@@ -8,7 +8,7 @@ import io.github.nakanomk.stacklife.planner.PlannerApi
 import io.github.nakanomk.stacklife.storage.PlannerDatabase
 import io.github.nakanomk.stacklife.storage.RoomPlannerApi
 
-class StackLifeApplication : Application() {
+open class StackLifeApplication : Application() {
     internal val connections by lazy { ConnectionStore(this) }
     internal val chat by lazy { OpenAiTransport() }
     internal val planner: PlannerApi by lazy {

@@ -103,6 +103,7 @@ sealed interface PlannerCommand {
     data class FramePush(val reason: String, val taskIds: List<String>, val ref: String? = null) : PlannerCommand
     data class FrameRestore(val frameId: String, val mode: RestoreMode, val taskIds: List<String> = emptyList()) : PlannerCommand
     data class SetRestorePolicy(val policy: RestorePolicy) : PlannerCommand
+    data class EditAppearance(val patch: AppearancePatch, val expected: Appearance? = null) : PlannerCommand
     data class SlotSet(
         val taskId: String, val start: OffsetDateTime, val durationMinutes: Int, val expectedRevision: Long? = null,
     ) : PlannerCommand

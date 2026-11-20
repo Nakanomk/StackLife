@@ -25,7 +25,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.DockOverlay
 import io.github.nakanomk.stacklife.AddTaskFab
-import io.github.nakanomk.stacklife.taskFabClearance
+import io.github.nakanomk.stacklife.appearance.LocalAppearance
+import io.github.nakanomk.stacklife.planner.NavStyle
 import io.github.nakanomk.stacklife.planner.DayPlan
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.PlannerQuery
@@ -88,30 +89,33 @@ internal fun TodayScreen(
             val send: (PlannerCommand.SlotSet) -> Unit = { submission.send(it) }
             DragEffects(drag, checkSlot)
             DockOverlay(navigationBar) { clearance ->
-                BoxWithConstraints(Modifier.fillMaxSize().padding(bottom = clearance)) {
+                val floating = LocalAppearance.current.navStyle == NavStyle.FLOATING
+                val overlay = if (floating) clearance else 0.dp
+                BoxWithConstraints(Modifier.fillMaxSize().padding(bottom = if (floating) 0.dp else clearance)) {
                     val sideBySide = maxWidth >= 480.dp && maxWidth > maxHeight && trayOpen
-                    val trayLimit = maxHeight * 0.46f
+                    val trayLimit = ((maxHeight - overlay).coerceAtLeast(0.dp) * 0.46f + overlay).coerceAtMost(maxHeight)
                     val axis: @Composable (Modifier) -> Unit = {
-                        DayAxis(drag, plan.revision, !submission.busy, onEdit, send, it)
+                        Box(it) {
+                            DayAxis(drag, plan.revision, !submission.busy, onEdit, send, Modifier.fillMaxSize())
+                            // Over actual scrolling ticks, not a duplicate image of the calendar.
+                            Box(Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 2.dp)) {
+                                AssistantEntry(AssistantPage.Day(plan.day.date, plan.day.zone))
+                            }
+                            AddTaskFab(onAdd, bottomInset = if (sideBySide) overlay else 0.dp)
+                        }
                     }
                     val tray: @Composable (Modifier) -> Unit = {
                         QueueTray(plan.tray, plan.revision, drag, trayOpen, { trayOpen = !trayOpen },
-                            !submission.busy, onEdit, send, it.padding(horizontal = 6.dp), if (sideBySide) taskFabClearance else 0.dp)
+                            !submission.busy, onEdit, send, it.padding(horizontal = 6.dp), overlay)
                     }
                     if (sideBySide) {
                         Row(Modifier.fillMaxSize()) {
+                            tray(Modifier.weight(1f).fillMaxHeight())
                             axis(Modifier.weight(1.6f).fillMaxHeight())
-                            Box(Modifier.weight(1f).fillMaxHeight()) {
-                                tray(Modifier.fillMaxSize())
-                                AddTaskFab(onAdd)
-                            }
                         }
                     } else {
                         Column(Modifier.fillMaxSize()) {
-                            Box(Modifier.fillMaxWidth().weight(1f)) {
-                                axis(Modifier.fillMaxSize())
-                                AddTaskFab(onAdd)
-                            }
+                            axis(Modifier.fillMaxWidth().weight(1f))
                             tray(Modifier.fillMaxWidth().heightIn(max = trayLimit))
                         }
                     }
@@ -138,20 +142,37 @@ private fun DayHeader(
         TextButton(onClick = { onDate(date.plusDays(1)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("后一天") }
     }
     val tools: @Composable () -> Unit = {
-        AssistantEntry(AssistantPage.Day(date, day.zone))
         TextButton(onClick = onToday, modifier = Modifier.heightIn(min = 48.dp)) { Text("回到今天") }
         TextButton(onClick = onSettings, modifier = Modifier.heightIn(min = 48.dp)) { Text("设置") }
     }
-    val shortWindow = LocalConfiguration.current.screenHeightDp < 480
+    val shortWindow = LocalConfiguration.current.screenHeightDp < 480 || LocalDensity.current.fontScale >= 1.4f
+    if (shortWindow) {
+        var moreDates by remember { mutableStateOf(false) }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("今天", Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
+            FilledTonalButton(onClick = onPick, modifier = Modifier.heightIn(min = 48.dp).semantics {
+                contentDescription = "选择日期，${date.year}年${date.format(dateHeading)}"
+            }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("${date.monthValue}/${date.dayOfMonth}") }
+            Box {
+                TextButton(onClick = { moreDates = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text("切换") }
+                DropdownMenu(expanded = moreDates, onDismissRequest = { moreDates = false }) {
+                    DropdownMenuItem(text = { Text("前一天") }, onClick = { moreDates = false; onDate(date.minusDays(1)) })
+                    DropdownMenuItem(text = { Text("后一天") }, onClick = { moreDates = false; onDate(date.plusDays(1)) })
+                    DropdownMenuItem(text = { Text("回到今天") }, onClick = { moreDates = false; onToday() })
+                }
+            }
+            TextButton(onClick = onSettings, modifier = Modifier.heightIn(min = 48.dp)) { Text("设置") }
+        }
+        return
+    }
     val scrollingRow = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-        Row(if (shortWindow) scrollingRow else Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("今天", (if (shortWindow) Modifier else Modifier.weight(1f)).padding(horizontal = 6.dp).semantics { heading() },
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("今天", Modifier.weight(1f).padding(horizontal = 6.dp).semantics { heading() },
                 style = MaterialTheme.typography.headlineMedium)
-            if (shortWindow) dates()
             tools()
         }
-        if (!shortWindow) Row(scrollingRow, verticalAlignment = Alignment.CenterVertically) { dates() }
+        Row(scrollingRow, verticalAlignment = Alignment.CenterVertically) { dates() }
     }
 }
 
@@ -160,6 +181,7 @@ private fun QueueTray(
     tasks: List<QueueTask>, revision: Long, drag: AxisDrag, expanded: Boolean, toggle: () -> Unit,
     enabled: Boolean, onEdit: (String) -> Unit, send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier, bottomClearance: Dp,
 ) {
+    val appearance = LocalAppearance.current
     Surface(modifier, shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer) {
         Column {
             Row(Modifier.fillMaxWidth().clickable(onClickLabel = if (expanded) "收起待排队列" else "展开待排队列",
@@ -171,7 +193,7 @@ private fun QueueTray(
             }
             if (expanded) {
                 LazyColumn(Modifier.fillMaxWidth().testTag("day-tray"), contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = bottomClearance + 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    verticalArrangement = Arrangement.spacedBy(if (appearance.compact) 2.dp else 4.dp)) {
                     if (tasks.isEmpty()) item {
                         Text("队列中没有待排任务", Modifier.padding(8.dp), style = MaterialTheme.typography.bodyMedium)
                     }
@@ -183,13 +205,18 @@ private fun QueueTray(
                             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(task.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Text("${task.minutes} 分钟 · 长按拖动", style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (appearance.showNotes && task.notes.isNotBlank())
+                                    Text(task.notes, style = MaterialTheme.typography.bodySmall, maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(if (appearance.showDuration) "${task.minutes} 分钟 · 长按拖动" else "长按拖动",
+                                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Text("安排时间", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
+            } else if (bottomClearance > 0.dp) {
+                Spacer(Modifier.height(bottomClearance))
             }
         }
     }

@@ -105,8 +105,13 @@ internal class PlannerTools(private val api: PlannerApi, val page: AssistantPage
                 PlannerCommand.CourseImport(id)
             }
             "term_remove" -> PlannerCommand.TermRemove(seen.term(o.string("termId")))
-            "prefs_set" -> PlannerCommand.SetRestorePolicy(RestorePolicy.valueOf(o.string("restorePolicy")))
-            "prefs_reset" -> PlannerCommand.SetRestorePolicy(RestorePolicy.PREPEND)
+            "prefs_set", "prefs_reset" -> {
+                val reset = o.string("kind") == "prefs_reset"
+                if (o.string("group") == "workspace") PlannerCommand.SetRestorePolicy(
+                    if (reset) RestorePolicy.PREPEND else RestorePolicy.valueOf(o.string("restorePolicy")))
+                else PlannerCommand.EditAppearance(AppearanceFields(AppearanceGroup.entries.first { it.key == o.string("group") },
+                    if (reset) null else o.getValue("values").jsonObject))
+            }
             else -> throw IllegalArgumentException("不支持的写提案。")
         }
     }

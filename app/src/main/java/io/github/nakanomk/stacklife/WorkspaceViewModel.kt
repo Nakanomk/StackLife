@@ -34,6 +34,8 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
 
     val workspace = read<Workspace>(PlannerQuery.Workspace)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadState.Loading)
+    val settings = read<PolicyView>(PlannerQuery.Settings)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadState.Loading)
 
     fun day(query: PlannerQuery.Day) = read<DayPlan>(query)
     fun terms() = read<Terms>(PlannerQuery.Terms)

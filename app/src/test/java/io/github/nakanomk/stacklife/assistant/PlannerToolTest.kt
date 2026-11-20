@@ -93,6 +93,24 @@ class PlannerToolTest {
         assertEquals(listOf("planner_query", "planner_propose"), plannerToolDefinitions.map { it.jsonObject.getValue("function").jsonObject.getValue("name").jsonPrimitive.content })
     }
 
+    @Test fun appearanceScopeIsExplicitAndPatchesCannotResetUnmentionedFields() = runBlocking {
+        val initial = Appearance(glass = true, highContrast = true, compact = true)
+        val prefs = Reads(PlannerQuery.Settings to PolicyView(RestorePolicy.SWAP, initial))
+        val offPage = PlannerTools(prefs, day, Disclosure())
+        denied { offPage.query(obj("""{"kind":"settings"}""")) }
+        val tools = PlannerTools(prefs, AssistantPage.Settings, Disclosure())
+        val settings = tools.query(current).jsonObject.getValue("rows").jsonArray
+        assertEquals(setOf("workspace", "color", "layout", "material"), settings.map { it.jsonObject.getValue("group").jsonPrimitive.content }.toSet())
+        fun decode(raw: String) = ((tools.proposal(cmd(raw)) as ToolPlan.Commands).commands.single() as PlannerCommand.EditAppearance).patch
+        assertEquals(initial.copy(glass = false), decode("""{"kind":"prefs_set","group":"material","values":{"glass":false}}""").applyTo(initial))
+        assertEquals(initial.copy(compact = false), decode("""{"kind":"prefs_reset","group":"layout"}""").applyTo(initial))
+        for (invalid in listOf(
+            """{"kind":"prefs_set","group":"material","values":{}}""", """{"kind":"prefs_set","group":"material","values":{"glass":"false"}}""",
+            """{"kind":"prefs_set","group":"layout","values":{"glass":true}}""", """{"kind":"prefs_set","group":"color","values":{"seed":"#AAA"}}""",
+            """{"kind":"prefs_set","group":"layout","values":{"order":["TODAY","COURSES","GRAPHS","TODAY"]}}""",
+        )) denied { tools.proposal(cmd(invalid)) }
+    }
+
     @Test fun importerRequiresExactReviewedDraftAndCannotBeMixedWithCommands() = runBlocking {
         val tools = PlannerTools(Reads(), AssistantPage.CourseDraft("d", "term"), Disclosure())
         assertEquals(obj("""{"draftId":"d","termId":"term"}"""), tools.query(current))

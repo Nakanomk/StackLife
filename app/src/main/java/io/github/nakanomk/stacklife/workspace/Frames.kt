@@ -14,16 +14,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.planner.*
+import io.github.nakanomk.stacklife.appearance.LocalAppearance
+import io.github.nakanomk.stacklife.transitions.DetailCard
+import io.github.nakanomk.stacklife.transitions.DetailListSource
+import io.github.nakanomk.stacklife.transitions.detailListSource
 
 @Composable
 internal fun FrameList(
     frames: List<FrameView>, scroll: LazyListState, onFrame: (String) -> Unit, onCreate: () -> Unit,
-    shared: SharedModifier, bottomClearance: Dp,
+    shared: SharedModifier, bottomClearance: Dp, revision: Long,
 ) {
+    val source = detailListSource(scroll, bottomClearance, revision)
     val available = remember(frames) {
         frames.indexOfFirst { it.remaining == 0 }.let { if (it == -1) frames.size else it }
     }
-    LazyColumn(Modifier.fillMaxSize().testTag("frames"), state = scroll, contentPadding = dockListPadding(bottomClearance), verticalArrangement = listSpacing) {
+    LazyColumn(Modifier.fillMaxSize().then(source?.modifier ?: Modifier).testTag("frames"), state = scroll,
+        contentPadding = dockListPadding(bottomClearance), verticalArrangement = listSpacing) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionTitle("栈帧")
@@ -40,19 +46,20 @@ internal fun FrameList(
             }
         }
         if (available > 0) item { SectionTitle("可恢复 · 最近保存优先") }
-        items(available, key = { frames[it].id }) { FrameCard(frames[it], onFrame, shared) }
+        items(available, key = { frames[it].id }) { FrameCard(frames[it], onFrame, shared, source) }
         if (available < frames.size) item { SectionTitle("历史 · 已取空") }
         items(frames.size - available, key = { frames[available + it].id }) {
-            FrameCard(frames[available + it], onFrame, shared)
+            FrameCard(frames[available + it], onFrame, shared, source)
         }
     }
 }
 
 @Composable
-private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: SharedModifier) {
-    Surface(onClick = { onFrame(frame.id) }, modifier = shared("frame:${frame.id}").fillMaxWidth().testTag("frame:${frame.id}"),
+private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: SharedModifier, source: DetailListSource?) {
+    val appearance = LocalAppearance.current
+    DetailCard(source, "frame", frame.id, onFrame, modifier = shared("frame:${frame.id}").fillMaxWidth().testTag("frame:${frame.id}"),
         shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Column(Modifier.padding(if (appearance.compact) 12.dp else 18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(savedTime(frame.savedAtMillis), style = MaterialTheme.typography.labelMedium)
             Text(frame.reason, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
             Text("原有 ${frame.items.size} 项 · 剩余 ${frame.remaining} 项", style = MaterialTheme.typography.bodyMedium)

@@ -30,6 +30,9 @@ import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.planner.Workspace
 import io.github.nakanomk.stacklife.assistant.AssistantPage
+import io.github.nakanomk.stacklife.appearance.LocalAppearance
+import io.github.nakanomk.stacklife.transitions.DetailCard
+import io.github.nakanomk.stacklife.transitions.detailListSource
 import kotlinx.coroutines.flow.collect
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -66,9 +69,9 @@ fun WorkspaceScreen(
                 }
             }
             DockOverlay(navigationBar) { clearance ->
-                if (stack) FrameList(state.frames, stackScroll, onFrame, { editor = Editor.FRAME }, shared, clearance)
+                if (stack) FrameList(state.frames, stackScroll, onFrame, { editor = Editor.FRAME }, shared, clearance, state.revision)
                 else Box(Modifier.fillMaxSize()) {
-                    QueueList(state.queue, queueScroll, actions, onTask, { editor = Editor.PUSH }, shared, clearance + taskFabClearance)
+                    QueueList(state.queue, queueScroll, actions, onTask, { editor = Editor.PUSH }, shared, clearance + taskFabClearance, state.revision)
                     AddTaskFab(onAdd, bottomInset = clearance)
                 }
             }
@@ -79,9 +82,12 @@ fun WorkspaceScreen(
 @Composable
 private fun QueueList(
     tasks: List<QueueTask>, scroll: LazyListState, actions: WorkspaceActions, onTask: (String) -> Unit,
-    onPush: () -> Unit, shared: SharedModifier, bottomClearance: Dp,
+    onPush: () -> Unit, shared: SharedModifier, bottomClearance: Dp, revision: Long,
 ) {
+    val appearance = LocalAppearance.current
+    val source = detailListSource(scroll, bottomClearance, revision)
     var order by remember(tasks) { mutableStateOf(tasks) }
+    val settledSource = if (source != null && order != tasks) null else source
     val action = rememberSubmission(actions) { if (it != SaveOutcome.APPLIED) order = tasks }
     val drags = remember { MutableInteractionSource() }
     val reorder = rememberReorderableLazyListState(scroll) { from, to ->
@@ -98,7 +104,8 @@ private fun QueueList(
             }
         }
     }
-    LazyColumn(Modifier.fillMaxSize().testTag("queue"), state = scroll, contentPadding = dockListPadding(bottomClearance), verticalArrangement = listSpacing) {
+    LazyColumn(Modifier.fillMaxSize().then(source?.modifier ?: Modifier).testTag("queue"), state = scroll,
+        contentPadding = dockListPadding(bottomClearance), verticalArrangement = listSpacing) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionTitle("待办队列")
@@ -119,23 +126,27 @@ private fun QueueList(
         itemsIndexed(order, key = { _, task -> task.id }) { index, task ->
             ReorderableItem(reorder, key = task.id) { dragging ->
                 val head = index == 0
-                Surface(
-                    onClick = { onTask(task.id) }, modifier = shared("task:${task.id}").fillMaxWidth().testTag("task:${task.id}"),
+                DetailCard(
+                    source = if (dragging) null else settledSource, kind = "task", id = task.id, onDetail = onTask,
+                    modifier = shared("task:${task.id}").fillMaxWidth().testTag("task:${task.id}"),
                     shape = if (head) MaterialTheme.shapes.extraLarge else MaterialTheme.shapes.large,
                     color = if (head) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
                     shadowElevation = if (dragging) 6.dp else 0.dp,
                 ) {
-                    Row(Modifier.padding(start = 18.dp, top = 14.dp, end = 6.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val inset = if (appearance.compact) 8.dp else 14.dp
+                    Row(Modifier.padding(start = if (appearance.compact) 12.dp else 18.dp, top = inset, end = 6.dp, bottom = inset),
+                        verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(if (head) "当前优先" else "第 ${index + 1} 项", style = MaterialTheme.typography.labelMedium)
                             Text(task.title, style = if (head) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
                                 maxLines = 3, overflow = TextOverflow.Ellipsis)
-                            Text("${task.minutes} 分钟", style = MaterialTheme.typography.bodyMedium)
+                            if (appearance.showDuration) Text("${task.minutes} 分钟", style = MaterialTheme.typography.bodyMedium)
                             if (task.scheduledStartMillis != null && task.scheduledEndMillis != null) {
                                 Text("已安排：${savedTime(task.scheduledStartMillis)} 至 ${savedTime(task.scheduledEndMillis)}",
                                     style = MaterialTheme.typography.bodySmall)
                             }
-                            if (task.notes.isNotBlank()) Text(task.notes, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (appearance.showNotes && task.notes.isNotBlank()) Text(task.notes, style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         if (order.size > 1) MoveMenu(
                             modifier = Modifier.longPressDraggableHandle(enabled = !action.busy, interactionSource = drags),

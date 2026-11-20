@@ -5,7 +5,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 internal enum class ReadArea(val label: String) {
-    DAY("其他日期的日程"), WORKSPACE("队列与其他栈帧"), GRAPHS("其他流程图"), COURSES("其他学期与周课表"), SETTINGS("恢复设置")
+    DAY("其他日期的日程"), WORKSPACE("队列与其他栈帧"), GRAPHS("其他流程图"), COURSES("其他学期与周课表"), SETTINGS("外观与恢复设置")
 }
 
 internal sealed class AssistantPage(val label: String) {

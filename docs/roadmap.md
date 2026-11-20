@@ -2,7 +2,7 @@
 
 StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Android 日程工具。**队列**回答「我现在要做什么」，**栈帧**记录「我为什么停下、怎样接回去」。**DAG** 决定为选定目标先做什么，**时间轴**决定哪天几点做，**课表**标出已经占用的时段。一项工作不因换视图而变成几份任务。
 
-**当前交付：v0.5.0 · M5 对话。** 业务页可「问今天」「问队列」「问这张图」或询问当前课表。在设置填写兼容服务，核对域与可读字段后才联网；组合更改只生成一份本地差异，须用户确认才能写入。不配置也能继续手动使用。流程图新增一键整理。真实外部 BYOK 和校园账号登录后的提取各自待授权实测；M6 外观和系统动效尚未开放。
+**当前交付：v0.6.0 · M6 自定义与系统动效。** 设置可预览、取消、保存或重置外观；工作台恢复策略独立。普通包默认实色，可在支持环境为浮动导航和收起的助理启用局部折射。它不含联盟 SDK，卡片使用应用内转场。联盟分发许可、支持设备的系统 OPEN/BACK 及固定真机帧预算尚未验收。M1–M5 手动路径不变；校园登录与真实外部 BYOK 的授权验收独立。
 
 ## 起点与产品决定
 
@@ -145,6 +145,8 @@ interface PlannerApi {
 - 标准/紧凑密度只减非交互留白。可调四个目的地次序/启动页、任务时长/备注副标题显隐、贴底/浮动、玻璃总开关和导航/助理分项、跟随系统/减弱动画、减少透明度、增强对比、触感随系统/关闭。三种恢复偏好独立于外观重置。外观实时预览、可取消/恢复默认，保存后跨启动生效。默认舒适密度、今天启动（目的地可用后）、动态色（不可用取品牌种子）、玻璃关闭、随系统动效。以 [Google Core App Quality](https://developer.android.com/docs/quality-guidelines/core-app-quality) 的一致交互、横竖屏功能对等与后台恢复为底线。
 - 首发图标为原创 fumo 颜文字 **`ᗜˬᗜ`**：两只对称方眼和低位短弧嘴，用独立矢量笔画，不依赖字库、商业布偶照片，不强画天子肖像。按 [Android Adaptive Icon](https://developer.android.com/develop/ui/views/launch/icon_design_adaptive) 做 108×108 dp 分层，识别区在中心 66×66 dp，彩色前景/背景及 monochrome 层共用轮廓，不预烘启动器圆角/阴影。空队列小标沿用同一张脸，不用颜文字代替操作标签。
 
+设置草稿只存在于编辑页；退出不写库，保存使用 `PlannerApi` 的同一预览/提交事务。持久化契约是 `planner/Appearance.kt`，Room 4→5 为原设置行加入缺省 `{}` 的外观字段，不迁移队列、快照、时段或模型凭据。主题/平台能力、局部绘制和设置编辑分别在 `StackLifeTheme.kt`、`appearance/`；业务页只读取对应偏好。以后替换导航及页面布局不需要更改排程或恢复规则。
+
 **交互参考与借用边界：**
 
 |来源|具体借用点|
@@ -180,6 +182,8 @@ interface PlannerApi {
 **联盟系统能力（M6 单列验收）。** 依据 [ITGSA SharedViewDemo](https://gitee.com/itgsa_sharedviewkit/SharedViewDemo)。`gsai.sdk:sharedview-kit` 运行时调用 `ViewAnimationManager.isViewAnimationSupported()`，不按品牌猜。仅在协议支持、动效允许、源卡片完整可见时，对队列事件/栈帧卡片用非导出 `EntityDetailActivity`，复用同一详情 Composable，Intent 只传实体类型和 ID。用 `PixelCopy` 取被点卡片的 window 矩形，不把整屏 `LocalView` 当卡片。按 Kit 能力约定区分屏幕/窗口坐标、转换 bounds，圆角转 px，交给 `makeViewAnimationOptions(bitmap, bounds, radius, …)`；成功只让系统播一次。返回按实体 key 刷新落点，在详情 Activity 的 `finish()` **之前** `overrideViewAnimationTransition`；源丢失跟随系统。能力为 0、options 为空或取图失败，走同一应用内详情路径，不叠动画、不阻断导航。
 
 依赖候选为[官方 HTTPS 固定提交的 1.0.0.5 AAR](https://gitee.com/itgsa_sharedviewkit/SharedViewDemo/tree/b449a426a340f1827d942592bddf0a416eae3ac4/app/libs)；核对来源/授权，记录并校验 SHA-256，不用示例的 HTTP 内测 Maven 或动态 `+`。[NOTICE](https://gitee.com/itgsa_sharedviewkit/SharedViewDemo/blob/master/NOTICE) 的 MIT 只覆盖示例，SDK 授权另计。**正式分发许可和真实支持设备均未核实。** 许可明确后才以单一发行包按能力分支；此前不得分发含 SDK 的包，普通版只含真实 Compose 转场。联盟验收仍受阻，模拟器截图不能证明系统 OPEN/BACK，更不能称已支持或已获金标认证。
+
+本地实验变体只接受 `-PstacklifeKitAar=/绝对路径/sharedview-kit-1.0.0.5.aar`，SHA-256 必须为 `7c0937ecde545a262619e5fa19d56a21b0ad3fd8013cbc4fe058c497808702bd`。`./gradlew -PstacklifeKitAar=… :app:assembleKitLab` 生成独立 `.kitlab`，只在获准设备本地测试，不交付；`StackLifeKit` 日志仅记协议值。普通 `:app:assemblePreview` 不需要 AAR，也不会打入适配器或详情 Activity。
 
 **可选光学层。** `StackLifeSurface` 保持同一 Material 组件、焦点与布局，唯一折射后端取 [Haze 2.1.0 Glass](https://github.com/chrisbanes/haze/blob/2.1.0/docs/effects/glass/index.md)（Apache-2.0，`haze` / `haze-glass` 同版）。只在导航胶囊和收起的助理胶囊使用 `GlassStyle.regular`、官方主题 surface 色、`HazeInput.Sources`、`HazeSourceRetention.ClearWhenUnavailable` 做折射和高光。不另配一套颜色、不叠全屏滤镜、不用实验性 window backdrop。长对话、恢复清单、登录页、时间轴正文和 DAG 节点均实色。是可选皮肤，不称 Google 官方材质。
 
@@ -249,7 +253,11 @@ JVM 上 5 项排序用例、Android 17 上 6 项图相关仪器用例通过。�
 
 在 Google Play API 37 AVD（1080×2340、440 dpi、字体 1.0）由 v0.4.0 覆盖安装 v0.5.0，打开升级前手建的四边菱形并实际点击「一键整理」，四个节点和全部连线均可见。`GraphEditorTest.arrangeLayersFollowAllEdgesAndKeepExistingFrameAndOrder` 校验缩放后的卡片和连线手柄都在画布内，`GraphTransactionTest.diamondSkipsUnrelatedTemplatesAndNeverRewritesFramesOrQueue` 校验现有图只改依赖时仍以图名展示。未配置服务能返回手动界面；软件键盘弹出时，半屏面板的输入和发送仍可见。以上不代证真实外部模型的协议兼容性或回答质量。
 
-|阶段 / 用例|输入 → 可观察结果（M1–M5 为回归用例；M3 校园账号、M5 外部服务另验，M6 待开发）|
+**M6 复现：** 在 Android 17 / API 37 运行 `AppearanceTest`、`AppearanceResourcesTest`。7 项检测覆盖草稿取消与保存、跨组重置和并发覆盖、冷读后的目的地/副标题、横屏双列操作互不遮挡、系统栏预览回退、色彩角色文本对比，以及彩色/单色启动器前景均在安全圆内。`PlannerToolTest` 的 9 项包含设置范围、字段类型和导航排列验证。普通包由 v0.5.0 原地升级后仍能看到已有待排任务；实际强制停止后以所选的深色、贴底导航和工作台冷启。
+
+Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚焦并双击右下 `+` 进入任务编辑器；横屏同倍率分别点到时间编辑与新增入口。取消边缘返回手势留在原详情，完成手势才回队列。AOSP API 37 录下同一份 30 项队列实色/折射滚动对照；切省电模式、以 `debug.force_low_ram` 重启测试系统后，均显示具体实色原因。`AppearanceBenchmark` 两档三种操作的 dry run 全部跑通，**不是**固定真机 P95 结论。仅本地 `.kitlab` 在 API 37 AVD 取得实际协议值 `0`，任务往返仍留在 `MainActivity`。协议 `>0` 的双向转场、打断、落点丢失及 SDK 分发许可未验。
+
+|阶段 / 用例|输入 → 可观察结果（校方登录、真实模型、联盟真机和性能有各自的验收条件）|
 |---|---|
 |M1 `WorkspaceTest`|新建 A、B、C，完成 C；以「去开会」压栈，添加 X。仅取 B 得 `[B,X]`，原帧仍显示 A、B 原序及原因，仅 A 可取；再全部恢复得 `[A,B,X]`。改 B 标题再压另一帧，旧快照不变。独立复位，对 `[A,B]` 帧与 `[X]` 队列分别验三种策略：队首 `[A,B,X]`、队尾 `[X,A,B]`、切换 `[A,B]` 且新帧只含 X；切换模式下选择 B 不新建帧。空原因/事务失败不移动任何项；连点、旋转、`adb shell am force-stop io.github.nakanomk.stacklife` 再启动均不重复、不丢任务。|
 |M2 `DayTimelineTest`|待排「报告提纲」30 分钟拖到 15:45 → 显示 15:45–16:15，仍是同一队列 ID，只有一个块。改到 16:00 → 原块移动；取消排程 → 块消失，队列保留。用 TalkBack 的「安排时间」走同一路。压栈再恢复已排任务，时段不变。|
@@ -259,5 +267,7 @@ JVM 上 5 项排序用例、Android 17 上 6 项图相关仪器用例通过。�
 |M6 `AppearanceTest` + 真机|切浅/深、品牌/动态色、胶囊/贴底并冷启，布局/点击/偏好一致。360dp 宽、字体 200%、TalkBack、手势返回取消、低端禁玻璃都不丢主操作。同一滚动内容录开/关玻璃，支持档应能看见背景边缘折射。启动器圆形/方圆、单色主题均不裁脸。一台 Kit 能力 `>0` 的真机验 OPEN/BACK、快速打断、返回落点消失；一台能力 0 的设备照常进退。记录协议值、机型、系统和录屏，不记录事件私密正文。|
 
 **M6 性能门槛。** 仅在 M6 建测试专用 `:macrobenchmark`；`benchmark` 构建继承 release、可 profile、仅装测试机，不拆生产模块。在固定真机/刷新率、同一份 30 项队列与一日课表，用 `./gradlew :macrobenchmark:connectedBenchmarkAndroidTest` 分别测玻璃开/关下滚动、卡片往返、面板开合，各五轮，使用 [FrameTimingMetric](https://developer.android.com/topic/performance/benchmarking/macrobenchmark-metrics)。API 31+ 测试机各可用档 `frameOverrunMs` P95 ≤ 0；不过只调/缩小有问题的光学表面再验，不以 debug 模拟器帧率宣称流畅。
+
+宏基准使用独立 `.bench` 包，不读写普通包的日程。只在此变体启用 shell 可 profile 及受 `android.permission.DUMP` 保护的造数入口；通过正常事务写入 30 个任务及当天 5 门双节课。测量前检查实际胶囊状态，不把已降为实色的运行当作玻璃结果。固定设备与刷新率后查看输出 JSON 的 `sampledMetrics.frameOverrunMs` 和每轮 Perfetto trace。模拟器用 `-Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.dryRunMode.enable=true` 只能检查交互链路，不用于 P95 判定。
 
 **外部条件不互相代证。** HUB 在线登录、真实付费模型、联盟设备与 SDK 授权分别需要自己的证据。缺条件时仍保留原始文件导入、完整手动操作、普通 Compose 连续转场；只注明相应路径未验，不缩减路线图、不冒充通过。首个开发目标仍是离线可靠地中断和续做，不预设云同步、iOS 或开放 API。

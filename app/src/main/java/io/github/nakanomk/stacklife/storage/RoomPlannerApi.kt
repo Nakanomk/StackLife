@@ -30,7 +30,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
                     is PlannerQuery.Frame -> FrameDetailResult(dao.frame(query.frameId)?.let { f ->
                         FrameView(f.id, f.reason, f.savedAtMillis, f.source, dao.frameEntries(f.id).map { it.entry() })
                     })
-                    PlannerQuery.Settings -> PolicyView(settings.restorePolicy)
+                    PlannerQuery.Settings -> PolicyView(settings.restorePolicy, decodeAppearance(settings.appearance))
                     is PlannerQuery.Day -> {
                         val tray = dao.dayTray()
                         if (query.startMillis >= query.endMillis) DayPlan(query, settings.revision, tray, emptyList())

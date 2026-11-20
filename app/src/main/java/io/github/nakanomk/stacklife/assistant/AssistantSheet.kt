@@ -9,12 +9,17 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.nakanomk.stacklife.appearance.CapsuleScene
+import io.github.nakanomk.stacklife.appearance.StackLifeSurface
 import io.github.nakanomk.stacklife.planner.PlannerChange
 import io.github.nakanomk.stacklife.workspace.CheckRow
 import io.github.nakanomk.stacklife.workspace.Hint
@@ -30,8 +35,14 @@ internal fun AssistantEntry(page: AssistantPage? = LocalAssistantPage.current) {
 @Composable
 internal fun AssistantEntry(label: String, target: () -> AssistantPage) {
     val assistant = LocalAssistant.current ?: return
-    FilledTonalButton(onClick = { assistant.open(target()) }, modifier = Modifier.heightIn(min = 48.dp).testTag("ask-planner"),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) { Text(label) }
+    val colors = MaterialTheme.colorScheme
+    val haptics = LocalHapticFeedback.current
+    StackLifeSurface(CapsuleScene.ASSISTANT, Modifier, colors.secondaryContainer) {
+        FilledTonalButton(onClick = { haptics.performHapticFeedback(HapticFeedbackType.VirtualKey); assistant.open(target()) },
+            modifier = Modifier.heightIn(min = 48.dp).testTag("ask-planner"),
+            colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color.Transparent, contentColor = colors.onSurface),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) { Text(label) }
+    }
 }
 
 private fun AssistantPage.scopeName() = when (this) {
@@ -45,7 +56,7 @@ private fun AssistantPage.scopeName() = when (this) {
     AssistantPage.Frames -> "栈帧列表"
     AssistantPage.Graphs -> "流程图列表"
     AssistantPage.Terms -> "学期列表"
-    AssistantPage.Settings -> "工作台恢复设置"
+    AssistantPage.Settings -> "外观与工作台恢复设置"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

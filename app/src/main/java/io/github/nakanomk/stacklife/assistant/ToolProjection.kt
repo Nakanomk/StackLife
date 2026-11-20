@@ -115,9 +115,11 @@ internal class ToolProjection(private val grant: Disclosure, private val seen: T
                 id("termId", term.id, seen.terms); put("week", week.week); put("zone", campusZone.id)
                 section(week.classes) { course(it, campusZone) }
             }
-            PlannerQuery.Settings -> section(listOf((result as PolicyView).policy)) { policy -> buildJsonObject {
-                put("group", "workspace"); put("restorePolicy", policy.name)
-            } }
+            PlannerQuery.Settings -> {
+                val settings = result as PolicyView
+                section(listOf(buildJsonObject { put("group", "workspace"); put("restorePolicy", settings.policy.name) }) +
+                    AppearanceGroup.entries.map { group -> buildJsonObject { put("group", group.key); put("values", group.project(settings.appearance)) } }) { it }
+            }
             PlannerQuery.Workspace -> error("不允许通过助理读取整个工作台。")
         }
         put("rows", JsonArray(rows)); put("offset", offset); put("total", count)

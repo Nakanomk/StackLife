@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.assistant.AssistantPage
+import io.github.nakanomk.stacklife.planner.AppearanceGroup
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.RestorePolicy
 import io.github.nakanomk.stacklife.planner.Workspace
@@ -79,20 +80,24 @@ internal fun MissingDetail(title: String, message: String, onBack: () -> Unit) {
 }
 
 @Composable
-fun SettingsScreen(state: Workspace, actions: WorkspaceActions, onBack: () -> Unit, onConnection: () -> Unit) {
+internal fun SettingsScreen(restorePolicy: RestorePolicy, actions: WorkspaceActions, onBack: () -> Unit,
+    onConnection: () -> Unit, onAppearance: (AppearanceGroup) -> Unit) {
     val action = rememberSubmission(actions)
     Page {
         LazyColumn(contentPadding = pagePadding, verticalArrangement = listSpacing) {
             item { PageTitle("设置", back = onBack, assistantPage = AssistantPage.Settings) }
+            item { Secondary("色彩", onClick = { onAppearance(AppearanceGroup.COLOR) }) }
+            item { Secondary("布局", onClick = { onAppearance(AppearanceGroup.LAYOUT) }) }
+            item { Secondary("材质与动态", onClick = { onAppearance(AppearanceGroup.MATERIAL) }) }
             item { Secondary("模型服务配置", onClick = onConnection) }
             item {
-                SectionTitle("恢复策略")
+                SectionTitle("工作台 · 恢复策略")
                 Hint("决定如何把栈帧里的任务接回队列。选中即保存，帧内的顺序始终保留。")
             }
             item {
                 Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (policy in RestorePolicy.entries) {
-                        val selected = state.restorePolicy == policy
+                        val selected = restorePolicy == policy
                         Surface(shape = MaterialTheme.shapes.large,
                             color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow) {
                             Row(Modifier.fillMaxWidth().selectable(selected, enabled = !action.busy, role = Role.RadioButton,

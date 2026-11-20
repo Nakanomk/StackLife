@@ -1,6 +1,7 @@
 package io.github.nakanomk.stacklife.storage
 
 import androidx.room.AutoMigration
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Embedded
@@ -22,8 +23,9 @@ import io.github.nakanomk.stacklife.planner.RestorePolicy
 @Database(
     entities = [TaskRow::class, FrameRow::class, FrameItemRow::class, SettingsRow::class, TimeBlockRow::class,
         TermRow::class, CourseRow::class, GraphRow::class, GraphNodeRow::class, GraphEdgeRow::class],
-    version = 4,
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4)],
+    version = 5,
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4),
+        AutoMigration(from = 4, to = 5)],
     exportSchema = true,
 )
 abstract class PlannerDatabase : RoomDatabase() {
@@ -90,6 +92,7 @@ internal data class SettingsRow(
     @PrimaryKey val id: Int = 1,
     val revision: Long = 0,
     val restorePolicy: RestorePolicy = RestorePolicy.PREPEND,
+    @ColumnInfo(defaultValue = "'{}'") val appearance: String = "{}",
 )
 
 internal data class ItemState(@Embedded val item: FrameItemRow, val restorable: Boolean)

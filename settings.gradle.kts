@@ -19,4 +19,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "StackLife"
-include(":app")
+include(":app", ":macrobenchmark")

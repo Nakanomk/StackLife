@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.workspace
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.*
@@ -7,11 +10,16 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.assistant.*
+import io.github.nakanomk.stacklife.appearance.AssistantGlassPage
+import io.github.nakanomk.stacklife.appearance.LocalAppearance
+import io.github.nakanomk.stacklife.planner.NavStyle
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import java.time.Instant
 import java.time.ZoneId
@@ -20,14 +28,22 @@ import java.time.format.FormatStyle
 
 typealias SharedModifier = @Composable (String) -> Modifier
 
-internal val pagePadding = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 24.dp)
-internal val listSpacing = Arrangement.spacedBy(12.dp)
+private val roomyPadding = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 24.dp)
+private val tightPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 12.dp)
+private val roomySpacing = Arrangement.spacedBy(12.dp)
+private val tightSpacing = Arrangement.spacedBy(6.dp)
+internal val pagePadding: PaddingValues @Composable get() = if (LocalAppearance.current.compact) tightPadding else roomyPadding
+internal val listSpacing: Arrangement.Vertical @Composable get() = if (LocalAppearance.current.compact) tightSpacing else roomySpacing
 
 @Composable
 internal fun Page(content: @Composable ColumnScope.() -> Unit) {
-    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-        Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding(), contentAlignment = Alignment.TopCenter) {
-            Column(Modifier.widthIn(max = 760.dp).fillMaxSize(), content = content)
+    val colors = MaterialTheme.colorScheme
+    val docked = LocalAppearance.current.navStyle == NavStyle.DOCKED
+    Surface(modifier = Modifier.fillMaxSize(), color = if (docked) colors.surfaceContainer else colors.surface) {
+        Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding().background(colors.surface), contentAlignment = Alignment.TopCenter) {
+            Box((if (docked) Modifier else Modifier.widthIn(max = 760.dp)).fillMaxSize()) {
+                AssistantGlassPage { Column(Modifier.fillMaxSize(), content = content) }
+            }
         }
     }
 }
@@ -35,9 +51,14 @@ internal fun Page(content: @Composable ColumnScope.() -> Unit) {
 @Composable
 internal fun PageTitle(title: String, back: (() -> Unit)? = null, backEnabled: Boolean = true, settings: (() -> Unit)? = null,
     assistantPage: AssistantPage? = LocalAssistantPage.current) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    val config = LocalConfiguration.current
+    val largeType = LocalDensity.current.fontScale >= 1.4f
+    val scroll = largeType && (config.screenHeightDp < 480 || config.screenWidthDp < 480)
+    val row = if (scroll) Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()) else Modifier.fillMaxWidth()
+    Row(row, verticalAlignment = Alignment.CenterVertically) {
         if (back != null) TextButton(onClick = back, enabled = backEnabled, modifier = Modifier.heightIn(min = 48.dp)) { Text("返回") }
-        Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.headlineLarge)
+        Text(title, (if (scroll) Modifier.padding(end = 8.dp) else Modifier.weight(1f)).semantics { heading() },
+            style = if (largeType) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineLarge)
         AssistantEntry(assistantPage)
         if (settings != null) TextButton(onClick = settings, modifier = Modifier.heightIn(min = 48.dp)) { Text("设置") }
     }

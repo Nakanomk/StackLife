@@ -1,5 +1,9 @@
 package io.github.nakanomk.stacklife.storage
 
+import io.github.nakanomk.stacklife.planner.Appearance
+import io.github.nakanomk.stacklife.planner.AppearancePatch
+import io.github.nakanomk.stacklife.planner.decodeAppearance
+import io.github.nakanomk.stacklife.planner.encodeAppearance
 import io.github.nakanomk.stacklife.planner.FrameSource
 import io.github.nakanomk.stacklife.planner.PlannerChange
 import io.github.nakanomk.stacklife.planner.PlannerCommand
@@ -25,6 +29,8 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     private val members = HashMap<String, List<String>>()
     private val changes = ArrayList<PlannerChange>()
     private var policy = base.restorePolicy
+    private val originalAppearance by lazy(LazyThreadSafetyMode.NONE) { decodeAppearance(base.appearance) }
+    private var appearance: Appearance? = null
 
     private enum class Kind { TASK, FRAME, GRAPH, NODE }
     private data class Binding(val id: String, val kind: Kind)
@@ -77,6 +83,10 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             }
             is PlannerCommand.FrameRestore -> restore(cmd)
             is PlannerCommand.SetRestorePolicy -> policy = cmd.policy
+            is PlannerCommand.EditAppearance -> {
+                if (cmd.expected != null && cmd.expected != originalAppearance) invalid("外观设置已变更，请按最新设置重新编辑。")
+                appearance = cmd.patch.applyTo(appearance ?: originalAppearance)
+            }
             is PlannerCommand.GraphCreate -> {
                 val id = newId(cmd.ref, Kind.GRAPH)
                 graphs[id] = GraphDraft(graphDao, id, null, cmd.title)
@@ -367,11 +377,15 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
                 })
         }
         if (base.restorePolicy != policy) change("工作台", "恢复策略", base.restorePolicy.label(), policy.label())
+        val settingsJson = appearance?.let { next ->
+            AppearancePatch.changes(originalAppearance, next, changes)
+            encodeAppearance(next)
+        } ?: base.appearance
         val slotDelta = slots.finish(changes, edited)
         val courseWrites = courses.finish(changes) { start, end -> slots.effective(start, end, edited) }
         val graphWrites = graphs.values.mapNotNull { it.finish(changes) }
         val refs = if (bindings.isEmpty()) emptyMap() else Collections.unmodifiableMap(bindings.mapValues { it.value.id })
-        return Proposal(base.revision, base.copy(revision = base.revision + 1, restorePolicy = policy),
+        return Proposal(base.revision, base.copy(revision = base.revision + 1, restorePolicy = policy, appearance = settingsJson),
             Collections.unmodifiableList(changes), frames, inserts, updates, positions, items, slotDelta, courseWrites, graphWrites, refs)
     }
 
