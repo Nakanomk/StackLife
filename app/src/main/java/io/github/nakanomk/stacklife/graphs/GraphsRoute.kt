@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.DockOverlay
+import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.WorkspaceViewModel
@@ -30,7 +31,7 @@ internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Uni
             DockOverlay(navigationBar) { bottom ->
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = listSpacing,
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = bottom + 12.dp)) {
-                    item { PageTitle("流程图", settings = onSettings) }
+                    item { PageTitle("流程图", settings = onSettings, assistantPage = AssistantPage.Graphs) }
                     item { Primary("新建流程图") { creating = true } }
                     if (list.graphs.isEmpty()) item {
                         SectionTitle("还没有流程图")

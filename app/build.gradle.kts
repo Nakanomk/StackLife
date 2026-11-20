@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.nakanomk.stacklife"
         minSdk = 26
         targetSdk = 37
-        versionCode = 6
-        versionName = "0.4.0"
+        versionCode = 7
+        versionName = "0.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
@@ -52,6 +52,11 @@ dependencies {
     implementation(libs.kotlinflow)
     implementation(libs.jgrapht)
     implementation(libs.serialization.json)
+    implementation(libs.okhttp)
+    testImplementation(libs.okhttp.tls)
+    testImplementation(libs.mockwebserver)
+    androidTestImplementation(libs.okhttp.tls)
+    androidTestImplementation(libs.mockwebserver)
     testImplementation(libs.junit)
     debugImplementation(libs.test.activity)
 

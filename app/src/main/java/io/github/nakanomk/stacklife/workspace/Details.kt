@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.RestorePolicy
 import io.github.nakanomk.stacklife.planner.Workspace
@@ -78,11 +79,12 @@ internal fun MissingDetail(title: String, message: String, onBack: () -> Unit) {
 }
 
 @Composable
-fun SettingsScreen(state: Workspace, actions: WorkspaceActions, onBack: () -> Unit) {
+fun SettingsScreen(state: Workspace, actions: WorkspaceActions, onBack: () -> Unit, onConnection: () -> Unit) {
     val action = rememberSubmission(actions)
     Page {
         LazyColumn(contentPadding = pagePadding, verticalArrangement = listSpacing) {
-            item { PageTitle("设置", back = onBack) }
+            item { PageTitle("设置", back = onBack, assistantPage = AssistantPage.Settings) }
+            item { Secondary("模型服务配置", onClick = onConnection) }
             item {
                 SectionTitle("恢复策略")
                 Hint("决定如何把栈帧里的任务接回队列。选中即保存，帧内的顺序始终保留。")

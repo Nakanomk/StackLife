@@ -14,6 +14,7 @@ import androidx.room.RoomDatabase
 import androidx.room.Update
 import androidx.room.Upsert
 import io.github.nakanomk.stacklife.planner.DayBlock
+import io.github.nakanomk.stacklife.planner.FrameSummary
 import io.github.nakanomk.stacklife.planner.FrameSource
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.planner.RestorePolicy
@@ -93,6 +94,7 @@ internal data class SettingsRow(
 
 internal data class ItemState(@Embedded val item: FrameItemRow, val restorable: Boolean)
 internal data class PositionUpdate(val id: String, val queuePosition: Int)
+internal data class QueuePositionLabel(val id: String, val queuePosition: Int, val title: String)
 
 @Dao
 internal interface PlannerDao {
@@ -102,6 +104,10 @@ internal interface PlannerDao {
     @Query("""SELECT t.id, t.title, t.notes, t.minutes, b.startMillis AS scheduledStartMillis, b.endMillis AS scheduledEndMillis
         FROM tasks t LEFT JOIN time_blocks b ON b.taskId = t.id WHERE t.owner = 'QUEUE' ORDER BY t.queuePosition""")
     fun visibleQueue(): List<QueueTask>
+
+    @Query("""SELECT t.id, t.title, t.notes, t.minutes, b.startMillis AS scheduledStartMillis, b.endMillis AS scheduledEndMillis
+        FROM tasks t LEFT JOIN time_blocks b ON b.taskId = t.id WHERE t.id=:id AND t.owner IN ('QUEUE','FRAME')""")
+    fun activeTask(id: String): QueueTask?
 
     @Query("""SELECT t.id, t.title, t.notes, t.minutes, NULL AS scheduledStartMillis, NULL AS scheduledEndMillis
         FROM tasks t WHERE t.owner = 'QUEUE' AND NOT EXISTS (SELECT 1 FROM time_blocks b WHERE b.taskId = t.id)
@@ -124,6 +130,17 @@ internal interface PlannerDao {
         f.savedAtMillis DESC, f.rowid DESC""")
     fun frames(): List<FrameRow>
 
+    @Query("""SELECT f.id, f.reason, f.savedAtMillis, f.source,
+        (SELECT COUNT(*) FROM frame_items i WHERE i.frameId=f.id) AS originalCount,
+        (SELECT COUNT(*) FROM tasks t WHERE t.frameId=f.id AND t.owner='FRAME') AS remaining
+        FROM frames f ORDER BY (remaining > 0) DESC, f.savedAtMillis DESC, f.rowid DESC""")
+    fun frameIndex(): List<FrameSummary>
+
+    @Query("SELECT * FROM frames WHERE id=:id") fun frame(id: String): FrameRow?
+    @Query("""SELECT i.*, CASE WHEN t.frameId=i.frameId AND t.owner='FRAME' THEN 1 ELSE 0 END AS restorable
+        FROM frame_items i JOIN tasks t ON t.id=i.taskId WHERE i.frameId=:id ORDER BY i.originalPosition""")
+    fun frameEntries(id: String): List<ItemState>
+
     @Query("""SELECT i.*, CASE WHEN t.frameId = i.frameId AND t.owner = 'FRAME' THEN 1 ELSE 0 END AS restorable
         FROM frame_items AS i JOIN tasks AS t ON t.id = i.taskId
         ORDER BY i.frameId, i.originalPosition""")
@@ -132,8 +149,8 @@ internal interface PlannerDao {
     @Query("SELECT COUNT(*) FROM tasks WHERE owner = 'QUEUE'")
     fun queueSize(): Int
 
-    @Query("SELECT id FROM tasks WHERE owner = 'QUEUE' ORDER BY queuePosition")
-    fun queueIds(): List<String>
+    @Query("SELECT id,queuePosition,title FROM tasks WHERE owner = 'QUEUE' ORDER BY queuePosition")
+    fun queuePositions(): List<QueuePositionLabel>
 
     @Query("SELECT * FROM tasks WHERE id IN (:ids)")
     fun tasks(ids: List<String>): List<TaskRow>

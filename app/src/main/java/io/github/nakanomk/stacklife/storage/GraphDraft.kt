@@ -54,7 +54,9 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
             }
             is GraphEdit.EditNode -> {
                 val old = node(resolveNode(edit.nodeId))
-                put(old.copy(title = nodeTitle(edit.title, edit.minutes), notes = edit.notes, minutes = edit.minutes))
+                if (edit.title == null && edit.notes == null && edit.minutes == null) throw InvalidCommand("请选择需要修改的节点字段。")
+                val minutes = edit.minutes ?: old.minutes
+                put(old.copy(title = nodeTitle(edit.title ?: old.title, minutes), notes = edit.notes ?: old.notes, minutes = minutes))
             }
             is GraphEdit.MoveNode -> {
                 val old = node(resolveNode(edit.nodeId))
@@ -97,11 +99,12 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
     fun finish(changes: MutableList<PlannerChange>): GraphWrites? {
         val next = title
         val oldTitle = original?.title
-        if (oldTitle != next) changes.add(PlannerChange(id, "流程图名称", oldTitle, next))
+        val graphLabel = "流程图「${next ?: oldTitle ?: return null}」"
+        if (oldTitle != next) changes.add(PlannerChange(id, "流程图名称", oldTitle, next, graphLabel))
         if (next == null) {
             if (original == null) return null
-            for (node in initialNodes) nodeChanges(changes, node, null)
-            for (edge in initialEdges) changes.add(PlannerChange(id, "移除依赖", oldLabel(edge), null))
+            for (node in initialNodes) nodeChanges(changes, graphLabel, node, null)
+            for (edge in initialEdges) changes.add(PlannerChange(id, "移除依赖", oldLabel(edge), null, graphLabel))
             return GraphWrites(id, remove = true, graph = null)
         }
         val graph = if (oldTitle == next) null else GraphRow(id, next)
@@ -111,7 +114,7 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
         for ((key, old) in before) {
             val node = nodes[key]
             if (node == old) continue
-            nodeChanges(changes, old, node)
+            nodeChanges(changes, graphLabel, old, node)
             if (node == null) deletes.add(key)
             else writes.add(GraphNodeRow(id, key, node.title, node.notes, node.minutes, node.creationOrder, node.x, node.y))
         }
@@ -120,11 +123,11 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
         for ((edge, added) in edgeChanges) {
             if (added) {
                 addedEdges.add(GraphEdgeRow(id, edge.from, edge.to))
-                changes.add(PlannerChange(id, "添加依赖", null, "${node(edge.from).title} → ${node(edge.to).title}"))
+                changes.add(PlannerChange(id, "添加依赖", null, "${node(edge.from).title} → ${node(edge.to).title}", graphLabel))
             } else {
                 // Node deletion already cascades to its incident edges.
                 if (edge.from in nodes && edge.to in nodes) removedEdges.add(GraphEdgeRow(id, edge.from, edge.to))
-                changes.add(PlannerChange(id, "移除依赖", oldLabel(edge), null))
+                changes.add(PlannerChange(id, "移除依赖", oldLabel(edge), null, graphLabel))
             }
         }
         if (graph == null && writes.isEmpty() && deletes.isEmpty() && edgeChanges.isEmpty()) return null
@@ -133,13 +136,14 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
 
     private fun oldLabel(edge: GraphEdge) = "${oldNode(edge.from)?.title ?: edge.from} → ${oldNode(edge.to)?.title ?: edge.to}"
 
-    private fun nodeChanges(changes: MutableList<PlannerChange>, old: GraphNode?, next: GraphNode?) {
+    private fun nodeChanges(changes: MutableList<PlannerChange>, graphLabel: String, old: GraphNode?, next: GraphNode?) {
         val node = next ?: requireNotNull(old)
+        val label = "$graphLabel · 节点「${node.title}」"
         fun change(field: String, a: Any?, b: Any?) {
-            if (a != b) changes.add(PlannerChange(node.id, "节点「${node.title}」· $field", a?.toString(), b?.toString()))
+            if (a != b) changes.add(PlannerChange(node.id, field, a?.toString(), b?.toString(), label))
         }
         change("标题", old?.title, next?.title)
-        change("备注", old?.notes, next?.notes)
+        change("备注", old?.notes?.ifEmpty { null }, next?.notes?.ifEmpty { null })
         change("预计分钟", old?.minutes, next?.minutes)
         if (old?.x != next?.x || old?.y != next?.y) change("画布位置", old?.let { "(${it.x}, ${it.y})" }, next?.let { "(${it.x}, ${it.y})" })
     }

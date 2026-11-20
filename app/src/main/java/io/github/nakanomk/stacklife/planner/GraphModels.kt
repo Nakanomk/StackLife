@@ -14,7 +14,7 @@ sealed interface GraphEdit {
     data class Rename(val title: String) : GraphEdit
     data class AddNode(val title: String, val notes: String = "", val minutes: Int = 30,
         val x: Float = 0f, val y: Float = 0f, val ref: String? = null) : GraphEdit
-    data class EditNode(val nodeId: String, val title: String, val notes: String, val minutes: Int) : GraphEdit
+    data class EditNode(val nodeId: String, val title: String? = null, val notes: String? = null, val minutes: Int? = null) : GraphEdit
     data class MoveNode(val nodeId: String, val x: Float, val y: Float) : GraphEdit
     data class RemoveNode(val nodeId: String) : GraphEdit
     data class AddEdge(val from: String, val to: String) : GraphEdit

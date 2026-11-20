@@ -28,6 +28,9 @@ import io.github.nakanomk.stacklife.AddTaskFab
 import io.github.nakanomk.stacklife.taskFabClearance
 import io.github.nakanomk.stacklife.planner.DayPlan
 import io.github.nakanomk.stacklife.planner.PlannerCommand
+import io.github.nakanomk.stacklife.planner.PlannerQuery
+import io.github.nakanomk.stacklife.assistant.AssistantEntry
+import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.workspace.Page
 import io.github.nakanomk.stacklife.workspace.WorkspaceActions
@@ -50,7 +53,7 @@ internal fun TodayScreen(
     var trayOpen by rememberSaveable { mutableStateOf(true) }
     if (choosingDate) DateChooser(plan.day.date, { choosingDate = false; onDate(it) }, { choosingDate = false })
     Page {
-        DayHeader(plan.day.date, onPick = { choosingDate = true }, onDate = onDate,
+        DayHeader(plan.day, onPick = { choosingDate = true }, onDate = onDate,
             onToday = { onDate(LocalDate.now(plan.day.zone)) }, onSettings = onSettings)
         key(plan.day) {
             val density = LocalDensity.current
@@ -124,8 +127,9 @@ internal fun TodayScreen(
 
 @Composable
 private fun DayHeader(
-    date: LocalDate, onPick: () -> Unit, onDate: (LocalDate) -> Unit, onToday: () -> Unit, onSettings: () -> Unit,
+    day: PlannerQuery.Day, onPick: () -> Unit, onDate: (LocalDate) -> Unit, onToday: () -> Unit, onSettings: () -> Unit,
 ) {
+    val date = day.date
     val dates: @Composable () -> Unit = {
         TextButton(onClick = { onDate(date.minusDays(1)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("前一天") }
         FilledTonalButton(onClick = onPick, modifier = Modifier.heightIn(min = 48.dp).semantics {
@@ -134,6 +138,7 @@ private fun DayHeader(
         TextButton(onClick = { onDate(date.plusDays(1)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("后一天") }
     }
     val tools: @Composable () -> Unit = {
+        AssistantEntry(AssistantPage.Day(date, day.zone))
         TextButton(onClick = onToday, modifier = Modifier.heightIn(min = 48.dp)) { Text("回到今天") }
         TextButton(onClick = onSettings, modifier = Modifier.heightIn(min = 48.dp)) { Text("设置") }
     }

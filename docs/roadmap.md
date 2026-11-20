@@ -2,7 +2,7 @@
 
 StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Android 日程工具。**队列**回答「我现在要做什么」，**栈帧**记录「我为什么停下、怎样接回去」。**DAG** 决定为选定目标先做什么，**时间轴**决定哪天几点做，**课表**标出已经占用的时段。一项工作不因换视图而变成几份任务。
 
-**当前交付：M4 流程图。** 在画布或依赖列表编辑模板，选定目标、核对顺序与原因后直接生成新栈帧，不经过当前队列。v0.3.2 可原地升级。今天用单条时间竖轴，今天和工作台的右下角圆形 `+` 均独立于悬浮导航。手机课表提取和文件导入仍先核对再写入，Chrome 浏览入口独立，未使用真实校园账号验收登录后的提取。对话、玻璃及联盟转场仍属 M5–M6。
+**当前交付：v0.5.0 · M5 对话。** 业务页可「问今天」「问队列」「问这张图」或询问当前课表。在设置填写兼容服务，核对域与可读字段后才联网；组合更改只生成一份本地差异，须用户确认才能写入。不配置也能继续手动使用。流程图新增一键整理。真实外部 BYOK 和校园账号登录后的提取各自待授权实测；M6 外观和系统动效尚未开放。
 
 ## 起点与产品决定
 
@@ -111,12 +111,15 @@ interface PlannerApi {
 - 画布使用 [KotlinFlow 1.0.1 / MIT](https://repo.maven.apache.org/maven2/io/github/joaonart/kotlinflow/1.0.1/) 绘制有向边并处理平移、双指缩放与全图适配；不引示例皮肤、不当数据库。该版本内建节点拖动把取消和松手交给同一回调，`onConnect` 不派发；节点移动、箭头拖到后继的命中及取消由应用适配。库用物理像素，节点位置按 dp 保存。领域层拒绝自环、重复边、缺失/跨图端点、会成环的边；说明具体冲突，不留半条边或部分生成物。
 - 选一个目标，取其**传递前驱和自身**的诱导子图，稳定拓扑排序；并列就绪节点按创建顺序，再按 ID，不用坐标或画布排版决定优先级。用 [JGraphT Core](https://jgrapht.org/) `org.jgrapht:jgrapht-core:1.5.3`（上游双许可，按 EPL-2.0 保留许可与来源）：`DirectedAcyclicGraph.addEdge/getAncestors`、包含目标的子图、带显式比较器的 [`TopologicalOrderIterator`](https://jgrapht.org/javadoc/org.jgrapht.core/org/jgrapht/traverse/TopologicalOrderIterator.html)。拖节点只保存布局。
 - 先看有序清单再「生成栈帧」；默认原因「为目标〈标题〉生成」，可改非空。一次事务生成一帧、新任务实例及有序快照，不经过当前队列。未选目标不能生成，孤立目标一项，菱形前置只出现一次。再次主动生成是新帧，重放同一确认不是；生成顺序不限制之后选择恢复其中几项。
+- 画布右下角「一键整理」按最长前置链从左到右分层，同层保持原序，未连线节点另排。沿每条边前置都在后继左侧；按节点实际高度留白。一次只提交坐标并适配全图，不动依赖、目标生成顺序、队列或历史帧。重复整理同一布局不增加修订。
 
 ## M5 对话
 
 业务页面共用应用内 `AssistantSheet`，非系统悬浮窗。入口说明当前语境，如「问今天」「问这个栈帧」，绑定日期/选中实体 ID；作用域变化可见。打开仍看得见原页，可展开、收起、取消，避开键盘和手势区。从任何业务页都能发起组合操作。未配置引导设置，不模拟回答；校方登录与密钥编辑不共享屏幕内容。
 
 **连接。** 用 OkHttp `5.5.1` + `kotlinx.serialization`。用户提供含 API 前缀的 HTTPS base URL、模型、Key；在 base URL 后追加 `chat/completions`。使用 [OpenAI 兼容 function tools](https://platform.openai.com/docs/guides/function-calling) 和 `tool_calls`，不从散文猜命令；模型必须支持这套协议，只支持 Responses 的不冒充兼容。用 [Android Keystore](https://developer.android.com/privacy-and-security/keystore) 中不可导出的 AES-GCM 密钥加密 BYOK，每次写用新 IV，密文放私有 `noBackupFilesDir`。换服务域需重新授权/填 key，不跨域转发鉴权。无账号、无托管中转、无后台自动操作。
+
+运行时 HTTP 为 [OkHttp 5.5.1](https://github.com/lysine-dev/okhttp/tree/parent-5.5.1) 和 [Okio 3.18.1](https://github.com/lysine-dev/okio/tree/parent-3.18.1)，两者发布标签的 Apache-2.0 完整许可一并放在 APK 的 `assets/licenses/OkHttp-Okio-Apache-2.0.txt`。`MockWebServer` 和测试 TLS 证书仅在测试包。
 
 **仅两种模型工具。** `planner_query` 限定类型、范围、字段，可查当前队列、帧/清单、图/目标次序、某天占位、某学期/周课表及普通设置；只读本轮获准范围。`planner_propose` 传一次有序命令数组。下表 `kind` 也是 UI 命令的序列化名。不提供 raw SQL、任意 URL/文件、脚本执行、任意 UI 点击或确认按钮；隐私、连接配置、认证、系统选文件都要显式用户操作。
 
@@ -130,6 +133,8 @@ interface PlannerApi {
 **数据披露。** 首次联网及扩大范围前展示要发往哪个域、哪些字段。默认只有当前范围的任务标题、顺序、时段和必要 ID；课表默认只给忙碌时段。备注、压栈原因、课程名/地点须用户明确纳入才出设备。整库、原始课表、Cookie 永不发送；BYOK 仅作绑定服务的鉴权头，不进提示词/工具结果。课程名、备注和模型输出都是不可信文本，不是权限指令。对话限会话内，日志不落原文；关闭/取消终止在途请求。
 
 **谁能提交。** 纯查询直接答。每轮所有写操作合为**一张差异卡**，列项目名、顺序、旧 → 新时间、实际生成的节点/边/帧或受影响设置。模型没有 `commit` 工具；只有用户点一次「应用这些更改」，手机才消费对应本地提案，收到事务回执才说「已应用」。校验失败、重名歧义、空结果、协议不兼容、401、限流、超时、取消均给具体反馈，不写业务项。每条消息最多四次只读往返，写提案返回即停；不运行自主后台 Agent。
+
+**使用。** 在「设置 → 模型服务配置」填写最终 HTTPS API 前缀、模型与密钥，保存本身不联网。模型每次返回至多一项工具调用；列表分页，跨页查询先由用户扩大范围。`task_edit` / `edit_node` 未指定的字段由本机保留。课程来源选择页只能问已保存课表；未核对的文件和 HUB 登录页不提供对话。只有从核对完成的导入差异页发起时，助理才取得对应的不透明草稿 ID。确认后发现本地修订已变会拒绝旧提案，重新预览后仍须再次确认。
 
 ## 设计与外观
 
@@ -240,7 +245,11 @@ M1 首验在 Android 17 / API 37 x86_64 专用 AVD 上通过 12 项仪器测试�
 
 JVM 上 5 项排序用例、Android 17 上 6 项图相关仪器用例通过。触控覆盖重叠节点的连线落点、取消与过期拖动；确认期间重建 Activity，放开 Room 写锁后只生成一帧，再重建仍回到同一帧。Google Play API 37 AVD 实测空白处平移、双指缩放；启用系统 TalkBack 17.0 后，可聚焦「先做 A，再做 C」并双击选择 D、进入四项目标预览。不据此宣称实体机性能或语音质量。
 
-|阶段 / 用例|输入 → 可观察结果（M1–M4 为回归用例；M3 真实账号提取另验，M5–M6 待开发）|
+**M5 复现：** `./gradlew :app:testDebugUnitTest --tests '*ChatTransportTest' --tests '*PlannerToolTest'`：16 项通过，涵盖 HTTPS 路径、取消、拒绝转发密钥、协议、字段投影及范围。Android 17 / API 37 上 `AssistantProposalTest` 6 项、`ConnectionStoreTest` 2 项通过。用仅在测试包中的回环 HTTPS 服务实际经过网络、Keystore 和文件型 Room；确认前三节点两边的计划不存在，确认后仅写一个修订，生成一帧剩两项，查资料保留同一任务 ID 并排到本地 16:00–16:30。另验取消、旧修订、重复确认、401、越权、只改时长保留私密备注，以及核对过的课程草稿导入。
+
+在 Google Play API 37 AVD（1080×2340、440 dpi、字体 1.0）由 v0.4.0 覆盖安装 v0.5.0，打开升级前手建的四边菱形并实际点击「一键整理」，四个节点和全部连线均可见。`GraphEditorTest.arrangeLayersFollowAllEdgesAndKeepExistingFrameAndOrder` 校验缩放后的卡片和连线手柄都在画布内，`GraphTransactionTest.diamondSkipsUnrelatedTemplatesAndNeverRewritesFramesOrQueue` 校验现有图只改依赖时仍以图名展示。未配置服务能返回手动界面；软件键盘弹出时，半屏面板的输入和发送仍可见。以上不代证真实外部模型的协议兼容性或回答质量。
+
+|阶段 / 用例|输入 → 可观察结果（M1–M5 为回归用例；M3 校园账号、M5 外部服务另验，M6 待开发）|
 |---|---|
 |M1 `WorkspaceTest`|新建 A、B、C，完成 C；以「去开会」压栈，添加 X。仅取 B 得 `[B,X]`，原帧仍显示 A、B 原序及原因，仅 A 可取；再全部恢复得 `[A,B,X]`。改 B 标题再压另一帧，旧快照不变。独立复位，对 `[A,B]` 帧与 `[X]` 队列分别验三种策略：队首 `[A,B,X]`、队尾 `[X,A,B]`、切换 `[A,B]` 且新帧只含 X；切换模式下选择 B 不新建帧。空原因/事务失败不移动任何项；连点、旋转、`adb shell am force-stop io.github.nakanomk.stacklife` 再启动均不重复、不丢任务。|
 |M2 `DayTimelineTest`|待排「报告提纲」30 分钟拖到 15:45 → 显示 15:45–16:15，仍是同一队列 ID，只有一个块。改到 16:00 → 原块移动；取消排程 → 块消失，队列保留。用 TalkBack 的「安排时间」走同一路。压栈再恢复已排任务，时段不变。|

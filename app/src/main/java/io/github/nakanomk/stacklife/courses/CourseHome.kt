@@ -27,6 +27,7 @@ import de.tobiasschuerg.weekview.model.Period
 import de.tobiasschuerg.weekview.model.TimeSpan
 import de.tobiasschuerg.weekview.model.WeekData
 import io.github.nakanomk.stacklife.DockOverlay
+import io.github.nakanomk.stacklife.assistant.*
 import io.github.nakanomk.stacklife.planner.CourseWeek
 import io.github.nakanomk.stacklife.workspace.Page
 import io.github.nakanomk.stacklife.workspace.PageTitle
@@ -50,7 +51,7 @@ internal fun CourseHome(
     week?.classes?.getOrNull(detail)?.let { CourseDetails(it) { detail = -1 } }
     Page {
         Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 6.dp)) {
-            PageTitle("课表", settings = onSettings)
+            PageTitle("课表", settings = onSettings, assistantPage = if (term != null && week != null) AssistantPage.Week(term.id, week.week) else AssistantPage.Terms)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 if (terms.isNotEmpty()) {
@@ -163,6 +164,7 @@ internal fun CourseDetails(course: ScheduledCourse, close: () -> Unit) {
                 Text(course.meeting.title, style = MaterialTheme.typography.titleLarge)
                 Text(course.termId, style = MaterialTheme.typography.labelLarge)
                 CourseInfo(course)
+                AssistantEntry(AssistantPage.Week(course.termId, course.meeting.week))
             }
         }, confirmButton = { TextButton(onClick = close) { Text("关闭") } })
 }

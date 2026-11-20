@@ -24,7 +24,7 @@ internal sealed interface ReadState<out T> {
     data class Loaded<T>(val value: T) : ReadState<T>
 }
 
-internal class WorkspaceViewModel(private val planner: PlannerApi) : ViewModel(), WorkspaceActions {
+internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), WorkspaceActions {
     private inline fun <reified T : QueryResult> read(query: PlannerQuery) = planner.observe(query)
         .map<QueryResult, ReadState<T>> { ReadState.Loaded(it as T) }
         .catch { cause ->

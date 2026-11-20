@@ -123,7 +123,7 @@ internal class SlotDraft(private val dao: PlannerDao, private val originalTasks:
             val title = (editedTasks[id] ?: originalTasks.getValue(id)).title
             changes.add(PlannerChange(id, "排程 · $title",
                 originals[id]?.let { intervalLabel(it.startMillis, it.endMillis, zone) },
-                after?.let { intervalLabel(it.startMillis, it.endMillis, zone) }))
+                after?.let { intervalLabel(it.startMillis, it.endMillis, zone) }, title))
         }
         return SlotDelta(writes, deletes)
     }

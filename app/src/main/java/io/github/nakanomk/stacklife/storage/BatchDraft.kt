@@ -5,6 +5,8 @@ import io.github.nakanomk.stacklife.planner.PlannerChange
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.RestoreMode
 import io.github.nakanomk.stacklife.planner.RestorePolicy
+import java.time.Instant
+import java.time.format.DateTimeFormatter
 import java.time.ZoneId
 import java.util.Collections
 import java.util.UUID
@@ -18,6 +20,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     private val courses = CourseDraft(courseDao)
     private val graphs = LinkedHashMap<String, GraphDraft>()
     private val frames = ArrayList<FrameRow>()
+    private val frameNames by lazy(LazyThreadSafetyMode.NONE) { HashMap<String, String>() }
     private val items = ArrayList<FrameItemRow>()
     private val members = HashMap<String, List<String>>()
     private val changes = ArrayList<PlannerChange>()
@@ -27,12 +30,11 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     private data class Binding(val id: String, val kind: Kind)
     private val bindings = HashMap<String, Binding>()
 
-    // Adding to the tail normally needs just COUNT(*). Only materialize the initial IDs for a
-    // move or removal, and never read titles/notes just to shift another task's position.
+    // Appending needs just COUNT(*); load positions and display labels only for a move/removal.
     private val initialSize by lazy(LazyThreadSafetyMode.NONE) { dao.queueSize() }
     private val pendingTail = ArrayList<String>()
     private var order: ArrayList<String>? = null
-    private val initialPositions = HashMap<String, Int>()
+    private val initialPositions = HashMap<String, QueuePositionLabel>()
 
     fun plan(commands: List<PlannerCommand>): Proposal {
         if (commands.isEmpty()) invalid("请至少选择一项更改。")
@@ -42,9 +44,10 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
                 edited[row.id] = row
             }
             is PlannerCommand.TaskEdit -> {
-                if (cmd.task.ref != null) invalid("只能为新建任务声明引用。")
+                if (cmd.title == null && cmd.notes == null && cmd.minutes == null) invalid("请选择需要修改的任务字段。")
                 val row = activeTask(cmd.taskId)
-                edited[row.id] = row.copy(title = title(cmd.task.title, cmd.task.minutes), notes = cmd.task.notes, minutes = cmd.task.minutes)
+                val minutes = cmd.minutes ?: row.minutes
+                edited[row.id] = row.copy(title = title(cmd.title ?: row.title, minutes), notes = cmd.notes ?: row.notes, minutes = minutes)
             }
             is PlannerCommand.TaskFinish -> retire(cmd.taskId, Owner.DONE)
             is PlannerCommand.TaskRemove -> retire(cmd.taskId, Owner.REMOVED)
@@ -166,8 +169,10 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
 
     private fun newFrame(reason: String, source: FrameSource, ref: String?): FrameRow {
         val label = reason.trim().ifEmpty { invalid("请填写保存栈帧的原因。") }
-        return FrameRow(newId(ref, Kind.FRAME), label, System.currentTimeMillis(), source).also(frames::add)
+        return FrameRow(newId(ref, Kind.FRAME), label, System.currentTimeMillis(), source).also { frames.add(it); frameNames[it.id] = label }
     }
+
+    private fun frameName(id: String) = frameNames.getOrPut(id) { dao.frame(id)?.reason ?: id }
 
     private inline fun populateFrame(frame: FrameRow, count: Int, makeTask: (Int) -> TaskRow) {
         val ids = ArrayList<String>(count)
@@ -197,10 +202,9 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
 
     private fun queue(): ArrayList<String> {
         order?.let { return it }
-        val ids = dao.queueIds()
-        val queue = ArrayList<String>(ids.size + pendingTail.size)
-        for ((position, id) in ids.withIndex()) initialPositions[id] = position
-        queue.addAll(ids)
+        val initial = dao.queuePositions()
+        val queue = ArrayList<String>(initial.size + pendingTail.size)
+        for (row in initial) { initialPositions[row.id] = row; queue.add(row.id) }
         queue.addAll(pendingTail)
         pendingTail.clear()
         order = queue
@@ -312,7 +316,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             val pos = if (policy == RestorePolicy.APPEND) append(id) else index
             edited[id] = task(id).copy(owner = Owner.QUEUE, frameId = null, queuePosition = pos)
         }
-        changes.add(PlannerChange(frameId, "恢复方式", null, explanation))
+        changes.add(PlannerChange(frameId, "恢复方式", null, explanation, frameName(frameId)))
     }
 
     private fun finish(): Proposal {
@@ -323,9 +327,9 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
                 if (row.queuePosition != position) edited[id] = row.copy(queuePosition = position)
             } else {
                 val original = initialPositions.getValue(id)
-                if (original != position) {
+                if (original.queuePosition != position) {
                     positions.add(PositionUpdate(id, position))
-                    change(id, "队列位置", original + 1, position + 1)
+                    change(id, "队列位置", original.queuePosition + 1, position + 1, original.title)
                 }
             }
         }
@@ -336,15 +340,15 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             if (before == row) continue
             if (before == null) inserts.add(row) else updates.add(row)
             change(id, "标题", before?.title, row.title)
-            change(id, "备注", before?.notes, row.notes)
+            change(id, "备注", before?.notes?.ifEmpty { null }, row.notes.ifEmpty { null })
             change(id, "预计分钟", before?.minutes, row.minutes)
             change(id, "归属", before?.owner?.label(), row.owner.label())
-            change(id, "所属栈帧", before?.frameId, row.frameId)
+            if (before?.frameId != row.frameId) change(id, "所属栈帧", before?.frameId?.let(::frameName), row.frameId?.let(::frameName))
             change(id, "队列位置", before?.queuePosition?.plus(1), row.queuePosition?.plus(1))
         }
         for (frame in frames) {
             change(frame.id, "压栈原因", null, frame.reason)
-            change(frame.id, "保存时刻（毫秒）", null, frame.savedAtMillis)
+            change(frame.id, "保存时刻", null, Instant.ofEpochMilli(frame.savedAtMillis).atZone(ZoneId.systemDefault()).format(savedTimeFormat))
             change(frame.id, "栈帧来源", null, when (frame.source) {
                 FrameSource.PUSH -> "从队列保存"
                 FrameSource.MANUAL -> "手动新建"
@@ -353,7 +357,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             })
         }
         for (item in items) {
-            change(item.frameId, "原第 ${item.originalPosition + 1} 项（${item.taskId}）", null,
+            change(item.frameId, "原第 ${item.originalPosition + 1} 项", null,
                 buildString {
                     append(item.title).append(" · ").append(item.minutes).append(" 分钟")
                     if (item.scheduledStartMillis != null && item.scheduledEndMillis != null) {
@@ -371,8 +375,8 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             Collections.unmodifiableList(changes), frames, inserts, updates, positions, items, slotDelta, courseWrites, graphWrites, refs)
     }
 
-    private fun change(id: String, field: String, before: Any?, after: Any?) {
-        if (before != after) changes.add(PlannerChange(id, field, before?.toString(), after?.toString()))
+    private fun change(id: String, field: String, before: Any?, after: Any?, label: String? = edited[id]?.title) {
+        if (before != after) changes.add(PlannerChange(id, field, before?.toString(), after?.toString(), label))
     }
 
     private fun Owner.label() = when (this) {
@@ -388,3 +392,5 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         RestorePolicy.SWAP -> "整帧切换"
     }
 }
+
+private val savedTimeFormat = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss xxx")

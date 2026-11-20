@@ -25,6 +25,9 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.WorkspaceViewModel
+import io.github.nakanomk.stacklife.assistant.AssistantEntry
+import io.github.nakanomk.stacklife.assistant.AssistantPage
+import io.github.nakanomk.stacklife.assistant.LocalAssistant
 import io.github.nakanomk.stacklife.planner.PreviewResult
 import io.github.nakanomk.stacklife.workspace.SaveOutcome
 import io.github.nakanomk.stacklife.workspace.rememberSubmission
@@ -158,6 +161,7 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("导入课表", style = MaterialTheme.typography.headlineSmall)
+            if (rows == null) AssistantEntry(AssistantPage.Terms)
             TextButton(enabled = !writing, onClick = ::cancel, modifier = Modifier.testTag("cancelCourseImport")) { Text("取消导入") }
         }
         message?.let { Text(it, color = MaterialTheme.colorScheme.error,
@@ -254,7 +258,28 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
                 }
             }
             else -> {
-                ImportDiff(parsed, effective, ready, busy || writing, onEdit = ::leavePreview, onConfirm = {
+                val assistant = LocalAssistant.current
+                var staged by remember(ready.proposalId) { mutableStateOf<String?>(null) }
+                if (assistant != null) {
+                    DisposableEffect(ready.proposalId) {
+                        onDispose {
+                            staged?.let { id ->
+                                model.planner.discardCourseImport(id)
+                                if ((assistant.state.value.page as? AssistantPage.CourseDraft)?.draftId == id) assistant.close()
+                            }
+                        }
+                    }
+                    val chat by assistant.state.collectAsState()
+                    var imported by remember { mutableStateOf(false) }
+                    LaunchedEffect(chat.importedDraft, chat.page) {
+                        if (staged != null && chat.importedDraft == staged) imported = true
+                        if (imported && chat.page == null) onImported(parsed.term.id)
+                    }
+                }
+                ImportDiff(parsed, effective, ready, busy || writing, ask = {
+                    val id = staged ?: model.planner.stageCourseImport(parsed.term, effective).also { staged = it }
+                    AssistantPage.CourseDraft(id, parsed.term.id)
+                }, onEdit = ::leavePreview, onConfirm = {
                     if (!busy && submission.submit { model.confirmProposal(ready.proposalId) }) {
                         confirmedTerm = parsed.term.id
                         message = null
@@ -301,7 +326,7 @@ private data class CourseGroup(val title: String, val room: String, val day: Int
 
 @Composable
 private fun ImportDiff(draft: ImportDraft, meetings: List<CourseMeeting>, proposal: PreviewResult.Ready, busy: Boolean,
-    onEdit: () -> Unit, onConfirm: () -> Unit) {
+    ask: () -> AssistantPage.CourseDraft, onEdit: () -> Unit, onConfirm: () -> Unit) {
     val groups = remember(meetings) { meetings.groupBy {
         fun time(millis: Long) = Instant.ofEpochMilli(millis).atZone(campusZone).toLocalTime().toString()
         CourseGroup(it.title, it.room, it.day, it.firstPeriod, it.lastPeriod, time(it.startMillis), time(it.endMillis))
@@ -310,6 +335,7 @@ private fun ImportDiff(draft: ImportDraft, meetings: List<CourseMeeting>, propos
     LazyColumn(Modifier.testTag("courseImportDiff"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Text("确认导入差异", style = MaterialTheme.typography.titleLarge)
+            if (!busy) AssistantEntry("问这份导入", ask)
             Text("只替换 ${draft.term.id} 的 HUB 课表；已有任务保留。最终 ${meetings.size} 次课程，${groups.size} 个时段分组。")
             Text("首周 ${draft.term.firstMonday} · ${draft.term.weeks} 周 · ${if (draft.term.initial == BellSchedule.SUMMER) "夏令" else "冬令"}起始" +
                 (draft.term.switchDate?.let { " · $it 起切换" } ?: " · 全期不切换"))

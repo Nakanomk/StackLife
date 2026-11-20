@@ -137,6 +137,34 @@ class GraphEditorTest {
         assertEquals(state.frames, runBlocking { store.state().frames })
     }
 
+    @Test fun arrangeLayersFollowAllEdgesAndKeepExistingFrameAndOrder() = runBlocking {
+        open()
+        store.apply(GraphPatch(id("g"), listOf(GraphEdit.AddEdge(id("a"), id("b")), GraphEdit.AddEdge(id("a"), id("d")))),
+            GraphFrame(id("g"), id("d")))
+        val before = graph()
+        val state = store.state()
+        val expected = goalTitles("d")
+        tag("graph-arrange").performClick()
+        val result = expectGraph("Arrange all nodes in one commit") { it.revision == before.revision + 1 }
+        val positions = result.nodes.associateBy { it.id }
+        for (edge in result.edges) assertTrue(positions.getValue(edge.from).x < positions.getValue(edge.to).x)
+        assertEquals(result.nodes.size, result.nodes.distinctBy { it.x to it.y }.size)
+        assertEquals(expected, goalTitles("d"))
+        assertEquals(before.edges, result.edges)
+        assertEquals(state.frames, store.state().frames)
+        val viewport = tag("graph-canvas").fetchSemanticsNode().layoutInfo.coordinates
+        for (node in result.nodes) for (part in listOf("canvas-node", "canvas-link")) {
+            val child = tag("$part:${node.id}").fetchSemanticsNode().layoutInfo.coordinates
+            ui.runOnIdle {
+                val rect = viewport.localBoundingBoxOf(child, clipBounds = false)
+                assertTrue("${node.title}/$part $rect outside ${viewport.size}", !rect.isEmpty &&
+                    rect.left >= -1 && rect.top >= -1 && rect.right <= viewport.size.width + 1 && rect.bottom <= viewport.size.height + 1)
+            }
+        }
+        tag("graph-arrange").performClick()
+        assertEquals(result, graph())
+    }
+
     @Test fun overlappingDropTargetsVisibleNodeAndPendingGenerationSurvivesRecreation() = runBlocking {
         open()
         canvas("a").performTouchInput { click() }

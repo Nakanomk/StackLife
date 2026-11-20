@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.ReadPanel
+import io.github.nakanomk.stacklife.assistant.*
 import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.planner.*
@@ -77,6 +78,7 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
             TextButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp)) { Text("返回") }
             Text(graph.title, Modifier.weight(1f).semantics { heading() }.padding(horizontal = 6.dp), maxLines = 1,
                 overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.headlineSmall)
+            AssistantEntry(AssistantPage.Graph(graph.id, selected?.id))
             TextButton(onClick = { listMode = !listMode }, modifier = Modifier.heightIn(min = 48.dp).testTag("graph-toggle-view")) {
                 Text(if (listMode) "画布" else "依赖列表")
             }
@@ -112,6 +114,7 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
             edgeFrom = edge.from; edgeTo = edge.to; form("unlink")
         })
         else GraphCanvas(detail, selected?.id, select, { id -> if (sourceId != null) select(id) else linkFrom(id) }, patch,
+            { moves, revision -> submission.send(PlannerCommand.GraphPatch(graph.id, moves, revision)) },
             Modifier.fillMaxSize().padding(start = 8.dp, end = 8.dp, bottom = 8.dp))
     }
     when (editing) {

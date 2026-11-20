@@ -29,6 +29,7 @@ import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.planner.Workspace
+import io.github.nakanomk.stacklife.assistant.AssistantPage
 import kotlinx.coroutines.flow.collect
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -56,7 +57,7 @@ fun WorkspaceScreen(
         Editor.FRAME -> TaskEditor(actions, close, createFrame = true)
         null -> Page {
             Column(Modifier.fillMaxWidth().padding(start = 20.dp, top = 12.dp, end = 20.dp)) {
-                PageTitle("工作台", settings = onSettings)
+                PageTitle("工作台", settings = onSettings, assistantPage = if (stack) AssistantPage.Frames else AssistantPage.Queue)
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     SegmentedButton(selected = !stack, onClick = { stack = false }, shape = SegmentedButtonDefaults.itemShape(0, 2),
                         modifier = Modifier.heightIn(min = 48.dp)) { Text("队列") }

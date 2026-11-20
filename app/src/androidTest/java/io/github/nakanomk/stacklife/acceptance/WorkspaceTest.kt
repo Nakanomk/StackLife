@@ -66,7 +66,7 @@ class WorkspaceTest {
         assertEquals(listOf(true, false), partial.frames.single().items.map { it.restorable })
         store.apply(FrameRestore(frame.id, RestoreMode.ALL))
         assertEquals(listOf(a.id, b.id, x.id), store.state().queue.map { it.id })
-        store.apply(TaskEdit(b.id, TaskInput("新标题", "新备注", 10)), FramePush("再中断", listOf(b.id)))
+        store.apply(TaskEdit(b.id, "新标题", "新备注", 10), FramePush("再中断", listOf(b.id)))
         val expected = store.state()
         store.reopen()
         assertEquals(expected, store.state())
@@ -129,7 +129,7 @@ class WorkspaceTest {
         val before = store.state()
         val invalid = listOf(
             FramePush("  ", listOf(a)), FramePush("停", emptyList()), FramePush("停", listOf(a, "missing")),
-            QueueOrder(listOf(a, b, b, d)), TaskAdd(TaskInput(" ")), TaskEdit(a, TaskInput("A", minutes = 0)),
+            QueueOrder(listOf(a, b, b, d)), TaskAdd(TaskInput(" ")), TaskEdit(a, "A", minutes = 0),
             FramePush("停", listOf("@not-declared")),
         )
         for (bad in invalid) {
@@ -149,7 +149,7 @@ class WorkspaceTest {
         store.apply(
             FrameCreate("准备", listOf(TaskInput("原题", ref = "a"), TaskInput("另一项")), ref = "f"),
             FrameRestore("@f", RestoreMode.SELECTED, listOf("@a")),
-            TaskEdit("@a", TaskInput("新题")),
+            TaskEdit("@a", "新题"),
         )
         val state = store.state()
         val a = state.queue.single()

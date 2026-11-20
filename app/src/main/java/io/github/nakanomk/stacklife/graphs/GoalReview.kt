@@ -13,6 +13,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.ReadState
+import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.*
@@ -64,7 +65,7 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, goalId: Stri
     BackHandler(onBack = close)
     Page {
         LazyColumn(Modifier.fillMaxSize().testTag("goal-order"), contentPadding = pagePadding, verticalArrangement = listSpacing) {
-            item { PageTitle("目标顺序", back = close, backEnabled = !submission.busy) }
+            item { PageTitle("目标顺序", back = close, backEnabled = !submission.busy, assistantPage = AssistantPage.Graph(graphId, goalId)) }
             when {
                 read == ReadState.Loading -> item { CircularProgressIndicator() }
                 read == ReadState.ReadFailed -> item { Text("未能读取流程图") }

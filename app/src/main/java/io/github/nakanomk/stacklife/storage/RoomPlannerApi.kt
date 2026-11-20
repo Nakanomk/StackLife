@@ -24,6 +24,13 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
                 val settings = dao.settings() ?: SettingsRow()
                 when (query) {
                     PlannerQuery.Workspace -> workspace(settings)
+                    PlannerQuery.Queue -> QueueView(dao.visibleQueue())
+                    is PlannerQuery.Task -> TaskView(dao.activeTask(query.taskId))
+                    PlannerQuery.Frames -> FrameIndex(dao.frameIndex())
+                    is PlannerQuery.Frame -> FrameDetailResult(dao.frame(query.frameId)?.let { f ->
+                        FrameView(f.id, f.reason, f.savedAtMillis, f.source, dao.frameEntries(f.id).map { it.entry() })
+                    })
+                    PlannerQuery.Settings -> PolicyView(settings.restorePolicy)
                     is PlannerQuery.Day -> {
                         val tray = dao.dayTray()
                         if (query.startMillis >= query.endMillis) DayPlan(query, settings.revision, tray, emptyList())
@@ -69,14 +76,12 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
     }
     override fun discardCourseImport(draftId: String) { reviewed.remove(draftId) }
 
+    private fun ItemState.entry() = FrameEntry(item.taskId, item.originalPosition, item.title, item.notes, item.minutes,
+        item.scheduledStartMillis, item.scheduledEndMillis, restorable)
+
     private fun workspace(settings: SettingsRow): Workspace {
         val entries = HashMap<String, MutableList<FrameEntry>>()
-        for ((item, restorable) in dao.itemStates()) {
-            entries.getOrPut(item.frameId) { ArrayList() }.add(
-                FrameEntry(item.taskId, item.originalPosition, item.title, item.notes, item.minutes,
-                    item.scheduledStartMillis, item.scheduledEndMillis, restorable),
-            )
-        }
+        for (state in dao.itemStates()) entries.getOrPut(state.item.frameId) { ArrayList() }.add(state.entry())
         return Workspace(settings.revision, dao.visibleQueue(), dao.frames().map {
             FrameView(it.id, it.reason, it.savedAtMillis, it.source, entries[it.id].orEmpty())
         }, settings.restorePolicy)

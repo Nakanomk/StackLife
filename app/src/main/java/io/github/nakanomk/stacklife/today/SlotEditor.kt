@@ -25,6 +25,7 @@ import io.github.nakanomk.stacklife.workspace.*
 import java.time.*
 import java.time.format.DateTimeFormatter
 import kotlinx.serialization.Serializable
+import io.github.nakanomk.stacklife.assistant.AssistantPage
 
 /** A restored editor targets exactly the task and revision the user opened, never a replacement. */
 @Serializable
@@ -83,7 +84,7 @@ internal fun SlotEditor(
     Page {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(pagePadding),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            PageTitle(if (original == null) "安排时间" else "调整时段", back = { if (editable) onBack() })
+            PageTitle(if (original == null) "安排时间" else "调整时段", back = { if (editable) onBack() }, assistantPage = AssistantPage.Task(entry.taskId))
             Text(entry.title, style = MaterialTheme.typography.headlineSmall)
             Text("当地时区 · ${zone.id}", style = MaterialTheme.typography.bodySmall)
             OutlinedButton(onClick = { pickDate = true }, enabled = editable,

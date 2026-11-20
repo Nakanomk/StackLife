@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.planner.TaskInput
+import io.github.nakanomk.stacklife.assistant.AssistantPage
 
 private data class Draft(
     val key: Int,
@@ -58,7 +59,8 @@ internal fun TaskEditor(
     Page {
         LazyColumn(state = scroll, contentPadding = pagePadding, verticalArrangement = listSpacing) {
             item {
-                PageTitle(if (createFrame) "新建栈帧" else if (original != null) "编辑任务" else "新增任务", back = close)
+                PageTitle(if (createFrame) "新建栈帧" else if (original != null) "编辑任务" else "新增任务", back = close,
+                    assistantPage = original?.let { AssistantPage.Task(it.id) } ?: if (createFrame) AssistantPage.Frames else AssistantPage.Queue)
             }
             if (createFrame) item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -107,7 +109,7 @@ internal fun TaskEditor(
                         val inputs = drafts.map { TaskInput(it.title.text, it.notes.text, checkNotNull(it.duration())) }
                         val command = when {
                             createFrame -> PlannerCommand.FrameCreate(reason.text, inputs)
-                            original != null -> PlannerCommand.TaskEdit(original.id, inputs.single())
+                            original != null -> inputs.single().let { PlannerCommand.TaskEdit(original.id, it.title, it.notes, it.minutes) }
                             else -> PlannerCommand.TaskAdd(inputs.single())
                         }
                         action.send(command)
@@ -135,7 +137,7 @@ internal fun PushEditor(queue: List<QueueTask>, actions: WorkspaceActions, onClo
     BackHandler(onBack = close)
     Page {
         LazyColumn(Modifier.weight(1f), contentPadding = pagePadding, verticalArrangement = listSpacing) {
-            item { PageTitle("压栈", back = close) }
+            item { PageTitle("压栈", back = close, assistantPage = AssistantPage.Queue) }
             item { ReasonField(reason) { reason = it } }
             item {
                 SectionTitle("保存哪些任务 · 已选 ${selected.size} 项")

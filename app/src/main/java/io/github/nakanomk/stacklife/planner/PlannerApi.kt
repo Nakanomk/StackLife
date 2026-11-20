@@ -18,6 +18,11 @@ interface PlannerApi {
 
 sealed interface PlannerQuery {
     data object Workspace : PlannerQuery
+    data object Queue : PlannerQuery
+    data class Task(val taskId: String) : PlannerQuery
+    data object Frames : PlannerQuery
+    data class Frame(val frameId: String) : PlannerQuery
+    data object Settings : PlannerQuery
     data object Terms : PlannerQuery
     data class Week(val termId: String, val week: Int) : PlannerQuery
     data object Graphs : PlannerQuery
@@ -90,7 +95,7 @@ data class TaskInput(val title: String, val notes: String = "", val minutes: Int
 
 sealed interface PlannerCommand {
     data class TaskAdd(val task: TaskInput) : PlannerCommand
-    data class TaskEdit(val taskId: String, val task: TaskInput) : PlannerCommand
+    data class TaskEdit(val taskId: String, val title: String? = null, val notes: String? = null, val minutes: Int? = null) : PlannerCommand
     data class TaskFinish(val taskId: String) : PlannerCommand
     data class TaskRemove(val taskId: String) : PlannerCommand
     data class QueueOrder(val taskIds: List<String>) : PlannerCommand
@@ -113,7 +118,7 @@ sealed interface PlannerCommand {
     ) : PlannerCommand
 }
 
-data class PlannerChange(val entityId: String, val field: String, val before: String?, val after: String?)
+data class PlannerChange(val entityId: String, val field: String, val before: String?, val after: String?, val entityLabel: String? = null)
 
 sealed interface PreviewResult {
     data class Ready(val proposalId: String, val baseRevision: Long, val changes: List<PlannerChange>,

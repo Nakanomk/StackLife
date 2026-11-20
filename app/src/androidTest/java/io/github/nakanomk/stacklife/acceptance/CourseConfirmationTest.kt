@@ -37,6 +37,15 @@ import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 
+internal fun pickerReturning(file: File): ActivityResultRegistryOwner = object : ActivityResultRegistryOwner {
+    override val activityResultRegistry = object : ActivityResultRegistry() {
+        override fun <I, O> onLaunch(requestCode: Int, contract: ActivityResultContract<I, O>, input: I, options: ActivityOptionsCompat?) {
+            check(contract is ActivityResultContracts.OpenDocument)
+            dispatchResult(requestCode, Activity.RESULT_OK, Intent().setData(Uri.fromFile(file)))
+        }
+    }
+}
+
 @RunWith(AndroidJUnit4::class)
 class CourseConfirmationTest {
     private val store = WorkspaceFixture()
@@ -49,15 +58,7 @@ class CourseConfirmationTest {
     // Stand in only for the system picker returning the test file. Reading, preview,
     // navigation, the retained activity ViewModel and the file-backed Room are all real.
     private fun attach(file: File? = null) = ui.activityRule.scenario.onActivity { activity ->
-        val owner = if (file == null) activity else object : ActivityResultRegistryOwner {
-            override val activityResultRegistry = object : ActivityResultRegistry() {
-                override fun <I, O> onLaunch(requestCode: Int, contract: ActivityResultContract<I, O>,
-                    input: I, options: ActivityOptionsCompat?) {
-                    check(contract is ActivityResultContracts.OpenDocument)
-                    dispatchResult(requestCode, Activity.RESULT_OK, Intent().setData(Uri.fromFile(file)))
-                }
-            }
-        }
+        val owner = file?.let(::pickerReturning) ?: activity
         activity.setContent {
             CompositionLocalProvider(LocalActivityResultRegistryOwner provides owner) {
                 StackLifeApp(viewModel { WorkspaceViewModel(store.api) })

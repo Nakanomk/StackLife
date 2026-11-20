@@ -11,6 +11,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import io.github.nakanomk.stacklife.assistant.*
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import java.time.Instant
 import java.time.ZoneId
@@ -32,10 +33,12 @@ internal fun Page(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-internal fun PageTitle(title: String, back: (() -> Unit)? = null, backEnabled: Boolean = true, settings: (() -> Unit)? = null) {
+internal fun PageTitle(title: String, back: (() -> Unit)? = null, backEnabled: Boolean = true, settings: (() -> Unit)? = null,
+    assistantPage: AssistantPage? = LocalAssistantPage.current) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         if (back != null) TextButton(onClick = back, enabled = backEnabled, modifier = Modifier.heightIn(min = 48.dp)) { Text("返回") }
         Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.headlineLarge)
+        AssistantEntry(assistantPage)
         if (settings != null) TextButton(onClick = settings, modifier = Modifier.heightIn(min = 48.dp)) { Text("设置") }
     }
 }

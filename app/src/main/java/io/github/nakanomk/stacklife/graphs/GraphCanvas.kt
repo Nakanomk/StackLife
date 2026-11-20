@@ -47,7 +47,8 @@ private fun LayoutCoordinates?.containsDrop(view: LayoutCoordinates, point: Offs
 /** Graph coordinates are logical dp. KotlinFlow positions/edges and its viewport use physical px. */
 @Composable
 internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (String) -> Unit,
-    onLinkFrom: (String) -> Unit, onEdit: (GraphEdit, Long) -> Unit, modifier: Modifier = Modifier) {
+    onLinkFrom: (String) -> Unit, onEdit: (GraphEdit, Long) -> Unit, onArrange: (List<GraphEdit.MoveNode>, Long) -> Boolean,
+    modifier: Modifier = Modifier) {
     val scale = LocalDensity.current.density
     val latest by rememberUpdatedState(detail)
     val latestSelection by rememberUpdatedState(selected)
@@ -74,6 +75,26 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
     val theme = remember(colors, scale) { KotlinFlowTheme(canvasBackgroundColor = colors.surfaceContainerLow,
         edgeColor = colors.onSurfaceVariant, edgeWidth = 2f * scale, nodeSelectedBorderColor = colors.primary,
         gridColor = colors.outlineVariant, gridSpacing = 22f) }
+    fun fit() {
+        val sizes = boxes.filterValues { it.isAttached }.mapValues { (_, box) ->
+            androidx.compose.ui.geometry.Size(box.size.width.toFloat(), box.size.height.toFloat())
+        }
+        instance.fitView(nodes, sizes, FitViewOptions(padding = 16f * scale, maxZoom = 1f))
+    }
+    var arranged by remember { mutableStateOf<Pair<Long, List<GraphEdit.MoveNode>>?>(null) }
+    LaunchedEffect(detail.revision) {
+        val pending = arranged ?: return@LaunchedEffect
+        if (detail.revision > pending.first) {
+            arranged = null
+            val moves = pending.second.iterator()
+            var move = moves.next()
+            for (node in detail.nodes) if (node.id == move.nodeId) {
+                if (node.x != move.x || node.y != move.y) break
+                if (!moves.hasNext()) { fit(); break }
+                move = moves.next()
+            }
+        }
+    }
 
     Box(modifier.clip(MaterialTheme.shapes.large).onGloballyPositioned { canvas = it }.testTag("graph-canvas")) {
         // 1.0.1 renders directed edges and handles pan/pinch. Its built-in node drag conflates
@@ -150,11 +171,14 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
             }
         }
         if (nodes.isEmpty()) Text("添加第一个节点", Modifier.align(Alignment.Center), color = colors.onSurfaceVariant)
-        if (nodes.isNotEmpty()) TextButton(onClick = {
-            val sizes = boxes.filterValues { it.isAttached }.mapValues { (_, box) ->
-                androidx.compose.ui.geometry.Size(box.size.width.toFloat(), box.size.height.toFloat())
-            }
-            instance.fitView(nodes, sizes, FitViewOptions(padding = 16f * scale, maxZoom = 1f))
-        }, modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp).heightIn(min = 48.dp)) { Text("全图") }
+        if (nodes.isNotEmpty()) Row(Modifier.align(Alignment.BottomEnd).padding(4.dp)) {
+            TextButton(onClick = {
+                val height = boxes.values.maxOfOrNull { if (it.isAttached) it.size.height / scale else 0f } ?: 0f
+                val moves = arrangeGraph(detail, maxOf(56f, height) + 32f)
+                if (moves.isEmpty()) fit()
+                else if (onArrange(moves, detail.revision)) arranged = detail.revision to moves
+            }, modifier = Modifier.heightIn(min = 48.dp).testTag("graph-arrange")) { Text("一键整理") }
+            TextButton(onClick = ::fit, modifier = Modifier.heightIn(min = 48.dp)) { Text("全图") }
+        }
     }
 }

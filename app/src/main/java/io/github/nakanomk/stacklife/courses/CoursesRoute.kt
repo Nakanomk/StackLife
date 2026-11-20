@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.ReadState
+import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.*
@@ -60,7 +61,7 @@ internal fun RemoveTermReview(id: String, model: WorkspaceViewModel, onBack: () 
     BackHandler(enabled = saving) { /* Do not replay or cancel an accepted removal on Back. */ }
     Page {
         LazyColumn(Modifier.weight(1f), contentPadding = pagePadding, verticalArrangement = listSpacing) {
-            item { PageTitle("移除学期课表", back = cancel, backEnabled = !saving) }
+            item { PageTitle("移除学期课表", back = cancel, backEnabled = !saving, assistantPage = AssistantPage.Week(id, 1)) }
             item { Text(id, style = MaterialTheme.typography.titleLarge); Hint("仅移除本学期的华科课程。队列、预约和其他学期不动。") }
             when (val result = preview) {
                 null -> item { CircularProgressIndicator() }
