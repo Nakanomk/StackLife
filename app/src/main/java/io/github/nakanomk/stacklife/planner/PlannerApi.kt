@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.planner
 
+import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.time.ZoneId
 import kotlinx.coroutines.flow.Flow
 
 interface PlannerApi {
@@ -11,6 +14,10 @@ interface PlannerApi {
 
 sealed interface PlannerQuery {
     data object Workspace : PlannerQuery
+    data class Day(val date: LocalDate, val zone: ZoneId) : PlannerQuery {
+        val startMillis = date.atStartOfDay(zone).toInstant().toEpochMilli()
+        val endMillis = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+    }
 }
 
 sealed interface QueryResult
@@ -23,7 +30,21 @@ data class Workspace(
     val restorePolicy: RestorePolicy,
 ) : QueryResult
 
-data class QueueTask(val id: String, val title: String, val notes: String, val minutes: Int)
+data class QueueTask(
+    val id: String, val title: String, val notes: String, val minutes: Int,
+    val scheduledStartMillis: Long? = null, val scheduledEndMillis: Long? = null,
+)
+
+enum class ScheduledState { QUEUE, FRAME, DONE }
+
+/** The stored interval is never clipped. Rendering clips it to the requested civil day. */
+data class DayBlock(
+    val taskId: String, val title: String, val startMillis: Long, val endMillis: Long, val state: ScheduledState,
+)
+
+data class DayPlan(
+    val day: PlannerQuery.Day, val revision: Long, val tray: List<QueueTask>, val blocks: List<DayBlock>,
+) : QueryResult
 
 enum class FrameSource { PUSH, MANUAL, SWAP }
 enum class RestorePolicy { PREPEND, APPEND, SWAP }
@@ -64,6 +85,10 @@ sealed interface PlannerCommand {
     data class FramePush(val reason: String, val taskIds: List<String>, val ref: String? = null) : PlannerCommand
     data class FrameRestore(val frameId: String, val mode: RestoreMode, val taskIds: List<String> = emptyList()) : PlannerCommand
     data class SetRestorePolicy(val policy: RestorePolicy) : PlannerCommand
+    data class SlotSet(
+        val taskId: String, val start: OffsetDateTime, val durationMinutes: Int, val expectedRevision: Long? = null,
+    ) : PlannerCommand
+    data class SlotClear(val taskId: String, val expectedRevision: Long? = null) : PlannerCommand
 }
 
 data class PlannerChange(val entityId: String, val field: String, val before: String?, val after: String?)

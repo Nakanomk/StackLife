@@ -17,13 +17,12 @@ import io.github.nakanomk.stacklife.planner.*
 @Composable
 internal fun FrameList(
     frames: List<FrameView>, scroll: LazyListState, onFrame: (String) -> Unit, onCreate: () -> Unit,
-    onSettings: () -> Unit, shared: SharedModifier,
+    shared: SharedModifier,
 ) {
     val available = remember(frames) {
         frames.indexOfFirst { it.remaining == 0 }.let { if (it == -1) frames.size else it }
     }
     LazyColumn(Modifier.fillMaxSize().testTag("frames"), state = scroll, contentPadding = pagePadding, verticalArrangement = listSpacing) {
-        item { PageTitle("工作台", settings = onSettings) }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionTitle("栈帧")

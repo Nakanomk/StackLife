@@ -16,22 +16,34 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 
-internal sealed interface WorkspaceState {
-    data object Loading : WorkspaceState
-    data object ReadFailed : WorkspaceState
-    data class Loaded(val workspace: Workspace) : WorkspaceState
+internal sealed interface ReadState<out T> {
+    data object Loading : ReadState<Nothing>
+    data object ReadFailed : ReadState<Nothing>
+    data class Loaded<T>(val value: T) : ReadState<T>
 }
 
 internal class WorkspaceViewModel(private val planner: PlannerApi) : ViewModel(), WorkspaceActions {
-    val state = planner.observe(PlannerQuery.Workspace)
-        .map<QueryResult, WorkspaceState> { result ->
-            when (result) { is Workspace -> WorkspaceState.Loaded(result) }
-        }
+    private inline fun <reified T : QueryResult> read(query: PlannerQuery) = planner.observe(query)
+        .map<QueryResult, ReadState<T>> { ReadState.Loaded(it as T) }
         .catch { cause ->
             if (cause !is SQLiteException) throw cause
-            emit(WorkspaceState.ReadFailed)
+            emit(ReadState.ReadFailed)
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WorkspaceState.Loading)
+
+    val workspace = read<Workspace>(PlannerQuery.Workspace)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadState.Loading)
+
+    fun day(query: PlannerQuery.Day) = read<DayPlan>(query)
+
+    /** A hover or editor check never leaves a committable proposal behind. */
+    suspend fun checkSlot(command: PlannerCommand.SlotSet): String? = try {
+        when (val preview = planner.preview(listOf(command))) {
+            is PreviewResult.Rejected -> preview.message
+            is PreviewResult.Ready -> { planner.discard(preview.proposalId); null }
+        }
+    } catch (_: SQLiteException) {
+        "无法从设备读取时段，未安排任务"
+    }
 
     private val errors = Channel<String>(Channel.BUFFERED)
     val notices = errors.receiveAsFlow()
@@ -76,7 +88,7 @@ internal class WorkspaceViewModel(private val planner: PlannerApi) : ViewModel()
         val ticket = latest
         if (ticket?.id == requestId) return ticket.outcome.await()
         // Process death: the transaction may already have committed. Never re-submit the draft.
-        errors.send("上次保存的回执不可用，未重新提交。请在工作台核对结果。")
+        errors.send("上次保存的回执不可用，未重新提交。请核对当前结果。")
         return SaveOutcome.INTERRUPTED
     }
 }

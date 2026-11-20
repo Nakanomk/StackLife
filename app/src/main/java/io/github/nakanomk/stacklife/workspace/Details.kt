@@ -43,6 +43,9 @@ fun TaskScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: 
                         Text(if (index == 0) "当前优先" else "队列第 ${index + 1} 项", style = MaterialTheme.typography.labelLarge)
                         Text(task.title, style = MaterialTheme.typography.headlineMedium)
                         Text("预计 ${task.minutes} 分钟", style = MaterialTheme.typography.bodyMedium)
+                        if (task.scheduledStartMillis != null && task.scheduledEndMillis != null) {
+                            Text("已安排：${savedTime(task.scheduledStartMillis)} 至 ${savedTime(task.scheduledEndMillis)}")
+                        }
                     }
                 }
             }

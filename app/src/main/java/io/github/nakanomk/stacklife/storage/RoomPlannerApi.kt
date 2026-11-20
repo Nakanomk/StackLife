@@ -3,6 +3,7 @@ package io.github.nakanomk.stacklife.storage
 import androidx.room.withTransaction
 import io.github.nakanomk.stacklife.planner.CommitFailure
 import io.github.nakanomk.stacklife.planner.CommitResult
+import io.github.nakanomk.stacklife.planner.DayPlan
 import io.github.nakanomk.stacklife.planner.FrameEntry
 import io.github.nakanomk.stacklife.planner.FrameView
 import io.github.nakanomk.stacklife.planner.PlannerApi
@@ -22,23 +23,31 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
     private val dao = db.plannerDao()
     private val pending = ConcurrentHashMap<String, Proposal>()
 
-    override fun observe(query: PlannerQuery): Flow<QueryResult> = when (query) {
-        // Every successful commit touches the singleton, including commits that only move tasks.
-        PlannerQuery.Workspace -> db.invalidationTracker.createFlow("planner_settings").map {
+    // Every successful commit touches the singleton, including commits that only move slots.
+    override fun observe(query: PlannerQuery): Flow<QueryResult> =
+        db.invalidationTracker.createFlow("planner_settings").map {
             db.withTransaction {
                 val settings = dao.settings() ?: SettingsRow()
-                val entries = HashMap<String, MutableList<FrameEntry>>()
-                for ((item, restorable) in dao.itemStates()) {
-                    entries.getOrPut(item.frameId) { ArrayList() }.add(
-                        FrameEntry(item.taskId, item.originalPosition, item.title, item.notes, item.minutes,
-                            item.scheduledStartMillis, item.scheduledEndMillis, restorable),
-                    )
+                when (query) {
+                    PlannerQuery.Workspace -> workspace(settings)
+                    is PlannerQuery.Day -> DayPlan(query, settings.revision, dao.dayTray(),
+                        if (query.startMillis < query.endMillis) dao.dayBlocks(query.startMillis, query.endMillis)
+                        else emptyList())
                 }
-                Workspace(settings.revision, dao.visibleQueue(), dao.frames().map {
-                    FrameView(it.id, it.reason, it.savedAtMillis, it.source, entries[it.id].orEmpty())
-                }, settings.restorePolicy)
             }
         }
+
+    private fun workspace(settings: SettingsRow): Workspace {
+        val entries = HashMap<String, MutableList<FrameEntry>>()
+        for ((item, restorable) in dao.itemStates()) {
+            entries.getOrPut(item.frameId) { ArrayList() }.add(
+                FrameEntry(item.taskId, item.originalPosition, item.title, item.notes, item.minutes,
+                    item.scheduledStartMillis, item.scheduledEndMillis, restorable),
+            )
+        }
+        return Workspace(settings.revision, dao.visibleQueue(), dao.frames().map {
+            FrameView(it.id, it.reason, it.savedAtMillis, it.source, entries[it.id].orEmpty())
+        }, settings.restorePolicy)
     }
 
     override suspend fun preview(commands: List<PlannerCommand>): PreviewResult {
@@ -93,6 +102,7 @@ internal class Proposal(
     private val updates: List<TaskRow>,
     private val positions: List<PositionUpdate>,
     private val items: List<FrameItemRow>,
+    private val slots: SlotDelta?,
 ) {
     fun applyTo(dao: PlannerDao) {
         if (frames.isNotEmpty()) dao.insertFrames(frames)
@@ -100,6 +110,7 @@ internal class Proposal(
         if (updates.isNotEmpty()) dao.updateTasks(updates)
         if (positions.isNotEmpty()) dao.updatePositions(positions)
         if (items.isNotEmpty()) dao.insertItems(items)
+        slots?.applyTo(dao)
         dao.saveSettings(settings)
     }
 }

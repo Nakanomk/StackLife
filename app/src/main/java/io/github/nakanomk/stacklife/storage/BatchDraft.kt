@@ -6,6 +6,7 @@ import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.RestoreMode
 import io.github.nakanomk.stacklife.planner.RestorePolicy
 import io.github.nakanomk.stacklife.planner.TaskInput
+import java.time.ZoneId
 import java.util.Collections
 import java.util.UUID
 
@@ -13,6 +14,7 @@ import java.util.UUID
 internal class BatchDraft(private val dao: PlannerDao, private val base: SettingsRow) {
     private val originals = HashMap<String, TaskRow>()
     private val edited = LinkedHashMap<String, TaskRow>()
+    private val slots = SlotDraft(dao, originals)
     private val frames = ArrayList<FrameRow>()
     private val items = ArrayList<FrameItemRow>()
     private val members = HashMap<String, List<String>>()
@@ -44,6 +46,14 @@ internal class BatchDraft(private val dao: PlannerDao, private val base: Setting
             }
             is PlannerCommand.TaskFinish -> retire(cmd.taskId, Owner.DONE)
             is PlannerCommand.TaskRemove -> retire(cmd.taskId, Owner.REMOVED)
+            is PlannerCommand.SlotSet -> {
+                checkRevision(cmd.expectedRevision)
+                slots.set(activeTask(cmd.taskId), cmd, edited)
+            }
+            is PlannerCommand.SlotClear -> {
+                checkRevision(cmd.expectedRevision)
+                slots.clear(activeTask(cmd.taskId).id, required = true)
+            }
             is PlannerCommand.QueueOrder -> reorder(cmd.taskIds)
             is PlannerCommand.FrameCreate -> {
                 if (cmd.tasks.isEmpty()) invalid("栈帧至少需要一项任务。")
@@ -69,6 +79,10 @@ internal class BatchDraft(private val dao: PlannerDao, private val base: Setting
     }
 
     private fun invalid(message: String): Nothing = throw InvalidCommand(message)
+
+    private fun checkRevision(expected: Long?) {
+        if (expected != null && expected != base.revision) invalid("日程已有变更，请按最新时段重新安排。")
+    }
 
     private fun newId(ref: String?, kind: Kind): String {
         val id = UUID.randomUUID().toString()
@@ -110,7 +124,9 @@ internal class BatchDraft(private val dao: PlannerDao, private val base: Setting
     }
 
     private fun snapshot(frameId: String, position: Int, row: TaskRow) {
-        items.add(FrameItemRow(frameId, position, row.id, row.title, row.notes, row.minutes, null, null))
+        val slot = slots.current(row.id)
+        items.add(FrameItemRow(frameId, position, row.id, row.title, row.notes, row.minutes,
+            slot?.startMillis, slot?.endMillis))
     }
 
     private fun append(id: String): Int {
@@ -168,6 +184,7 @@ internal class BatchDraft(private val dao: PlannerDao, private val base: Setting
     private fun retire(raw: String, owner: Owner) {
         val row = activeTask(raw)
         if (row.owner == Owner.QUEUE) queue().remove(row.id)
+        if (owner == Owner.REMOVED) slots.clear(row.id, required = false)
         edited[row.id] = row.copy(owner = owner, frameId = null, queuePosition = null)
     }
 
@@ -184,6 +201,7 @@ internal class BatchDraft(private val dao: PlannerDao, private val base: Setting
         val queue = queue()
         val expected = selection?.size ?: queue.size
         loadTasks(selection ?: queue)
+        slots.preload(selection ?: queue)
         val saved = ArrayList<String>(expected)
         var kept = 0
         for (position in queue.indices) {
@@ -279,11 +297,18 @@ internal class BatchDraft(private val dao: PlannerDao, private val base: Setting
         }
         for (item in items) {
             change(item.frameId, "原第 ${item.originalPosition + 1} 项（${item.taskId}）", null,
-                "${item.title} · ${item.minutes} 分钟" + if (item.notes.isEmpty()) "" else "\n${item.notes}")
+                buildString {
+                    append(item.title).append(" · ").append(item.minutes).append(" 分钟")
+                    if (item.scheduledStartMillis != null && item.scheduledEndMillis != null) {
+                        append('\n').append(intervalLabel(item.scheduledStartMillis, item.scheduledEndMillis, ZoneId.systemDefault()))
+                    }
+                    if (item.notes.isNotEmpty()) append('\n').append(item.notes)
+                })
         }
         if (base.restorePolicy != policy) change("工作台", "恢复策略", base.restorePolicy.label(), policy.label())
+        val slotDelta = slots.finish(changes, edited)
         return Proposal(base.revision, base.copy(revision = base.revision + 1, restorePolicy = policy),
-            Collections.unmodifiableList(changes), frames, inserts, updates, positions, items)
+            Collections.unmodifiableList(changes), frames, inserts, updates, positions, items, slotDelta)
     }
 
     private fun change(id: String, field: String, before: Any?, after: Any?) {

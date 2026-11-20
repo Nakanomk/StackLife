@@ -32,6 +32,7 @@ class WorkspaceUiTest {
 
     private fun show() {
         ui.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
+        await(hasTestTag("nav:workspace")).performClick()
         await(hasText("待办队列"))
     }
 
@@ -90,6 +91,7 @@ class WorkspaceUiTest {
             activity.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
         }
         attach()
+        await(hasTestTag("nav:workspace")).performClick()
         await(hasText("新增任务") and hasClickAction()).performClick()
         ui.onNodeWithTag("title:0").performTextInput("只创建一次")
         val add = hasText("添加到队列")

@@ -2,7 +2,7 @@
 
 StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Android 日程工具。**队列**回答「我现在要做什么」，**栈帧**记录「我为什么停下、怎样接回去」。**DAG** 决定为选定目标先做什么，**时间轴**决定哪天几点做，**课表**标出已经占用的时段。一项工作不因换视图而变成几份任务。
 
-**当前交付：M1 离线工作台。** M0 的[根开发约定](../AGENTS.md)和本路线图是长期入口。`:app` 已实现队列、持久栈帧、整帧/部分恢复与三种恢复策略。M2–M6 仍是计划；时间轴、课表、DAG、对话、玻璃和联盟系统转场均未开放。
+**当前交付：M2 今天。** 应用默认进入当地日期的时间轴，可拖放待排任务，也可点「安排时间」编辑。M1 的队列、栈帧和恢复策略继续可用；升级保留原库。M3–M6 仍是计划，课表、DAG、对话、玻璃和联盟系统转场均未开放。
 
 ## 起点与产品决定
 
@@ -35,7 +35,7 @@ StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Andr
 |工具链|[AGP 9.5.0 / Gradle wrapper 9.6.0 / JDK 17](https://developer.android.com/build/releases/agp-9-5-0-release-notes)，用 [AGP 内建 Kotlin](https://developer.android.com/build/migrate-to-built-in-kotlin)；Compose 编译插件和序列化插件统一 Kotlin `2.4.10`，KSP2 `2.3.14`。|
 |导航与存储|[Navigation 3 `1.2.2`](https://developer.android.com/jetpack/androidx/releases/navigation3)、[Room `2.8.5`](https://developer.android.com/jetpack/androidx/releases/room)。版本集中在 `gradle/libs.versions.toml`，不用 `+`、snapshot 或 beta BOM。|
 
-M1 的本地入口在 `app/src/main/java/io/github/nakanomk/stacklife/planner/PlannerApi.kt`。`discard` 只撤销未消费的内存提案，不写业务表：
+本地入口在 `app/src/main/java/io/github/nakanomk/stacklife/planner/PlannerApi.kt`。`discard` 只撤销未消费的内存提案，不写业务表：
 
 ```kotlin
 interface PlannerApi {
@@ -75,6 +75,8 @@ interface PlannerApi {
 - Compose 可滚动刻度接[原生拖动手势](https://developer.android.com/develop/ui/compose/touch-input/pointer-input/drag-swipe-fling)。长按拖动，边缘滚动；指针换算为含滚动偏移的轴内容坐标，按 5 分钟就近吸附。预览半透明落点、起止与冲突。松手才落库；轴外、取消、目标失效不改原数据。「安排时间」打开同一日期/时间/时长编辑器，无需拖动也可完成全部安排。
 - `TimeBlock(taskId UNIQUE, startInstant, endInstant)` 引用原任务。新排或移动只动该占位，不出队、不复制任务；轴上可拖改开始、在编辑器改时长/取消。取消只释放时段；移出任务释放占位，完成任务保留标完成的历史块。
 - 用当地午夜到次日午夜换算一天，不假定恒为 24 小时。跨日按日裁剪显示，底层仍一条；课程按学期换算到同一时间基准。冲突按半开区间 `[start,end)`，移动排除自身。撞已有预约或固定课程须指出具体冲突并保留原状，不推走别项。课程导入撞上既有块则预览、标记双项，不抹掉用户安排。
+
+已实现 `PlannerQuery.Day(date, zone)`：一次事务读出同修订号的待排队列与当日相交的原始时段。`SlotSet(taskId, start, durationMinutes, expectedRevision)` 新增或移动，`SlotClear` 只释放占位；拖动读到的旧修订不可覆写新日程。两条界面路径共享 `preview/commit`。编辑器标明时区，拒绝不存在的当地时刻；秋季同一时刻出现两次时可选 UTC 偏移。Room v2 只新增占位表和索引，没有新增运行依赖。
 
 ## M3 华科课表
 
@@ -215,7 +217,11 @@ M1 首验在 Android 17 / API 37 x86_64 专用 AVD 上通过 12 项仪器测试�
 
 安装包另经实际界面压栈、旋转和 `am force-stop` 冷启动：队列仍为 `[A,B,X]`，历史帧保留两项、剩余零项；取消系统返回手势仍在原帧详情，完成手势才回到栈。以上不代证实体机性能、TalkBack 实机体验或联盟能力。后续阶段的纯 Kotlin 用例可用 `./gradlew :app:testDebugUnitTest --tests '*GoalOrderTest'` 等按类选择，不预造空测试。
 
-|阶段 / 用例|输入 → 可观察结果（M1 为回归用例，M2–M6 待开发）|
+**M2 复现：** 在专用 API 37 设备运行 `./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=io.github.nakanomk.stacklife.acceptance.DaySlotTest,io.github.nakanomk.stacklife.acceptance.DayTimelineTest`。前者覆盖事务、所有权、重开和当地日边界；后者向真实界面发送长按、移动、松开、取消及无障碍点击事件。连同 M1 回归共 **21 项通过**。其中一项在手指静止时推进帧时钟，检查边缘滚动改变候选时段；并发改动后松手不得写入。
+
+**升级与无障碍实测：** 在 Android 17 x86_64 测试 AVD 保留 M1 安装数据，以 `adb install -r` 覆盖启动 v0.2.0；数据库版本 1→2。原四张业务表导出的 SQL 逐字节相同（5 个任务、3 个帧、7 条快照、修订 14），新占位表为空。在另一台 Google Play API 37 AVD 启用系统 TalkBack 17.0，实际触摸聚焦并双击「安排时间」，键盘输入 15:45；同一个队列 ID 经 16:00 改时、取消后仍在原位。会话附两条操作录屏；未评估语音播报质量或实体机性能。
+
+|阶段 / 用例|输入 → 可观察结果（M1、M2 为回归用例，M3–M6 待开发）|
 |---|---|
 |M1 `WorkspaceTest`|新建 A、B、C，完成 C；以「去开会」压栈，添加 X。仅取 B 得 `[B,X]`，原帧仍显示 A、B 原序及原因，仅 A 可取；再全部恢复得 `[A,B,X]`。改 B 标题再压另一帧，旧快照不变。独立复位，对 `[A,B]` 帧与 `[X]` 队列分别验三种策略：队首 `[A,B,X]`、队尾 `[X,A,B]`、切换 `[A,B]` 且新帧只含 X；切换模式下选择 B 不新建帧。空原因/事务失败不移动任何项；连点、旋转、`adb shell am force-stop io.github.nakanomk.stacklife` 再启动均不重复、不丢任务。|
 |M2 `DayTimelineTest`|待排「报告提纲」30 分钟拖到 15:45 → 显示 15:45–16:15，仍是同一队列 ID，只有一个块。改到 16:00 → 原块移动；取消排程 → 块消失，队列保留。用 TalkBack 的「安排时间」走同一路。压栈再恢复已排任务，时段不变。|

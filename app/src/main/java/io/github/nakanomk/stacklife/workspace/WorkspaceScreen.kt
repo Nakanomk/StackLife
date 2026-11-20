@@ -39,6 +39,7 @@ fun WorkspaceScreen(
     onFrame: (String) -> Unit,
     onSettings: () -> Unit,
     shared: SharedModifier,
+    navigationBar: @Composable () -> Unit,
 ) {
     var stack by rememberSaveable { mutableStateOf(false) }
     var editor by rememberSaveable { mutableStateOf<Editor?>(null) }
@@ -50,18 +51,20 @@ fun WorkspaceScreen(
         Editor.PUSH -> PushEditor(state.queue, actions, close)
         Editor.FRAME -> TaskEditor(actions, close, createFrame = true)
         null -> Page {
+            Column(Modifier.fillMaxWidth().padding(start = 20.dp, top = 12.dp, end = 20.dp)) {
+                PageTitle("工作台", settings = onSettings)
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    SegmentedButton(selected = !stack, onClick = { stack = false }, shape = SegmentedButtonDefaults.itemShape(0, 2),
+                        modifier = Modifier.heightIn(min = 48.dp)) { Text("队列") }
+                    SegmentedButton(selected = stack, onClick = { stack = true }, shape = SegmentedButtonDefaults.itemShape(1, 2),
+                        modifier = Modifier.heightIn(min = 48.dp)) { Text("栈") }
+                }
+            }
             Box(Modifier.weight(1f)) {
-                if (stack) FrameList(state.frames, stackScroll, onFrame, { editor = Editor.FRAME }, onSettings, shared)
-                else QueueList(state.queue, queueScroll, actions, onTask, { editor = Editor.ADD }, { editor = Editor.PUSH }, onSettings, shared)
+                if (stack) FrameList(state.frames, stackScroll, onFrame, { editor = Editor.FRAME }, shared)
+                else QueueList(state.queue, queueScroll, actions, onTask, { editor = Editor.ADD }, { editor = Editor.PUSH }, shared)
             }
-            SingleChoiceSegmentedButtonRow(
-                Modifier.align(Alignment.CenterHorizontally).widthIn(max = 368.dp).fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-            ) {
-                SegmentedButton(selected = !stack, onClick = { stack = false }, shape = SegmentedButtonDefaults.itemShape(0, 2),
-                    modifier = Modifier.heightIn(min = 48.dp)) { Text("队列") }
-                SegmentedButton(selected = stack, onClick = { stack = true }, shape = SegmentedButtonDefaults.itemShape(1, 2),
-                    modifier = Modifier.heightIn(min = 48.dp)) { Text("栈") }
-            }
+            navigationBar()
         }
     }
 }
@@ -69,7 +72,7 @@ fun WorkspaceScreen(
 @Composable
 private fun QueueList(
     tasks: List<QueueTask>, scroll: LazyListState, actions: WorkspaceActions, onTask: (String) -> Unit,
-    onAdd: () -> Unit, onPush: () -> Unit, onSettings: () -> Unit, shared: SharedModifier,
+    onAdd: () -> Unit, onPush: () -> Unit, shared: SharedModifier,
 ) {
     var order by remember(tasks) { mutableStateOf(tasks) }
     val action = rememberSubmission(actions) { if (it != SaveOutcome.APPLIED) order = tasks }
@@ -89,7 +92,6 @@ private fun QueueList(
         }
     }
     LazyColumn(Modifier.fillMaxSize().testTag("queue"), state = scroll, contentPadding = pagePadding, verticalArrangement = listSpacing) {
-        item { PageTitle("工作台", settings = onSettings) }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionTitle("待办队列")
@@ -125,6 +127,10 @@ private fun QueueList(
                             Text(task.title, style = if (head) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
                                 maxLines = 3, overflow = TextOverflow.Ellipsis)
                             Text("${task.minutes} 分钟", style = MaterialTheme.typography.bodyMedium)
+                            if (task.scheduledStartMillis != null && task.scheduledEndMillis != null) {
+                                Text("已安排：${savedTime(task.scheduledStartMillis)} 至 ${savedTime(task.scheduledEndMillis)}",
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
                             if (task.notes.isNotBlank()) Text(task.notes, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         if (order.size > 1) MoveMenu(

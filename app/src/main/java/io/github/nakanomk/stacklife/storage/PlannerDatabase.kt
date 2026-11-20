@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.storage
 
+import androidx.room.AutoMigration
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Embedded
@@ -12,13 +13,15 @@ import androidx.room.Query
 import androidx.room.RoomDatabase
 import androidx.room.Update
 import androidx.room.Upsert
+import io.github.nakanomk.stacklife.planner.DayBlock
 import io.github.nakanomk.stacklife.planner.FrameSource
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.planner.RestorePolicy
 
 @Database(
-    entities = [TaskRow::class, FrameRow::class, FrameItemRow::class, SettingsRow::class],
-    version = 1,
+    entities = [TaskRow::class, FrameRow::class, FrameItemRow::class, SettingsRow::class, TimeBlockRow::class],
+    version = 2,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
     exportSchema = true,
 )
 abstract class PlannerDatabase : RoomDatabase() {
@@ -41,6 +44,13 @@ internal data class TaskRow(
     val frameId: String?,
     val queuePosition: Int?,
 )
+
+@Entity(
+    tableName = "time_blocks",
+    foreignKeys = [ForeignKey(entity = TaskRow::class, parentColumns = ["id"], childColumns = ["taskId"])],
+    indices = [Index(value = ["endMillis"])],
+)
+internal data class TimeBlockRow(@PrimaryKey val taskId: String, val startMillis: Long, val endMillis: Long)
 
 @Entity(tableName = "frames", indices = [Index(value = ["savedAtMillis"])])
 internal data class FrameRow(
@@ -86,8 +96,25 @@ internal interface PlannerDao {
     @Query("SELECT * FROM planner_settings WHERE id = 1")
     fun settings(): SettingsRow?
 
-    @Query("SELECT id, title, notes, minutes FROM tasks WHERE owner = 'QUEUE' ORDER BY queuePosition")
+    @Query("""SELECT t.id, t.title, t.notes, t.minutes, b.startMillis AS scheduledStartMillis, b.endMillis AS scheduledEndMillis
+        FROM tasks t LEFT JOIN time_blocks b ON b.taskId = t.id WHERE t.owner = 'QUEUE' ORDER BY t.queuePosition""")
     fun visibleQueue(): List<QueueTask>
+
+    @Query("""SELECT t.id, t.title, t.notes, t.minutes, NULL AS scheduledStartMillis, NULL AS scheduledEndMillis
+        FROM tasks t WHERE t.owner = 'QUEUE' AND NOT EXISTS (SELECT 1 FROM time_blocks b WHERE b.taskId = t.id)
+        ORDER BY t.queuePosition""")
+    fun dayTray(): List<QueueTask>
+
+    @Query("""SELECT b.taskId, t.title, b.startMillis, b.endMillis, t.owner AS state
+        FROM time_blocks b JOIN tasks t ON t.id = b.taskId
+        WHERE b.startMillis < :endMillis AND b.endMillis > :startMillis ORDER BY b.startMillis, b.taskId""")
+    fun dayBlocks(startMillis: Long, endMillis: Long): List<DayBlock>
+
+    @Query("SELECT * FROM time_blocks WHERE taskId IN (:ids)")
+    fun slots(ids: List<String>): List<TimeBlockRow>
+
+    @Upsert fun saveSlots(slots: List<TimeBlockRow>)
+    @Query("DELETE FROM time_blocks WHERE taskId IN (:ids)") fun deleteSlots(ids: List<String>)
 
     @Query("""SELECT * FROM frames AS f ORDER BY
         EXISTS (SELECT 1 FROM tasks AS t WHERE t.frameId = f.id) DESC,
