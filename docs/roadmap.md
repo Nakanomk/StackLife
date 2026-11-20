@@ -2,7 +2,7 @@
 
 StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Android 日程工具。**队列**回答「我现在要做什么」，**栈帧**记录「我为什么停下、怎样接回去」。**DAG** 决定为选定目标先做什么，**时间轴**决定哪天几点做，**课表**标出已经占用的时段。一项工作不因换视图而变成几份任务。
 
-**当前交付：M2 今天。** 应用默认进入当地日期的时间轴，可拖放待排任务，也可点「安排时间」编辑。M1 的队列、栈帧和恢复策略继续可用；升级保留原库。M3–M6 仍是计划，课表、DAG、对话、玻璃和联盟系统转场均未开放。
+**当前交付：M3 华科课表。** 今天以单条竖轴呈现任务与固定课程；今天和工作台右下角的圆形 `+` 创建同一种任务。课表支持原始文件和校内 WebView 导入、逐项修正、确认差异、按学期替换和按周查看。文件路径已在设备上从系统选择器走到入库；没有用真实账号验证登录后的提取。M1、M2 数据可原地升级。流程图、对话、玻璃及联盟转场仍属 M4–M6。
 
 ## 起点与产品决定
 
@@ -43,11 +43,14 @@ interface PlannerApi {
     suspend fun preview(commands: List<PlannerCommand>): PreviewResult
     suspend fun commit(proposalId: String): CommitResult
     fun discard(proposalId: String)
+    fun stageCourseImport(term: TermSpec, meetings: List<CourseMeeting>): String
+    fun discardCourseImport(draftId: String)
 }
 ```
 
 - `PlannerQuery`、`PlannerCommand` 为封闭类型，随里程碑加入真实操作。Compose 订阅 Flow，对话只取一次。UI、导入器、LLM 不直接拿 DAO。明确的手动点击可在内部连续预览/提交，无额外确认框；模型**没有 `commit` 工具**。需选文件、登录、授权等动作返回 `UserActionRequired`，不可报成已完成。
 - `preview` 在同一读快照中按顺序校验整批命令，分配批内新增实体的 ID，算出明确增删改和 `baseRevision`。已声明的批内唯一别名可供后续命令引用；未声明、重复或歧义则拒绝。不可变提案及差异只留本机内存，不写业务表。
+- M3 两个 `stage/discardCourseImport` 草稿方法只接收本人已核对的课次，在设备内存中临时登记；原始 JSON、网页登录数据不进 `PlannerApi`。预览取得独立差异后即释放输入草稿，未确认不改 Room。
 - `commit` 只消费本机生成的对应提案。Room 写事务复核全局业务修订号，仅落下已预览的变更，修订号加一。过期返回 `STALE_PREVIEW`，须重新预览；不再询问模型决定写什么。重复点不能生第二份，取消/进程死亡丢弃未确认提案，中途失败整批回滚。校验只写一处。
 - 非敏感外观与恢复偏好放在同库一行，保证与日程混合写入时仍能原子提交；密钥不进 Room。应用私有空间持久化，日程、登录数据与密钥不进系统云备份。Room 升级写迁移，不销毁重建。自行实现的是本项目的归属/快照、命令语义和交互连接；画布、主题、布局、解析依据与材质均有下列参考。
 
@@ -82,16 +85,20 @@ interface PlannerApi {
 
 编译期登记 `HustCourseImporter`（插件 ID `hust-hub`）。`CourseImporter.parse(rows: JsonArray, term: TermSpec): ImportDraft` 是纯 Kotlin，无网络、DAO 或密码。只支持两条已知输入，两路共用解析/预览：
 
-1. 用户在 [HUB 总课表](https://hubs.hust.edu.cn/basicInformation/scheduleInformation/index) 本人登录、选学期、点「提取」。移植 `../WadwaitaUp/browser.py:37–62` 的 Vue 父链查找，桌面调用路径在 `:103–169`，不搬桌面浏览器。
+1. WebView 从固定的[校方 HTTPS 登录页](https://hubs.hust.edu.cn/login)进入；本人登录后打开 [HUB 总课表](https://hubs.hust.edu.cn/basicInformation/scheduleInformation/index)，选学期、点「提取」。未登录访问总课表时，校方实测重定向到 HTTP 登录页；不发送该明文请求，只对这个确切的主框架 GET 重定向重新打开固定 HTTPS 地址，不带原请求参数或正文。移植 `../WadwaitaUp/browser.py:37–62` 的 Vue 父链查找，桌面调用路径在 `:103–169`，不搬桌面浏览器。
 2. Android 系统文件选择器选本人导出的原始周数组 JSON；格式依据 `../WadwaitaUp/tools/hust_converter.py:6–16,84–100`。不架中转服务，不承诺兼容未核实格式。
 
 **网页边界。** 用 [`AndroidView` 承载 WebView](https://developer.android.com/develop/ui/compose/migrate/interoperability-apis/views-in-compose)，显示当前域名；登录与验证在校方页面内完成。导航只接受 `hust.edu.cn` 或按域标签区分的 HTTPS 校方子域（根域也须 HTTPS）；未知外链移出导入器。仅当用户点提取、当前主框架 origin **恰为** `https://hubs.hust.edu.cn` 且为核对过的总课表路由，才以 `evaluateJavascript` 执行 APK 内 `app/src/main/assets/importers/hust-hub.js`；脚本再查 origin。只返回 `ZC/KS/MONDAY…SUNDAY/KCMC/JC/JSMC` 投影。Kotlin 解两层 JSON，校验导航代次，离页或换学期作废旧结果。
 
 只为校方页面开 JS/DOM 存储，不注册原生 JS bridge，不忽略 TLS，不允许混合内容或文件访问。新会话前及结束/取消时调用 [`CookieManager.removeAllCookies`](https://developer.android.com/reference/android/webkit/CookieManager) 清除含持久 Cookie 的登录并等回调，清 WebStorage、缓存/历史，离页销毁 WebView；不承诺服务端登出。遵循 [WebView 安全指引](https://developer.android.com/privacy-and-security/risks/insecure-webview-native-bridges)。不抓密码或 Cookie，登录页不显示会发送页面内容的 AI 控件。
 
+API 37 设备已从 `hubs.hust.edu.cn` 进入 `pass.hust.edu.cn` 的「您正在登录 HUB 系统」表单，非课表页不能提取；未输入账号或验证码。给用户试用的包用 `./gradlew :app:assemblePreview` 构建，路径是 `app/build/outputs/apk/preview/app-preview.apk`：不可调试，与本机 M1/M2 调试包同签名，可覆盖安装。`debug` 包只用于开发；实测已授权的 ADB 仍可检查其 WebView，不用于真实登录。断网设备测试验证进入和退出时持久测试 Cookie 均被清除，不代表服务端登出。
+
 **从原始行到实际上课日期。** `ZC` 为周序，周集合去重排序。按周保留课名 `KCMC`、星期、节次 `JC`、教室 `JSMC`；仅完全相同条目去重，同课换教室不能并掉。`JC` 完整匹配单节或数字区间，支持 `-`、`–`、`—`；倒序、越界、「实践」均保留原文待修正，不默认为第一节。`KS` 只是第一周日期候选。用户确认学期标识、首周周一、总周数和夏/冬作息，可指定中途切换作息的生效日，不猜当年校历。按 `Asia/Shanghai` 实际上课日期套用 `../WadwaitaUp/models.py:33–62` 的两套 12 节预设；来源没有的教师等字段留空。
 
 **写入边界。** 展示差异、有效/待修正数、同名不同地点和冲突；有问题的条目须修正或明确排除。无课或无有效数据不得覆盖已有课表。确认后仅替换所选学期 `hust-hub` 来源的课程集合；相同内容重复导入无新增，不动用户任务、其他来源或学期。**不移植** `../WadwaitaUp/window.py:3155–3188` 的 `_apply_imported_courses` 按课名跳过/覆盖；同名不是身份。移除某学期课表也须预览，不删除工作台内容。
+
+单次导入预览先计数，再生成冲突明细。超过 256 对受影响的重叠时，提示检查源文件，不截断课次后提交；课名和教室各限 256 个 UTF-16 单元，超长进入可修正条目。日/周视图中一门课超过 8 个冲突对象时显示确切总数，避免把大量课程两两展开。
 
 **阅读与失败路径。** 周网格用 [Android Week View 5.1.2](https://github.com/tobiasschuerg/android-week-view/tree/5.1.2) 的 `WeekView` / `WeekLayout.Periods`；JitPack 限该依赖组，锁 tag 和制品校验值。周次可切换，点课看教室、节次和周次。网格只读，不承担跨托盘拖放；当天实例在同一轴上为锁定块。Vue 字段非公开协议；未登录、未加载、结构变化、SSO 拒内嵌、校园网不可达，应指出原因、保留现有课表并提供真实文件入口。文件通过不代表在线登录通过。
 
@@ -141,6 +148,8 @@ interface PlannerApi {
 |[Breezy Weather](https://github.com/breezy-weather/breezy-weather) / [Auxio](https://github.com/OxygenCobalt/Auxio)|今天页的概要/细节排版；当前任务与队列之间的入口（Auxio 是原生 Views，不是 Compose）。|
 |[Metrolist](https://github.com/MetrolistGroup/Metrolist) / [Mihon](https://github.com/mihonapp/mihon)|助理从收起到展开的层次；队列手柄及移动到顶/底。|
 |Flutter [PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus) / [LocalSend](https://github.com/localsend/localsend)|中文标签分组、多选排序；单一目的操作。只借信息结构，不搬旧视觉、播放器架构或插画。|
+
+**时间轴与底栏的具体取舍。** [Structured 的日视图](https://help.structured.app/en/articles/380546)在一根竖轴左边标时刻，右边读事件；右下角 `+` 不占列表位置。StackLife 保留按时间比例的空白，供五分钟拖放。参考 [BiliPai 的导航外壳与选中指示器](https://github.com/jay3-yy/BiliPai/blob/8392b7de4a21c37252858986dc7c96e17826e768/app/src/main/java/com/android/purebilibili/feature/home/components/FloatingBottomBar.kt)和 [Etar 的 bottom/end FAB](https://github.com/Etar-Group/Etar-Calendar/blob/6fb46d1606622aecc719b7e5dc15a48528768c94/app/src/main/res/layout/all_in_one_material.xml)：一个实色胶囊浮在内容之上，选中指示器在槽位间滑动，圆形加号独立；列表末项可以滚到胶囊上方。图标自行绘制，不复制上游代码或素材，折射仍属 M6。
 
 手机关键帧规格（示意，不是应用截图）：
 
@@ -221,7 +230,9 @@ M1 首验在 Android 17 / API 37 x86_64 专用 AVD 上通过 12 项仪器测试�
 
 **升级与无障碍实测：** 在 Android 17 x86_64 测试 AVD 保留 M1 安装数据，以 `adb install -r` 覆盖启动 v0.2.0；数据库版本 1→2。原四张业务表导出的 SQL 逐字节相同（5 个任务、3 个帧、7 条快照、修订 14），新占位表为空。在另一台 Google Play API 37 AVD 启用系统 TalkBack 17.0，实际触摸聚焦并双击「安排时间」，键盘输入 15:45；同一个队列 ID 经 16:00 改时、取消后仍在原位。会话附两条操作录屏；未评估语音播报质量或实体机性能。
 
-|阶段 / 用例|输入 → 可观察结果（M1、M2 为回归用例，M3–M6 待开发）|
+**M3 复现：** `./gradlew :app:testDebugUnitTest --tests '*HustImportTest'`（7 项）；专用 API 37 设备运行 `./gradlew :app:connectedDebugAndroidTest`（含 M1/M2 回归共 33 项）。`CourseConfirmationTest` 在 Room 写事务被占用时确认导入/移除并重建 Activity，两次操作分别只写一次；`CourseConflictBoundsTest` 检查密集冲突拒绝时不改库。设备上从系统选择器导入 [`hust-week-acceptance.json`](../app/src/androidTest/assets/hust-week-acceptance.json)，明确排除 `实践`，确认前学期/课次为 0/0，确认后为 1/3，再导入仍三次。冬令当天拖到 15:00 被拒，同一任务在 15:35 紧接课程成功。v0.2.0 → v0.3.0 原地升级，五张原业务表 SQL 导出逐字节一致，保留 5 个任务、3 个帧和修订 14。
+
+|阶段 / 用例|输入 → 可观察结果（M1–M3 为回归用例；M3 真实账号提取另验，M4–M6 待开发）|
 |---|---|
 |M1 `WorkspaceTest`|新建 A、B、C，完成 C；以「去开会」压栈，添加 X。仅取 B 得 `[B,X]`，原帧仍显示 A、B 原序及原因，仅 A 可取；再全部恢复得 `[A,B,X]`。改 B 标题再压另一帧，旧快照不变。独立复位，对 `[A,B]` 帧与 `[X]` 队列分别验三种策略：队首 `[A,B,X]`、队尾 `[X,A,B]`、切换 `[A,B]` 且新帧只含 X；切换模式下选择 B 不新建帧。空原因/事务失败不移动任何项；连点、旋转、`adb shell am force-stop io.github.nakanomk.stacklife` 再启动均不重复、不丢任务。|
 |M2 `DayTimelineTest`|待排「报告提纲」30 分钟拖到 15:45 → 显示 15:45–16:15，仍是同一队列 ID，只有一个块。改到 16:00 → 原块移动；取消排程 → 块消失，队列保留。用 TalkBack 的「安排时间」走同一路。压栈再恢复已排任务，时段不变。|

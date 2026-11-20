@@ -22,6 +22,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.github.nakanomk.stacklife.DockOverlay
 import io.github.nakanomk.stacklife.planner.DayPlan
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
@@ -39,7 +40,7 @@ private val dateHeading = DateTimeFormatter.ofPattern("M月d日 E", Locale.CHINE
 internal fun TodayScreen(
     plan: DayPlan, actions: WorkspaceActions, checkSlot: suspend (PlannerCommand.SlotSet) -> String?,
     onDate: (LocalDate) -> Unit, onEdit: (String) -> Unit, onSettings: () -> Unit, navigationBar: @Composable () -> Unit,
-    revealStart: Long?, onRevealed: () -> Unit,
+    revealStart: Long?, onRevealed: () -> Unit, onAdd: () -> Unit,
 ) {
     val submission = rememberSubmission(actions)
     var choosingDate by rememberSaveable { mutableStateOf(false) }
@@ -52,15 +53,18 @@ internal fun TodayScreen(
             val density = LocalDensity.current
             val type = MaterialTheme.typography
             val minCard = with(density) {
-                (type.titleSmall.lineHeight.toDp() + type.labelMedium.lineHeight.toDp() * 2 + 4.dp).coerceAtLeast(48.dp).roundToPx()
+                (type.titleSmall.lineHeight.toDp() + type.labelMedium.lineHeight.toDp() * 2 + 8.dp).coerceAtLeast(48.dp).roundToPx()
             }
+            val minCourse = minCard + with(density) { type.bodySmall.lineHeight.toDp().roundToPx() }
             val minutePx = with(density) { 2.dp.toPx() }
-            val scale = remember(plan.day, plan.blocks, minutePx, minCard) { DayAxisScale(plan, minutePx, minCard) }
+            val scale = remember(plan.day, plan.blocks, plan.courses, plan.conflictingTaskIds, minutePx, minCard, minCourse) {
+                DayAxisScale(plan, minutePx, minCard, minCourse)
+            }
             val initial = remember {
                 val now = System.currentTimeMillis()
                 val anchor = when {
                     now in plan.day.startMillis until plan.day.endMillis -> now - 60 * MINUTE_MS
-                    plan.blocks.isNotEmpty() -> plan.blocks.minOf { it.startMillis } - 30 * MINUTE_MS
+                    scale.groups.isNotEmpty() -> scale.groups.first().start - 30 * MINUTE_MS
                     else -> plan.day.date.atTime(8, 0).atZone(plan.day.zone).toInstant().toEpochMilli()
                 }
                 scale.yAt(anchor)
@@ -77,34 +81,35 @@ internal fun TodayScreen(
             val drag = remember(scale, scroll) { AxisDrag(scale, scroll) }
             val send: (PlannerCommand.SlotSet) -> Unit = { submission.send(it) }
             DragEffects(drag, checkSlot)
-            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
-                val sideBySide = maxWidth >= 480.dp && maxWidth > maxHeight && trayOpen
-                val trayLimit = maxHeight * 0.46f
-                val axis: @Composable (Modifier) -> Unit = {
-                    DayAxis(drag, plan.revision, !submission.busy, onEdit, send, it)
-                }
-                val tray: @Composable (Modifier) -> Unit = {
-                    QueueTray(plan.tray, plan.revision, drag, trayOpen, { trayOpen = !trayOpen },
-                        !submission.busy, onEdit, send, it)
-                }
-                if (sideBySide) {
-                    Row(Modifier.fillMaxSize()) {
-                        axis(Modifier.weight(1.6f).fillMaxHeight())
-                        tray(Modifier.weight(1f).fillMaxHeight())
+            DockOverlay(navigationBar, onAdd) { clearance ->
+                BoxWithConstraints(Modifier.fillMaxSize().padding(bottom = clearance)) {
+                    val sideBySide = maxWidth >= 480.dp && maxWidth > maxHeight && trayOpen
+                    val trayLimit = maxHeight * 0.46f
+                    val axis: @Composable (Modifier) -> Unit = {
+                        DayAxis(drag, plan.revision, !submission.busy, onEdit, send, it)
                     }
-                } else {
-                    Column(Modifier.fillMaxSize()) {
-                        axis(Modifier.fillMaxWidth().weight(1f))
-                        tray(Modifier.fillMaxWidth().heightIn(max = trayLimit))
+                    val tray: @Composable (Modifier) -> Unit = {
+                        QueueTray(plan.tray, plan.revision, drag, trayOpen, { trayOpen = !trayOpen },
+                            !submission.busy, onEdit, send, it.padding(horizontal = 6.dp))
                     }
-                }
-                drag.dropNotice?.let { message ->
-                    Snackbar(Modifier.align(Alignment.BottomCenter).padding(4.dp),
-                        dismissAction = { TextButton(onClick = { drag.dropNotice = null }) { Text("知道了") } }) { Text(message) }
+                    if (sideBySide) {
+                        Row(Modifier.fillMaxSize()) {
+                            axis(Modifier.weight(1.6f).fillMaxHeight())
+                            tray(Modifier.weight(1f).fillMaxHeight())
+                        }
+                    } else {
+                        Column(Modifier.fillMaxSize()) {
+                            axis(Modifier.fillMaxWidth().weight(1f))
+                            tray(Modifier.fillMaxWidth().heightIn(max = trayLimit))
+                        }
+                    }
+                    drag.dropNotice?.let { message ->
+                        Snackbar(Modifier.align(Alignment.BottomCenter).padding(4.dp),
+                            dismissAction = { TextButton(onClick = { drag.dropNotice = null }) { Text("知道了") } }) { Text(message) }
+                    }
                 }
             }
         }
-        navigationBar()
     }
 }
 

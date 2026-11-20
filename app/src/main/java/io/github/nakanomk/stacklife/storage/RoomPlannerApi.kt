@@ -1,18 +1,8 @@
 package io.github.nakanomk.stacklife.storage
 
 import androidx.room.withTransaction
-import io.github.nakanomk.stacklife.planner.CommitFailure
-import io.github.nakanomk.stacklife.planner.CommitResult
-import io.github.nakanomk.stacklife.planner.DayPlan
-import io.github.nakanomk.stacklife.planner.FrameEntry
-import io.github.nakanomk.stacklife.planner.FrameView
-import io.github.nakanomk.stacklife.planner.PlannerApi
-import io.github.nakanomk.stacklife.planner.PlannerChange
-import io.github.nakanomk.stacklife.planner.PlannerCommand
-import io.github.nakanomk.stacklife.planner.PlannerQuery
-import io.github.nakanomk.stacklife.planner.PreviewResult
-import io.github.nakanomk.stacklife.planner.QueryResult
-import io.github.nakanomk.stacklife.planner.Workspace
+import io.github.nakanomk.stacklife.courses.*
+import io.github.nakanomk.stacklife.planner.*
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
@@ -22,6 +12,8 @@ import kotlinx.coroutines.flow.map
 class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
     private val dao = db.plannerDao()
     private val pending = ConcurrentHashMap<String, Proposal>()
+    private val courses = db.courseDao()
+    private val reviewed = ConcurrentHashMap<String, ReviewedCourses>()
 
     // Every successful commit touches the singleton, including commits that only move slots.
     override fun observe(query: PlannerQuery): Flow<QueryResult> =
@@ -30,12 +22,37 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
                 val settings = dao.settings() ?: SettingsRow()
                 when (query) {
                     PlannerQuery.Workspace -> workspace(settings)
-                    is PlannerQuery.Day -> DayPlan(query, settings.revision, dao.dayTray(),
-                        if (query.startMillis < query.endMillis) dao.dayBlocks(query.startMillis, query.endMillis)
-                        else emptyList())
+                    is PlannerQuery.Day -> {
+                        val tray = dao.dayTray()
+                        if (query.startMillis >= query.endMillis) DayPlan(query, settings.revision, tray, emptyList())
+                        else {
+                            val slots = dao.dayBlocks(query.startMillis, query.endMillis)
+                            val occupied = CourseOccupancy(courses.intersecting(query.startMillis, query.endMillis), slots)
+                            DayPlan(query, settings.revision, tray, slots, occupied.courses, occupied.taskIds)
+                        }
+                    }
+                    PlannerQuery.Terms -> Terms(courses.terms(HUST_SOURCE).map(TermRow::spec))
+                    is PlannerQuery.Week -> week(query)
                 }
             }
         }
+
+    private fun week(query: PlannerQuery.Week): CourseWeek {
+        val term = courses.term(query.termId, HUST_SOURCE)?.spec() ?: return CourseWeek(null, query.week, emptyList())
+        if (query.week !in 1..term.weeks) return CourseWeek(term, query.week, emptyList())
+        val monday = term.firstMonday.plusWeeks(query.week - 1L)
+        val start = monday.atStartOfDay(campusZone).toInstant().toEpochMilli()
+        val end = monday.plusWeeks(1).atStartOfDay(campusZone).toInstant().toEpochMilli()
+        val occupancy = CourseOccupancy(courses.intersecting(start, end), dao.dayBlocks(start, end))
+        return CourseWeek(term, query.week, occupancy.courses.filter { it.source == HUST_SOURCE && it.termId == term.id })
+    }
+
+    override fun stageCourseImport(term: TermSpec, meetings: List<CourseMeeting>): String {
+        val id = UUID.randomUUID().toString()
+        reviewed[id] = ReviewedCourses(term, meetings.toList())
+        return id
+    }
+    override fun discardCourseImport(draftId: String) { reviewed.remove(draftId) }
 
     private fun workspace(settings: SettingsRow): Workspace {
         val entries = HashMap<String, MutableList<FrameEntry>>()
@@ -52,7 +69,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
 
     override suspend fun preview(commands: List<PlannerCommand>): PreviewResult {
         val proposal = try {
-            db.withTransaction { BatchDraft(dao, dao.settings() ?: SettingsRow()).plan(commands) }
+            db.withTransaction { BatchDraft(dao, courses, reviewed, dao.settings() ?: SettingsRow()).plan(commands) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: InvalidCommand) {
@@ -78,7 +95,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
                 if (revision != proposal.baseRevision) {
                     CommitResult.Rejected(CommitFailure.STALE_PREVIEW, "工作台已有变更，请重新预览。")
                 } else {
-                    proposal.applyTo(dao)
+                    proposal.applyTo(dao, courses)
                     CommitResult.Applied(proposal.settings.revision)
                 }
             }
@@ -103,14 +120,16 @@ internal class Proposal(
     private val positions: List<PositionUpdate>,
     private val items: List<FrameItemRow>,
     private val slots: SlotDelta?,
+    private val courses: List<CourseWrites>,
 ) {
-    fun applyTo(dao: PlannerDao) {
+    fun applyTo(dao: PlannerDao, courseDao: CourseDao) {
         if (frames.isNotEmpty()) dao.insertFrames(frames)
         if (inserts.isNotEmpty()) dao.insertTasks(inserts)
         if (updates.isNotEmpty()) dao.updateTasks(updates)
         if (positions.isNotEmpty()) dao.updatePositions(positions)
         if (items.isNotEmpty()) dao.insertItems(items)
         slots?.applyTo(dao)
+        for (write in courses) write.applyTo(courseDao)
         dao.saveSettings(settings)
     }
 }

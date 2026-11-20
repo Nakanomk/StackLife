@@ -11,10 +11,12 @@ import java.util.Collections
 import java.util.UUID
 
 /** Single preview transaction. The overlay contains only addressed tasks; old frame snapshots never change. */
-internal class BatchDraft(private val dao: PlannerDao, private val base: SettingsRow) {
+internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao,
+    private val reviewed: Map<String, ReviewedCourses>, private val base: SettingsRow) {
     private val originals = HashMap<String, TaskRow>()
     private val edited = LinkedHashMap<String, TaskRow>()
     private val slots = SlotDraft(dao, originals)
+    private val courses = CourseDraft(courseDao)
     private val frames = ArrayList<FrameRow>()
     private val items = ArrayList<FrameItemRow>()
     private val members = HashMap<String, List<String>>()
@@ -48,12 +50,14 @@ internal class BatchDraft(private val dao: PlannerDao, private val base: Setting
             is PlannerCommand.TaskRemove -> retire(cmd.taskId, Owner.REMOVED)
             is PlannerCommand.SlotSet -> {
                 checkRevision(cmd.expectedRevision)
-                slots.set(activeTask(cmd.taskId), cmd, edited)
+                slots.set(activeTask(cmd.taskId), cmd, edited, courses)
             }
             is PlannerCommand.SlotClear -> {
                 checkRevision(cmd.expectedRevision)
                 slots.clear(activeTask(cmd.taskId).id, required = true)
             }
+            is PlannerCommand.CourseImport -> courses.replace(reviewed[cmd.draftId] ?: invalid("导入草稿已失效，请重新核对。"))
+            is PlannerCommand.TermRemove -> courses.remove(cmd.termId)
             is PlannerCommand.QueueOrder -> reorder(cmd.taskIds)
             is PlannerCommand.FrameCreate -> {
                 if (cmd.tasks.isEmpty()) invalid("栈帧至少需要一项任务。")
@@ -307,8 +311,9 @@ internal class BatchDraft(private val dao: PlannerDao, private val base: Setting
         }
         if (base.restorePolicy != policy) change("工作台", "恢复策略", base.restorePolicy.label(), policy.label())
         val slotDelta = slots.finish(changes, edited)
+        val courseWrites = courses.finish(changes) { start, end -> slots.effective(start, end, edited) }
         return Proposal(base.revision, base.copy(revision = base.revision + 1, restorePolicy = policy),
-            Collections.unmodifiableList(changes), frames, inserts, updates, positions, items, slotDelta)
+            Collections.unmodifiableList(changes), frames, inserts, updates, positions, items, slotDelta, courseWrites)
     }
 
     private fun change(id: String, field: String, before: Any?, after: Any?) {

@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.planner
 
+import io.github.nakanomk.stacklife.courses.*
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -10,10 +11,15 @@ interface PlannerApi {
     suspend fun preview(commands: List<PlannerCommand>): PreviewResult
     suspend fun commit(proposalId: String): CommitResult
     fun discard(proposalId: String)
+    /** Register local user-reviewed input, never raw web/file contents or a model-supplied draft. */
+    fun stageCourseImport(term: TermSpec, meetings: List<CourseMeeting>): String
+    fun discardCourseImport(draftId: String)
 }
 
 sealed interface PlannerQuery {
     data object Workspace : PlannerQuery
+    data object Terms : PlannerQuery
+    data class Week(val termId: String, val week: Int) : PlannerQuery
     data class Day(val date: LocalDate, val zone: ZoneId) : PlannerQuery {
         val startMillis = date.atStartOfDay(zone).toInstant().toEpochMilli()
         val endMillis = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
@@ -21,6 +27,9 @@ sealed interface PlannerQuery {
 }
 
 sealed interface QueryResult
+
+data class Terms(val terms: List<TermSpec>) : QueryResult
+data class CourseWeek(val term: TermSpec?, val week: Int, val classes: List<ScheduledCourse>) : QueryResult
 
 /** Queue order is priority order; frames are newest first within restorable and then empty frames. */
 data class Workspace(
@@ -44,6 +53,7 @@ data class DayBlock(
 
 data class DayPlan(
     val day: PlannerQuery.Day, val revision: Long, val tray: List<QueueTask>, val blocks: List<DayBlock>,
+    val courses: List<ScheduledCourse> = emptyList(), val conflictingTaskIds: Set<String> = emptySet(),
 ) : QueryResult
 
 enum class FrameSource { PUSH, MANUAL, SWAP }
@@ -89,6 +99,8 @@ sealed interface PlannerCommand {
         val taskId: String, val start: OffsetDateTime, val durationMinutes: Int, val expectedRevision: Long? = null,
     ) : PlannerCommand
     data class SlotClear(val taskId: String, val expectedRevision: Long? = null) : PlannerCommand
+    data class CourseImport(val draftId: String) : PlannerCommand
+    data class TermRemove(val termId: String) : PlannerCommand
 }
 
 data class PlannerChange(val entityId: String, val field: String, val before: String?, val after: String?)

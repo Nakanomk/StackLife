@@ -3,6 +3,8 @@ package io.github.nakanomk.stacklife
 import android.database.sqlite.SQLiteException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.nakanomk.stacklife.courses.CourseMeeting
+import io.github.nakanomk.stacklife.courses.TermSpec
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.SaveOutcome
 import io.github.nakanomk.stacklife.workspace.WorkspaceActions
@@ -34,6 +36,17 @@ internal class WorkspaceViewModel(private val planner: PlannerApi) : ViewModel()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadState.Loading)
 
     fun day(query: PlannerQuery.Day) = read<DayPlan>(query)
+    fun terms() = read<Terms>(PlannerQuery.Terms)
+    fun week(query: PlannerQuery.Week) = read<CourseWeek>(query)
+
+    suspend fun previewImport(term: TermSpec, meetings: List<CourseMeeting>): PreviewResult {
+        val draft = planner.stageCourseImport(term, meetings)
+        return try { planner.preview(listOf(PlannerCommand.CourseImport(draft))) }
+        finally { planner.discardCourseImport(draft) }
+    }
+    suspend fun previewRemoval(term: String) = planner.preview(listOf(PlannerCommand.TermRemove(term)))
+    fun confirmProposal(id: String): String? = startWrite(notifyOnFailure = false) { commit(id) }
+    fun discardProposal(id: String) = planner.discard(id)
 
     /** A hover or editor check never leaves a committable proposal behind. */
     suspend fun checkSlot(command: PlannerCommand.SlotSet): String? = try {
@@ -47,48 +60,56 @@ internal class WorkspaceViewModel(private val planner: PlannerApi) : ViewModel()
 
     private val errors = Channel<String>(Channel.BUFFERED)
     val notices = errors.receiveAsFlow()
-    private data class Ticket(val id: String, val outcome: Deferred<SaveOutcome>)
+    private data class Ticket(val id: String, val error: Deferred<String?>)
     private var latest: Ticket? = null
 
-    // Main-thread UI entry. Rotation can stop awaiting this write, but cannot rerun or cancel it.
-    override fun start(command: PlannerCommand): String? {
-        if (latest?.outcome?.isCompleted == false) {
+    override fun start(command: PlannerCommand): String? = startWrite(notifyOnFailure = true) {
+        when (val preview = planner.preview(listOf(command))) {
+            is PreviewResult.Rejected -> preview.message
+            is PreviewResult.Ready -> commit(preview.proposalId)
+        }
+    }
+
+    private suspend fun commit(id: String): String? = try {
+        when (val result = planner.commit(id)) {
+            is CommitResult.Applied -> null
+            is CommitResult.Rejected -> result.message
+        }
+    } finally {
+        planner.discard(id)
+    }
+
+    // A receipt tracks the original write, not a command or proposal to replay after rotation.
+    private fun startWrite(notifyOnFailure: Boolean, write: suspend () -> String?): String? {
+        if (latest?.error?.isCompleted == false) {
             errors.trySend("上一项更改正在保存")
             return null
         }
         val id = UUID.randomUUID().toString()
-        val outcome = viewModelScope.async {
-            var pending: String? = null
+        val result = viewModelScope.async {
             val error = try {
-                when (val plan = planner.preview(listOf(command))) {
-                    is PreviewResult.Rejected -> plan.message
-                    is PreviewResult.Ready -> {
-                        pending = plan.proposalId
-                        when (val result = planner.commit(plan.proposalId)) {
-                            is CommitResult.Applied -> null
-                            is CommitResult.Rejected -> result.message
-                        }
-                    }
-                }
+                write()
             } catch (_: SQLiteException) {
                 "未能保存到设备，本次更改没有应用"
-            } finally {
-                pending?.let(planner::discard)
             }
-            if (error == null) SaveOutcome.APPLIED else {
-                errors.send(error)
-                SaveOutcome.REJECTED
-            }
+            // Ordinary actions report even if their screen is gone; confirmation forms show the receipt inline.
+            if (error != null && notifyOnFailure) errors.send(error)
+            error
         }
-        latest = Ticket(id, outcome)
+        latest = Ticket(id, result)
         return id
     }
 
-    override suspend fun result(requestId: String): SaveOutcome {
+    override suspend fun result(requestId: String, onError: ((String) -> Unit)?): SaveOutcome {
         val ticket = latest
-        if (ticket?.id == requestId) return ticket.outcome.await()
+        if (ticket?.id == requestId) {
+            val error = ticket.error.await() ?: return SaveOutcome.APPLIED
+            onError?.invoke(error)
+            return SaveOutcome.REJECTED
+        }
         // Process death: the transaction may already have committed. Never re-submit the draft.
-        errors.send("上次保存的回执不可用，未重新提交。请核对当前结果。")
+        val message = "上次保存的回执不可用，未重新提交。请核对当前结果。"
+        if (onError != null) onError(message) else errors.send(message)
         return SaveOutcome.INTERRUPTED
     }
 }

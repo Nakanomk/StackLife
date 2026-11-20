@@ -32,9 +32,9 @@ internal fun Page(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-internal fun PageTitle(title: String, back: (() -> Unit)? = null, settings: (() -> Unit)? = null) {
+internal fun PageTitle(title: String, back: (() -> Unit)? = null, backEnabled: Boolean = true, settings: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        if (back != null) TextButton(onClick = back, modifier = Modifier.heightIn(min = 48.dp)) { Text("返回") }
+        if (back != null) TextButton(onClick = back, enabled = backEnabled, modifier = Modifier.heightIn(min = 48.dp)) { Text("返回") }
         Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.headlineLarge)
         if (settings != null) TextButton(onClick = settings, modifier = Modifier.heightIn(min = 48.dp)) { Text("设置") }
     }
@@ -90,23 +90,27 @@ internal class Submission(
 ) {
     val busy: Boolean get() = pending.value != null
 
-    fun send(command: PlannerCommand): Boolean {
+    fun send(command: PlannerCommand): Boolean = submit { actions.start(command) }
+
+    inline fun submit(start: () -> String?): Boolean {
         if (busy) return false
-        val id = actions.start(command) ?: return false
+        val id = start() ?: return false
         pending.value = id
         return true
     }
 }
 
 @Composable
-internal fun rememberSubmission(actions: WorkspaceActions, onResult: (SaveOutcome) -> Unit = {}): Submission {
+internal fun rememberSubmission(actions: WorkspaceActions, onError: ((String) -> Unit)? = null,
+    onResult: (SaveOutcome) -> Unit = {}): Submission {
     // Save the receipt identity, never a command to replay. Rotation only restarts the await.
     val pending = rememberSaveable { mutableStateOf<String?>(null) }
     val currentHandler by rememberUpdatedState(onResult)
+    val currentError by rememberUpdatedState(onError)
     val requestId = pending.value
     LaunchedEffect(actions, requestId) {
         if (requestId != null) {
-            val outcome = actions.result(requestId)
+            val outcome = actions.result(requestId, currentError)
             pending.value = null
             currentHandler(outcome)
         }

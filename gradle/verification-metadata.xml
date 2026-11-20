@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<verification-metadata xmlns="https://schema.gradle.org/dependency-verification">
+   <configuration>
+      <verify-metadata>true</verify-metadata>
+      <verify-signatures>false</verify-signatures>
+      <trusted-artifacts>
+         <trust group="^(?!com\.github\.tobiasschuerg$).+$" regex="true" reason="Only the new exclusive JitPack module is pinned here"/>
+      </trusted-artifacts>
+   </configuration>
+   <components>
+      <component group="com.github.tobiasschuerg" name="android-week-view" version="5.1.2">
+         <artifact name="android-week-view-5.1.2.aar"><sha256 value="b93877525308f732e50f8889c9132960cdd1b11c80a0b98a0b243ccd692c32db"/></artifact>
+         <artifact name="android-week-view-5.1.2.module"><sha256 value="41482c4cf730944d65baccb773072d2e533b2d7ab8a9f45f3fccb9cd93a4445f"/></artifact>
+         <artifact name="android-week-view-5.1.2.pom"><sha256 value="51fc85259f2b5f7aa4689a356a610d740a0d2212707ba4cddac079486b23b7f1"/></artifact>
+      </component>
+   </components>
+</verification-metadata>

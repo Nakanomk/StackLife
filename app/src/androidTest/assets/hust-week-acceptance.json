@@ -1,0 +1,9 @@
+[
+  {"ZC":"1","KS":"2026-09-07","MONDAY":[
+    {"KCMC":"操作系统","JC":"5–6","JSMC":"A"},
+    {"KCMC":"操作系统","JC":"5–6","JSMC":"A"},
+    {"KCMC":"课程实践","JC":"实践","JSMC":"A"}
+  ],"TUESDAY":[],"WEDNESDAY":[],"THURSDAY":[],"FRIDAY":[],"SATURDAY":[],"SUNDAY":[]},
+  {"ZC":3,"KS":"2026-09-21","MONDAY":[{"KCMC":"操作系统","JC":"5–6","JSMC":"B"}],"TUESDAY":[],"WEDNESDAY":[],"THURSDAY":[],"FRIDAY":[],"SATURDAY":[],"SUNDAY":[]},
+  {"ZC":9,"KS":"2026-11-02","MONDAY":[{"KCMC":"操作系统","JC":"5–6","JSMC":"B"}],"TUESDAY":[],"WEDNESDAY":[],"THURSDAY":[],"FRIDAY":[],"SATURDAY":[],"SUNDAY":[]}
+]

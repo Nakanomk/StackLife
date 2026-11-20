@@ -60,7 +60,7 @@ class WorkspaceUiTest {
         ui.onNodeWithTag("reason").performTextInput("去开会")
         ui.onNodeWithText("保存到栈").performClick()
         await(hasText("队列是空的"))
-        ui.onNodeWithText("新增任务").performClick()
+        ui.onNodeWithContentDescription("新增任务").performClick()
         ui.onNodeWithTag("title:0").performTextInput("X")
         val add = hasText("添加到队列") and hasClickAction()
         scrollTo(add)
@@ -92,7 +92,7 @@ class WorkspaceUiTest {
         }
         attach()
         await(hasTestTag("nav:workspace")).performClick()
-        await(hasText("新增任务") and hasClickAction()).performClick()
+        await(hasContentDescription("新增任务") and hasClickAction()).performClick()
         ui.onNodeWithTag("title:0").performTextInput("只创建一次")
         val add = hasText("添加到队列")
         scrollTo(add)

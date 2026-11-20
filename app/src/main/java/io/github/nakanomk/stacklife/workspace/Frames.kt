@@ -11,18 +11,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.planner.*
 
 @Composable
 internal fun FrameList(
     frames: List<FrameView>, scroll: LazyListState, onFrame: (String) -> Unit, onCreate: () -> Unit,
-    shared: SharedModifier,
+    shared: SharedModifier, bottomClearance: Dp,
 ) {
     val available = remember(frames) {
         frames.indexOfFirst { it.remaining == 0 }.let { if (it == -1) frames.size else it }
     }
-    LazyColumn(Modifier.fillMaxSize().testTag("frames"), state = scroll, contentPadding = pagePadding, verticalArrangement = listSpacing) {
+    LazyColumn(Modifier.fillMaxSize().testTag("frames"), state = scroll, contentPadding = dockListPadding(bottomClearance), verticalArrangement = listSpacing) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionTitle("栈帧")

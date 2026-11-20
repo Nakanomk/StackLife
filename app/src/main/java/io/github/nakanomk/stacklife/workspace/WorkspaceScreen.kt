@@ -21,6 +21,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import io.github.nakanomk.stacklife.DockOverlay
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
@@ -29,7 +31,7 @@ import kotlinx.coroutines.flow.collect
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
-private enum class Editor { ADD, PUSH, FRAME }
+private enum class Editor { PUSH, FRAME }
 
 @Composable
 fun WorkspaceScreen(
@@ -40,6 +42,7 @@ fun WorkspaceScreen(
     onSettings: () -> Unit,
     shared: SharedModifier,
     navigationBar: @Composable () -> Unit,
+    onAdd: () -> Unit,
 ) {
     var stack by rememberSaveable { mutableStateOf(false) }
     var editor by rememberSaveable { mutableStateOf<Editor?>(null) }
@@ -47,7 +50,6 @@ fun WorkspaceScreen(
     val stackScroll = rememberLazyListState()
     val close = { editor = null }
     when (editor) {
-        Editor.ADD -> TaskEditor(actions, close)
         Editor.PUSH -> PushEditor(state.queue, actions, close)
         Editor.FRAME -> TaskEditor(actions, close, createFrame = true)
         null -> Page {
@@ -60,11 +62,10 @@ fun WorkspaceScreen(
                         modifier = Modifier.heightIn(min = 48.dp)) { Text("栈") }
                 }
             }
-            Box(Modifier.weight(1f)) {
-                if (stack) FrameList(state.frames, stackScroll, onFrame, { editor = Editor.FRAME }, shared)
-                else QueueList(state.queue, queueScroll, actions, onTask, { editor = Editor.ADD }, { editor = Editor.PUSH }, shared)
+            DockOverlay(navigationBar, if (stack) null else onAdd) { clearance ->
+                if (stack) FrameList(state.frames, stackScroll, onFrame, { editor = Editor.FRAME }, shared, clearance)
+                else QueueList(state.queue, queueScroll, actions, onTask, { editor = Editor.PUSH }, shared, clearance)
             }
-            navigationBar()
         }
     }
 }
@@ -72,7 +73,7 @@ fun WorkspaceScreen(
 @Composable
 private fun QueueList(
     tasks: List<QueueTask>, scroll: LazyListState, actions: WorkspaceActions, onTask: (String) -> Unit,
-    onAdd: () -> Unit, onPush: () -> Unit, shared: SharedModifier,
+    onPush: () -> Unit, shared: SharedModifier, bottomClearance: Dp,
 ) {
     var order by remember(tasks) { mutableStateOf(tasks) }
     val action = rememberSubmission(actions) { if (it != SaveOutcome.APPLIED) order = tasks }
@@ -91,15 +92,12 @@ private fun QueueList(
             }
         }
     }
-    LazyColumn(Modifier.fillMaxSize().testTag("queue"), state = scroll, contentPadding = pagePadding, verticalArrangement = listSpacing) {
+    LazyColumn(Modifier.fillMaxSize().testTag("queue"), state = scroll, contentPadding = dockListPadding(bottomClearance), verticalArrangement = listSpacing) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionTitle("待办队列")
                 Hint("${tasks.size} 项未完成 · 预计 ${tasks.sumOf { it.minutes.toLong() }} 分钟")
-                Actions {
-                    Primary("新增任务", !action.busy, onAdd)
-                    if (tasks.isNotEmpty()) Secondary("压栈", !action.busy, onPush)
-                }
+                if (tasks.isNotEmpty()) Secondary("压栈", !action.busy, onPush)
             }
         }
         if (order.isEmpty()) item {
@@ -144,6 +142,8 @@ private fun QueueList(
         }
     }
 }
+
+internal fun dockListPadding(bottom: Dp) = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = bottom + 12.dp)
 
 private fun <T> List<T>.moved(from: Int, to: Int): List<T> = toMutableList().apply { add(to, removeAt(from)) }
 

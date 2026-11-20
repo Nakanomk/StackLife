@@ -3,13 +3,20 @@ package io.github.nakanomk.stacklife.today
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -20,13 +27,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import io.github.nakanomk.stacklife.planner.DayBlock
+import io.github.nakanomk.stacklife.courses.CourseDetails
+import io.github.nakanomk.stacklife.courses.ScheduledCourse
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.ScheduledState
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
-private val gutter = 64.dp
+private val spine = 56.dp
+private val gutter = 72.dp
 
 @Composable
 internal fun DayAxis(
@@ -34,24 +43,51 @@ internal fun DayAxis(
     send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier,
 ) {
     val density = LocalDensity.current
+    val scale = drag.scale
+    val colors = MaterialTheme.colorScheme
     Box(modifier.fillMaxWidth().clipToBounds().onGloballyPositioned { drag.viewport = it.boundsInRoot() }) {
-        Column(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll)) {
-            for (band in drag.scale.bands) key(band.start, band.block?.taskId) {
-                Box(Modifier.fillMaxWidth().height(with(density) { band.height.toDp() })) {
-                    for (tick in band.ticks) {
-                        Box(Modifier.fillMaxWidth().offset { IntOffset(0, band.yAt(tick.millis)) }.testTag(tick.tag)) {
-                            HorizontalDivider(Modifier.padding(start = if (tick.major) 52.dp else gutter),
-                                color = if (tick.major) MaterialTheme.colorScheme.outlineVariant
-                                else MaterialTheme.colorScheme.surfaceContainerHigh)
-                            if (tick.major) {
-                                Text(tick.label, modifier = Modifier.width(gutter).padding(start = 4.dp),
-                                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll)) {
+            Box(Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() }).drawBehind {
+                val x = spine.toPx()
+                drawLine(colors.outlineVariant, Offset(x, 0f), Offset(x, size.height), 2.dp.toPx())
+                for (group in scale.groups) {
+                    for ((index, lane) in group.lanes.withIndex()) for (entry in lane) {
+                        val top = scale.yAt(entry.startMillis).toFloat()
+                        val bottom = scale.yAt(entry.endMillis).toFloat()
+                        val ink = if (entry is AxisEntry.Course) colors.tertiary else colors.secondary
+                        if (index == 0) drawLine(ink.copy(alpha = .52f), Offset(x, top), Offset(x, bottom), 5.dp.toPx(), StrokeCap.Round)
+                        drawCircle(ink, 7.dp.toPx(), Offset(x, top))
+                        drawCircle(colors.surface, 2.5.dp.toPx(), Offset(x, top))
+                    }
+                }
+            }) {
+                for (band in scale.bands) for (tick in band.ticks) {
+                    Box(Modifier.offset { IntOffset(0, band.top + band.yAt(tick.millis)) }.width(spine - 10.dp)
+                        .testTag(tick.tag)) {
+                        if (tick.major) Text(tick.label, Modifier.padding(start = 4.dp), style = MaterialTheme.typography.labelMedium,
+                            color = colors.onSurfaceVariant)
+                        else Spacer(Modifier.align(Alignment.TopEnd).size(4.dp, 1.dp).background(colors.outlineVariant))
+                    }
+                }
+                for (group in scale.groups) key(group.start) {
+                    val top = scale.yAt(group.start)
+                    BoxWithConstraints(Modifier.offset { IntOffset(0, top) }.fillMaxWidth().padding(start = gutter, end = 8.dp)
+                        .height(with(density) { (scale.yAt(group.end) - top).toDp() })) {
+                        val width = maxWidth / group.lanes.size
+                        val overflow = group.lanes.size > 1 && width < 112.dp
+                        Row(if (overflow) Modifier.horizontalScroll(rememberScrollState()) else Modifier) {
+                            for (lane in group.lanes) Box(Modifier.width(if (overflow) 112.dp else width).fillMaxHeight()) {
+                                for (entry in lane) key(entry) {
+                                    val y = scale.yAt(entry.startMillis)
+                                    val bounds = Modifier.offset { IntOffset(0, y - top) }.fillMaxWidth()
+                                        .height(with(density) { (scale.yAt(entry.endMillis) - y).toDp() })
+                                    when (entry) {
+                                        is AxisEntry.Task -> BlockCard(entry, drag, revision, enabled, onEdit, send, bounds)
+                                        is AxisEntry.Course -> CourseCard(entry.course, drag.scale, bounds)
+                                    }
+                                }
                             }
                         }
-                    }
-                    band.block?.let { block ->
-                        BlockCard(block, drag, revision, enabled, onEdit, send,
-                            Modifier.fillMaxSize().padding(start = gutter, end = 4.dp))
                     }
                 }
             }
@@ -63,15 +99,11 @@ internal fun DayAxis(
 
 @Composable
 private fun BlockCard(
-    block: DayBlock, drag: AxisDrag, revision: Long, enabled: Boolean,
+    entry: AxisEntry.Task, drag: AxisDrag, revision: Long, enabled: Boolean,
     onEdit: (String) -> Unit, send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val color = when (block.state) {
-        ScheduledState.QUEUE -> scheme.secondaryContainer
-        ScheduledState.FRAME -> scheme.tertiaryContainer
-        ScheduledState.DONE -> scheme.surfaceContainerHigh
-    }
+    val block = entry.block
     val state = when (block.state) {
         ScheduledState.QUEUE -> "队列"
         ScheduledState.FRAME -> "已压栈 · 仍占用时段"
@@ -83,12 +115,30 @@ private fun BlockCard(
         SlotSource(block.taskId, ((block.endMillis - block.startMillis) / MINUTE_MS).toInt(), block.startMillis),
         drag, revision, enabled, send,
     ).clickable(enabled, onClickLabel = "编辑时间", role = Role.Button) { onEdit(block.taskId) }
-    Surface(modifier.testTag("block:${block.taskId}").clip(MaterialTheme.shapes.medium).then(action)
-        .semantics(mergeDescendants = true) {}, color = color, shape = MaterialTheme.shapes.medium) {
-        Column(Modifier.padding(horizontal = 10.dp, vertical = 2.dp)) {
-            Text(block.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("$range · $state", style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
+    Column(modifier.testTag("block:${block.taskId}").clip(MaterialTheme.shapes.medium).then(action)
+        .semantics(mergeDescendants = true) {}.padding(start = 4.dp, end = 4.dp)) {
+        Text(range, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(block.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(if (entry.conflict) "时段冲突 · $state" else state, style = MaterialTheme.typography.labelMedium,
+            color = if (entry.conflict) scheme.error else scheme.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun CourseCard(course: ScheduledCourse, scale: DayAxisScale, modifier: Modifier) {
+    val meeting = course.meeting
+    val scheme = MaterialTheme.colorScheme
+    var open by rememberSaveable { mutableStateOf(false) }
+    if (open) CourseDetails(course) { open = false }
+    Column(modifier.testTag("day-course").clip(MaterialTheme.shapes.medium)
+        .clickable(onClickLabel = "查看固定课程", role = Role.Button) { open = true }.padding(horizontal = 4.dp)) {
+        Text("${clockLabel(meeting.startMillis, scale.day)}–${clockLabel(meeting.endMillis, scale.day)}",
+            style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(meeting.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(if (course.conflicts.isEmpty()) "固定课程" else "时段冲突 · 固定课程",
+            style = MaterialTheme.typography.labelMedium, color = if (course.conflicts.isEmpty()) scheme.tertiary else scheme.error,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (meeting.room.isNotBlank()) Text(meeting.room, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -106,8 +156,8 @@ private fun CurrentLine(drag: AxisDrag) {
     val color = MaterialTheme.colorScheme.primary
     Box(Modifier.fillMaxWidth().offset { IntOffset(0, top) }.testTag("now-line")
         .semantics { contentDescription = "现在 ${clockLabel(millis, drag.scale.day)}" }) {
-        HorizontalDivider(color = color, thickness = 2.dp)
-        Text("现在", Modifier.background(color, MaterialTheme.shapes.small).padding(horizontal = 4.dp),
+        HorizontalDivider(Modifier.padding(start = spine), color = color, thickness = 1.dp)
+        Text("现在", Modifier.background(color, CircleShape).padding(horizontal = 6.dp),
             color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall)
     }
 }
