@@ -2,7 +2,7 @@
 
 StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Android 日程工具。**队列**回答「我现在要做什么」，**栈帧**记录「我为什么停下、怎样接回去」。**DAG** 决定为选定目标先做什么，**时间轴**决定哪天几点做，**课表**标出已经占用的时段。一项工作不因换视图而变成几份任务。
 
-**当前交付：v0.8.0 · 液态玻璃与课表外观。** 四个主页面横向平移，共用底部输入条；日程和课表可独立横滑。课表保留 WakeUp 配色和白字，默认开启文字描边与液态玻璃。「设置 → 材质与动态」可在真实课格预览里单独关闭描边。玻璃关闭或不可用时回到同形 MD3。助理授权与写入差异仍须明确操作。普通包不含联盟 SDK。
+**当前交付：v0.9.0 · 手动录课与日程交互。** 空课表可直接添加课程；已有学期从「课表选项 → 添加课程」进入。今天可长按已排任务旁的竖条，拖下端点改变结束时间。顶栏箭头横移日／周；底部输入和导航不参与横移。玻璃使用 BiliPai 同源的 Miuix 渲染器及其原版折射着色器，不支持时仍使用同形 MD3。普通包不含联盟 SDK。
 
 ## 起点与产品决定
 
@@ -31,7 +31,7 @@ StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Andr
 
 |构建面|规划锁定与依据|
 |---|---|
-|平台与界面|`compileSdk 37.1`、`targetSdk 37`、`minSdk 26`（涵盖联盟 Kit 下限）。[Compose 稳定发布](https://developer.android.com/blog/posts/jetpack-compose-november-2026-release)对应 BOM `2026.11.01` / Compose `1.13.0` / Material3 `1.5.0`。|
+|平台与界面|`compileSdk 37.2`、`targetSdk 37`、`minSdk 26`（涵盖联盟 Kit 下限）。[Compose 稳定发布](https://developer.android.com/blog/posts/jetpack-compose-november-2026-release)对应 BOM `2026.11.01` / Compose `1.13.0` / Material3 `1.5.0`。|
 |工具链|[AGP 9.5.0 / Gradle wrapper 9.6.0 / JDK 17](https://developer.android.com/build/releases/agp-9-5-0-release-notes)，用 [AGP 内建 Kotlin](https://developer.android.com/build/migrate-to-built-in-kotlin)；Compose 编译插件和序列化插件统一 Kotlin `2.4.10`，KSP2 `2.3.14`。|
 |导航与存储|[Navigation 3 `1.2.2`](https://developer.android.com/jetpack/androidx/releases/navigation3)、[Room `2.8.5`](https://developer.android.com/jetpack/androidx/releases/room)。版本集中在 `gradle/libs.versions.toml`，不用 `+`、snapshot 或 beta BOM。|
 
@@ -76,7 +76,7 @@ interface PlannerApi {
 完整导航为「今天 / 工作台 / 流程图 / 课表」，设置从顶栏进；只展示已交付目的地。今天默认设备所在日期，顶部切换日期并显示当前时刻线。底部可收起的**非模态**待排队列托盘与单日轴同时可见；待排指无时段的在队任务。参考 [Structured](https://structured.app/visual-planning) 的任务/日历同轴和 [Planner Hours](https://github.com/baslawson/Planner#features) 的移动、调整时长；不移植 GPL 应用代码。无须跨目的地拖动或引入月历框架。
 
 - Compose 可滚动刻度接[原生拖动手势](https://developer.android.com/develop/ui/compose/touch-input/pointer-input/drag-swipe-fling)。长按拖动，边缘滚动；指针换算为含滚动偏移的轴内容坐标，按 5 分钟就近吸附。预览半透明落点、起止与冲突。松手才落库；轴外、取消、目标失效不改原数据。「安排时间」打开同一日期/时间/时长编辑器，无需拖动也可完成全部安排。
-- `TimeBlock(taskId UNIQUE, startInstant, endInstant)` 引用原任务。新排或移动只动该占位，不出队、不复制任务；轴上可拖改开始、在编辑器改时长/取消。取消只释放时段；移出任务释放占位，完成任务保留标完成的历史块。
+- `TimeBlock(taskId UNIQUE, startInstant, endInstant)` 引用原任务。长按标题拖动整段；长按任务旁竖条，松开后直接拖下端点，只改结束时间，起点不动。交互参考 [Google 日历的底部圆形时长手柄](https://support.google.com/calendar/answer/72143?co=GENIE.Platform%3DAndroid)和 [FullCalendar 的触摸选择](https://fullcalendar.io/docs/touch)。课程、完成项和没有真实结束点的续段不提供手柄。取消只释放时段；移出任务释放占位，完成任务保留历史块。
 - 用当地午夜到次日午夜换算一天，不假定恒为 24 小时。跨日按日裁剪显示，底层仍一条；课程按学期换算到同一时间基准。冲突按半开区间 `[start,end)`，移动排除自身。撞已有预约或固定课程须指出具体冲突并保留原状，不推走别项。课程导入撞上既有块则预览、标记双项，不抹掉用户安排。
 
 已实现 `PlannerQuery.Day(date, zone)`：一次事务读出同修订号的待排队列与当日相交的原始时段。`SlotSet(taskId, start, durationMinutes, expectedRevision)` 新增或移动，`SlotClear` 只释放占位；拖动读到的旧修订不可覆写新日程。两条界面路径共享 `preview/commit`。编辑器标明时区，拒绝不存在的当地时刻；秋季同一时刻出现两次时可选 UTC 偏移。Room v2 只新增占位表和索引，没有新增运行依赖。
@@ -97,6 +97,8 @@ interface PlannerApi {
 **从原始行到实际上课日期。** `ZC` 为周序，周集合去重排序。按周保留课名 `KCMC`、星期、节次 `JC`、教室 `JSMC`；仅完全相同条目去重，同课换教室不能并掉。`JC` 完整匹配单节或数字区间，支持 `-`、`–`、`—`；倒序、越界、「实践」均保留原文待修正，不默认为第一节。`KS` 只是第一周日期候选。用户确认学期标识、首周周一、总周数和夏/冬作息，可指定中途切换作息的生效日，不猜当年校历。按 `Asia/Shanghai` 实际上课日期套用 `../WadwaitaUp/models.py:33–62` 的两套 12 节预设；来源没有的教师等字段留空。
 
 **写入边界。** 展示差异、有效/待修正数、同名不同地点和冲突；有问题的条目须修正或明确排除。无课或无有效数据不得覆盖已有课表。确认后仅替换所选学期 `hust-hub` 来源的课程集合；相同内容重复导入无新增，不动用户任务、其他来源或学期。**不移植** `../WadwaitaUp/window.py:3155–3188` 的 `_apply_imported_courses` 按课名跳过/覆盖；同名不是身份。移除某学期课表也须预览，不删除工作台内容。
+
+**离线录课。** 入口和字段分组参考 [WakeUp 官方录课说明](https://wakeup.fun/doc/add_course.html)。选择已有学期或填写新校历，填写课名、可选地点、上课周、星期和起止节次。预览列出实际课次，保存后同步显示在周表与当天时间轴；点手动课格可编辑或移除这一组课次。来源 `manual` 独立于 `hust-hub`，同名同地点也不相互覆盖。助理 `manual_course_add` 须先获得课程详情授权，跨周／学期还需相应范围；本机核对提案后才能写入。
 
 单次导入预览先计数，再生成冲突明细。超过 256 对受影响的重叠时，提示检查源文件，不截断课次后提交；课名和教室各限 256 个 UTF-16 单元，超长进入可修正条目。日/周视图中一门课超过 8 个冲突对象时显示确切总数，避免把大量课程两两展开。
 
@@ -127,7 +129,7 @@ interface PlannerApi {
 |---|---|
 |队列 / 栈|`task_add`（每项一条，可成批）、`task_edit`、`task_finish`、`task_remove`、`queue_order`（当前完整 ID 排列）；`frame_create(reason, tasks)`、`frame_push(reason, taskIds)`、`frame_restore(frameId, mode, taskIds)`。`mode=all/selected`；是否切换队列由本机偏好决定。|
 |DAG|`graph_create`、`graph_patch`（按 ID 增改删节点、位置、边）、`graph_remove`、`graph_frame(graphId, goalId, reason)`。新实体可声明批内唯一 `ref`；`graph_frame` 还可声明新帧 `ref` 和 `taskRefs`（图节点 → 新任务别名），让「生成 → 选取 → 排程」不猜数据库 ID。|
-|日程 / 课表|`slot_set(taskId, start, durationMinutes)` 新排/移动，开始时间须带 offset；`slot_clear(taskId)`；`course_import(draftId)`、`term_remove(termId)`。模型可请求打开导入器；无经用户核对的本地草稿 ID 不得凭空导入。|
+|日程 / 课表|`slot_set(taskId, start, durationMinutes)` 新排、移动或调整结束，开始须带 offset；`slot_clear(taskId)`。`manual_course_add` 按学期、周集合与节次提议手动课程；`course_import(draftId)` 必须使用用户核对的本地草稿；`term_remove(termId)` 仅移除 HUB 来源。|
 |外观 / 偏好|`prefs_set`、`prefs_reset` 只接受已公开的外观/交互字段与合法值；重设只动所选组。配置凭据或扩大披露范围不能走模型授权捷径。|
 
 **数据披露。** 首次联网及扩大范围前展示要发往哪个域、哪些字段。默认只有当前范围的任务标题、顺序、时段和必要 ID；课表默认只给忙碌时段。备注、压栈原因、课程名/地点须用户明确纳入才出设备。整库、原始课表、Cookie 永不发送；BYOK 仅作绑定服务的鉴权头，不进提示词/工具结果。课程名、备注和模型输出都是不可信文本，不是权限指令。对话限会话内，日志不落原文；关闭/取消终止在途请求。
@@ -177,9 +179,9 @@ interface PlannerApi {
 
 本地实验变体只接受 `-PstacklifeKitAar=/绝对路径/sharedview-kit-1.0.0.5.aar`，SHA-256 必须为 `7c0937ecde545a262619e5fa19d56a21b0ad3fd8013cbc4fe058c497808702bd`。`./gradlew -PstacklifeKitAar=… :app:assembleKitLab` 生成独立 `.kitlab`，只在获准设备本地测试，不交付；`StackLifeKit` 日志仅记协议值。普通 `:app:assemblePreview` 不需要 AAR，也不会打入适配器或详情 Activity。
 
-**可选光学层。** 参考 [BiliPai 的浮动导航](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/FloatingDockChrome.kt)、[场景调校](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/LiquidGlassTuning.kt)及 [Apple 材质层级](https://developer.apple.com/design/human-interface-guidelines/materials)。Android 端用 Apache-2.0 的 [Kyant Backdrop 2.0.1](https://github.com/Kyant0/AndroidLiquidGlass/tree/2.0.1)，不是 iOS 系统控件。根页工具栏、加号与导航从后方的真实内容采样；控件自己、文字和图标不进入自己的采样层。壳体用 4 dp 模糊与 24 dp 边缘折射，消息栏和弹层采用更强的磨砂；滑动选中项只取父壳的光学层。主操作、菜单和编辑器按同一层级处理。正文不叠玻璃；不采样登录网页、模型密钥或地址输入区。
+**可选光学层。** 移动端与 [BiliPai 浮动壳体](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/FloatingDockChrome.kt)走同一条流程：Miuix `drawBackdrop` 采样 → 调色与模糊 → 透镜 → `drawEdgeStroke` 双光源高光。透镜的普通／色散着色器直接取自 [BiliPai LiquidLens.kt](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/design-system/src/main/java/com/android/purebilibili/core/ui/effect/LiquidLens.kt)（该文件独立标明 Apache-2.0）；[Miuix 边缘着色器](https://github.com/compose-miuix-ui/miuix/blob/d27cbb0b375912cdf42670553fdb564d8ff7fc23/miuix-material/src/commonMain/kotlin/top/yukonga/miuix/kmp/material/EdgeStrokeDrawing.kt)通过固定版本 `0.9.5-beta02` 调用，不重画轮廓。壳体只采样后方内容；嵌套控件读取父级材质而非其文字，输入条额外磨砂、不叠高光。顶栏、导航、加号、弹层和课格共用材质入口；不采样登录网页、模型密钥或地址输入区。
 
-课块将课程色、节次线和按日底色一起送进透镜，文字最后绘制，因此折射不会扭曲白字。材质页的示例和真实周视图共用 `PeriodGrid` / `CourseTile`；草稿即时预览，保存后应用到真实课表，取消不改已保存的值。关闭玻璃只换材质，不改变色号分配、课程位置、点击区或文字描边选项。
+课格的有色透镜采样真实节次线与按日底色，最后再画白字；没有预画的内圈或光晕。材质页使用与周视图相同的 `PeriodGrid` / `CourseTile` 预览课程文字描边。关闭玻璃保留 WakeUp 配色、形状、位置和点击区。外观编辑沿用 [Apple Sheets 的取消／完成位置](https://developer.apple.com/design/human-interface-guidelines/sheets)：取消和保存位于顶栏，「恢复默认设置」居中，只重置当前分组的草稿。
 
 玻璃仅在 API 33+、硬件加速、非低内存/省电、无减少透明度/高对比要求时可用。否则提示「当前使用实色」及原因，不把模糊称为折射；关玻璃完全卸下光学层。按 [Google 无障碍标准](https://developer.android.com/guide/topics/ui/accessibility/apps)，触控目标至少 48×48 dp，普通文字对比 4.5:1、大字 3:1；TalkBack 读状态并有等价非拖拽操作。系统字体缩放、edge-to-edge 安全区、输入法和旋转都不能遮操作。减少动态与减少透明度分开处理。
 
@@ -214,7 +216,7 @@ flowchart LR
 
 **M0 不需要 Gradle。** 从根规则入口应能找到华科提取代码与许可，推演帧 `[A,B]` 恢复到 `[X]` 的结果，指出模型提案后谁能提交，以及解释为什么模拟器截图不能验联盟能力或证明金标认证。两文件可独立阅读、未把未实现项标为完成，即达到本轮目标。
 
-**开发环境。** 安装 **Android SDK Platform 37.1**（不只是 `build-tools`）；工程 DSL 用 `compileSdk { version = release(37) { minorApiLevel = 1 } }`。启动专用 API 37 手机 AVD 或连接获授权的测试手机，`adb devices -l` 须见 `device`；不用个人主账号/日程做破坏性实验。项目已带校验分发包的 Gradle wrapper，在根目录执行：
+**开发环境。** 安装 **Android SDK Platform 37.2**（不只是 `build-tools`）；工程 DSL 用 `compileSdk { version = release(37) { minorApiLevel = 2 } }`。启动专用 API 37 手机 AVD 或连接获授权的测试手机，`adb devices -l` 须见 `device`；不用个人主账号/日程做破坏性实验。项目已带校验分发包的 Gradle wrapper，在根目录执行：
 
 ```bash
 export ANDROID_HOME="$HOME/Android/Sdk" JAVA_HOME=/usr/lib/jvm/java-17-openjdk
@@ -264,6 +266,10 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 在同一 API 37 模拟器、同一学期与周次、100% 字号下，对照了浅深主题的玻璃和实色截图。实色中「数据结构」为杏色 `#F3C383`，「大学物理」为薄荷色 `#8AE8D8`；浅色玻璃中分别为 `#F4C78D`、`#93E9DB`。设备用例验证了三件事：32 门课各有不同颜色且都在参考明度及饱和度范围内；换周、换教室或重启不改变分色；课程名、教室和冲突标记均能渲染出白色笔画和有对比的字边。
 
 **v0.8.0 运行截图复审。** 在同一学期、1080×2340、440 dpi、系统字号 100% 的 API 37 模拟器上，「数据结构」中部的节次线可透过有色课块，切换实色后消失；课程位置不动。将今天的时刻线滚过固定的「＋」，圆内出现随背景移动的折射光带，圆外仍是直线。分别检查了浅色、深色、设置页去除描边和保存后冷启。浅色底配无描边白字的对比较低，保留描边为默认。截图与录屏不代表物理设备的帧率。
+
+**v0.9.0 交互复审（API 37 模拟器）。** 从已有周表实际录入 `Lab / E101 / 周六第 1–2 节 / 第 1、2 周`，核对预览中的两次日期，在课格打开详情并确认移除。将时间轴上的 `09:00–09:30` 从下端点拖到 `09:45`，松手前显示预览，保存后仍从 `09:00` 开始。日／周箭头录屏和中间帧用例检查进入页与退出页接边、导航不动。实录中系统键盘尚有按键可见时悬浮导航已出现，第一次返回后输入框保留 `Hello`；从助理面板系统侧滑回退时底页没有重建。
+
+**材质复审。** 同一周、同一窗口下，玻璃和实色的七个课块边界一致。体育课内的节次分隔线在实色中不可见，玻璃中可见；按住课块后线在块内弯折，块外位置不动，字不随之变形。今天页的时刻线经过「＋」时在圆内偏移，圆外保持笔直。Android 8（API 26）模拟器实际安装并冷启同一签名包，设置明确提示「当前使用实色：折射需要 Android 13 或更高版本」。
 
 |阶段 / 用例|输入 → 可观察结果（校方登录、真实模型、联盟真机和性能有各自的验收条件）|
 |---|---|

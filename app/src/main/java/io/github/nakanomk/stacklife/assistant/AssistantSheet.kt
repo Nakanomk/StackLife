@@ -67,22 +67,24 @@ private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: As
         onDispose { model.composerLeft(id) }
     }
     val ui by model.state.collectAsStateWithLifecycle()
-    if (ui.page != null) return
-    StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth(), MaterialTheme.colorScheme.surfaceContainerHigh) {
-        val origin = ui.draftPage.takeIf { ui.composerId == id }
-        MessageEditor(if (ui.composerId == id) ui.draft else "", origin?.scopeName() ?: scope,
+    val active = ui.page == null
+    val surface = if (active) Modifier else Modifier.clearAndSetSemantics {}
+    StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth().then(surface), MaterialTheme.colorScheme.surfaceContainerHigh) {
+        val origin = ui.draftPage.takeIf { active && ui.composerId == id }
+        MessageEditor(if (active && ui.composerId == id) ui.draft else "", origin?.scopeName() ?: scope,
             { model.editLocal(id, it, page) }, { model.submitLocal(id, target) },
-            origin?.takeIf { page != null && privateScope == null }?.let { "草稿范围：${it.scopeName()}" })
+            origin?.takeIf { page != null && privateScope == null }?.let { "草稿范围：${it.scopeName()}" }, active)
     }
 }
 
 @Composable
-private fun MessageEditor(text: String, scope: String, onChange: (String) -> Unit, onSend: () -> Unit, originHint: String? = null) {
+private fun MessageEditor(text: String, scope: String, onChange: (String) -> Unit, onSend: () -> Unit, originHint: String? = null,
+    active: Boolean = true) {
     val colors = MaterialTheme.colorScheme
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val haptics = LocalHapticFeedback.current
-    val enabled = text.isSendable()
+    val enabled = active && text.isSendable()
     fun submit() {
         if (!enabled) return
         keyboard?.hide()
@@ -92,7 +94,7 @@ private fun MessageEditor(text: String, scope: String, onChange: (String) -> Uni
     }
     Row(Modifier.fillMaxWidth().padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
-            BasicTextField(value = text, onValueChange = onChange, singleLine = true,
+            BasicTextField(value = text, onValueChange = onChange, singleLine = true, enabled = active,
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("assistant-input")
                     .semantics { contentDescription = "$scope · 助理消息" }
                     .onPreviewKeyEvent {

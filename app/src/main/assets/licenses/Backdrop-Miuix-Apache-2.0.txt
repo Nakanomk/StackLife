@@ -1,3 +1,12 @@
+Miuix blur and material — Copyright 2026, compose-miuix-ui contributors
+https://github.com/compose-miuix-ui/miuix
+
+DockLens.kt includes the unmodified shader programs from BiliPai's Apache-2.0
+LiquidLens.kt. StackLife supplies the Compose uniform bindings for full-shape lenses.
+https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/design-system/src/main/java/com/android/purebilibili/core/ui/effect/LiquidLens.kt
+Copyright 2026, compose-miuix-ui contributors
+Adapted upstream from Kyant0/AndroidLiquidGlass: https://github.com/Kyant0/AndroidLiquidGlass
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/

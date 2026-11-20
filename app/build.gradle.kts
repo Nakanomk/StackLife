@@ -19,14 +19,14 @@ val kitAar = providers.gradleProperty("stacklifeKitAar").orNull?.let { path ->
 
 android {
     namespace = "io.github.nakanomk.stacklife"
-    compileSdk { version = release(37) { minorApiLevel = 1 } }
+    compileSdk { version = release(37) { minorApiLevel = 2 } }
 
     defaultConfig {
         applicationId = "io.github.nakanomk.stacklife"
         minSdk = 26
         targetSdk = 37
-        versionCode = 13
-        versionName = "0.8.0"
+        versionCode = 14
+        versionName = "0.9.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
@@ -82,7 +82,9 @@ dependencies {
     implementation(libs.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.materialkolor)
-    implementation(libs.backdrop)
+    implementation(libs.miuix.blur) {
+        exclude(group = "org.jetbrains.compose.foundation", module = "foundation-android")
+    }
     if (kitAar != null) add("kitLabImplementation", files(kitAar))
     testImplementation(libs.okhttp.tls)
     testImplementation(libs.mockwebserver)

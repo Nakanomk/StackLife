@@ -159,7 +159,7 @@ class CourseTimelineGestureTest {
         material()
         field(outline).assertIsOff()
         assertEquals(saved.copy(courseTextOutline = false), appearance())
-        field(hasText("恢复本页默认") and hasClickAction()).performClick()
+        field(hasText("恢复默认设置") and hasClickAction()).performClick()
         field(outline).assertIsOn()
         assertEquals(saved.copy(courseTextOutline = false), appearance())
         ui.onNodeWithText("保存外观").performClick()

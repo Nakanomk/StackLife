@@ -30,7 +30,7 @@ internal fun BoxScope.AddTaskFab(onAdd: () -> Unit, bottomInset: Dp = 0.dp) {
     val ink = if (LocalCapsuleBackdrop.current == null) colors.onPrimaryContainer else colors.primary
     StackLifeSurface(CapsuleScene.ACTION,
         Modifier.align(Alignment.BottomEnd).padding(end = fabMargin, bottom = bottomInset + fabMargin).size(fabSize),
-        solid = colors.primaryContainer, tint = colors.primaryContainer.copy(alpha = .5f), elevation = 3.dp, interactionSource = interaction) {
+        solid = colors.primaryContainer, elevation = 3.dp, interactionSource = interaction) {
         IconButton(onClick = onAdd, modifier = Modifier.size(fabSize).testTag("add-task"), interactionSource = interaction) {
             Icon(painterResource(R.drawable.ic_add), "新增任务", tint = ink)
         }

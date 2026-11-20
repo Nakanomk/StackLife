@@ -56,7 +56,7 @@ import kotlinx.serialization.json.JsonArray
 
 private val chromePackages = listOf("com.android.chrome", "com.chrome.beta", "com.chrome.dev", "com.chrome.canary")
 
-private data class TermForm(val id: String = "", val monday: String = "", val weeks: String = "",
+internal data class TermForm(val id: String = "", val monday: String = "", val weeks: String = "",
     val initial: BellSchedule = BellSchedule.SUMMER, val switchDate: String = "") {
     fun term(): TermSpec {
         fun date(text: String): LocalDate = try { LocalDate.parse(text.trim()) } catch (_: DateTimeParseException) {
@@ -190,26 +190,7 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
                 Text("确认学期与校区作息", style = MaterialTheme.typography.titleLarge)
                 Text("时间按 Asia/Shanghai。首周日期只作候选，请自行核实校历。")
                 if (hints.isNotEmpty()) Text("第一周 KS 候选：${hints.joinToString("、")}")
-                FormGroup {
-                    ImportField("学期标识", form.id, "termId", !busy) { form = form.copy(id = it) }
-                    ImportField("首周周一 YYYY-MM-DD", form.monday, "termMonday", !busy) { form = form.copy(monday = it) }
-                    ImportField("总周数", form.weeks, "termWeeks", !busy) { form = form.copy(weeks = it) }
-                }
-                Text("首周作息")
-                val initial = rememberUpdatedState(form.initial.ordinal.toFloat())
-                ControlGroup {
-                    SegmentTrack(initial, BellSchedule.entries.size, MaterialTheme.colorScheme.secondaryContainer) {
-                        Row(Modifier.selectableGroup()) {
-                            BellSchedule.entries.forEach { bell ->
-                                Box(Modifier.clip(CircleShape).selectable(form.initial == bell, enabled = !busy, role = Role.RadioButton,
-                                    onClick = { form = form.copy(initial = bell) }).heightIn(min = 48.dp).padding(horizontal = 16.dp),
-                                    contentAlignment = Alignment.Center) { Text(if (bell == BellSchedule.SUMMER) "夏令" else "冬令") }
-                            }
-                        }
-                    }
-                }
-                ImportField("切换为另一作息的生效日（选填）", form.switchDate, "termSwitchDate", !busy) { form = form.copy(switchDate = it) }
-                Text("填写后从该日开始切换；留空则整个学期不变。")
+                TermFields(form, !busy) { form = it }
                 ActionPill("确认学期并核对条目", enabled = !busy, prominent = true, modifier = Modifier.testTag("reviewCourseRows"), onClick = {
                     if (busy) return@ActionPill
                     busy = true; message = null
@@ -335,7 +316,31 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
 }
 
 @Composable
-private fun ImportField(label: String, value: String, tag: String, enabled: Boolean = true, change: (String) -> Unit) {
+internal fun TermFields(form: TermForm, enabled: Boolean, change: (TermForm) -> Unit) {
+    FormGroup {
+        ImportField("学期标识", form.id, "termId", enabled) { change(form.copy(id = it)) }
+        ImportField("首周周一 YYYY-MM-DD", form.monday, "termMonday", enabled) { change(form.copy(monday = it)) }
+        ImportField("总周数", form.weeks, "termWeeks", enabled) { change(form.copy(weeks = it)) }
+    }
+    Text("首周作息")
+    val initial = rememberUpdatedState(form.initial.ordinal.toFloat())
+    ControlGroup {
+        SegmentTrack(initial, BellSchedule.entries.size, MaterialTheme.colorScheme.secondaryContainer) {
+            Row(Modifier.selectableGroup()) {
+                BellSchedule.entries.forEach { bell ->
+                    Box(Modifier.clip(CircleShape).selectable(form.initial == bell, enabled = enabled, role = Role.RadioButton,
+                        onClick = { change(form.copy(initial = bell)) }).heightIn(min = 48.dp).padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center) { Text(if (bell == BellSchedule.SUMMER) "夏令" else "冬令") }
+                }
+            }
+        }
+    }
+    ImportField("切换为另一作息的生效日（选填）", form.switchDate, "termSwitchDate", enabled) { change(form.copy(switchDate = it)) }
+    Text("填写后从该日开始切换；留空则整个学期不变。")
+}
+
+@Composable
+internal fun ImportField(label: String, value: String, tag: String, enabled: Boolean = true, change: (String) -> Unit) {
     // Don't let framework text-editing state save even a course name to an Activity Bundle.
     CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
         TextField(value = value, onValueChange = change, enabled = enabled, colors = lineFieldColors(), label = { Text(label) },

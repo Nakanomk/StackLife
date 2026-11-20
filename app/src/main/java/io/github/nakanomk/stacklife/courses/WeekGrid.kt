@@ -1,8 +1,8 @@
 package io.github.nakanomk.stacklife.courses
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,12 +14,10 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -41,8 +39,6 @@ import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.appearance.CapsuleScene
 import io.github.nakanomk.stacklife.appearance.GlassBacking
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
-import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
-import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
 import io.github.nakanomk.stacklife.appearance.StackLifeSurface
 import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 import io.github.nakanomk.stacklife.planner.CourseWeek
@@ -179,8 +175,6 @@ private fun PeriodGrid(termId: String, week: CourseWeek, periods: List<PeriodTim
     val pigments = remember(arrangement, termId, week.colorIndices) {
         arrangement.map { courseColor(termId, week.colorIndices.getValue(it.course.meeting.title)) }
     }
-    val appearance = LocalAppearance.current
-    val lit = LocalPlannerGlassAllowed.current && appearance.glass && glassUnavailableReason(appearance) == null
     val colors = MaterialTheme.colorScheme
     val typography = MaterialTheme.typography
     val density = LocalDensity.current
@@ -190,34 +184,17 @@ private fun PeriodGrid(termId: String, week: CourseWeek, periods: List<PeriodTim
     val ruleBlend = if (colors.surface.luminance() < .5f) BlendMode.Screen else BlendMode.Multiply
     GlassBacking(Modifier.fillMaxWidth().height(periodHeight * periods.size), background = {
         Box(Modifier.fillMaxSize().background(colors.surface).drawBehind {
-            val x0 = rail.toPx(); val cell = dayWidth.toPx()
+            val x0 = rail.toPx(); val cell = dayWidth.toPx(); val row = periodHeight.toPx()
             drawRect(colors.surfaceContainerLow, size = Size(x0, size.height))
             if (highlightedDay >= 0 && highlightedDay < dayCount) drawRect(colors.primaryContainer.copy(alpha = .28f),
                 Offset(x0 + cell * highlightedDay.toInt(), 0f), Size(cell, size.height))
-        }) {
-            if (lit) Spacer(Modifier.matchParentSize().blur(4.dp).drawBehind {
-                val x0 = rail.toPx(); val cell = dayWidth.toPx(); val row = periodHeight.toPx()
-                for (j in arrangement.indices) {
-                    val tile = arrangement[j]
-                    val meeting = tile.course.meeting
-                    val w = cell / tile.lanes
-                    val h = row * (meeting.lastPeriod - meeting.firstPeriod + 1)
-                    val inset = minOf(8.dp.toPx(), w * .18f, h * .18f)
-                    val x = x0 + cell * (meeting.day - 1) + w * tile.lane
-                    val y = row * (meeting.firstPeriod - 1)
-                    drawRoundRect(pigments[j].copy(alpha = .62f), Offset(x + inset, y + inset),
-                        Size(w - 2 * inset, h - 2 * inset), CornerRadius(5.dp.toPx()))
-                }
-            })
-            Canvas(Modifier.matchParentSize()) {
-                val x0 = rail.toPx(); val cell = dayWidth.toPx(); val row = periodHeight.toPx()
-                val rule = 1.dp.toPx()
-                for (i in 0..dayCount) {
-                    val x = x0 + cell * i
-                    drawLine(colors.outlineVariant, Offset(x, 0f), Offset(x, size.height), rule, blendMode = ruleBlend)
-                }
-                for (i in 0..periods.size) drawLine(colors.outlineVariant, Offset(0f, row * i), Offset(size.width, row * i), rule, blendMode = ruleBlend)
+            val rule = 1.dp.toPx()
+            for (i in 0..dayCount) {
+                val x = x0 + cell * i
+                drawLine(colors.outlineVariant, Offset(x, 0f), Offset(x, size.height), rule, blendMode = ruleBlend)
             }
+            for (i in 0..periods.size) drawLine(colors.outlineVariant, Offset(0f, row * i), Offset(size.width, row * i), rule, blendMode = ruleBlend)
+        }) {
             Column(Modifier.width(rail)) {
                 for ((i, period) in periods.withIndex()) Column(Modifier.fillMaxWidth().height(periodHeight),
                     verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -249,8 +226,9 @@ private fun CourseTile(tile: Tile, swatch: Color, outline: Stroke?, open: ((Sche
         "${m.title}，周${weekdays[m.day - 1]}，${m.periodLabel()}，${m.room.ifBlank { "教室未提供" }}" +
             if (tile.course.conflicts.isEmpty()) "" else "，时段冲突：${tile.course.conflicts.joinToString("、")}"
     }
-    StackLifeSurface(CapsuleScene.COURSE, modifier, solid = swatch, shape = courseShape, tint = swatch) {
-        val action = if (open == null) Modifier else Modifier.clickable(role = Role.Button, onClickLabel = "查看固定课程") {
+    val interaction = if (open == null) null else remember { MutableInteractionSource() }
+    StackLifeSurface(CapsuleScene.COURSE, modifier, solid = swatch, shape = courseShape, tint = swatch, interactionSource = interaction) {
+        val action = if (open == null) Modifier else Modifier.clickable(interactionSource = interaction, role = Role.Button, onClickLabel = "查看固定课程") {
             open(tile.course)
         }
         Column(Modifier.fillMaxSize().clipToBounds().testTag("grid-course:${tile.index}").then(action)

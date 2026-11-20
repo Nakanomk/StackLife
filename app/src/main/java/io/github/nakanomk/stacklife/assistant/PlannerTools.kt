@@ -1,6 +1,10 @@
 package io.github.nakanomk.stacklife.assistant
 
 import io.github.nakanomk.stacklife.planner.*
+import io.github.nakanomk.stacklife.courses.BellSchedule
+import io.github.nakanomk.stacklife.courses.CoursePattern
+import io.github.nakanomk.stacklife.courses.ManualSeries
+import io.github.nakanomk.stacklife.courses.TermSpec
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -105,6 +109,22 @@ internal class PlannerTools(private val api: PlannerApi, val page: AssistantPage
                 PlannerCommand.CourseImport(id)
             }
             "term_remove" -> PlannerCommand.TermRemove(seen.term(o.string("termId")))
+            "manual_course_add" -> {
+                require(disclosure.courseDetails) { "请先授权课程名称与地点，或在课表中手动添加。" }
+                val id = o.string("termId")
+                val weeks = o.getValue("weeks").jsonArray.mapTo(mutableSetOf()) { it.jsonPrimitive.int }
+                val newTerm = o["newTerm"]?.jsonObject
+                val sameWeek = page is AssistantPage.Week && page.termId == id && weeks.singleOrNull() == page.week
+                require(ReadArea.COURSES in disclosure.extra || (newTerm == null && sameWeek) ||
+                    (newTerm != null && page == AssistantPage.Terms)) { "请先授权其他学期与周课表，或仅添加本周的课程。" }
+                val term = newTerm?.let {
+                    TermSpec(id, date(it.string("firstMonday")), it.int("totalWeeks"), BellSchedule.valueOf(it.string("initial")),
+                        it.optString("switchDate")?.let(::date))
+                }
+                if (term == null) seen.term(id)
+                PlannerCommand.ManualCourse(id, null, ManualSeries(CoursePattern(o.string("title"), o.optString("room").orEmpty(),
+                    o.int("day"), o.int("firstPeriod"), o.int("lastPeriod")), weeks), createTerm = term)
+            }
             "prefs_set", "prefs_reset" -> {
                 val reset = o.string("kind") == "prefs_reset"
                 if (o.string("group") == "workspace") PlannerCommand.SetRestorePolicy(

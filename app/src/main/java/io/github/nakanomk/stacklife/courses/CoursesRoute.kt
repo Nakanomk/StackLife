@@ -34,7 +34,7 @@ internal fun CoursesRoute(model: WorkspaceViewModel, termId: String?, selectedWe
         }
         val scope = if (term != null && week != null) AssistantPage.Week(term.id, week) else AssistantPage.Terms
         SideEffect { onScope(scope) }
-        CourseHome(model, all.terms, term, week, onTerm, { n -> if (term != null) { onTerm(term); onWeek(n) } },
+        CourseHome(model, all, term, week, onTerm, { selected, n -> onTerm(selected); onWeek(n) },
             onImport, onRemove, onSettings)
     }
 }

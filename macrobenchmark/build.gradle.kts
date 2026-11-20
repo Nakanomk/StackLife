@@ -2,7 +2,7 @@ plugins { alias(libs.plugins.android.test) }
 
 android {
     namespace = "io.github.nakanomk.stacklife.macrobenchmark"
-    compileSdk { version = release(37) { minorApiLevel = 1 } }
+    compileSdk { version = release(37) { minorApiLevel = 2 } }
     defaultConfig {
         minSdk = 31
         targetSdk = 37

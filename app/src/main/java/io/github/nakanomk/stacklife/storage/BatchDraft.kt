@@ -68,6 +68,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             }
             is PlannerCommand.CourseImport -> courses.replace(reviewed[cmd.draftId] ?: invalid("导入草稿已失效，请重新核对。"))
             is PlannerCommand.TermRemove -> courses.remove(cmd.termId)
+            is PlannerCommand.ManualCourse -> courses.manual(cmd)
             is PlannerCommand.QueueOrder -> reorder(cmd.taskIds)
             is PlannerCommand.FrameCreate -> {
                 if (cmd.tasks.isEmpty()) invalid("栈帧至少需要一项任务。")

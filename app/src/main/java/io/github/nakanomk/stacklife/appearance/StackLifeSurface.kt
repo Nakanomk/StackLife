@@ -1,8 +1,10 @@
 package io.github.nakanomk.stacklife.appearance
 
+import android.os.Build
+import androidx.annotation.RequiresApi
+
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -14,12 +16,13 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -27,31 +30,43 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.*
-import com.kyant.backdrop.Backdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.highlight.Highlight
-import com.kyant.backdrop.highlight.HighlightStyle
-import com.kyant.backdrop.shadow.InnerShadow
-import com.kyant.backdrop.shadow.Shadow
+import top.yukonga.miuix.kmp.blur.Backdrop
+import top.yukonga.miuix.kmp.blur.blur
+import top.yukonga.miuix.kmp.blur.colorControls
+import top.yukonga.miuix.kmp.blur.drawBackdrop
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import androidx.compose.ui.graphics.shadow.Shadow
+import kotlin.math.cos
+import kotlin.math.sin
+import top.yukonga.miuix.kmp.material.EdgeLightSource
+import top.yukonga.miuix.kmp.material.EdgePeak
+import top.yukonga.miuix.kmp.material.EdgeStroke
+import top.yukonga.miuix.kmp.material.drawEdgeStroke
 
 internal val LocalPlannerGlassAllowed = staticCompositionLocalOf { false }
 internal val LocalCapsuleBackdrop = compositionLocalOf<Backdrop?> { null }
+private val LocalParentShell = compositionLocalOf { false }
 internal enum class CapsuleScene { NAVIGATION, ASSISTANT, CHROME, ACTION, COURSE, INDICATOR, PANEL }
+
+private val dockEdge = EdgeStroke(width = 1.dp, bevel = 2.dp, color = Color.White.copy(alpha = .12f),
+    primary = EdgeLightSource(.5f, -.3f, -.05f), secondary = EdgeLightSource(.5f, .8f, -.5f, intensity = .4f), peak = EdgePeak.Dual)
 
 @Stable
 internal class PlannerBackdrop(val layer: GraphicsLayer, private val base: Color, private val below: Backdrop?) : Backdrop {
     override val isCoordinatesDependent = true
     var origin: Offset by mutableStateOf(Offset.Unspecified)
 
-    override fun DrawScope.drawBackdrop(density: Density, coordinates: LayoutCoordinates?, layerBlock: (GraphicsLayerScope.() -> Unit)?) {
-        if (below == null) drawRect(base) else with(below) { drawBackdrop(density, coordinates, layerBlock) }
+    override fun DrawScope.drawBackdrop(density: Density, coordinates: LayoutCoordinates?, layerBlock: (GraphicsLayerScope.() -> Unit)?, downscaleFactor: Float) {
+        if (below == null) drawRect(base) else with(below) { drawBackdrop(density, coordinates, layerBlock, downscaleFactor) }
         if (coordinates == null || !coordinates.isAttached || !origin.isSpecified) return
         val target = coordinates.localToScreen(Offset.Zero)
-        if (target.isSpecified) translate(origin.x - target.x, origin.y - target.y) { drawLayer(layer) }
+        if (!target.isSpecified) return
+        val factor = 1f / downscaleFactor
+        withTransform({
+            translate((origin.x - target.x) * factor, (origin.y - target.y) * factor)
+            if (factor != 1f) scale(factor, factor, Offset.Zero)
+        }) { drawLayer(layer) }
     }
 }
 
@@ -96,65 +111,80 @@ internal fun StackLifeSurface(scene: CapsuleScene, modifier: Modifier, solid: Co
         else -> true
     } }
     val nestedShell = scene == CapsuleScene.PANEL || scene == CapsuleScene.CHROME || scene == CapsuleScene.NAVIGATION
-    val export = if (source != null && nestedShell) rememberLayerBackdrop() else null
     val semantics = if (scene == CapsuleScene.NAVIGATION || scene == CapsuleScene.ASSISTANT) Modifier.semantics {
         stateDescription = if (source == null) "实色胶囊" else "折射胶囊"
     } else Modifier
-    val material = if (source == null) Modifier else {
-        val base = MaterialTheme.colorScheme.surface
-        val dark = base.luminance() < .5f
-        val course = scene == CapsuleScene.COURSE
-        val indicator = scene == CapsuleScene.INDICATOR
-        val panel = scene == CapsuleScene.PANEL
-        val wash = when {
-            course -> tint.copy(alpha = if (dark) .66f else .48f)
-            indicator -> tint.copy(alpha = .28f)
-            tint.isSpecified -> tint.copy(alpha = tint.alpha * .56f)
-            panel -> base.copy(alpha = if (dark) .63f else .70f)
-            scene == CapsuleScene.ASSISTANT -> base.copy(alpha = .54f)
-            else -> base.copy(alpha = .40f)
+    if (Build.VERSION.SDK_INT < 33 || source == null) {
+        if (scene == CapsuleScene.INDICATOR) Box(modifier.background(solid, shape)) { content() }
+        else Surface(modifier.then(semantics), shape = shape, color = solid, contentColor = LocalContentColor.current, shadowElevation = elevation) {
+            if (nestedShell) CompositionLocalProvider(LocalCapsuleBackdrop provides null, LocalParentShell provides false, content = content) else content()
         }
-        val blend = if (!course) BlendMode.SrcOver else if (dark) BlendMode.Screen else BlendMode.Multiply
-        val blurDp = when (scene) {
-            CapsuleScene.COURSE, CapsuleScene.INDICATOR -> 1.dp
-            CapsuleScene.ASSISTANT -> 10.dp
-            CapsuleScene.PANEL -> 24.dp
-            else -> 4.dp
-        }
-        val depth = when { course || indicator -> 10.dp; panel -> 12.dp; else -> 24.dp }
-        val displacement = if (indicator || course) 14.dp else depth
-        val angle = LocalGlassLight.current
-        val highlight = remember(angle, course, indicator) { derivedStateOf {
-            Highlight(width = if (indicator) .6.dp else .8.dp,
-                style = HighlightStyle.Default(color = Color.White.copy(alpha = if (indicator) .48f else .75f), angle = angle.intValue.toFloat()))
-        } }
-        val shade = remember(course, tint, dark, indicator) {
-            val ink = if (course) lerp(tint, Color.Black, .35f) else Color.Black
-            Shadow(radius = if (indicator) 3.dp else if (course) 5.dp else 10.dp, color = ink.copy(alpha = if (indicator) .08f else if (dark || course) .24f else .10f))
-        }
-        val rim = remember(course, dark) {
-            InnerShadow(radius = if (course) 4.dp else 5.dp, offset = DpOffset(0.dp, 1.dp),
-                color = Color.White.copy(alpha = if (course) .18f else if (dark) .16f else .08f))
-        }
-        val press = if (interactionSource != null && LocalMotionEnabled.current) {
-            val down by interactionSource.collectIsPressedAsState()
-            val scale = animateFloatAsState(if (down) 1.055f else 1f, spring(dampingRatio = .8f, stiffness = 550f), label = "glass press")
-            Modifier.graphicsLayer { scaleX = scale.value; scaleY = scale.value }
-        } else Modifier
-        press.drawBackdrop(source, shape = { shape }, effects = {
-            vibrancy()
-            blur(blurDp.toPx())
-            lens(depth.toPx(), displacement.toPx(), depthEffect = course, chromaticAberration = indicator)
-        }, highlight = { highlight.value }, shadow = { shade }, innerShadow = { rim }, exportedBackdrop = export,
-            onDrawSurface = { drawRect(wash, blendMode = blend) })
-    }
-    if (source == null && scene == CapsuleScene.INDICATOR) {
-        Box(modifier.then(Modifier.background(solid, shape))) { content() }
         return
     }
-    Surface(modifier.then(semantics).then(material), shape = shape, color = if (source == null) solid else Color.Transparent,
-        contentColor = LocalContentColor.current, border = if (source == null) BorderStroke(Dp.Hairline, MaterialTheme.colorScheme.outlineVariant) else null,
-        shadowElevation = if (source == null) elevation else 0.dp) {
-        if (nestedShell) CompositionLocalProvider(LocalCapsuleBackdrop provides export, content = content) else content()
+    OpticalSurface(scene, modifier.then(semantics), source, nestedShell, shape, tint, interactionSource, content)
+}
+
+@RequiresApi(33)
+@Composable
+private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Backdrop, nestedShell: Boolean,
+    shape: RoundedCornerShape, tint: Color, interactionSource: InteractionSource?, content: @Composable () -> Unit) {
+    val export = if (nestedShell) rememberLayerBackdrop() else null
+    val base = MaterialTheme.colorScheme.surface
+    val dark = base.luminance() < .5f
+    val course = scene == CapsuleScene.COURSE
+    val indicator = scene == CapsuleScene.INDICATOR
+    val panel = scene == CapsuleScene.PANEL
+    val input = scene == CapsuleScene.ASSISTANT
+    val inline = LocalParentShell.current && !indicator
+    val hasLens = !inline && !input
+    val wash = when {
+        course -> tint.copy(alpha = .88f)
+        indicator -> (if (dark) Color.White else Color.Black).copy(alpha = .10f)
+        panel -> base.copy(alpha = if (dark) .63f else .70f)
+        input -> base.copy(alpha = .54f)
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .40f)
+    }
+    val blend = if (!course) BlendMode.SrcOver else if (dark) BlendMode.Screen else BlendMode.Multiply
+    val blurDp = when (scene) {
+        CapsuleScene.COURSE, CapsuleScene.INDICATOR -> 1.dp
+        CapsuleScene.ASSISTANT -> 10.dp
+        CapsuleScene.PANEL -> 24.dp
+        else -> 4.dp
+    }
+    val depth = when { indicator -> 10.dp; panel -> 12.dp; else -> 24.dp }
+    val displacement = if (indicator) 14.dp else depth
+    val angle = LocalGlassLight.current
+    val specular = remember(angle) { derivedStateOf {
+        val r = Math.toRadians((angle.intValue - 45).toDouble())
+        dockEdge.copy(primary = dockEdge.primary.copy(x = .5f + cos(r).toFloat(), y = .7f + sin(r).toFloat()))
+    } }
+    val shadow = if (inline || indicator) Modifier else Modifier.dropShadow(shape,
+        remember(dark, course) { Shadow(radius = if (course) 4.dp else 10.dp, color = Color.Black, alpha = if (dark) .20f else .10f) })
+    val press = if (!inline && interactionSource != null && LocalMotionEnabled.current) {
+        val down by interactionSource.collectIsPressedAsState()
+        val progress = animateFloatAsState(if (down) 1f else 0f, spring(dampingRatio = .8f, stiffness = 550f), label = "glass press")
+        Modifier.graphicsLayer { val s = 1f + progress.value * 16.dp.toPx() / size.maxDimension.coerceAtLeast(1f); scaleX = s; scaleY = s }
+    } else Modifier
+    val material = Modifier.drawBackdrop(source, shape = { shape }, effects = {
+        if (!inline) {
+            if (hasLens) padding = maxOf(padding, displacement.toPx())
+            colorControls(saturation = 1.5f)
+            blur(blurDp.toPx())
+            if (hasLens) dockLens(depth.toPx(), displacement.toPx(), depth = course, dispersion = if (indicator) .5f else 0f)
+        }
+    }, onDrawSurface = {
+        if (tint.isSpecified && !course && !indicator) {
+            drawRect(tint, blendMode = BlendMode.Hue)
+            drawRect(tint.copy(alpha = .75f))
+        }
+        drawRect(wash, blendMode = blend)
+    }, onDrawFront = if (!hasLens || indicator || panel) null else {
+        { drawEdgeStroke(shape, specular.value, .75f) }
+    })
+    Surface(modifier.then(press).then(shadow), shape = shape, color = Color.Transparent, contentColor = LocalContentColor.current) {
+        Box {
+            Spacer(Modifier.matchParentSize().then(if (export != null) Modifier.layerBackdrop(export) else Modifier).then(material))
+            if (export != null) CompositionLocalProvider(LocalCapsuleBackdrop provides export, LocalParentShell provides true, content = content) else content()
+        }
     }
 }

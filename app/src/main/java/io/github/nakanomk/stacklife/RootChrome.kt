@@ -1,6 +1,7 @@
 package io.github.nakanomk.stacklife
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -9,17 +10,31 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.drawPlainBackdrop
-import com.kyant.backdrop.effects.blur
+import top.yukonga.miuix.kmp.blur.drawBackdrop
+import top.yukonga.miuix.kmp.blur.blur
 import io.github.nakanomk.stacklife.appearance.*
 
 internal val LocalRootBottom = compositionLocalOf { 0.dp }
 internal val chromeGutter = 16.dp
+
+@Composable
+internal fun PagerPane(selected: Boolean, visible: Boolean, content: @Composable () -> Unit) {
+    val semantics = if (selected) Modifier else Modifier.clearAndSetSemantics {}
+    Box(semantics.fillMaxSize().layout { child, constraints ->
+        val measured = child.measure(constraints)
+        layout(measured.width, measured.height) { if (visible) measured.place(0, 0) }
+    }.focusProperties { onEnter = { if (!selected) cancelFocusChange() } }.focusGroup()) {
+        CompositionLocalProvider(LocalPlannerGlassAllowed provides (visible && LocalPlannerGlassAllowed.current), content = content)
+    }
+}
 
 @Composable
 internal fun RootPane(header: @Composable () -> Unit,
@@ -49,7 +64,7 @@ private fun ScrollEdge(source: PlannerBackdrop, modifier: Modifier) {
     Spacer(modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithCache {
         val edge = Brush.verticalGradient(0f to Color.Black, .58f to Color.Black.copy(alpha = .85f), 1f to Color.Transparent)
         onDrawWithContent { drawContent(); drawRect(edge, blendMode = BlendMode.DstIn) }
-    }.drawPlainBackdrop(source, shape = { rectangle }, effects = { blur(16.dp.toPx()) },
+    }.drawBackdrop(source, shape = { rectangle }, effects = { blur(16.dp.toPx()) },
         onDrawSurface = { drawRect(base.copy(alpha = .40f)) }))
 }
 

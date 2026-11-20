@@ -17,12 +17,15 @@ internal data class CourseRow(val termId: String, val source: String, @Embedded 
 
 @Dao
 internal interface CourseDao {
-    @Query("SELECT * FROM course_terms WHERE source=:source ORDER BY monday DESC,termId") fun terms(source: String): List<TermRow>
+    @Query("SELECT * FROM course_terms WHERE source IN (:hub,:manual) ORDER BY monday DESC,termId,source")
+    fun terms(hub: String, manual: String): List<TermRow>
     @Query("SELECT * FROM course_terms WHERE termId=:id AND source=:source") fun term(id: String, source: String): TermRow?
     @Query("SELECT * FROM course_meetings WHERE termId=:id AND source=:source ORDER BY startMillis,endMillis,title,room")
     fun meetings(id: String, source: String): List<CourseRow>
-    @Query("SELECT DISTINCT title FROM course_meetings WHERE termId=:id AND source=:source ORDER BY title")
-    fun orderedTitles(id: String, source: String): List<String>
+    @Query("SELECT DISTINCT title FROM course_meetings WHERE termId=:id AND source IN (:hub,:manual) ORDER BY title")
+    fun orderedTitles(id: String, hub: String, manual: String): List<String>
+    @Query("SELECT week FROM course_meetings WHERE termId=:id AND source=:source AND title=:title AND room=:room AND day=:day AND firstPeriod=:first AND lastPeriod=:last ORDER BY week")
+    fun patternWeeks(id: String, source: String, title: String, room: String, day: Int, first: Int, last: Int): List<Int>
     @Query("SELECT * FROM course_meetings WHERE startMillis < :end AND endMillis > :start ORDER BY startMillis,endMillis,termId,title,room")
     fun intersecting(start: Long, end: Long): List<CourseRow>
     @Upsert fun put(term: TermRow)

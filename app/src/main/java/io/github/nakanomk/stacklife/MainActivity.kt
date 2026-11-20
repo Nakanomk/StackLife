@@ -9,7 +9,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.SharedTransitionLayout
-import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -18,9 +17,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.layout.layout
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.platform.LocalContext
@@ -166,29 +162,22 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                                         val inViewport by remember(pager, index) {
                                             derivedStateOf { kotlin.math.abs(position.value - index) < 1f }
                                         }
-                                        val visible = front || inViewport
-                                        val pane = if (front) Modifier else Modifier.clearAndSetSemantics {}
-                                        Box(pane.fillMaxSize().layout { child, constraints ->
-                                            val measured = child.measure(constraints)
-                                            layout(measured.width, measured.height) { if (visible) measured.place(0, 0) }
-                                        }.focusProperties { onEnter = { if (!front) cancelFocusChange() } }.focusGroup()) {
-                                            CompositionLocalProvider(LocalPlannerGlassAllowed provides visible) {
-                                                when (page) {
-                                                    Destination.TODAY -> TodayRoute(model, date, local.zone,
-                                                        onDate = { selectedDate = it.takeUnless { d -> d == local.date }?.toEpochDay() },
-                                                        onEdit = navigate, onSettings = { navigate(Preferences) }, revealStart = revealStart,
-                                                        onRevealed = { revealStart = null }, onAdd = { navigate(AddTask) })
-                                                    Destination.WORKSPACE -> WorkspacePanel(model) { workspace ->
-                                                        WorkspaceScreen(workspace, model, { navigate(TaskDetail(it)) }, { navigate(FrameDetail(it)) },
-                                                            { navigate(Preferences) }, shared, frames, { frames = it }, { navigate(PushTasks) },
-                                                            { navigate(CreateFrame) }, { navigate(AddTask) })
-                                                    }
-                                                    Destination.GRAPHS -> GraphsRoute(model, { navigate(GraphEditor(it)) }, { navigate(Preferences) })
-                                                    Destination.COURSES -> CoursesRoute(model, selectedTerm, selectedWeek,
-                                                        onTerm = { selectedTerm = it.id; selectedWeek = null }, onWeek = { selectedWeek = it },
-                                                        onImport = { navigate(ImportCourses) }, onRemove = { navigate(RemoveTerm(it.id)) },
-                                                        onSettings = { navigate(Preferences) }, onScope = { courseScope = it })
+                                        PagerPane(front, front || inViewport) {
+                                            when (page) {
+                                                Destination.TODAY -> TodayRoute(model, date, local.zone,
+                                                    onDate = { selectedDate = it.takeUnless { d -> d == local.date }?.toEpochDay() },
+                                                    onEdit = navigate, onSettings = { navigate(Preferences) }, revealStart = revealStart,
+                                                    onRevealed = { revealStart = null }, onAdd = { navigate(AddTask) })
+                                                Destination.WORKSPACE -> WorkspacePanel(model) { workspace ->
+                                                    WorkspaceScreen(workspace, model, { navigate(TaskDetail(it)) }, { navigate(FrameDetail(it)) },
+                                                        { navigate(Preferences) }, shared, frames, { frames = it }, { navigate(PushTasks) },
+                                                        { navigate(CreateFrame) }, { navigate(AddTask) })
                                                 }
+                                                Destination.GRAPHS -> GraphsRoute(model, { navigate(GraphEditor(it)) }, { navigate(Preferences) })
+                                                Destination.COURSES -> CoursesRoute(model, selectedTerm, selectedWeek,
+                                                    onTerm = { selectedTerm = it.id; selectedWeek = null }, onWeek = { selectedWeek = it },
+                                                    onImport = { navigate(ImportCourses) }, onRemove = { navigate(RemoveTerm(it.id)) },
+                                                    onSettings = { navigate(Preferences) }, onScope = { courseScope = it })
                                             }
                                         }
                                     }

@@ -2,6 +2,7 @@ package io.github.nakanomk.stacklife.today
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -15,6 +16,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -23,6 +26,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -49,22 +53,14 @@ internal fun DayAxis(
         val clockWidth = measurer.measure("00:00", style = hourStyle).size.width
         with(density) { (clockWidth.toDp() + 16.dp).coerceAtLeast(56.dp) }
     }
-    val gutter = spine + 16.dp
+    val railWidth = 48.dp
+    val gutter = spine + railWidth / 2
+    var selectedEnd by remember(drag, revision) { mutableStateOf<String?>(null) }
     Box(modifier.fillMaxWidth().clipToBounds()) {
         Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll).padding(top = topInset)) {
             Box(Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() }).drawBehind {
                 val x = spine.toPx()
                 drawLine(colors.outlineVariant, Offset(x, 0f), Offset(x, size.height), 2.dp.toPx())
-                for (group in scale.groups) {
-                    for ((index, lane) in group.lanes.withIndex()) for (entry in lane) {
-                        val top = scale.yAt(entry.startMillis).toFloat()
-                        val bottom = scale.yAt(entry.endMillis).toFloat()
-                        val ink = if (entry is AxisEntry.Course) colors.tertiary else colors.secondary
-                        if (index == 0) drawLine(ink.copy(alpha = .52f), Offset(x, top), Offset(x, bottom), 5.dp.toPx(), StrokeCap.Round)
-                        drawCircle(ink, 7.dp.toPx(), Offset(x, top))
-                        drawCircle(colors.surface, 2.5.dp.toPx(), Offset(x, top))
-                    }
-                }
             }) {
                 for (band in scale.bands) for (tick in band.ticks) {
                     Box(Modifier.offset { IntOffset(0, band.top + band.yAt(tick.millis)) }.width(spine - 10.dp)
@@ -76,19 +72,24 @@ internal fun DayAxis(
                 }
                 for (group in scale.groups) key(group.start) {
                     val top = scale.yAt(group.start)
-                    BoxWithConstraints(Modifier.offset { IntOffset(0, top) }.fillMaxWidth().padding(start = gutter, end = 8.dp)
+                    BoxWithConstraints(Modifier.offset { IntOffset(0, top) }.fillMaxWidth().padding(start = gutter - railWidth, end = 8.dp)
                         .height(with(density) { (scale.yAt(group.end) - top).toDp() })) {
                         val width = maxWidth / group.lanes.size
-                        val overflow = group.lanes.size > 1 && width < 112.dp
+                        val minimumLane = railWidth + 112.dp
+                        val overflow = group.lanes.size > 1 && width < minimumLane
                         Row(if (overflow) Modifier.horizontalScroll(rememberScrollState()) else Modifier) {
-                            for (lane in group.lanes) Box(Modifier.width(if (overflow) 112.dp else width).fillMaxHeight()) {
+                            for (lane in group.lanes) Box(Modifier.width(if (overflow) minimumLane else width).fillMaxHeight()) {
                                 for (entry in lane) key(entry) {
                                     val y = scale.yAt(entry.startMillis)
                                     val bounds = Modifier.offset { IntOffset(0, y - top) }.fillMaxWidth()
                                         .height(with(density) { (scale.yAt(entry.endMillis) - y).toDp() })
-                                    when (entry) {
-                                        is AxisEntry.Task -> BlockCard(entry, drag, revision, enabled, onEdit, send, bounds)
-                                        is AxisEntry.Course -> CourseCard(entry.course, drag.scale, bounds)
+                                    Row(bounds) {
+                                        EventRail(entry, selectedEnd, { selectedEnd = it }, drag, revision, enabled, onEdit, send,
+                                            Modifier.width(railWidth).fillMaxHeight())
+                                        when (entry) {
+                                            is AxisEntry.Task -> BlockCard(entry, drag, revision, enabled, onEdit, send, Modifier.fillMaxSize())
+                                            is AxisEntry.Course -> CourseCard(entry.course, drag.scale, Modifier.fillMaxSize())
+                                        }
                                     }
                                 }
                             }
@@ -105,6 +106,71 @@ internal fun DayAxis(
             }
         }
     }
+}
+
+@Composable
+private fun EventRail(
+    entry: AxisEntry, selectedId: String?, select: (String?) -> Unit, drag: AxisDrag, revision: Long,
+    enabled: Boolean, onEdit: (String) -> Unit, send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier,
+) {
+    val task = (entry as? AxisEntry.Task)?.block
+    // A clipped continuation has no endpoint here. Its full interval is still editable by tapping the title.
+    val resizable = task?.takeIf { it.state != ScheduledState.DONE && it.endMillis <= drag.scale.day.endMillis }
+    val selected = resizable != null && resizable.taskId == selectedId
+    val colors = MaterialTheme.colorScheme
+    val ink = when {
+        selected -> colors.primary
+        task == null -> colors.tertiary
+        else -> colors.secondary
+    }
+    val action = if (resizable == null) Modifier else Modifier.testTag("resize-bar:${resizable.taskId}")
+        .combinedClickable(enabled = enabled, role = Role.Button, onLongClickLabel = "显示结束手柄",
+            onLongClick = { select(resizable.taskId) }, onClickLabel = if (selected) "收起结束手柄" else "显示结束手柄",
+            onClick = { select(if (selected) null else resizable.taskId) })
+        .semantics {
+            contentDescription = "${resizable.title}，时段条"
+            stateDescription = if (selected) "已显示结束手柄" else "长按调整结束时间"
+        }
+    Box(modifier) {
+        Spacer(Modifier.fillMaxSize().then(action).drawBehind {
+            val radius = 6.dp.toPx()
+            val top = Offset(size.width / 2, radius)
+            if (!selected || drag.resizeRailX == null || drag.candidate == null) {
+                drawLine(ink.copy(alpha = if (selected) 1f else .65f), top,
+                    Offset(top.x, size.height - 3.dp.toPx()), 5.dp.toPx(), StrokeCap.Round)
+            }
+            drawCircle(ink, radius, top)
+            drawCircle(colors.surface, 2.dp.toPx(), top)
+        })
+        if (selected && resizable != null) {
+            val source = SlotSource(resizable.taskId, ((resizable.endMillis - resizable.startMillis) / MINUTE_MS).toInt(), resizable.startMillis)
+            val endLabel = clockLabel(resizable.endMillis, drag.scale.day)
+            LaunchedEffect(drag, resizable.taskId) {
+                // A long task may continue below the screen. Reveal the real end, never put
+                // a substitute handle at the viewport edge or on a clipped midnight boundary.
+                val endY = drag.scale.yAt(resizable.endMillis)
+                val visibleHeight = drag.viewport.height.roundToInt()
+                if (visibleHeight > 0 && endY > drag.scroll.value + visibleHeight) {
+                    val margin = visibleHeight / 4
+                    drag.scroll.scrollTo((endY - visibleHeight + margin).coerceAtLeast(0))
+                }
+            }
+            Spacer(Modifier.align(Alignment.BottomCenter).size(48.dp).testTag("resize-end:${resizable.taskId}")
+                .endDrag(source, drag, revision, enabled, send)
+                .clickable(enabled, onClickLabel = "精确编辑时间", role = Role.Button) { onEdit(resizable.taskId) }
+                .semantics { contentDescription = "${resizable.title}，结束手柄，$endLabel，上下拖动调整结束时间" }
+                .drawBehind {
+                    if (drag.resizeRailX == null || drag.candidate == null) drawEndKnob(size.width / 2, size.height, ink, colors.surface)
+                })
+        }
+    }
+}
+
+private fun DrawScope.drawEndKnob(x: Float, endY: Float, ink: Color, centerColor: Color) {
+    val radius = 8.dp.toPx()
+    val center = Offset(x, endY - radius)
+    drawCircle(ink, radius, center)
+    drawCircle(centerColor, 3.dp.toPx(), center)
 }
 
 @Composable
@@ -180,9 +246,26 @@ private fun DropPreview(drag: AxisDrag, gutter: Dp) {
     val color = if (checked?.error == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
     if (bottom > top) Box(Modifier.fillMaxWidth().offset { IntOffset(0, top) }.padding(start = gutter, end = 4.dp)
         .height(with(density) { (bottom - top).toDp() }).background(color.copy(alpha = 0.29f), MaterialTheme.shapes.medium)) {
-        HorizontalDivider(thickness = 3.dp, color = color)
+        HorizontalDivider(Modifier.align(if (drag.resizeRailX == null) Alignment.TopCenter else Alignment.BottomCenter),
+            thickness = 3.dp, color = color)
     }
-    val status = checked?.error ?: if (checked == null) "检查时段中" else "松手安排"
+    val railX = drag.resizeRailX
+    if (railX != null) {
+        val edge = drag.scale.yAt(end) - drag.scroll.value
+        val centerColor = MaterialTheme.colorScheme.surface
+        Spacer(Modifier.fillMaxSize().clipToBounds().drawBehind {
+            val x = railX - drag.viewport.left
+            if (bottom > top) drawLine(color, Offset(x, top.toFloat()), Offset(x, bottom.toFloat()), 5.dp.toPx())
+            if (edge in 0..size.height.roundToInt()) {
+                drawEndKnob(x, edge.toFloat(), color, centerColor)
+            }
+        })
+    }
+    val status = checked?.error ?: when {
+        checked == null -> "检查时段中"
+        railX != null -> "松手调整结束时间"
+        else -> "松手安排"
+    }
     Surface(Modifier.fillMaxWidth().padding(start = gutter, end = 4.dp, top = 2.dp).testTag("drop-preview"),
         color = if (checked?.error == null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
         shape = MaterialTheme.shapes.medium, shadowElevation = 2.dp) {

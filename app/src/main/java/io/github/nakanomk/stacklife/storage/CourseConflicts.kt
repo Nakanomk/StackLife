@@ -72,7 +72,7 @@ internal fun importConflicts(rows: List<CourseRow>, tasks: List<DayBlock>, touch
                 count += priorTouched.size.toLong()
                 if (included) count += priorOther.size.toLong() + (slots.until - slots.from)
                 if (count > MAX_IMPORT_CONFLICTS) throw InvalidCommand(
-                    "此次导入与课程或任务重叠超过 $MAX_IMPORT_CONFLICTS 对，无法逐项核对。请检查重复课表或修正原始文件后重试。")
+                    "本次课程变更与课程或任务重叠超过 $MAX_IMPORT_CONFLICTS 对，无法逐项核对。请检查重复课表或调整时段后重试。")
             } else {
                 for (other in priorTouched) coursePair(other, row)
                 if (included) {

@@ -5,6 +5,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 
 const val HUST_SOURCE = "hust-hub"
+const val MANUAL_SOURCE = "manual"
 internal const val MAX_COURSE_FIELD = 256
 internal fun courseFieldProblem(title: String, room: String): String? = when {
     title.isBlank() -> "KCMC 课名不能为空"
@@ -20,6 +21,14 @@ data class TermSpec(val id: String, val firstMonday: LocalDate, val weeks: Int, 
 data class CourseMeeting(val week: Int, val day: Int, val title: String, val room: String, val firstPeriod: Int, val lastPeriod: Int,
     val startMillis: Long, val endMillis: Long)
 data class ScheduledCourse(val termId: String, val source: String, val meeting: CourseMeeting, val conflicts: List<String> = emptyList())
+
+/** Identity of one weekly time pattern within the manual source, never just a title. */
+data class CoursePattern(val title: String, val room: String, val day: Int, val firstPeriod: Int, val lastPeriod: Int) {
+    internal fun matches(m: CourseMeeting) = m.day == day && m.firstPeriod == firstPeriod && m.lastPeriod == lastPeriod &&
+        m.title == title && m.room == room
+}
+internal fun CourseMeeting.pattern() = CoursePattern(title, room, day, firstPeriod, lastPeriod)
+data class ManualSeries(val pattern: CoursePattern, val weeks: Set<Int>)
 
 fun TermSpec.problem(): String? = when {
     id.isBlank() || id != id.trim() || id.length > 128 -> "学期标识须为 1–128 个字符，首尾不能有空格。"

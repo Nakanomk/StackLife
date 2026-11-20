@@ -6,12 +6,15 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.nakanomk.stacklife.StackLifeApp
+import io.github.nakanomk.stacklife.StackLifeTheme
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.planner.PlannerCommand.*
+import io.github.nakanomk.stacklife.today.TodayRoute
 import java.time.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -54,6 +57,136 @@ class DayTimelineTest {
         val root = ui.onRoot()
         root.performTouchInput { down(start); advanceEventTime(700); moveTo(start + Offset(0f, 1f)) }
         root.performTouchInput { for (i in 1..8) moveTo(start + (end - start) * (i / 8f), delayMillis = 16) }
+    }
+
+    private fun armEnd(id: String) {
+        val bar = await(hasTestTag("resize-bar:$id"))
+        assertEquals("显示结束手柄", bar.fetchSemanticsNode().config[SemanticsActions.OnLongClick].label)
+        bar.assertWidthIsAtLeast(48.dp).performTouchInput { longClick() }
+        await(hasTestTag("resize-end:$id")).assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+    }
+
+    private fun dragEndTo(id: String, time: String, slightlyToward: String? = null) {
+        val handle = await(hasTestTag("resize-end:$id")).fetchSemanticsNode().boundsInRoot
+        val y = ui.onNodeWithTag("hour:$time", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.top
+        val start = handle.center
+        val extra = slightlyToward?.let {
+            (ui.onNodeWithTag("hour:$it", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.top - y) / 5
+        } ?: 0f
+        val distance = y + extra - handle.bottom
+        ui.onRoot().performTouchInput {
+            down(start)
+            for (i in 1..5) moveTo(start + Offset(0f, distance * i / 5))
+        }
+    }
+
+    @Test fun longPressRailThenDragLowerHandleSnapsOnlyTheEndOnRelease() {
+        runBlocking { store.apply(TaskAdd(TaskInput("写提纲", ref = "a")), SlotSet("@a", at(15, 45), 30)) }
+        val before = readDay(); val task = before.blocks.single()
+        show(); centerTick("16:15")
+        ui.onNodeWithTag("resize-end:${task.taskId}").assertDoesNotExist()
+        armEnd(task.taskId)
+        // 16:33 snaps forward to 16:35. No long press is needed on the revealed endpoint.
+        dragEndTo(task.taskId, "16:30", slightlyToward = "16:45")
+        await(hasText("15:45–16:35 · 松手调整结束时间")).assertIsDisplayed()
+        assertEquals(before, readDay())
+        ui.onRoot().performTouchInput { up() }
+        val after = readDay { it.revision > before.revision }
+        assertEquals(before.revision + 1, after.revision)
+        assertEquals(task.copy(endMillis = at(16, 35).toInstant().toEpochMilli()), after.blocks.single())
+        centerTick("16:15"); armEnd(task.taskId); dragEndTo(task.taskId, "16:00")
+        await(hasText("15:45–16:00 · 松手调整结束时间"))
+        ui.onRoot().performTouchInput { up() }
+        assertEquals(task.copy(endMillis = at(16, 0).toInstant().toEpochMilli()),
+            readDay { it.revision > after.revision }.blocks.single())
+    }
+
+    @Test fun endpointRejectsConflictCancellationOutsideAndChangedRevision() {
+        runBlocking {
+            store.apply(TaskAdd(TaskInput("提纲", ref = "a")), SlotSet("@a", at(15, 45), 30),
+                TaskAdd(TaskInput("已约", ref = "b")), SlotSet("@b", at(16, 30), 30), TaskFinish("@b"))
+        }
+        val before = readDay()
+        val (task, done) = before.blocks
+        show(); centerTick("16:15")
+        ui.onNodeWithTag("resize-bar:${done.taskId}").assertDoesNotExist()
+        armEnd(task.taskId); dragEndTo(task.taskId, "16:45")
+        await(hasText("时段冲突：", substring = true) and hasText("已约", substring = true)).assertIsDisplayed()
+        ui.onRoot().performTouchInput { up() }
+        await(hasText("知道了")).performClick(); assertEquals(before, readDay())
+        dragEndTo(task.taskId, "16:30")
+        await(hasText("15:45–16:30 · 松手调整结束时间"))
+        ui.onRoot().performTouchInput { cancel() }
+        ui.onNodeWithTag("drop-preview").assertDoesNotExist()
+        assertEquals(before, readDay())
+        dragEndTo(task.taskId, "16:30")
+        val outside = ui.onNodeWithTag("day-axis").fetchSemanticsNode().boundsInRoot.bottom + 2f
+        ui.onRoot().performTouchInput { moveTo(Offset(center.x, outside)); up() }
+        assertEquals(before, readDay())
+        dragEndTo(task.taskId, "16:30")
+        await(hasTestTag("drop-preview"))
+        runBlocking { store.apply(TaskAdd(TaskInput("另一个任务"))) }
+        ui.onRoot().performTouchInput { up() }
+        val current = readDay()
+        assertEquals(before.blocks, current.blocks); assertEquals(before.revision + 1, current.revision)
+    }
+
+    @Test fun overnightEndCanCrossTheRepeatedHourWithoutMovingItsPreviousDayStart() {
+        val date = LocalDate.of(2026, 11, 1)
+        val zone = ZoneId.of("America/New_York")
+        val start = date.minusDays(1).atTime(23, 45).atZone(zone).toOffsetDateTime()
+        val q = PlannerQuery.Day(date, zone)
+        fun snapshot() = runBlocking { store.api.observe(q).first() as DayPlan }
+        runBlocking { store.apply(TaskAdd(TaskInput("跨午夜", ref = "a")), SlotSet("@a", start, 120)) }
+        val task = snapshot().blocks.single()
+        ui.setContent {
+            val vm = viewModel { WorkspaceViewModel(store.api) }
+            StackLifeTheme { TodayRoute(vm, date, zone, {}, {}, {}, null, {}, {}) }
+        }
+        await(hasTestTag("day-axis")); centerTick("01:45:-04:00")
+        armEnd(task.taskId); dragEndTo(task.taskId, "01:15:-05:00")
+        await(hasText("10/31 23:45–01:15 -05:00 · 松手调整结束时间"))
+        ui.onRoot().performTouchInput { up() }
+        ui.waitUntil(10_000) { snapshot().blocks.single().endMillis != task.endMillis }
+        assertEquals(task.copy(endMillis = start.plusMinutes(150).toInstant().toEpochMilli()), snapshot().blocks.single())
+    }
+
+    @Test fun selectingLongRailRevealsRealEndAndHoldingHandleAtEdgeExtendsPreviewOnly() {
+        runBlocking { store.apply(TaskAdd(TaskInput("长时段", ref = "a")), SlotSet("@a", at(10, 0), 540)) }
+        val before = readDay(); val id = before.blocks.single().taskId
+        show()
+        val middle = centerTick("12:00")
+        val axis = ui.onNodeWithTag("day-axis")
+        fun scroll() = axis.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+        val bar = await(hasTestTag("resize-bar:$id"))
+        val press = Offset(bar.fetchSemanticsNode().boundsInRoot.center.x, middle.y)
+        ui.onRoot().performTouchInput { longClick(press) }
+        val handle = await(hasTestTag("resize-end:$id"))
+        handle.assertIsDisplayed().assertContentDescriptionContains("19:00", substring = true)
+        val box = handle.fetchSemanticsNode().boundsInRoot
+        val endTick = ui.onNodeWithTag("hour:19:00", useUnmergedTree = true)
+        assertEquals(endTick.fetchSemanticsNode().boundsInRoot.top, box.bottom, 2f)
+        val edge = Offset(box.center.x, axis.fetchSemanticsNode().boundsInRoot.bottom - 4f)
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.onRoot().performTouchInput { down(box.center); moveTo(edge) }
+            ui.mainClock.advanceTimeBy(64)
+            val first = scroll()
+            val preview = ui.onNode(hasAnyAncestor(hasTestTag("drop-preview")) and
+                SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true)
+            fun range() = preview.fetchSemanticsNode().config[SemanticsProperties.Text].single().text.substringBefore(" · ")
+            val earlier = range()
+            ui.mainClock.advanceTimeBy(640)
+            val later = range()
+            assertTrue(scroll() > first)
+            assertTrue(earlier.startsWith("10:00–") && later.startsWith("10:00–"))
+            assertNotEquals(earlier, later)
+            ui.onRoot().performTouchInput { cancel() }
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+        ui.onNodeWithTag("drop-preview").assertDoesNotExist()
+        assertEquals(before, readDay())
     }
 
     @Test fun horizontalSwipeChangesCivilDayAndKeepsItsScrollOnReturn() {

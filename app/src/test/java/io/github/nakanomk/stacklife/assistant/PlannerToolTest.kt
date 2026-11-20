@@ -148,6 +148,25 @@ class PlannerToolTest {
         denied { tools.proposal(cmd("""{"kind":"term_remove","termId":"@invented"}""")) }
     }
 
+    @Test fun manualCourseProposalRequiresCourseDetailsExactWeekAndAnAuthorizedSemester() {
+        val api = Reads()
+        val page = AssistantPage.Week("fall", 2)
+        fun add(weeks: String, term: String = "fall", newTerm: String = "") = cmd(
+            """{"kind":"manual_course_add","termId":"$term","title":"物理","room":"B","weeks":[$weeks],"day":1,"firstPeriod":3,"lastPeriod":4$newTerm}""")
+        denied { PlannerTools(api, page, Disclosure()).proposal(add("2")) }
+        val local = PlannerTools(api, page, Disclosure(courseDetails = true))
+        denied { local.proposal(add("1,2")) }
+        denied { local.proposal(add("2", "other")) }
+        val same = ((local.proposal(add("2")) as ToolPlan.Commands).commands.single() as PlannerCommand.ManualCourse)
+        assertEquals(setOf(2), same.after!!.weeks); assertNull(same.before); assertNull(same.createTerm)
+        val expanded = PlannerTools(api, page, Disclosure(extra = setOf(ReadArea.COURSES), courseDetails = true))
+        denied { expanded.proposal(add("1,2", "never-disclosed")) }
+        val early = PlannerTools(api, AssistantPage.Terms, Disclosure(courseDetails = true))
+        val fresh = ((early.proposal(add("1,3", "new", ""","newTerm":{"firstMonday":"2026-09-07","totalWeeks":18,"initial":"SUMMER"}"""))
+            as ToolPlan.Commands).commands.single() as PlannerCommand.ManualCourse)
+        assertEquals(TermSpec("new", LocalDate.parse("2026-09-07"), 18, BellSchedule.SUMMER), fresh.createTerm)
+    }
+
     @Test fun editKindsAndBatchReferencesDecodeWithoutWrites() {
         val tools = PlannerTools(Reads(), day, Disclosure())
         val result = tools.proposal(cmd("""

@@ -121,6 +121,7 @@ internal class ToolProjection(private val grant: Disclosure, private val seen: T
                     AppearanceGroup.entries.map { group -> buildJsonObject { put("group", group.key); put("values", group.project(settings.appearance)) } }) { it }
             }
             PlannerQuery.Workspace -> error("不允许通过助理读取整个工作台。")
+            is PlannerQuery.ManualWeeks -> error("手动课程编辑器不属于助理的读取范围。")
         }
         put("rows", JsonArray(rows)); put("offset", offset); put("total", count)
         when {

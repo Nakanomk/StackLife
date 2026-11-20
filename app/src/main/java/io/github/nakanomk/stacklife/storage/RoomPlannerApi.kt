@@ -40,8 +40,15 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
                             DayPlan(query, settings.revision, tray, slots, occupied.courses, occupied.taskIds)
                         }
                     }
-                    PlannerQuery.Terms -> Terms(courses.terms(HUST_SOURCE).map(TermRow::spec))
+                    PlannerQuery.Terms -> {
+                        val rows = courses.terms(HUST_SOURCE, MANUAL_SOURCE)
+                        Terms(rows.distinctBy { it.termId }.map(TermRow::spec),
+                            rows.filter { it.source == HUST_SOURCE }.mapTo(mutableSetOf()) { it.termId })
+                    }
                     is PlannerQuery.Week -> week(query)
+                    is PlannerQuery.ManualWeeks -> with(query.pattern) {
+                        ManualWeeksView(courses.patternWeeks(query.termId, MANUAL_SOURCE, title, room, day, firstPeriod, lastPeriod).toSet())
+                    }
                     PlannerQuery.Graphs -> GraphList(graphs.list())
                     is PlannerQuery.Graph -> {
                         val graph = graphs.graph(query.graphId)
@@ -60,17 +67,18 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
         }
 
     private fun week(query: PlannerQuery.Week): CourseWeek {
-        val term = courses.term(query.termId, HUST_SOURCE)?.spec() ?: return CourseWeek(null, query.week, emptyList())
+        val term = (courses.term(query.termId, HUST_SOURCE) ?: courses.term(query.termId, MANUAL_SOURCE))?.spec()
+            ?: return CourseWeek(null, query.week, emptyList())
         if (query.week !in 1..term.weeks) return CourseWeek(term, query.week, emptyList())
         val monday = term.firstMonday.plusWeeks(query.week - 1L)
         val start = monday.atStartOfDay(campusZone).toInstant().toEpochMilli()
         val end = monday.plusWeeks(1).atStartOfDay(campusZone).toInstant().toEpochMilli()
         val occupancy = CourseOccupancy(courses.intersecting(start, end), dao.dayBlocks(start, end))
-        val visible = occupancy.courses.filter { it.source == HUST_SOURCE && it.termId == term.id }
+        val visible = occupancy.courses.filter { it.termId == term.id && (it.source == MANUAL_SOURCE || it.source == HUST_SOURCE) }
         if (visible.isEmpty()) return CourseWeek(term, query.week, visible)
         val titles = visible.mapTo(HashSet()) { it.meeting.title }
         val indices = buildMap {
-            courses.orderedTitles(term.id, HUST_SOURCE).forEachIndexed { index, title ->
+            courses.orderedTitles(term.id, HUST_SOURCE, MANUAL_SOURCE).forEachIndexed { index, title ->
                 if (title in titles) put(title, index)
             }
         }

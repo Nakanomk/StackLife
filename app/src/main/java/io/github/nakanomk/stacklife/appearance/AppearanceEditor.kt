@@ -32,6 +32,7 @@ private val AppearanceGroup.title get() = when (this) {
     AppearanceGroup.COLOR -> "色彩"; AppearanceGroup.LAYOUT -> "布局"; AppearanceGroup.MATERIAL -> "材质与动态"
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions: WorkspaceActions, onBack: () -> Unit) {
     var baseline by rememberSaveable(stateSaver = appearanceSaver) { mutableStateOf(saved) }
@@ -47,19 +48,18 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
     val reload = { baseline = saved; draft = saved; seedInput = saved.seed; message = "" }
     BackHandler(enabled = receipt.busy) { }
     StackLifeTheme(preview) {
-        EditorPage(group.title, onBack, backEnabled = !receipt.busy, footer = {
-            Column {
-                if (message.isNotEmpty()) Text(message, color = MaterialTheme.colorScheme.error)
-                Actions {
-                    Secondary("取消", enabled = !receipt.busy, onClick = onBack)
-                    Primary("保存外观", enabled = !receipt.busy && seedOK && !stale && selected != persisted) {
-                        receipt.send(PlannerCommand.EditAppearance(AppearanceFields(group, selected), expected = baseline))
+        Page {
+            CenterAlignedTopAppBar(title = { Text(group.title, style = MaterialTheme.typography.titleLarge) },
+                navigationIcon = { TextButton(onClick = onBack, enabled = !receipt.busy) { Text("取消") } },
+                actions = {
+                    TextButton(enabled = !receipt.busy && seedOK && !stale && selected != persisted,
+                        onClick = { receipt.send(PlannerCommand.EditAppearance(AppearanceFields(group, selected), expected = baseline)) }) {
+                        Text("保存外观")
                     }
-                }
-            }
-        }) { top, bottom ->
-            LazyColumn(Modifier.fillMaxSize().testTag("appearance-scroll"), contentPadding = dockListPadding(top, bottom),
+                }, windowInsets = WindowInsets(0))
+            LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("appearance-scroll"), contentPadding = dockListPadding(0.dp, 0.dp),
                 verticalArrangement = listSpacing) {
+                if (message.isNotEmpty()) item { Text(message, color = MaterialTheme.colorScheme.error) }
                 item { AppearancePreview(preview) }
                 when (group) {
                     AppearanceGroup.COLOR -> item { ColorFields(draft, seedInput, { seedInput = it }, { draft = it }) }
@@ -76,9 +76,16 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                         item { AccessibilityFields(draft) { draft = it } }
                     }
                 }
-                item { HorizontalDivider(); Secondary("恢复本页默认", enabled = !receipt.busy) {
-                    draft = AppearanceFields(group, null).applyTo(draft); seedInput = draft.seed; message = ""
-                } }
+                item {
+                    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        HorizontalDivider()
+                        Spacer(Modifier.height(12.dp))
+                        TextButton(onClick = { draft = AppearanceFields(group, null).applyTo(draft); seedInput = draft.seed; message = "" },
+                            enabled = !receipt.busy, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
+                            Text("恢复默认设置")
+                        }
+                    }
+                }
                 if (stale) item { Secondary("重新载入已保存设置", enabled = !receipt.busy, onClick = reload) }
             }
         }

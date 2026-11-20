@@ -1,5 +1,11 @@
 package io.github.nakanomk.stacklife
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.focusGroup
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -12,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
@@ -33,6 +40,7 @@ import io.github.nakanomk.stacklife.assistant.LocalAssistant
 import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.planner.NavStyle
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun DockOverlay(
     navigationBar: (@Composable () -> Unit)? = null,
@@ -43,13 +51,17 @@ internal fun DockOverlay(
     val appearance = LocalAppearance.current
     val docked = appearance.navStyle == NavStyle.DOCKED
     val composer = assistantPage?.takeIf { LocalAssistant.current != null }
-    val showNav = navigationBar != null && WindowInsets.ime.getBottom(density) == 0
-    val source = rememberPlannerBackdrop((showNav && appearance.navGlass) || (composer != null && appearance.assistantGlass))
+    var composerFocused by remember { mutableStateOf(false) }
+    val showNav = navigationBar != null && (!composerFocused || WindowInsets.imeAnimationTarget.getBottom(density) == 0)
+    val source = rememberPlannerBackdrop((navigationBar != null && appearance.navGlass) || (composer != null && appearance.assistantGlass))
+    val ms = if (LocalMotionEnabled.current) 150 else 0
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val shareRow = maxWidth >= 600.dp && maxWidth > maxHeight && composer != null && showNav
         val navSlot: @Composable () -> Unit = {
-            if (showNav) Box(if (docked) Modifier.fillMaxWidth() else chromeRail()) {
-                navigationBar()
+            if (navigationBar != null) AnimatedVisibility(showNav,
+                enter = expandVertically(tween(ms), expandFrom = Alignment.Bottom) + fadeIn(tween(ms)),
+                exit = shrinkVertically(tween(ms), shrinkTowards = Alignment.Bottom) + fadeOut(tween(ms))) {
+                Box(if (docked) Modifier.fillMaxWidth() else chromeRail()) { navigationBar() }
             }
         }
         Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), bottomBar = {
@@ -57,7 +69,7 @@ internal fun DockOverlay(
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     if (composer != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            Box(chromeRail()) {
+                            Box(chromeRail().onFocusChanged { composerFocused = it.hasFocus }.focusGroup()) {
                                 AssistantComposer(composer, persistentRoot = navigationBar != null)
                             }
                         }

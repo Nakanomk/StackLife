@@ -25,6 +25,7 @@ sealed interface PlannerQuery {
     data object Settings : PlannerQuery
     data object Terms : PlannerQuery
     data class Week(val termId: String, val week: Int) : PlannerQuery
+    data class ManualWeeks(val termId: String, val pattern: CoursePattern) : PlannerQuery
     data object Graphs : PlannerQuery
     data class Graph(val graphId: String) : PlannerQuery
     data class Goal(val graphId: String, val goalId: String) : PlannerQuery
@@ -36,7 +37,8 @@ sealed interface PlannerQuery {
 
 sealed interface QueryResult
 
-data class Terms(val terms: List<TermSpec>) : QueryResult
+data class Terms(val terms: List<TermSpec>, val importedIds: Set<String> = emptySet()) : QueryResult
+data class ManualWeeksView(val weeks: Set<Int>) : QueryResult
 data class CourseWeek(val term: TermSpec?, val week: Int, val classes: List<ScheduledCourse>,
     /** Index in this term's distinct title catalog; only this week's keys leave the read transaction. */
     internal val colorIndices: Map<String, Int> = emptyMap()) : QueryResult
@@ -112,6 +114,9 @@ sealed interface PlannerCommand {
     data class SlotClear(val taskId: String, val expectedRevision: Long? = null) : PlannerCommand
     data class CourseImport(val draftId: String) : PlannerCommand
     data class TermRemove(val termId: String) : PlannerCommand
+    /** Null before = add, null after = remove. New term creation never reuses an existing ID. */
+    data class ManualCourse(val termId: String, val before: ManualSeries?, val after: ManualSeries?,
+        val createTerm: TermSpec? = null) : PlannerCommand
     data class GraphCreate(val title: String, val ref: String? = null) : PlannerCommand
     data class GraphPatch(val graphId: String, val edits: List<GraphEdit>, val expectedRevision: Long? = null) : PlannerCommand
     data class GraphRemove(val graphId: String, val expectedRevision: Long? = null) : PlannerCommand
