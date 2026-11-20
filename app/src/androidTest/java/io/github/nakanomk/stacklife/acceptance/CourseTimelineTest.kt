@@ -46,15 +46,21 @@ class CourseTimelineTest {
         assertEquals(setOf("实验", "代数"), first.keys)
         assertEquals(setOf("实验", "物理"), second.keys)
         assertEquals(first.getValue("实验"), second.getValue("实验"))
-        for (dark in listOf(false, true)) {
-            val swatches = (first + second).values.map { courseColor(term.id, it, dark) }
-            assertEquals(3, swatches.distinct().size)
-            for (color in swatches) assertTrue("White course labels must remain readable",
-                1.05f / (color.luminance() + .05f) >= 6f)
-        }
+        assertEquals(3, (first + second).values.map { courseColor(term.id, it) }.distinct().size)
         store.reopen()
         assertEquals(first, week(1).colorIndices)
         assertEquals(second, week(2).colorIndices)
+    }
+
+    @Test fun largeCourseCatalogStaysDistinctWithoutDarkOrFluorescentTiles() {
+        val colors = (0 until 32).map { courseColor(term.id, it) }
+        assertEquals("Large terms must not recycle the first eight colors", colors.size, colors.distinct().size)
+        for (color in colors) {
+            val peak = maxOf(color.red, color.green, color.blue)
+            val saturation = (peak - minOf(color.red, color.green, color.blue)) / peak
+            assertTrue("Dark or glaring tile: $color", color.luminance() in 0.30f..0.72f)
+            assertTrue("Gray or fluorescent tile: $color", saturation in 0.20f..0.55f)
+        }
     }
 
     @Test fun rawFileReimportAndRemovalAreScopedToTheTermAndSource() = runBlocking {

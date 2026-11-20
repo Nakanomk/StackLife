@@ -18,18 +18,21 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.materialkolor.hct.Hct
-import com.materialkolor.ktx.toColor
 import io.github.nakanomk.stacklife.appearance.CapsuleScene
 import io.github.nakanomk.stacklife.appearance.GlassBacking
 import io.github.nakanomk.stacklife.appearance.StackLifeSurface
@@ -39,18 +42,34 @@ import java.time.LocalDate
 private const val weekdays = "一二三四五六日"
 private val courseShape = RoundedCornerShape(4.dp)
 
-// Rotate the term's ordered, unique course keys around the hue circle. The golden angle
-// separates neighbouring entries without repeating a short palette. Occurrences, room changes,
-// week order, process restarts and the current theme cannot change a course's assigned hue.
-internal fun courseColor(term: String, index: Int, dark: Boolean): Color {
-    val hue = (Math.floorMod(term.hashCode(), 360) + index * 137.50776405) % 360.0
-    return Hct.from(hue, 88.0, if (dark) 35.0 else 40.0).toColor()
+private val coursePalette = longArrayOf(
+    0xFFFA8EA5, 0xFFF79B84, 0xFFF3C383, 0xFFE5DB79,
+    0xFF8AE8D8, 0xFF74A3D1, 0xFF8DB5FA, 0xFFCFBAFD,
+)
+
+internal fun courseColor(term: String, index: Int): Color {
+    val size = coursePalette.size
+    val start = Math.floorMod(term.hashCode(), 360) * size / 360
+    val slot = (start + index % size * 3) % size
+    val color = Color(coursePalette[slot])
+    val cycle = index / size
+    if (cycle == 0) return color
+    // Bisect each gap at .5, then .25 and .75, for terms with more courses than swatches.
+    val level = Integer.highestOneBit(cycle)
+    return lerp(color, Color(coursePalette[(slot + 1) % size]), (cycle - level + .5f) / level)
 }
 
 @Composable
-internal fun rememberCourseColor(term: String, index: Int): Color {
-    val dark = MaterialTheme.colorScheme.surface.luminance() < .5f
-    return remember(term, index, dark) { courseColor(term, index, dark) }
+internal fun rememberCourseColor(term: String, index: Int) = remember(term, index) { courseColor(term, index) }
+
+private val labelEdge = Color(0xB4384050)
+
+@Composable
+private fun CourseLabel(text: String, style: TextStyle, maxLines: Int, outline: Stroke) {
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    Text(text, Modifier.drawBehind { layout?.let { drawText(it, color = labelEdge, drawStyle = outline) } },
+        color = Color.White, style = style, maxLines = maxLines, overflow = TextOverflow.Ellipsis,
+        onTextLayout = { layout = it })
 }
 
 private data class Tile(val index: Int, val course: ScheduledCourse, val lane: Int, val lanes: Int)
@@ -87,6 +106,7 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, ope
     val arrangement = remember(week.classes) { tiles(week.classes) }
     val typography = MaterialTheme.typography
     val density = LocalDensity.current
+    val outline = remember(density) { Stroke(with(density) { 1.05.dp.toPx().coerceAtLeast(2f) }, join = StrokeJoin.Round) }
     val periodHeight = with(density) { (typography.labelMedium.lineHeight.toDp() * 3 + 8.dp).coerceAtLeast(56.dp) }
     val measurer = rememberTextMeasurer()
     val rail = remember(density, measurer, typography.labelSmall) {
@@ -172,11 +192,9 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, ope
                             Column(Modifier.fillMaxSize().clipToBounds().testTag("grid-course:${tile.index}")
                                 .clickable(role = Role.Button, onClickLabel = "查看固定课程") { open(tile.course) }
                                 .semantics { contentDescription = description }.padding(horizontal = 3.dp, vertical = 4.dp)) {
-                                if (tile.course.conflicts.isNotEmpty()) Text("冲突", color = Color.White, style = typography.labelSmall,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(m.title, color = Color.White, style = typography.labelMedium, maxLines = 5, overflow = TextOverflow.Ellipsis)
-                                if (m.room.isNotEmpty()) Text("@${m.room}", color = Color.White, style = typography.labelSmall,
-                                    maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                if (tile.course.conflicts.isNotEmpty()) CourseLabel("冲突", typography.labelSmall, 1, outline)
+                                CourseLabel(m.title, typography.labelMedium, 5, outline)
+                                if (m.room.isNotEmpty()) CourseLabel("@${m.room}", typography.labelSmall, 3, outline)
                             }
                         }
                     }

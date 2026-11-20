@@ -1,19 +1,25 @@
 package io.github.nakanomk.stacklife.acceptance
 
 import androidx.activity.ComponentActivity
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.nakanomk.stacklife.StackLifeApp
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.courses.*
+import io.github.nakanomk.stacklife.planner.CourseWeek
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import java.time.LocalDate
 import java.time.DayOfWeek
 import java.time.temporal.TemporalAdjusters
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -28,6 +34,23 @@ class CourseTimelineGestureTest {
     private fun await(matcher: SemanticsMatcher): SemanticsNodeInteraction {
         ui.waitUntil(10_000) { ui.onAllNodes(matcher).fetchSemanticsNodes().size == 1 }
         return ui.onNode(matcher)
+    }
+
+    @Test fun whiteCourseNameRoomAndConflictHaveLocalContrastOnABrightTile() {
+        val term = TermSpec("Studio-7", LocalDate.of(2026, 11, 16), 1, BellSchedule.SUMMER)
+        val course = ScheduledCourse(term.id, HUST_SOURCE, term.meeting(1, 1, "物理", "A", 1, 2), listOf("预约"))
+        val week = CourseWeek(term, 1, listOf(course), mapOf("物理" to 0))
+        ui.setContent { MaterialTheme { WeekGrid(term, week, 0.dp, 0.dp) {} } }
+        for (label in listOf("物理", "@A", "冲突")) {
+            val pixels = ui.onNodeWithText(label, useUnmergedTree = true).captureToImage().toPixelMap()
+            var edges = 0
+            for (y in 0 until pixels.height) for (x in 2 until pixels.width - 2) {
+                val ink = pixels[x, y]
+                if (minOf(ink.red, ink.green, ink.blue) > .98f &&
+                    minOf(pixels[x - 2, y].luminance(), pixels[x + 2, y].luminance()) < .16f) edges++
+            }
+            assertTrue("White strokes in $label must border a contrasting edge", edges > 0)
+        }
     }
 
     @Test fun swipeSelectsOnlyAnAdjacentWeekAndTheCourseOpensItsActualOccurrence() {
