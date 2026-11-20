@@ -14,12 +14,11 @@ android {
         applicationId = "io.github.nakanomk.stacklife"
         minSdk = 26
         targetSdk = 37
-        versionCode = 4
-        versionName = "0.3.1"
+        versionCode = 5
+        versionName = "0.3.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
-        // Same local signer as M1/M2, but no debuggable WebView or instrumentation activity in the installable preview.
         create("preview") {
             initWith(getByName("release"))
             signingConfig = signingConfigs.getByName("debug")
@@ -41,6 +40,7 @@ dependencies {
     implementation(libs.compose.foundation)
     implementation(libs.compose.animation)
     implementation(libs.activity.compose)
+    implementation(libs.browser)
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.nav.runtime)

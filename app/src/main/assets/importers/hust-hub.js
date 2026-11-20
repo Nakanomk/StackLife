@@ -1,5 +1,4 @@
 // Vue parent traversal adapted from WadwaitaUp (MIT, assets/licenses/WadwaitaUp-LICENSE.txt).
-// Called only by the native Extract action. Arguments are APK constants and a native-generated nonce.
 (function (token, verify) {
     'use strict';
     const route = '/basicInformation/scheduleInformation/index';
@@ -31,7 +30,6 @@
     const rows = table();
     if (!rows) return JSON.stringify('no_table');
     const days = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
-    // Never stringify arbitrary nested page objects. Wrong scalar types stay visibly invalid in Kotlin.
     function scalar(v) { return v == null || ['string', 'number', 'boolean'].includes(typeof v) ? v : false; }
     function project() {
         if (rows.length > 2048) throw new RangeError();
@@ -58,7 +56,6 @@
     try {
         const href = location.href;
         const snapshot = project();
-        // Same-URL semester changes need a page-side guard too. Never read selector values or input text.
         let changed = false;
         const invalidate = () => { changed = true; };
         const events = ['input', 'change', 'click', 'keydown', 'pagehide', 'popstate', 'hashchange'];

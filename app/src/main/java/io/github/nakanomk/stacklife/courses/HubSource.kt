@@ -21,13 +21,6 @@ private fun httpsPage(url: String?): URI? {
     val uri = try { URI(url) } catch (_: java.net.URISyntaxException) { return null }
     return uri.takeIf { it.scheme.equals("https", ignoreCase = true) && it.host != null && it.rawUserInfo == null }
 }
-private val authorityEnd = charArrayOf('/', '?', '#')
-internal fun loginAuthority(url: String?): String? {
-    if (url == null) return null
-    // Let Chromium interpret the SSO path and query; the native header only needs its origin.
-    val end = url.indexOfAny(authorityEnd, "https://".length)
-    return httpsPage(if (end < 0) url else url.substring(0, end))?.rawAuthority
-}
 internal fun isScheduleRoute(url: String?): Boolean = httpsPage(url)?.let {
     it.host.equals("hubs.hust.edu.cn", ignoreCase = true) && (it.port == -1 || it.port == 443) &&
         it.rawPath == "/basicInformation/scheduleInformation/index" && it.rawFragment.isNullOrEmpty()

@@ -2,7 +2,7 @@
 
 StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Android 日程工具。**队列**回答「我现在要做什么」，**栈帧**记录「我为什么停下、怎样接回去」。**DAG** 决定为选定目标先做什么，**时间轴**决定哪天几点做，**课表**标出已经占用的时段。一项工作不因换视图而变成几份任务。
 
-**当前交付：M3 华科课表。** 今天以单条竖轴呈现任务与固定课程；今天和工作台右下角的圆形 `+` 创建同一种任务。课表支持原始文件和校内 WebView 导入、逐项修正、确认差异、按学期替换和按周查看。文件路径已在设备上从系统选择器走到入库；没有用真实账号验证登录后的提取。M1、M2 数据可原地升级。流程图、对话、玻璃及联盟转场仍属 M4–M6。
+**当前交付：M3 华科课表。** 今天以单条竖轴呈现任务与固定课程；今天和工作台右下角的圆形 `+` 创建同一种任务。课表可在手机教务网页直接提取，也可导入原始文件；两者均先核对再按学期替换。另有独立的 Chrome 浏览入口。未使用真实校园账号验收登录后的提取。M1、M2 数据可原地升级。流程图、对话、玻璃及联盟转场仍属 M4–M6。
 
 ## 起点与产品决定
 
@@ -11,7 +11,7 @@ StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Andr
 - 规划时本机有 Android Studio、`adb`、JDK 17/21，系统默认 Java 27。`~/Android/Sdk/platforms` 仅有 `android-36.1`，37.0 的 x86_64 镜像目录仅见 `.installer`，`~/.android/avd` 为空。不能当成可启动设备；规划阶段未装 SDK、未启设备、未运行应用。
 - 恢复默认按帧内原序插队首，可改队尾或整帧切换，不得覆盖眼前未完成的工作。「顶级」指**选定的目标事件**：取前置及目标本身的合法顺序，不做截止时间倒排。
 - 日程留在设备，LLM 采用用户自填 OpenAI 兼容地址、模型和密钥（BYOK）。「接口」指 UI 和模型共用的完整**本地业务接口**；不监听端口、不向外部客户端开放。模型可查、可提案，不能自己确认写入。无账号、云端网关或云同步前提。
-- 内置华科导入器走一次性 WebView 或本人导出的原始文件，同一 Kotlin 解析器、同一份预览、确认后事务写入。保留来源 MIT 版权；不采集密码、Cookie，不把校方页面给模型。
+- 华科网页导入参照 [WakeUp 的教务导入流程](https://www.wakeup.fun/doc/import_from_eas.html)：手机登录、进入课表、点提取、核对。只借交互，不复制源码。网页和本人导出的 JSON 共用 Kotlin 解析器和确认事务；不采集密码、Cookie，不把校方页面给模型。
 
 ## 交付顺序
 
@@ -85,14 +85,14 @@ interface PlannerApi {
 
 编译期登记 `HustCourseImporter`（插件 ID `hust-hub`）。`CourseImporter.parse(rows: JsonArray, term: TermSpec): ImportDraft` 是纯 Kotlin，无网络、DAO 或密码。只支持两条已知输入，两路共用解析/预览：
 
-1. WebView 从固定的[校方 HTTPS 登录页](https://hubs.hust.edu.cn/login)进入；本人登录后打开 [HUB 总课表](https://hubs.hust.edu.cn/basicInformation/scheduleInformation/index)，选学期、点「提取」。未登录访问总课表时，校方实测重定向到 HTTP 登录页；不发送该明文请求，只对这个确切的主框架 GET 重定向重新打开固定 HTTPS 地址，不带原请求参数或正文。移植 `../WadwaitaUp/browser.py:37–62` 的 Vue 父链查找，桌面调用路径在 `:103–169`，不搬桌面浏览器。
+1. 「从 HUB 网页提取课表」在手机内打开[校方登录页](https://hubs.hust.edu.cn/login)。本人完成认证后点「总课表」，选学期，点「提取」进入学期确认，无需电脑或中间文件。`app/src/main/assets/importers/hust-hub.js` 的 Vue 父链查找依据 `../WadwaitaUp/browser.py:37–62`。
 2. Android 系统文件选择器选本人导出的原始周数组 JSON；格式依据 `../WadwaitaUp/tools/hust_converter.py:6–16,84–100`。不架中转服务，不承诺兼容未核实格式。
 
-**网页边界。** 登录与验证在同一 [`WebView`](https://developer.android.com/develop/ui/compose/migrate/interoperability-apis/views-in-compose) 中完成。HTTPS 跳转和页面资源不限制域名，允许第三方身份服务再跳回 HUB；原生顶栏显示当前网站（含非默认端口），提醒用户核对。**能打开不等于能提取**：仅当用户点提取、主框架 origin 恰为 `https://hubs.hust.edu.cn` 且为总课表路由，才执行 APK 内 `app/src/main/assets/importers/hust-hub.js`；脚本再次核对 origin。只返回 `ZC/KS/MONDAY…SUNDAY/KCMC/JC/JSMC` 投影。Kotlin 解两层 JSON，校验导航代次，离页或换学期作废旧结果。
+**独立浏览。** 「用 Chrome 浏览 HUB」通过 [AndroidX Browser 1.10.0](https://developer.android.com/jetpack/androidx/releases/browser#1.10.0)（Apache-2.0）打开真正的 [Chrome Custom Tab](https://developer.chrome.com/docs/android/custom-tabs/guide-get-started)，使用 Chrome 自己的登录态、证书策略与导航。只打开固定的登录入口，不传正在使用的认证 URL。Chrome 不向宿主开放校方 DOM 或 Cookie；这个入口用于浏览，不是提取器。
 
-登录会话使用网站自己的 JavaScript、DOM 存储和第一方 Cookie，不启用第三方 Cookie，不注册原生 JS bridge，不忽略 TLS，也不放开明文、混合内容或文件访问。新会话前及结束/取消时调用 [`CookieManager.removeAllCookies`](https://developer.android.com/reference/android/webkit/CookieManager) 清除持久 Cookie 并等回调，清 WebStorage、缓存/历史，离页销毁 WebView；不承诺服务端登出。遵循 [WebView 安全指引](https://developer.android.com/privacy-and-security/risks/insecure-webview-native-bridges)。不抓密码或 Cookie，登录页不显示会发送页面内容的 AI 控件。
+**浏览与提取分开。** 手机提取器用 [Android System WebView](https://developer.android.com/reference/android/webkit/WebView)。HTTP/HTTPS 页面及跨域验证交给 Chromium，不设校方域名白名单，不改写重定向。HTTP 是明文，App 不会把它变成安全连接。第三方登录 Cookie 仅限该会话；保留系统证书验证，不注册原生 JS bridge。只有当前显示的页面是 [HUB 总课表](https://hubs.hust.edu.cn/basicInformation/scheduleInformation/index) 且用户点提取，才运行 APK 内脚本；只取周次、日期、星期、课名、节次、教室。导航或换学期会使未完成的提取失效。
 
-API 37 设备已从 `hubs.hust.edu.cn` 进入 `pass.hust.edu.cn` 的「您正在登录 HUB 系统」表单，非课表页不能提取；未输入账号或验证码。给用户试用的包用 `./gradlew :app:assemblePreview` 构建，路径是 `app/build/outputs/apk/preview/app-preview.apk`：不可调试，与本机 M1/M2 调试包同签名，可覆盖安装。`debug` 包只用于开发；实测已授权的 ADB 仍可检查其 WebView，不用于真实登录。断网设备测试验证进入和退出时持久测试 Cookie 均被清除，不代表服务端登出。
+退出提取器清理其 WebView 站点数据，不清 Chrome 数据，也不代替校方登出。给用户安装的包用 `./gradlew :app:assemblePreview` 构建，路径为 `app/build/outputs/apk/preview/app-preview.apk`，不可调试、与上一版同签名。`debug` 包只用于开发。
 
 **从原始行到实际上课日期。** `ZC` 为周序，周集合去重排序。按周保留课名 `KCMC`、星期、节次 `JC`、教室 `JSMC`；仅完全相同条目去重，同课换教室不能并掉。`JC` 完整匹配单节或数字区间，支持 `-`、`–`、`—`；倒序、越界、「实践」均保留原文待修正，不默认为第一节。`KS` 只是第一周日期候选。用户确认学期标识、首周周一、总周数和夏/冬作息，可指定中途切换作息的生效日，不猜当年校历。按 `Asia/Shanghai` 实际上课日期套用 `../WadwaitaUp/models.py:33–62` 的两套 12 节预设；来源没有的教师等字段留空。
 
@@ -233,6 +233,8 @@ M1 首验在 Android 17 / API 37 x86_64 专用 AVD 上通过 12 项仪器测试�
 **M3 复现：** `./gradlew :app:testDebugUnitTest --tests '*HustImportTest'`（7 项）；专用 API 37 设备运行 `./gradlew :app:connectedDebugAndroidTest`（含 M1/M2 回归共 33 项）。`CourseConfirmationTest` 在 Room 写事务被占用时确认导入/移除并重建 Activity，两次操作分别只写一次；`CourseConflictBoundsTest` 检查密集冲突拒绝时不改库。设备上从系统选择器导入 [`hust-week-acceptance.json`](../app/src/androidTest/assets/hust-week-acceptance.json)，明确排除 `实践`，确认前学期/课次为 0/0，确认后为 1/3，再导入仍三次。冬令当天拖到 15:00 被拒，同一任务在 15:35 紧接课程成功。v0.2.0 → v0.3.0 原地升级，五张原业务表 SQL 导出逐字节一致，保留 5 个任务、3 个帧和修订 14。
 
 **v0.3.1 定向回归：** `HubLoginNavigationTest` 在真实 WebView 中用本地 HTTPS 响应复现「HUB → 第三方认证页（含另一域的脚本）→ HUB 总课表」，检查第三方不可提取、返回后可提取。`WorkspaceUiTest.addTaskFloatsAboveCenteredNavigationOnTodayAndInTheQueue` 检查圆形加号在胶囊上方且不挤偏导航，并从今天页实际创建一项队列任务。连同投影、Cookie 清理和拖放回归，API 37 设备定向 10 项通过；这些用例不替代本人认证后的在线验收。
+
+**v0.3.2 手机导入：** Android 17 上实际点击「用 Chrome 浏览 HUB」进入 Chrome 145 的 `CustomTabActivity`；两个入口都从 HUB 到达 `pass.hust.edu.cn` 的「您正在登录HUB系统」表单，返回可回到来源选择。未输入校园账号。`HubLoginNavigationTest` 用本机 HTTP 302、跨站验证 Cookie 和用户点击打开的新窗口验证往返；`HubMobileImportTest` 在手机显示合成总课表，通过「总课表 → 提取 → 核对 → 确认」写入一门课，确认前 Room 未变。连同 `HubProjectionTest` 共 5 项设备用例通过；`HustImportTest` 7 项通过。v0.3.1 可覆盖安装。
 
 |阶段 / 用例|输入 → 可观察结果（M1–M3 为回归用例；M3 真实账号提取另验，M4–M6 待开发）|
 |---|---|

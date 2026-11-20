@@ -1,8 +1,12 @@
 package io.github.nakanomk.stacklife.courses
 
+import android.content.ActivityNotFoundException
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.browser.customtabs.CustomTabsClient
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -36,6 +40,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 
+private val chromePackages = listOf("com.android.chrome", "com.chrome.beta", "com.chrome.dev", "com.chrome.canary")
+
 private data class TermForm(val id: String = "", val monday: String = "", val weeks: String = "",
     val initial: BellSchedule = BellSchedule.SUMMER, val switchDate: String = "") {
     fun term(): TermSpec {
@@ -59,8 +65,8 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
 @Composable
 private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, onImported: (String) -> Unit) {
     val scope = rememberCoroutineScope()
-    val resolver = LocalContext.current.contentResolver
-    // Raw inputs and unconfirmed previews never enter saved state; only the receipt and its destination do.
+    val context = LocalContext.current
+    val resolver = context.contentResolver
     var rows by remember { mutableStateOf<JsonArray?>(null) }
     var hub by remember { mutableStateOf(false) }
     var form by remember { mutableStateOf(TermForm()) }
@@ -116,7 +122,20 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
     fun chooseFile() {
         message = null
         try { picker.launch(arrayOf("application/json", "text/*", "application/octet-stream")) }
-        catch (_: android.content.ActivityNotFoundException) { message = "设备没有可用的系统文件选择器" }
+        catch (_: ActivityNotFoundException) { message = "设备没有可用的系统文件选择器" }
+    }
+    fun openChrome() {
+        message = null
+        val chrome = CustomTabsClient.getPackageName(context, chromePackages, true)
+        if (chrome == null) {
+            message = "未找到可用的 Chrome 浏览器"
+            return
+        }
+        val tab = CustomTabsIntent.Builder().build()
+        tab.intent.setPackage(chrome)
+        try { tab.launchUrl(context, Uri.parse(HUB_LOGIN_URL)) }
+        catch (_: ActivityNotFoundException) { message = "无法打开 Chrome 浏览器" }
+        catch (_: SecurityException) { message = "系统不允许启动 Chrome 浏览器" }
     }
     if (hub) {
         HubWebView(onRows = ::receive, onBack = { hub = false }, onFile = { hub = false; chooseFile() })
@@ -149,14 +168,11 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
         val parsed = draft
         val ready = proposal
         when {
-            writing && raw == null -> Unit // Reattached to a receipt, not to a saved file or login.
+            writing && raw == null -> Unit
             raw == null -> Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("选择数据来源", style = MaterialTheme.typography.titleLarge)
-                Text("仅支持华科 HUB 总课表。两种方式都先在设备上核对，不会立即写入。")
-                Button(onClick = ::chooseFile, enabled = !busy, modifier = Modifier.testTag("importCourseFile")) { Text("选择原始 JSON 文件") }
-                OutlinedButton(onClick = { message = null; hub = true }, enabled = !busy, modifier = Modifier.testTag("importCourseHub")) { Text("登录 HUB 总课表") }
-                Text("文件来源：在本人浏览器登录 HUB，进入总课表并选学期，将 getStudentScheduleByXqh 的响应周数组保存为 UTF-8 JSON（不超过 2 MiB）。")
-                Text("登录可能经过第三方 HTTPS 网站，请核对网页上方的域名。退出会清理本机网页登录数据，不代表服务端登出。")
+                Button(onClick = { message = null; hub = true }, enabled = !busy, modifier = Modifier.testTag("importCourseHub")) { Text("从 HUB 网页提取课表") }
+                OutlinedButton(onClick = ::openChrome, enabled = !busy, modifier = Modifier.testTag("browseHubChrome")) { Text("用 Chrome 浏览 HUB") }
+                TextButton(onClick = ::chooseFile, enabled = !busy, modifier = Modifier.testTag("importCourseFile")) { Text("选择原始 JSON 文件") }
             }
             parsed == null -> Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("确认学期与校区作息", style = MaterialTheme.typography.titleLarge)
@@ -223,7 +239,6 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
                             try {
                                 val meetings = withContext(Dispatchers.Default) { parsed.resolve(choices) }
                                 val owner = currentCoroutineContext()
-                                // Even if leaving during the DB read, collect its proposal ID and discard it.
                                 withContext(NonCancellable) {
                                     when (val preview = model.previewImport(parsed.term, meetings)) {
                                         is PreviewResult.Ready -> if (owner.isActive && attached) {

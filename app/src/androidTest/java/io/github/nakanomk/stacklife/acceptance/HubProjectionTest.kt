@@ -86,9 +86,14 @@ class HubProjectionTest {
                 assertEquals("true", eval("$script('a',true)"))
                 decodeHubReply(eval("$script('b',false)")); eval("raw[0].MONDAY[0].JSMC='C'")
                 assertEquals("false", eval("$script('b',true)"))
-                load("https://example.invalid/basicInformation/scheduleInformation/index")
-                val denied = eval("$script('c',false)")
-                assertThrows(SourceProblem::class.java) { decodeHubReply(denied) }
+                for (url in listOf(
+                    HUB_URL.replace("https:", "http:"),
+                    HUB_URL.replace("hubs.hust.edu.cn", "example.invalid"),
+                    "$HUB_URL/other",
+                )) {
+                    load(url)
+                    assertThrows(SourceProblem::class.java) { decodeHubReply(eval("$script('c',false)")) }
+                }
             } finally { scenario.onActivity { it.setContentView(android.widget.FrameLayout(it)); view.destroy() } }
         }
     }

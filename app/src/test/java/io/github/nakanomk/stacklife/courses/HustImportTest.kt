@@ -95,17 +95,14 @@ class HustImportTest {
         assertEquals("14:30", reverse.periodsOn(LocalDate.parse("2026-09-09"))[4].start.toString())
     }
 
-    @Test fun navigationAndExtractionHaveDifferentTrustBoundaries() {
+    @Test fun onlyTheOfficialHttpsTimetableIsExtractable() {
         val provider = "https://identity.example:8443/basicInformation/scheduleInformation/index"
-        assertEquals("identity.example:8443", loginAuthority(provider))
-        assertEquals("identity.example:8443", loginAuthority("$provider?state={ticket|return}"))
-        assertEquals("hubs.hust.edu.cn.example.org", loginAuthority("https://hubs.hust.edu.cn.example.org/"))
-        for (url in listOf("http://hubs.hust.edu.cn/", "https://hubs.hust.edu.cn@other.test/", "file:///x", "intent://app"))
-            assertNull(url, loginAuthority(url))
         assertTrue(isScheduleRoute(HUB_URL))
         assertTrue(isScheduleRoute("$HUB_URL?term=chosen"))
         assertTrue(isScheduleRoute(HUB_URL.replace(".cn/", ".cn:443/")))
-        for (url in listOf(provider, HUB_URL.replace(".cn/", ".cn:8443/"), HUB_URL.replace(".cn/", ".cn.example.org/"),
+        for (url in listOf(provider, HUB_URL.replace("https:", "http:"), HUB_URL.replace("https:", "file:"),
+            HUB_URL.replace("https://", "https://user@"), HUB_URL.replace(".cn/", ".cn@other.test/"),
+            HUB_URL.replace(".cn/", ".cn:8443/"), HUB_URL.replace(".cn/", ".cn.example.org/"),
             "$HUB_URL/else", "$HUB_URL#other", HUB_URL.replace("hubs.", "sso."), HUB_URL.replace("index", "%69ndex")))
             assertFalse(url, isScheduleRoute(url))
     }
