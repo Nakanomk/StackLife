@@ -1,6 +1,7 @@
 package io.github.nakanomk.stacklife.storage
 
 import io.github.nakanomk.stacklife.planner.Appearance
+import io.github.nakanomk.stacklife.planner.AppearanceFields
 import io.github.nakanomk.stacklife.planner.AppearancePatch
 import io.github.nakanomk.stacklife.planner.decodeAppearance
 import io.github.nakanomk.stacklife.planner.encodeAppearance
@@ -84,7 +85,9 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             is PlannerCommand.FrameRestore -> restore(cmd)
             is PlannerCommand.SetRestorePolicy -> policy = cmd.policy
             is PlannerCommand.EditAppearance -> {
-                if (cmd.expected != null && cmd.expected != originalAppearance) invalid("外观设置已变更，请按最新设置重新编辑。")
+                val expected = cmd.expected
+                if (expected != null && (if (cmd.patch is AppearanceFields) !cmd.patch.matchesBaseline(expected, originalAppearance)
+                    else expected != originalAppearance)) invalid("外观设置已变更，请按最新设置重新编辑。")
                 appearance = cmd.patch.applyTo(appearance ?: originalAppearance)
             }
             is PlannerCommand.GraphCreate -> {

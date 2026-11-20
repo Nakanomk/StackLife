@@ -39,10 +39,12 @@ class AppearanceTest {
     @Test fun previewCanBeCancelledAndReducedTransparencyAlwaysWins() {
         runBlocking { store.apply(PlannerCommand.SetRestorePolicy(RestorePolicy.SWAP)) }
         show(); editor("材质与动态")
-        field("启用局部玻璃").performClick(); field("减少透明度").performClick()
-        assertFalse(runBlocking { preferences().appearance.glass })
+        ui.onNodeWithText("设置分组").assertDoesNotExist()
+        ui.onNodeWithText("色彩来源").assertDoesNotExist()
+        field("启用液态玻璃").assertIsOn().performClick(); field("减少透明度").performClick()
+        assertTrue(runBlocking { preferences().appearance.glass })
         ui.onNodeWithText("取消").performClick(); visible(hasText("材质与动态") and hasClickAction()).performClick()
-        field("启用局部玻璃").assertIsOff().performClick(); field("减少透明度").assertIsOff().performClick()
+        field("启用液态玻璃").assertIsOn(); field("减少透明度").assertIsOff().performClick()
         ui.onNodeWithText("保存外观").performClick(); visible(hasText("模型服务配置"))
         val saved = runBlocking { preferences() }
         assertTrue(saved.appearance.glass && saved.appearance.reduceTransparency); assertEquals(RestorePolicy.SWAP, saved.policy)
@@ -59,8 +61,8 @@ class AppearanceTest {
         ui.onNodeWithText("23 分钟").assertDoesNotExist()
         assertTrue(ui.onNodeWithTag("nav:courses").fetchSemanticsNode().boundsInRoot.left < ui.onNodeWithTag("nav:today").fetchSemanticsNode().boundsInRoot.left)
         task.performClick(); visible(hasText("任务详情")).assertIsDisplayed(); ui.onNodeWithContentDescription("返回").performClick(); visible(hasText("持久队列"))
-        editor("色彩"); field("恢复默认外观").performClick(); ui.onNodeWithText("保存外观").performClick(); visible(hasText("模型服务配置"))
-        assertEquals(Appearance(), runBlocking { preferences().appearance })
+        editor("色彩"); field("恢复本页默认").performClick(); ui.onNodeWithText("保存外观").performClick(); visible(hasText("模型服务配置"))
+        assertEquals(layout.copy(theme = ThemeMode.SYSTEM, palette = PaletteMode.DYNAMIC, seed = Appearance().seed), runBlocking { preferences().appearance })
     }
 
     @OptIn(ExperimentalTestApi::class)
@@ -92,5 +94,11 @@ class AppearanceTest {
         assertTrue(store.api.preview(listOf(PlannerCommand.EditAppearance(AppearancePatch.Replace(a.copy(haptics = false)), expected = a))) is PreviewResult.Rejected)
         store.reopen()
         assertEquals(PolicyView(RestorePolicy.APPEND, Appearance(compact = true, glass = true)), preferences())
+        val snapshot = preferences().appearance
+        store.apply(PlannerCommand.EditAppearance(AppearanceFields(AppearanceGroup.MATERIAL,
+            kotlinx.serialization.json.JsonObject(mapOf("glass" to kotlinx.serialization.json.JsonPrimitive(false))))))
+        store.apply(PlannerCommand.EditAppearance(AppearanceFields(AppearanceGroup.LAYOUT, null), expected = snapshot))
+        assertFalse(preferences().appearance.compact)
+        assertFalse(preferences().appearance.glass)
     }
 }

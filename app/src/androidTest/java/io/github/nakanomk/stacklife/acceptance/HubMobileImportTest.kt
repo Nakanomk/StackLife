@@ -96,7 +96,7 @@ class HubMobileImportTest {
         assertNotImported()
         ui.onNode(confirm).performClick()
 
-        await(hasTestTag("course-term") and hasText(term.id)).assertIsDisplayed()
+        await(hasTestTag("course-week") and hasText(term.id)).assertIsDisplayed()
         ui.onNodeWithTag("course-week").assertTextContains("第 1 周")
         val week = store.api.observe(PlannerQuery.Week(term.id, 1)).first() as CourseWeek
         assertEquals(term, week.term)

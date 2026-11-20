@@ -21,6 +21,8 @@ internal interface CourseDao {
     @Query("SELECT * FROM course_terms WHERE termId=:id AND source=:source") fun term(id: String, source: String): TermRow?
     @Query("SELECT * FROM course_meetings WHERE termId=:id AND source=:source ORDER BY startMillis,endMillis,title,room")
     fun meetings(id: String, source: String): List<CourseRow>
+    @Query("SELECT DISTINCT title FROM course_meetings WHERE termId=:id AND source=:source ORDER BY title")
+    fun orderedTitles(id: String, source: String): List<String>
     @Query("SELECT * FROM course_meetings WHERE startMillis < :end AND endMillis > :start ORDER BY startMillis,endMillis,termId,title,room")
     fun intersecting(start: Long, end: Long): List<CourseRow>
     @Upsert fun put(term: TermRow)

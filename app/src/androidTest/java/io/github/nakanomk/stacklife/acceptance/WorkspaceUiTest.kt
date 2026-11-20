@@ -3,7 +3,10 @@ package io.github.nakanomk.stacklife.acceptance
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -81,6 +84,31 @@ class WorkspaceUiTest {
         ui.onNodeWithTag("nav:courses").performClick()
         await(hasTestTag("course-import")).assertIsDisplayed()
         ui.onNodeWithTag("add-task").assertDoesNotExist()
+    }
+
+    @Test fun keyboardTraversalVisitsTheVisibleWorkbenchAndSharedDockNotHiddenRoots() {
+        show()
+        val fab = ui.onNodeWithTag("add-task")
+        for (backwards in listOf(false, true)) {
+            fab.performSemanticsAction(SemanticsActions.RequestFocus)
+            var foundDock = false
+            for (i in 0..24) {
+                ui.onRoot().performKeyInput {
+                    if (backwards) withKeyDown(Key.ShiftLeft) { pressKey(Key.Tab) } else pressKey(Key.Tab)
+                }
+                val focused = ui.onAllNodes(isFocused(), useUnmergedTree = true).fetchSemanticsNodes()
+                assertTrue("Keyboard focus left the visible semantics tree", focused.isNotEmpty())
+                for (node in focused) {
+                    val bounds = node.boundsInRoot
+                    assertTrue("Off-screen keyboard target: ${node.id}", bounds.width > 0 && bounds.height > 0)
+                    val tag = node.config.getOrNull(SemanticsProperties.TestTag).orEmpty()
+                    if (tag.startsWith("nav:") || tag == "assistant-input") foundDock = true
+                }
+                ui.onNodeWithTag("queue").assertIsDisplayed()
+                if (foundDock) break
+            }
+            assertTrue("Keyboard must reach the shared dock in either direction", foundDock)
+        }
     }
 
     @Test fun pushSelectBThenResumeAThroughTheWorkbench() {

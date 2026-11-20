@@ -2,7 +2,7 @@
 
 StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Android 日程工具。**队列**回答「我现在要做什么」，**栈帧**记录「我为什么停下、怎样接回去」。**DAG** 决定为选定目标先做什么，**时间轴**决定哪天几点做，**课表**标出已经占用的时段。一项工作不因换视图而变成几份任务。
 
-**当前交付：v0.6.1 · M6 后的界面修订。** 改为 Android 标准字体、列表与紧凑操作栏；助理从底部直接编辑和发送。默认实色，可分别为浮动导航、助理输入条开启局部折射。普通包不含联盟 SDK。支持真机的 OPEN/BACK、分发许可、固定真机帧预算和真实 BYOK 服务各自验收，不以模拟器或回环请求代证。
+**当前交付：v0.7.0 · 连续导航与日历。** 四个主页面横向平移，共用底部输入条；日程和课表可独立横滑。默认液态玻璃，不支持或关闭时用同形 MD3。助理授权与写入差异仍须明确操作。普通包不含联盟 SDK；不以模拟器或回环请求代证真机 OPEN/BACK、帧预算或真实 BYOK。
 
 ## 起点与产品决定
 
@@ -100,7 +100,7 @@ interface PlannerApi {
 
 单次导入预览先计数，再生成冲突明细。超过 256 对受影响的重叠时，提示检查源文件，不截断课次后提交；课名和教室各限 256 个 UTF-16 单元，超长进入可修正条目。日/周视图中一门课超过 8 个冲突对象时显示确切总数，避免把大量课程两两展开。
 
-**阅读与失败路径。** 周网格用 [Android Week View 5.1.2](https://github.com/tobiasschuerg/android-week-view/tree/5.1.2) 的 `WeekView` / `WeekLayout.Periods`；JitPack 限该依赖组，锁 tag 和制品校验值。周次可切换，点课看教室、节次和周次。网格只读，不承担跨托盘拖放；当天实例在同一轴上为锁定块。Vue 字段非公开协议；未登录、未加载、结构变化、SSO 拒内嵌、校园网不可达，应指出原因、保留现有课表并提供真实文件入口。文件通过不代表在线登录通过。
+**阅读与失败路径。** 周视图按 [WakeUp](https://www.wakeup.fun/images/mobile3.png) 的「七日列 × 实际节次」排列；课程块用高饱和底色，课名、地点和冲突标记统一白字。按学期内的课程名分色，同课跨周/换教室不变。冲突并列，点课看教室、节次、实际起止及冲突；点日期或「课表选项 → 课程列表」提供等价入口。横向切相邻周，纵向滚节次，周次胶囊可直接跳周。切学期、导入和移除集中在课表选项。无课表时胶囊直接提供导入。当天实例仍是时间轴的锁定块。登录、加载或校园网失败不覆盖原课表，文件通过不代表在线登录通过。
 
 **许可。** 移植部分随附 `../WadwaitaUp/LICENSE` 完整 MIT 文本及 `Copyright (c) 2024–2026 Nakanomk`；不携带个人样本。
 
@@ -110,12 +110,12 @@ interface PlannerApi {
 
 - 画布使用 [KotlinFlow 1.0.1 / MIT](https://repo.maven.apache.org/maven2/io/github/joaonart/kotlinflow/1.0.1/) 绘制有向边并处理平移、双指缩放与全图适配；不引示例皮肤、不当数据库。该版本内建节点拖动把取消和松手交给同一回调，`onConnect` 不派发；节点移动、箭头拖到后继的命中及取消由应用适配。库用物理像素，节点位置按 dp 保存。领域层拒绝自环、重复边、缺失/跨图端点、会成环的边；说明具体冲突，不留半条边或部分生成物。
 - 选一个目标，取其**传递前驱和自身**的诱导子图，稳定拓扑排序；并列就绪节点按创建顺序，再按 ID，不用坐标或画布排版决定优先级。用 [JGraphT Core](https://jgrapht.org/) `org.jgrapht:jgrapht-core:1.5.3`（上游双许可，按 EPL-2.0 保留许可与来源）：`DirectedAcyclicGraph.addEdge/getAncestors`、包含目标的子图、带显式比较器的 [`TopologicalOrderIterator`](https://jgrapht.org/javadoc/org.jgrapht.core/org/jgrapht/traverse/TopologicalOrderIterator.html)。拖节点只保存布局。
-- 先看有序清单再「生成栈帧」；默认原因「为目标〈标题〉生成」，可改非空。一次事务生成一帧、新任务实例及有序快照，不经过当前队列。未选目标不能生成，孤立目标一项，菱形前置只出现一次。再次主动生成是新帧，重放同一确认不是；生成顺序不限制之后选择恢复其中几项。
+- 「生成拓扑排序」打开同一张操作单：使用已选节点，或自动选择唯一终点；多个终点可手选。选目标即展示依次要做的事，不写库。点「加入队列」一次按序追加新任务，不动现有队列和帧；「存为栈帧」一次生成有序快照，不动当前队列。帧原因默认「为目标〈标题〉生成」，可修改。两者均校验用户看到的修订，数据变了才要求重新核对；重复点击不重复写入。
 - 画布右下角「一键整理」按最长前置链从左到右分层，同层保持原序，未连线节点另排。沿每条边前置都在后继左侧；按节点实际高度留白。一次只提交坐标并适配全图，不动依赖、目标生成顺序、队列或历史帧。重复整理同一布局不增加修订。
 
 ## M5 对话
 
-每个业务页底部直接显示单行消息输入和纸飞机；日期、栈帧、任务、节点或周次绑定当前入口。键入时不打开面板、不联网。点发送或按键盘发送后，`AssistantSheet` 展示服务与授权范围；首次明确允许才发出这条消息一次。未配置引导设置，返回保留原入口本地草稿，不自动发送。切页不把草稿带入其他上下文，关闭面板取消请求。原始课表、HUB 登录与密钥编辑没有助理输入栏。
+每个业务页底部直接输入并用纸飞机发送。四个根页共用一个输入框：切目的地、自然日或教学周不会销毁正在编辑的草稿；非空草稿保留最初的发送范围，换页时有范围标记。键入或切页不联网，点发送才打开本机授权页；用户允许后才发送。左右气泡区分本人/助理，圆形 `!` 按钮收起蓝色提示、黄色警告、红色错误说明；服务地址、授权和待应用差异无需展开即可核对。原始课表、HUB 登录与密钥页无助理。
 
 **连接。** 用 OkHttp `5.5.1` + `kotlinx.serialization`。用户提供含 API 前缀的 HTTPS base URL、模型、Key；在 base URL 后追加 `chat/completions`。使用 [OpenAI 兼容 function tools](https://platform.openai.com/docs/guides/function-calling) 和 `tool_calls`，不从散文猜命令；模型必须支持这套协议，只支持 Responses 的不冒充兼容。用 [Android Keystore](https://developer.android.com/privacy-and-security/keystore) 中不可导出的 AES-GCM 密钥加密 BYOK，每次写用新 IV，密文放私有 `noBackupFilesDir`。换服务域需重新授权/填 key，不跨域转发鉴权。无账号、无托管中转、无后台自动操作。
 
@@ -140,9 +140,9 @@ interface PlannerApi {
 
 基线是 Android 标准 Material 3。字形走平台 sans-serif 与中文回退，不分发苹方或按品牌模拟字形。页名使用 `titleLarge`（22/28sp），普通列表标题 `bodyLarge`（16/24sp），次要信息 `bodyMedium`（14/20sp），导航与时间刻度使用标签角色（12/16sp）。是否强调由信息角色决定，不把普通任务当成展示大标题。使用标准 motion scheme；减少动效仍然生效。
 
-- 浮动胶囊与贴底导航仍可选。底部助理是输入框，不是打开输入框的按钮；键盘出现时收起主导航。右下圆形加号属于页面而非导航或输入条。工作台用下划线标签和普通任务行，队首仅保留「当前优先」语义；DAG、课表和手动操作均不依赖模型。
-- 设置分「色彩」「布局」「材质与动态」「工作台」。色彩可跟随系统/浅/深，Android 12+ 系统动态色或自选种子（默认靛蓝 `#435D92`）。自选色用 [MaterialKolor 6.0.0](https://github.com/jordond/MaterialKolor/releases/tag/6.0.0) 的 `material-kolor-core`、`rememberDynamicScheme` / `MaterialKolors`，把 `SPEC_2025` 角色交给 AndroidX `ColorScheme`，不引带另一套 Material 依赖的适配层；按种子、亮暗和对比度记忆色板。
-- 标准/紧凑密度只减非交互留白。可调四个目的地次序/启动页、任务时长/备注副标题显隐、贴底/浮动、玻璃总开关和导航/助理分项、跟随系统/减弱动画、减少透明度、增强对比、触感随系统/关闭。三种恢复偏好独立于外观重置。外观实时预览、可取消/恢复默认，保存后跨启动生效。默认舒适密度、今天启动（目的地可用后）、动态色（不可用取品牌种子）、玻璃关闭、随系统动效。以 [Google Core App Quality](https://developer.android.com/docs/quality-guidelines/core-app-quality) 的一致交互、横竖屏功能对等与后台恢复为底线。
+- 四个根页面在同一横向分页容器中，导航与助理位于容器外。默认浮动导航，支持改为贴底；键盘出现时收起主导航。根页不重复页名，顶栏中间胶囊放日期、队列/栈、流程图创建或教学周；独立动作用圆形按钮。右下加号属于页面。手动操作不依赖模型。
+- 设置首页按外观、日程助理和工作台恢复策略分组。「色彩」「布局」「材质与动态」各有独立目的地，只显示、保存或恢复本页字段。色彩支持随系统/浅/深、Android 12+ 动态色或种子（默认 `#435D92`）；使用 [MaterialKolor 6.0.0](https://github.com/jordond/MaterialKolor/releases/tag/6.0.0) 生成 `SPEC_2025` 颜色角色。
+- 支持标准/紧凑留白、主导航次序/启动页、任务时长/备注、贴底/浮动、材质总开关和导航/助理分项、减弱动效、减少透明度、增强对比及系统触感。默认舒适、今天、动态色、玻璃开启。旧版自定义配置中省略的 `glass=false` 保持实色；未配置的 `{}` 采用新默认。所有新写入显式保留关闭选择。三种恢复策略不受任何外观重置影响。
 - 首发图标为原创 fumo 颜文字 **`ᗜˬᗜ`**：两只对称方眼和低位短弧嘴，用独立矢量笔画，不依赖字库、商业布偶照片，不强画天子肖像。按 [Android Adaptive Icon](https://developer.android.com/develop/ui/views/launch/icon_design_adaptive) 做 108×108 dp 分层，识别区在中心 66×66 dp，彩色前景/背景及 monochrome 层共用轮廓，不预烘启动器圆角/阴影。空队列小标沿用同一张脸，不用颜文字代替操作标签。
 
 设置草稿只存在于编辑页；退出不写库，保存使用 `PlannerApi` 的同一预览/提交事务。持久化契约是 `planner/Appearance.kt`，Room 4→5 为原设置行加入缺省 `{}` 的外观字段，不迁移队列、快照、时段或模型凭据。主题/平台能力、局部绘制和设置编辑分别在 `StackLifeTheme.kt`、`appearance/`；业务页只读取对应偏好。以后替换导航及页面布局不需要更改排程或恢复规则。
@@ -155,6 +155,11 @@ interface PlannerApi {
 |[PiliPlus 私信编辑器](https://github.com/bggRGjQaUbCoE/PiliPlus/blob/217fb54f51f6764176319bbdedab2a7522d75401/lib/pages/whisper_detail/view.dart#L267-L375) / [设置列表](https://github.com/bggRGjQaUbCoE/PiliPlus/blob/217fb54f51f6764176319bbdedab2a7522d75401/lib/pages/whisper_settings/widgets/item.dart) / [Tasks.org 预计时长行](https://github.com/tasks/tasks/blob/main/app/src/main/java/org/tasks/compose/edit/TimerRow.kt)|底部直接编辑、尾部纸飞机；设置行显示当前值；任务时长按需编辑，不常驻第三个大输入框。三者只借交互，不复制源码。|
 |[BiliPai 底栏材质](https://github.com/jay3-yy/BiliPai/blob/796a876eee5dabd7e364550422c9a9ecbc1cc06d/app/src/main/java/com/android/purebilibili/feature/home/components/BottomBarGlassMaterialPolicy.kt) / [调校](https://github.com/jay3-yy/BiliPai/blob/796a876eee5dabd7e364550422c9a9ecbc1cc06d/app/src/main/java/com/android/purebilibili/feature/home/components/LiquidGlassTuning.kt)|一个真实内容采样源与胶囊同级，主题底色着色、无外壳色散、边缘折射。StackLife 不移植视频界面的发光、按压膨胀、shader 或资源。|
 |[BiliPai 外观](https://github.com/jay3-yy/BiliPai/wiki/Guide-Appearance) / [设置实现](https://github.com/jay3-yy/BiliPai/blob/main/app/src/main/java/com/android/purebilibili/feature/settings/screen/AnimationSettingsScreen.kt) / [材质实现](https://github.com/jay3-yy/BiliPai/blob/main/app/src/main/java/com/android/purebilibili/core/ui/popup/AppGlassSurfaceMaterial.kt) / [LiquidGlassSettingsStore](https://github.com/jay3-yy/BiliPai/blob/main/app/src/main/java/com/android/purebilibili/core/store/home/LiquidGlassSettingsStore.kt)|总开关 + 场景开关 + 能力门控，实色与透明分离、偏好与渲染分离。Kotlin/Compose、GPLv3；不复制代码、shader、资源、存储实现，不照抄 beta BOM/snapshot 依赖。|
+|[BiliPai 悬浮分段](https://github.com/jay3-yy/BiliPai/blob/796a876eee5dabd7e364550422c9a9ecbc1cc06d/app/src/main/java/com/android/purebilibili/feature/home/components/HomeTopTabFloatingDock.kt#L64-L143) / [底搜栏对齐](https://github.com/jay3-yy/BiliPai/blob/796a876eee5dabd7e364550422c9a9ecbc1cc06d/app/src/main/java/com/android/purebilibili/feature/home/components/BottomBarSearchContentLayout.kt) / [分类设置](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/screen/SettingsScreen.kt#L1186-L1221)|工作台悬浮分段、选中指示器、底部搜索与导航对齐、设置分类独立进出。|
+|Apple [Liquid Glass](https://developer.apple.com/videos/play/wwdc2025/219/) / [工具栏](https://developer.apple.com/design/human-interface-guidelines/toolbars) / Android [HorizontalPager](https://developer.android.com/develop/ui/compose/layouts/pager)|工具与内容分层、渐淡磨砂滚动边缘；页间位移由真实分页位置驱动。实色与光学档不替换输入或按钮。|
+|[WakeUp 周表实物](https://www.wakeup.fun/images/mobile3.png) / [周视图实现](https://github.com/YZune/WakeUpSchedule/blob/5d439287a22a64b36d14c08c81bd9fc7bb9a53db/app/src/main/java/com/suda/yzune/wakeupschedule/view/fragment/ScheduleFragment.java#L224-L266) / [Etar 日手势](https://github.com/Etar-Group/Etar-Calendar/blob/6fb46d1606622aecc719b7e5dc15a48528768c94/app/src/main/java/com/android/calendar/DayView.java#L4184-L4202)|七日列、跨节课程色块、点击详情；横向翻页和纵向滚动分开。不搬源码、配色或截图；课程局部发光是本项目要求。|
+|[Telegram 消息左右对齐](https://github.com/TelegramMessenger/Telegram-Android/blob/21f7d109da6ab3506c9e9577f98c6a38771ab335/TMessagesProj/src/main/java/org/telegram/ui/Cells/ChatMessageCell.java#L19055-L19067) / [按对话保存草稿](https://github.com/TelegramMessenger/Telegram-Android/blob/21f7d109da6ab3506c9e9577f98c6a38771ab335/TMessagesProj/src/main/java/org/telegram/messenger/MediaDataController.java#L7916-L7922) / [GitHub Alerts](https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#alerts)|左右短气泡、固定输入栏、草稿不改投；提示分级且有可读文字。无云端草稿，不复制代码或图标。|
+|[GitHub Actions 手动执行](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow#running-a-workflow)|同一处选择输入和执行一次；这里只借交互，拓扑和本地持久化沿用 JGraphT 与 PlannerApi。|
 |[Breezy Weather](https://github.com/breezy-weather/breezy-weather) / [Auxio](https://github.com/OxygenCobalt/Auxio)|今天页的概要/细节排版；当前任务与队列之间的入口（Auxio 是原生 Views，不是 Compose）。|
 |[Metrolist](https://github.com/MetrolistGroup/Metrolist) / [Mihon](https://github.com/mihonapp/mihon)|助理从收起到展开的层次；队列手柄及移动到顶/底。|
 |Flutter [PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus) / [LocalSend](https://github.com/localsend/localsend)|中文标签分组、多选排序；单一目的操作。只借信息结构，不搬旧视觉、播放器架构或插画。|
@@ -172,7 +177,7 @@ interface PlannerApi {
 
 本地实验变体只接受 `-PstacklifeKitAar=/绝对路径/sharedview-kit-1.0.0.5.aar`，SHA-256 必须为 `7c0937ecde545a262619e5fa19d56a21b0ad3fd8013cbc4fe058c497808702bd`。`./gradlew -PstacklifeKitAar=… :app:assembleKitLab` 生成独立 `.kitlab`，只在获准设备本地测试，不交付；`StackLifeKit` 日志仅记协议值。普通 `:app:assemblePreview` 不需要 AAR，也不会打入适配器或详情 Activity。
 
-**可选光学层。** `StackLifeSurface` 保持同一 Material 组件、焦点与布局，唯一折射后端取 [Haze 2.1.0 Glass](https://github.com/chrisbanes/haze/blob/2.1.0/docs/effects/glass/index.md)（Apache-2.0，`haze` / `haze-glass` 同版）。只在导航胶囊和收起的助理胶囊使用 `GlassStyle.regular`、官方主题 surface 色、`HazeInput.Sources`、`HazeSourceRetention.ClearWhenUnavailable` 做折射和高光。不另配一套颜色、不叠全屏滤镜、不用实验性 window backdrop。长对话、恢复清单、登录页、时间轴正文和 DAG 节点均实色。是可选皮肤，不称 Google 官方材质。
+**可选光学层。** `StackLifeSurface` 共用同一形状、焦点和布局，使用 [Haze 2.1.0 Glass](https://github.com/chrisbanes/haze/blob/2.1.0/docs/effects/glass/index.md) 的 `GlassStyle.regular` 和 `HazeSourceRetention.ClearWhenUnavailable`。根页滚动边缘采样正文；胶囊、圆形动作和课程块采样与自己并列的背景平面，不递归采样。课程轻微同色发光只在玻璃生效时绘制。正文、长对话、登录和密钥不加滤镜；关闭时使用同尺寸、同圆角的 MD3 实色。
 
 玻璃仅在 API 33+、硬件加速、非低内存/省电、无减少透明度/高对比要求时可用。否则提示「当前使用实色」及原因，不把模糊称为折射；关玻璃完全卸下光学层。按 [Google 无障碍标准](https://developer.android.com/guide/topics/ui/accessibility/apps)，触控目标至少 48×48 dp，普通文字对比 4.5:1、大字 3:1；TalkBack 读状态并有等价非拖拽操作。系统字体缩放、edge-to-edge 安全区、输入法和旋转都不能遮操作。减少动态与减少透明度分开处理。
 
@@ -247,6 +252,10 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 **v0.6.1 截图复审。** API 37 上原地升级，使用同一份两项队列对照工作台；另以 30 项队列在同一位置、同一滚动手势录制实色和玻璃。第一版玻璃仍能读出输入条下面一行任务的字，最终取 BiliPai 磨砂档的 10dp 扩散、54% 主题着色，去除锐利背景混合，保留 8dp 边缘折射；复拍后不再出现两层文字。360dp、200% 字号的横竖屏保留独立加号，横屏点待排行能进入时间编辑。1800×2420、440 dpi 窗口实际开关 Gboard 并继续输入，草稿保留，导航随键盘收起和恢复。
 
 本次 24 项 Android 定向用例与 9 项请求/传输 JVM 用例通过，涵盖预设与换站密钥、纸飞机与 IME 授权、差异确认、草稿跨尺寸、工作台和时间轴。截图来自 Android 17 模拟器；无物理设备或真实模型密钥，未据此判断真机帧率或外部模型回答。
+
+**v0.7.0 运行截图复审（Android 17 / API 37 模拟器）。** 在同一份本地导入的两周、六门课程上对照升级前后。1080×2340、440 dpi、系统字体 100%：玻璃/实色的逐个课程边界相同。截取课程名白色字芯与文字区的主要底色，六门课中最低对比度分别为浅色玻璃 5.40:1、浅色实色 6.45:1、深色玻璃 8.51:1、深色实色 7.74:1；标准是 [Android 小字 4.5:1](https://developer.android.com/guide/topics/ui/accessibility/apps)。上滚到底，第 12 节的 22:20 结束时间完整露在输入栏上方。
+
+录屏逐帧可见四个根页平移，草稿和标注不动；设备用例核对焦点、同一输入节点 ID、边界与原日期授权。Tab/Shift+Tab 不进入隐藏页。实际把 `Review → Ship` 追加到已有队列，原有两项保留；菱形去重、重复点击、修订过期、一次存帧、按页恢复外观、日期/周横滑与冲突拖拽另由设备用例验证。本轮分批通过 41 个不同 Android 用例及 13 个 JVM 用例。会话截图来自本地 HTTPS 验收服务；未使用外部模型密钥，录屏不作物理设备帧率结论。
 
 |阶段 / 用例|输入 → 可观察结果（校方登录、真实模型、联盟真机和性能有各自的验收条件）|
 |---|---|

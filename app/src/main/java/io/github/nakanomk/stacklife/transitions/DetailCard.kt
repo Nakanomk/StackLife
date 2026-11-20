@@ -18,7 +18,7 @@ internal data class DetailTarget(val kind: String, val id: String) {
 
 /** Only the local system-transition build provides this hook. No capture or registration in the normal app. */
 internal interface DetailTransitionHost {
-    @Composable fun listSource(scroll: LazyListState, bottomClearance: Dp, revision: Long): DetailListSource?
+    @Composable fun listSource(scroll: LazyListState, topClearance: Dp, bottomClearance: Dp, revision: Long): DetailListSource?
 }
 
 internal interface DetailListSource {
@@ -29,10 +29,10 @@ internal interface DetailListSource {
 internal class DetailCardLink(val modifier: Modifier, val open: () -> Unit)
 
 @Composable
-internal fun detailListSource(scroll: LazyListState, bottomClearance: Dp, revision: Long): DetailListSource? {
+internal fun detailListSource(scroll: LazyListState, topClearance: Dp, bottomClearance: Dp, revision: Long): DetailListSource? {
     if (!LocalMotionEnabled.current) return null
     val host = LocalContext.current.applicationContext as? DetailTransitionHost ?: return null
-    return host.listSource(scroll, bottomClearance, revision)
+    return host.listSource(scroll, topClearance, bottomClearance, revision)
 }
 
 @Composable

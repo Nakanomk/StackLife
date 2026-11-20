@@ -37,7 +37,9 @@ sealed interface PlannerQuery {
 sealed interface QueryResult
 
 data class Terms(val terms: List<TermSpec>) : QueryResult
-data class CourseWeek(val term: TermSpec?, val week: Int, val classes: List<ScheduledCourse>) : QueryResult
+data class CourseWeek(val term: TermSpec?, val week: Int, val classes: List<ScheduledCourse>,
+    /** Index in this term's distinct title catalog; only this week's keys leave the read transaction. */
+    internal val colorIndices: Map<String, Int> = emptyMap()) : QueryResult
 
 /** Queue order is priority order; frames are newest first within restorable and then empty frames. */
 data class Workspace(

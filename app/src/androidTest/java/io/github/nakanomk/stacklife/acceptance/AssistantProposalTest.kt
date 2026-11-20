@@ -1,6 +1,7 @@
 package io.github.nakanomk.stacklife.acceptance
 
 import android.graphics.Bitmap
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.compose.foundation.layout.Box
@@ -11,6 +12,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.activity.compose.setContent
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.unit.DpSize
@@ -78,7 +80,10 @@ class AssistantProposalTest {
         return ui.onNode(matcher)
     }
     private fun tag(value: String) = await(hasTestTag(value))
-    private fun send(text: String) { tag("assistant-input").performTextReplacement(text); tag("assistant-send").performClick() }
+    private fun send(text: String) {
+        tag("assistant-input").performTextReplacement(text)
+        await(hasTestTag("assistant-send") and isEnabled()).performClick()
+    }
     private fun startTurn(text: String) { send(text); tag("assistant-consent").performClick() }
     private fun toolCall(name: String, args: String) {
         val fn = buildJsonObject { put("name", name); put("arguments", args) }
@@ -111,6 +116,8 @@ class AssistantProposalTest {
         toolCall("planner_query", """{"kind":"current"}"""); toolCall("planner_propose", composite)
         consent.performClick(); ui.runOnUiThread { assistant.authorize() }
         val apply = tag("assistant-apply"); val pending = requireNotNull(assistant.state.value.pending)
+        tag("assistant-notice").assertContentDescriptionEquals("警告与说明")
+        ui.onNodeWithTag("assistant-notice-details").assertDoesNotExist()
         assertEquals(before, store.state()); assertTrue(graphList().isEmpty())
         val first = server.takeRequest(3, TimeUnit.SECONDS)!!; val second = server.takeRequest(3, TimeUnit.SECONDS)!!
         assertEquals("/acceptance/v1/chat/completions", first.target)
@@ -160,6 +167,66 @@ class AssistantProposalTest {
         assertEquals(0, server.requestCount)
     }
 
+    @Test fun changingRootTabsKeepsFocusAndBindsTheDraftToTheOriginalDateUntilConsent() {
+        val prompt = "安排还是刚才那一天"
+        val input = tag("assistant-input")
+        input.performClick().performTextInput(prompt)
+        val origin = assistant.state.value.draftPage as AssistantPage.Day
+        // Hide the IME, not the field's focus; some compact docks omit navigation while the IME shows.
+        ui.activityRule.scenario.onActivity { activity ->
+            requireNotNull(activity.getSystemService(InputMethodManager::class.java))
+                .hideSoftInputFromWindow(activity.window.decorView.windowToken, 0)
+        }
+        await(hasContentDescription("后一天")).performClick()
+        input.assertIsFocused().assertTextContains(prompt)
+        val before = input.fetchSemanticsNode()
+        tag("nav:graphs").performClick()
+        input.assertIsFocused().assertTextContains(prompt)
+        val after = input.fetchSemanticsNode()
+        assertEquals("Changing root pages must retain the focused editor", before.id, after.id)
+        assertEquals("The persistent field must not jump", before.boundsInRoot, after.boundsInRoot)
+        input.assertContentDescriptionContains(origin.date.toString(), substring = true)
+        assertEquals(origin, assistant.state.value.draftPage)
+        assertEquals(0, server.requestCount)
+        capture("assistant-bound-draft.png")
+        input.performImeAction()
+        tag("assistant-consent").assertIsDisplayed()
+        assertEquals(origin, assistant.state.value.page)
+        await(hasText("将发往 https://127.0.0.1:", substring = true)).assertTextContains(origin.date.toString(), substring = true)
+        capture("assistant-bound-consent.png")
+        assertEquals(0, server.requestCount)
+        server.enqueue(MockResponse(body = """{"choices":[{"message":{"role":"assistant","content":"收到"},"finish_reason":"stop"}]}"""))
+        tag("assistant-consent").performClick()
+        val answer = await(hasText("收到"))
+        val outbound = await(hasText(prompt))
+        assertTrue(outbound.fetchSemanticsNode().boundsInRoot.left > answer.fetchSemanticsNode().boundsInRoot.left)
+        assertEquals(1, server.requestCount)
+        capture("assistant-chat.png")
+        val body = server.takeRequest(3, TimeUnit.SECONDS)!!.body!!.utf8()
+        assertTrue("selectedDate" in body && origin.date.toString() in body)
+    }
+
+    @Test fun noticeIsCollapsedByDefaultAndSeverityRemainsReadableWithoutColor() {
+        send("请读取队列")
+        val consent = tag("assistant-consent")
+        val notice = tag("assistant-notice")
+        notice.assertContentDescriptionEquals("提示与说明")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已收起"))
+        ui.onNodeWithTag("assistant-notice-details").assertDoesNotExist()
+        notice.performClick()
+        tag("assistant-notice-details").assertIsDisplayed()
+        notice.performClick()
+        ui.onNodeWithTag("assistant-notice-details").assertDoesNotExist()
+        assertEquals(0, server.requestCount)
+        server.enqueue(MockResponse.Builder().code(401).body("private-server-body").build())
+        consent.performClick()
+        await(hasText("401", substring = true))
+        notice.assertContentDescriptionEquals("错误与说明").performClick()
+        tag("assistant-notice-details").assertIsDisplayed()
+        capture("assistant-error-details.png")
+        ui.onNodeWithText("private-server-body", substring = true).assertDoesNotExist()
+    }
+
     @Test fun configurationRoundTripReturnsOnlyTheLocalDraftAndBackCancelsConsent() = runBlocking {
         connection.clear()
         val prompt = "先留在本机"
@@ -190,6 +257,7 @@ class AssistantProposalTest {
         connection.save("https://127.0.0.1:${server.port}/acceptance/v1", "本地验收模型", "replacement-fixture")
         consent.performClick()
         await(hasText("服务配置已变更，请重新授权。"))
+        tag("assistant-notice").assertContentDescriptionEquals("警告与说明")
         val state = assistant.state.value
         assertFalse(state.allowed); assertTrue(state.lines.isEmpty()); assertTrue(state.draft.isEmpty())
         assertNull(state.pending); assertEquals(0, server.requestCount)
@@ -263,7 +331,7 @@ class AssistantProposalTest {
                 assertTrue(draft.draftId in sent); assertFalse("仅本机地点" in sent || "KCMC" in sent || "本地课程" in sent)
             }
             tag("assistant-apply").performClick(); await(hasText("已应用这些更改。")); await(hasText("关闭")).performClick()
-            await(hasTestTag("course-term") and hasText("秋季")).assertIsDisplayed()
+            await(hasTestTag("course-week") and hasText("秋季")).assertIsDisplayed()
             val week = store.api.observe(PlannerQuery.Week("秋季", 1)).first() as CourseWeek
             assertEquals("仅本机地点", week.classes.single().meeting.room); assertEquals(2, store.state().revision)
         } finally { file.delete() }

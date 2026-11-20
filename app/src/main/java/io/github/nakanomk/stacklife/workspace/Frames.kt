@@ -25,14 +25,14 @@ import io.github.nakanomk.stacklife.transitions.detailListSource
 @Composable
 internal fun FrameList(
     frames: List<FrameView>, scroll: LazyListState, onFrame: (String) -> Unit, onCreate: () -> Unit,
-    shared: SharedModifier, bottomClearance: Dp, revision: Long,
+    shared: SharedModifier, topClearance: Dp, bottomClearance: Dp, revision: Long,
 ) {
-    val source = detailListSource(scroll, bottomClearance, revision)
+    val source = detailListSource(scroll, topClearance, bottomClearance, revision)
     val available = remember(frames) {
         frames.indexOfFirst { it.remaining == 0 }.let { if (it == -1) frames.size else it }
     }
     LazyColumn(Modifier.fillMaxSize().then(source?.modifier ?: Modifier).testTag("frames"), state = scroll,
-        contentPadding = dockListPadding(bottomClearance), verticalArrangement = listSpacing) {
+        contentPadding = dockListPadding(topClearance, bottomClearance), verticalArrangement = listSpacing) {
         item {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("$available 帧可恢复 · ${frames.size - available} 帧已取空", Modifier.weight(1f),

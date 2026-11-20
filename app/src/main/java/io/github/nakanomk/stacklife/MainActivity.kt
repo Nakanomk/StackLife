@@ -3,18 +3,24 @@ package io.github.nakanomk.stacklife
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.platform.LocalContext
@@ -43,6 +49,7 @@ import io.github.nakanomk.stacklife.today.*
 import io.github.nakanomk.stacklife.workspace.*
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -62,6 +69,8 @@ class MainActivity : ComponentActivity() {
 @Serializable private data class EditAppearance(val group: String) : NavKey
 @Serializable private data object ModelConnection : NavKey
 @Serializable private data object AddTask : NavKey
+@Serializable private data object PushTasks : NavKey
+@Serializable private data object CreateFrame : NavKey
 @Serializable private data object ImportCourses : NavKey
 @Serializable private data class RemoveTerm(val id: String) : NavKey
 @Serializable private data class GraphEditor(val id: String) : NavKey
@@ -118,36 +127,69 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
             predictivePopTransitionSpec = if (animate) defaultPredictivePopTransitionSpec() else { { _ -> noMotion() } },
             entryProvider = entryProvider {
                 entry<Home> {
-                    val startPage = LocalAppearance.current.start.key
+                    val order = LocalAppearance.current.order
+                    val startPage = LocalAppearance.current.start
                     var destination by rememberSaveable { mutableStateOf(startPage) }
-                    val pages = rememberSaveableStateHolder()
-                    val bar = rememberDestinationCapsule(destination) { destination = it }
-                    pages.SaveableStateProvider(destination) { CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
-                        if (destination == "today") {
-                            val local = deviceDay()
-                            val date = selectedDate?.let(LocalDate::ofEpochDay) ?: local.date
-                            val query = remember(date, local.zone) { PlannerQuery.Day(date, local.zone) }
-                            key(query) {
-                                val state by remember(model, query) { model.day(query) }
-                                    .collectAsStateWithLifecycle(initialValue = ReadState.Loading)
-                                ReadPanel(state) { plan ->
-                                    TodayScreen(plan, model, model::checkSlot,
-                                        onDate = { selectedDate = it.takeUnless { d -> d == local.date }?.toEpochDay() },
-                                        onEdit = { id -> plan.editorFor(id)?.let(navigate) },
-                                        onSettings = { navigate(Preferences) }, onAdd = { navigate(AddTask) }, navigationBar = bar,
-                                        revealStart = revealStart, onRevealed = { revealStart = null })
+                    var frames by rememberSaveable { mutableStateOf(false) }
+                    var courseScope by remember { mutableStateOf<AssistantPage>(AssistantPage.Terms) }
+                    val local = deviceDay()
+                    val date = selectedDate?.let(LocalDate::ofEpochDay) ?: local.date
+                    val pager = rememberPagerState(initialPage = order.indexOf(destination)) { order.size }
+                    val moves = rememberCoroutineScope()
+                    LaunchedEffect(order) { pager.scrollToPage(order.indexOf(destination)) }
+                    val position = remember(pager) { derivedStateOf { pager.currentPage + pager.currentPageOffsetFraction } }
+                    val bar = rememberDestinationCapsule(destination.key, position) { key ->
+                        val target = order.indexOfFirst { it.key == key }
+                        destination = order[target]
+                        moves.launch { if (animate) pager.animateScrollToPage(target, animationSpec = tween(320)) else pager.scrollToPage(target) }
+                    }
+                    val scope = when (destination) {
+                        Destination.TODAY -> AssistantPage.Day(date, local.zone)
+                        Destination.WORKSPACE -> if (frames) AssistantPage.Frames else AssistantPage.Queue
+                        Destination.GRAPHS -> AssistantPage.Graphs
+                        Destination.COURSES -> courseScope
+                    }
+                    CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
+                        Page {
+                            DockOverlay(bar, scope) { bottom ->
+                                CompositionLocalProvider(LocalRootBottom provides bottom) {
+                                    HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = false,
+                                        beyondViewportPageCount = order.lastIndex, key = { order[it].key }) { index ->
+                                        val page = order[index]
+                                        val front = page == destination
+                                        val inViewport by remember(pager, index) {
+                                            derivedStateOf { kotlin.math.abs(position.value - index) < 1f }
+                                        }
+                                        val visible = front || inViewport
+                                        val pane = if (front) Modifier else Modifier.clearAndSetSemantics {}
+                                        Box(pane.fillMaxSize().layout { child, constraints ->
+                                            val measured = child.measure(constraints)
+                                            layout(measured.width, measured.height) { if (visible) measured.place(0, 0) }
+                                        }.focusProperties { onEnter = { if (!front) cancelFocusChange() } }.focusGroup()) {
+                                            CompositionLocalProvider(LocalPlannerGlassAllowed provides visible) {
+                                                when (page) {
+                                                    Destination.TODAY -> TodayRoute(model, date, local.zone,
+                                                        onDate = { selectedDate = it.takeUnless { d -> d == local.date }?.toEpochDay() },
+                                                        onEdit = navigate, onSettings = { navigate(Preferences) }, revealStart = revealStart,
+                                                        onRevealed = { revealStart = null }, onAdd = { navigate(AddTask) })
+                                                    Destination.WORKSPACE -> WorkspacePanel(model) { workspace ->
+                                                        WorkspaceScreen(workspace, model, { navigate(TaskDetail(it)) }, { navigate(FrameDetail(it)) },
+                                                            { navigate(Preferences) }, shared, frames, { frames = it }, { navigate(PushTasks) },
+                                                            { navigate(CreateFrame) }, { navigate(AddTask) })
+                                                    }
+                                                    Destination.GRAPHS -> GraphsRoute(model, { navigate(GraphEditor(it)) }, { navigate(Preferences) })
+                                                    Destination.COURSES -> CoursesRoute(model, selectedTerm, selectedWeek,
+                                                        onTerm = { selectedTerm = it.id; selectedWeek = null }, onWeek = { selectedWeek = it },
+                                                        onImport = { navigate(ImportCourses) }, onRemove = { navigate(RemoveTerm(it.id)) },
+                                                        onSettings = { navigate(Preferences) }, onScope = { courseScope = it })
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                        } else if (destination == "workspace") WorkspacePanel(model) { workspace ->
-                            WorkspaceScreen(workspace, model, { navigate(TaskDetail(it)) }, { navigate(FrameDetail(it)) },
-                                { navigate(Preferences) }, shared, navigationBar = bar, onAdd = { navigate(AddTask) })
-                        } else if (destination == "graphs") {
-                            GraphsRoute(model, { navigate(GraphEditor(it)) }, { navigate(Preferences) }, bar)
-                        } else CoursesRoute(model, selectedTerm, selectedWeek,
-                            onTerm = { selectedTerm = it.id; selectedWeek = null }, onWeek = { selectedWeek = it },
-                            onImport = { navigate(ImportCourses) }, onRemove = { navigate(RemoveTerm(it.id)) },
-                            onSettings = { navigate(Preferences) }, navigationBar = bar)
-                    } }
+                        }
+                    }
                 }
                 entry<SlotEditorKey> { key ->
                     SlotEditor(key, model, model::checkSlot, onBack = back, onSaved = { start ->
@@ -159,6 +201,8 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                         back()
                     })
                 }
+                entry<PushTasks> { WorkspacePanel(model) { PushEditor(it.queue, model, back) } }
+                entry<CreateFrame> { TaskEditor(model, back, createFrame = true) }
                 entry<AddTask> { TaskEditor(model, back) }
                 entry<ImportCourses> { CourseImportScreen(model, back) { id ->
                     selectedTerm = id; selectedWeek = 1; back()
@@ -174,10 +218,14 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     WorkspacePanel(model) { FrameScreen(key.id, it, model, back, shared) }
                 } }
                 entry<Preferences> {
-                    SettingsScreen(preferences.policy, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) })
+                    CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
+                        SettingsScreen(preferences.policy, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) })
+                    }
                 }
                 entry<EditAppearance> { key ->
-                    AppearanceEditor(preferences.appearance, AppearanceGroup.entries.first { it.key == key.group }, model, back)
+                    CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
+                        AppearanceEditor(preferences.appearance, AppearanceGroup.entries.first { it.key == key.group }, model, back)
+                    }
                 }
                 entry<ModelConnection> { ConnectionScreen(assistant.connections, back) }
             },

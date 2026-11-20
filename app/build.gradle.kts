@@ -25,8 +25,8 @@ android {
         applicationId = "io.github.nakanomk.stacklife"
         minSdk = 26
         targetSdk = 37
-        versionCode = 9
-        versionName = "0.6.1"
+        versionCode = 10
+        versionName = "0.7.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
@@ -77,7 +77,6 @@ dependencies {
     implementation(libs.room.runtime)
     ksp(libs.room.compiler)
     implementation(libs.reorderable)
-    implementation(libs.week.view)
     implementation(libs.kotlinflow)
     implementation(libs.jgrapht)
     implementation(libs.serialization.json)

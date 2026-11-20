@@ -20,7 +20,7 @@ data class Appearance(
     val start: Destination = Destination.TODAY,
     val showDuration: Boolean = true,
     val showNotes: Boolean = true,
-    val glass: Boolean = false,
+    val glass: Boolean = true,
     val navGlass: Boolean = true,
     val assistantGlass: Boolean = true,
     val reduceMotion: Boolean = false,

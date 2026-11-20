@@ -1,7 +1,6 @@
 package io.github.nakanomk.stacklife.acceptance
 
 import androidx.activity.ComponentActivity
-import androidx.compose.runtime.*
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
@@ -13,7 +12,7 @@ import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.planner.PlannerCommand.*
-import io.github.nakanomk.stacklife.today.TodayScreen
+import io.github.nakanomk.stacklife.today.TodayRoute
 import java.time.LocalDate
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -49,8 +48,7 @@ class FixedCourseDragTest {
         val before = readDay(); val task = before.blocks.single()
         ui.setContent {
             val vm = viewModel { WorkspaceViewModel(store.api) }
-            val plan by remember { store.api.observe(query) }.collectAsState(initial = before)
-            StackLifeTheme { TodayScreen(plan as DayPlan, vm, vm::checkSlot, {}, {}, {}, {}, null, {}, {}) }
+            StackLifeTheme { TodayRoute(vm, date, campusZone, {}, {}, {}, null, {}, {}) }
         }
         val axis = await(hasTestTag("day-axis"))
         fun time(t: String) = ui.onNodeWithTag("hour:$t", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.top

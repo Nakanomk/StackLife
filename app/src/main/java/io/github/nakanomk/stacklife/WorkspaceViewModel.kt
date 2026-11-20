@@ -54,6 +54,18 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
     fun confirmProposal(id: String): String? = startWrite(notifyOnFailure = false) { commit(id) }
     fun discardProposal(id: String) = planner.discard(id)
 
+    fun startReviewed(commands: List<PlannerCommand>, expectedRevision: Long): String? = startWrite(notifyOnFailure = false) {
+        when (val preview = planner.preview(commands)) {
+            is PreviewResult.Rejected -> preview.message
+            is PreviewResult.Ready -> if (preview.baseRevision != expectedRevision) {
+                planner.discard(preview.proposalId)
+                "日程已变更，请核对最新顺序后再生成。"
+            } else commit(preview.proposalId).also { error -> if (error == null) refs = preview.refs }
+        }
+    }
+
+    fun reviewedRef(requestId: String, ref: String): String? = latest?.takeIf { it.id == requestId }?.refs?.get(ref)
+
     /** A hover or editor check never leaves a committable proposal behind. */
     suspend fun checkSlot(command: PlannerCommand.SlotSet): String? = try {
         when (val preview = planner.preview(listOf(command))) {
@@ -66,7 +78,10 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
 
     private val errors = Channel<String>(Channel.BUFFERED)
     val notices = errors.receiveAsFlow()
-    private data class Ticket(val id: String, val error: Deferred<String?>)
+    private class Ticket(val id: String) {
+        lateinit var error: Deferred<String?>
+        var refs: Map<String, String> = emptyMap()
+    }
     private var latest: Ticket? = null
 
     override fun start(command: PlannerCommand): String? = startWrite(notifyOnFailure = true) {
@@ -86,15 +101,15 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
     }
 
     // A receipt tracks the original write, not a command or proposal to replay after rotation.
-    private fun startWrite(notifyOnFailure: Boolean, write: suspend () -> String?): String? {
+    private fun startWrite(notifyOnFailure: Boolean, write: suspend Ticket.() -> String?): String? {
         if (latest?.error?.isCompleted == false) {
             errors.trySend("上一项更改正在保存")
             return null
         }
-        val id = UUID.randomUUID().toString()
-        val result = viewModelScope.async {
+        val ticket = Ticket(UUID.randomUUID().toString())
+        ticket.error = viewModelScope.async {
             val error = try {
-                write()
+                ticket.write()
             } catch (_: SQLiteException) {
                 "未能保存到设备，本次更改没有应用"
             }
@@ -102,8 +117,8 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
             if (error != null && notifyOnFailure) errors.send(error)
             error
         }
-        latest = Ticket(id, result)
-        return id
+        latest = ticket
+        return ticket.id
     }
 
     override suspend fun result(requestId: String, onError: ((String) -> Unit)?): SaveOutcome {

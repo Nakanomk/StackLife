@@ -3,6 +3,7 @@ package io.github.nakanomk.stacklife.acceptance
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -72,7 +73,7 @@ class GraphEditorTest {
     }
     private fun bringIntoReview(matcher: SemanticsMatcher): SemanticsNodeInteraction {
         tag("goal-order").performScrollToNode(matcher)
-        return await(matcher)
+        return await(matcher and hasAnyAncestor(hasTestTag("goal-order")))
     }
 
     @Test fun drawDiamondMoveAndGenerateFromTheReviewedGoal() {
@@ -135,6 +136,59 @@ class GraphEditorTest {
         assertEquals(FrameSource.GRAPH, state.frames.single().source)
         runBlocking { store.apply(GraphPatch(id("g"), listOf(GraphEdit.RemoveNode(id("a"))))) }
         assertEquals(state.frames, runBlocking { store.state().frames })
+    }
+
+    @Test fun chooseTargetInlineOrUseSoleSinkAndAppendOneReviewedBatchEvenWithSwap() = runBlocking {
+        open()
+        val initial = store.state()
+        tag("graph-goal").performClick()
+        bringIntoReview(hasTestTag("goal-choice:${id("x")}")).performClick()
+        tag("goal-item:0")
+        bringIntoReview(hasText("1. X")).assertIsDisplayed()
+        assertEquals(initial, store.state())
+        bringIntoReview(hasContentDescription("返回")).performClick()
+
+        store.apply(SetRestorePolicy(RestorePolicy.SWAP), GraphPatch(id("g"), listOf(
+            GraphEdit.RemoveNode(id("x")), GraphEdit.AddEdge(id("a"), id("b")), GraphEdit.AddEdge(id("a"), id("c")))))
+        expectGraph("Only D is a sink") { it.nodes.size == 4 && it.edges.size == 4 }
+        tag("graph-goal").performClick()
+        tag("goal-item:0")
+        for ((i, title) in listOf("A", "B", "C", "D").withIndex())
+            bringIntoReview(hasText("${i + 1}. $title")).assertIsDisplayed()
+        val button = hasTestTag("graph-append")
+        bringIntoReview(button).assertIsEnabled()
+        val before = store.state()
+        val staged = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val edit = launch(Dispatchers.IO) {
+            store.db.withTransaction {
+                store.apply(GraphPatch(id("g"), listOf(GraphEdit.EditNode(id("a"), "A 新版"))))
+                staged.complete(Unit)
+                release.await()
+            }
+        }
+        try {
+            withTimeout(10_000) { staged.await() }
+            ui.onNode(button).performClick()
+        } finally {
+            release.complete(Unit); edit.join()
+        }
+        await(hasText("重新预览"))
+        bringIntoReview(hasText("重新预览")).performClick()
+        assertEquals(before.queue, store.state().queue)
+        assertEquals(before.frames, store.state().frames)
+        bringIntoReview(hasText("1. A 新版")).assertIsDisplayed()
+        val click = bringIntoReview(button and isEnabled()).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        ui.runOnIdle { click(); click() }
+        await(hasText("已按此顺序加入队尾。"))
+        val after = store.state()
+        assertEquals(before.revision + 2, after.revision) // one concurrent graph edit + one queue batch
+        assertEquals(before.queue, after.queue.take(before.queue.size))
+        assertEquals(listOf("A 新版", "B", "C", "D"), after.queue.drop(before.queue.size).map { it.title })
+        assertEquals("原备注", after.queue[before.queue.size].notes)
+        assertEquals(10, after.queue[before.queue.size].minutes)
+        assertEquals(before.frames, after.frames)
+        assertEquals(RestorePolicy.SWAP, after.restorePolicy)
     }
 
     @Test fun arrangeLayersFollowAllEdgesAndKeepExistingFrameAndOrder() = runBlocking {

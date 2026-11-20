@@ -66,7 +66,15 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
         val start = monday.atStartOfDay(campusZone).toInstant().toEpochMilli()
         val end = monday.plusWeeks(1).atStartOfDay(campusZone).toInstant().toEpochMilli()
         val occupancy = CourseOccupancy(courses.intersecting(start, end), dao.dayBlocks(start, end))
-        return CourseWeek(term, query.week, occupancy.courses.filter { it.source == HUST_SOURCE && it.termId == term.id })
+        val visible = occupancy.courses.filter { it.source == HUST_SOURCE && it.termId == term.id }
+        if (visible.isEmpty()) return CourseWeek(term, query.week, visible)
+        val titles = visible.mapTo(HashSet()) { it.meeting.title }
+        val indices = buildMap {
+            courses.orderedTitles(term.id, HUST_SOURCE).forEachIndexed { index, title ->
+                if (title in titles) put(title, index)
+            }
+        }
+        return CourseWeek(term, query.week, visible, indices)
     }
 
     override fun stageCourseImport(term: TermSpec, meetings: List<CourseMeeting>): String {

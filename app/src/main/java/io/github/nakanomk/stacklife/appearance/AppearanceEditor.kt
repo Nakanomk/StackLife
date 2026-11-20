@@ -1,14 +1,13 @@
 package io.github.nakanomk.stacklife.appearance
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -23,6 +22,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.DockOverlay
 import io.github.nakanomk.stacklife.StackLifeTheme
+import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.rememberDestinationCapsule
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.*
@@ -34,39 +34,45 @@ private val AppearanceGroup.title get() = when (this) {
 }
 
 @Composable
-internal fun AppearanceEditor(saved: Appearance, initialGroup: AppearanceGroup, actions: WorkspaceActions, onBack: () -> Unit) {
+internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions: WorkspaceActions, onBack: () -> Unit) {
     var baseline by rememberSaveable(stateSaver = appearanceSaver) { mutableStateOf(saved) }
     var draft by rememberSaveable(stateSaver = appearanceSaver) { mutableStateOf(saved) }
     var seedInput by rememberSaveable { mutableStateOf(saved.seed) }
-    var group by rememberSaveable { mutableStateOf(initialGroup) }
     var message by rememberSaveable { mutableStateOf("") }
     val receipt = rememberSubmission(actions, onError = { message = it }) { if (it == SaveOutcome.APPLIED) onBack() }
-    val seedOK = draft.palette != PaletteMode.SEED || validSeed.matches(seedInput)
+    val seedOK = group != AppearanceGroup.COLOR || draft.palette != PaletteMode.SEED || validSeed.matches(seedInput)
+    val selected = remember(group, draft) { group.project(draft) }
+    val persisted = remember(group, saved) { group.project(saved) }
+    val stale = remember(group, baseline, persisted) { group.project(baseline) != persisted }
+    val preview = remember(group, selected, saved) { AppearanceFields(group, selected).applyTo(saved) }
     val reload = { baseline = saved; draft = saved; seedInput = saved.seed; message = "" }
     BackHandler(enabled = receipt.busy) { }
-    StackLifeTheme(draft) {
+    StackLifeTheme(preview) {
         Page {
-            PageTitle("外观预览", back = onBack, backEnabled = !receipt.busy)
-            val scroll = rememberLazyListState()
-            LazyColumn(Modifier.weight(1f).testTag("appearance-scroll"), state = scroll, contentPadding = pagePadding, verticalArrangement = listSpacing) {
-                item { AppearancePreview(draft) }
-                item { Choice("设置分组", AppearanceGroup.entries, group, { it.title }) { group = it } }
-                item { when (group) {
-                    AppearanceGroup.COLOR -> ColorFields(draft, seedInput, { seedInput = it }, { draft = it })
-                    AppearanceGroup.LAYOUT -> LayoutFields(draft) { draft = it }
-                    AppearanceGroup.MATERIAL -> MaterialFields(draft) { draft = it }
-                } }
-                item { HorizontalDivider(); Secondary("恢复默认外观", enabled = !receipt.busy) {
-                    draft = Appearance(); seedInput = draft.seed; message = ""
-                }; Hint("只重置外观，不改变工作台的恢复策略。") }
-                if (baseline != saved) item { Secondary("重新载入已保存设置", enabled = !receipt.busy, onClick = reload) }
+            Box(Modifier.weight(1f)) {
+                RootPane(header = { PageTitle(group.title, back = onBack, backEnabled = !receipt.busy) }) { top, _ ->
+                    LazyColumn(Modifier.fillMaxSize().testTag("appearance-scroll"), contentPadding = dockListPadding(top, 0.dp), verticalArrangement = listSpacing) {
+                        item { AppearancePreview(preview) }
+                        item {
+                            when (group) {
+                                AppearanceGroup.COLOR -> ColorFields(draft, seedInput, { seedInput = it }, { draft = it })
+                                AppearanceGroup.LAYOUT -> LayoutFields(draft) { draft = it }
+                                AppearanceGroup.MATERIAL -> MaterialFields(draft) { draft = it }
+                            }
+                        }
+                        item { HorizontalDivider(); Secondary("恢复本页默认", enabled = !receipt.busy) {
+                            draft = AppearanceFields(group, null).applyTo(draft); seedInput = draft.seed; message = ""
+                        } }
+                        if (stale) item { Secondary("重新载入已保存设置", enabled = !receipt.busy, onClick = reload) }
+                    }
+                }
             }
             HorizontalDivider()
             if (message.isNotEmpty()) Text(message, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
                 TextButton(onClick = onBack, enabled = !receipt.busy, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消") }
-                TextButton(enabled = !receipt.busy && seedOK && baseline == saved && draft != saved, onClick = {
-                    receipt.send(PlannerCommand.EditAppearance(AppearancePatch.Replace(draft), expected = baseline))
+                TextButton(enabled = !receipt.busy && seedOK && !stale && selected != persisted, onClick = {
+                    receipt.send(PlannerCommand.EditAppearance(AppearanceFields(group, selected), expected = baseline))
                 }) { Text("保存外观") }
             }
         }
@@ -137,12 +143,12 @@ private fun MoveButton(dest: Destination, up: Boolean, enabled: Boolean, move: (
 private fun MaterialFields(d: Appearance, update: (Appearance) -> Unit) {
     val reason = glassUnavailableReason(d)
     Column {
-        SectionTitle("局部玻璃")
-        SwitchRow("启用局部玻璃", d.glass) { update(d.copy(glass = !d.glass)) }
+        SectionTitle("材质")
+        SwitchRow("启用液态玻璃", d.glass) { update(d.copy(glass = !d.glass)) }
         SwitchRow("浮动导航玻璃", d.navGlass, enabled = d.glass) { update(d.copy(navGlass = !d.navGlass)) }
         SwitchRow("助理胶囊玻璃", d.assistantGlass, enabled = d.glass) { update(d.copy(assistantGlass = !d.assistantGlass)) }
         Hint(when { reason != null -> "当前使用实色：$reason"; !d.glass -> "当前使用实色：总开关已关闭。";
-            else -> "仅已开启的浮动胶囊使用折射；正文、对话与登录页保持实色。" })
+            else -> "页眉、圆形操作与课程块使用玻璃；关闭后保持相同布局。" })
         SectionTitle("动态与辅助功能")
         SwitchRow("减弱动效", d.reduceMotion) { update(d.copy(reduceMotion = !d.reduceMotion)) }
         SwitchRow("减少透明度", d.reduceTransparency) { update(d.copy(reduceTransparency = !d.reduceTransparency)) }

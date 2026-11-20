@@ -13,12 +13,14 @@ import kotlinx.serialization.json.*
 
 internal data class ChatLine(val user: Boolean, val text: String)
 internal enum class AssistantWork { IDLE, LOADING, REQUEST, COMMIT }
+internal enum class NoticeLevel(val label: String) { INFO("提示"), WARNING("警告"), ERROR("错误") }
 internal data class AssistantState(
     val page: AssistantPage? = null, val profile: ServiceProfile? = null, val grant: Disclosure = Disclosure(),
     val allowed: Boolean = false, val work: AssistantWork = AssistantWork.IDLE, val lines: List<ChatLine> = emptyList(),
     val pending: PreviewResult.Ready? = null, val reviewAgain: Boolean = false, val importRequested: Boolean = false,
     val message: String? = null, val applied: Boolean = false, val importedDraft: String? = null,
     val composerId: String? = null, val draft: String = "",
+    val draftPage: AssistantPage? = null, val noticeLevel: NoticeLevel = NoticeLevel.INFO,
 )
 
 internal fun String.isSendable() = isNotBlank() && length <= 8000
@@ -35,10 +37,11 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
     private var configurationDraft: String? = null
     private var sessionConnection: ServiceConnection? = null
 
-    fun editLocal(id: String, text: String) {
+    fun editLocal(id: String, text: String, page: AssistantPage?) {
         if (ui.page != null) return
         configurationDraft = null
-        ui = ui.copy(composerId = id, draft = text)
+        val origin = if (text.isEmpty()) null else ui.draftPage?.takeIf { ui.composerId == id } ?: page
+        ui = ui.copy(composerId = id, draft = text, draftPage = origin)
     }
 
     fun composerReturned(id: String) {
@@ -51,10 +54,10 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
 
     fun submitLocal(id: String, target: () -> AssistantPage) {
         if (ui.page != null || ui.composerId != id || !ui.draft.isSendable()) return
-        val page = target()
+        val page = ui.draftPage ?: target()
         configurationDraft = null
         clearTurn()
-        ui = AssistantState(page = page, work = AssistantWork.LOADING, composerId = id, draft = ui.draft)
+        ui = AssistantState(page = page, work = AssistantWork.LOADING, composerId = id, draft = ui.draft, draftPage = ui.draftPage)
         val serial = generation
         job = viewModelScope.launch {
             try {
@@ -78,7 +81,7 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
         configurationDraft = ui.composerId
         clearTurn()
         sessionConnection = null
-        ui = AssistantState(composerId = ui.composerId, draft = ui.draft)
+        ui = AssistantState(composerId = ui.composerId, draft = ui.draft, draftPage = ui.draftPage)
     }
 
     fun setGrant(grant: Disclosure) {
@@ -100,7 +103,8 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
         if (ui.work == AssistantWork.COMMIT || ui.work == AssistantWork.LOADING) return
         clearTurn()
         ui = ui.copy(work = AssistantWork.IDLE, pending = null, reviewAgain = false, importRequested = false,
-            message = "已取消，未应用更改。", applied = false, allowed = false, lines = emptyList(), draft = "")
+            message = "已取消，未应用更改。", noticeLevel = NoticeLevel.INFO,
+            applied = false, allowed = false, lines = emptyList(), draft = "")
     }
 
     private fun clearTurn() {
@@ -131,7 +135,8 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
                 if (connection == null || connection.profile != old.profile || connection.key != sessionConnection?.key) {
                     if (serial == generation) {
                         tools = null; sessionConnection = connection
-                        ui = AssistantState(page = page, profile = connection?.profile, message = "服务配置已变更，请重新授权。")
+                        ui = AssistantState(page = page, profile = connection?.profile, message = "服务配置已变更，请重新授权。",
+                            noticeLevel = NoticeLevel.WARNING)
                     }
                     return@launch
                 }
@@ -150,7 +155,8 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
                         val answer = response["content"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
                         require(answer.isNotEmpty()) { "模型没有返回可读答案或工具调用。" }
                         require(answer.length <= 16_000) { "模型答复过长，请缩小问题。" }
-                        ui = ui.copy(lines = (ui.lines + ChatLine(false, answer)).takeLast(20), work = AssistantWork.IDLE, message = "仅收到模型答复，本轮未更改日程。")
+                        ui = ui.copy(lines = (ui.lines + ChatLine(false, answer)).takeLast(20), work = AssistantWork.IDLE,
+                            message = "仅收到模型答复，本轮未更改日程。", noticeLevel = NoticeLevel.INFO)
                         return@launch
                     }
                     require(calls.size == 1) { "请使用支持单次有序工具调用的模型；一轮写入须合成一个提案。" }
@@ -170,7 +176,8 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
                         }
                         "planner_propose" -> {
                             when (val plan = policy.proposal(arguments)) {
-                                ToolPlan.OpenImporter -> ui = ui.copy(work = AssistantWork.IDLE, importRequested = true, message = "需要你打开本地导入器并核对课程。")
+                                ToolPlan.OpenImporter -> ui = ui.copy(work = AssistantWork.IDLE, importRequested = true,
+                                    message = "需要你打开本地导入器并核对课程。", noticeLevel = NoticeLevel.INFO)
                                 is ToolPlan.Commands -> preview(plan.commands, serial)
                             }
                             return@launch
@@ -187,10 +194,12 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
         // Room may return a registered proposal just as its requesting screen is closed.
         withContext(NonCancellable) {
             when (val result = api.preview(plan)) {
-                is PreviewResult.Rejected -> if (serial == generation) { commands = null; ui = ui.copy(work = AssistantWork.IDLE, reviewAgain = false, message = result.message) }
+                is PreviewResult.Rejected -> if (serial == generation) { commands = null; ui = ui.copy(work = AssistantWork.IDLE,
+                    reviewAgain = false, message = result.message, noticeLevel = NoticeLevel.ERROR) }
                 is PreviewResult.Ready -> if (serial != generation || result.changes.isEmpty()) {
                     api.discard(result.proposalId)
-                    if (serial == generation) { commands = null; ui = ui.copy(work = AssistantWork.IDLE, reviewAgain = false, message = "提案没有实际变更。") }
+                    if (serial == generation) { commands = null; ui = ui.copy(work = AssistantWork.IDLE, reviewAgain = false,
+                        message = "提案没有实际变更。", noticeLevel = NoticeLevel.INFO) }
                 } else {
                     commands = plan
                     ui = ui.copy(work = AssistantWork.IDLE, pending = result, reviewAgain = false, message = null)
@@ -220,16 +229,19 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
                         val imported = commands?.firstNotNullOfOrNull { (it as? PlannerCommand.CourseImport)?.draftId }
                         imported?.let(api::discardCourseImport)
                         commands = null
-                        ui = ui.copy(work = AssistantWork.IDLE, pending = null, applied = true, importedDraft = imported, message = "已应用这些更改。")
+                        ui = ui.copy(work = AssistantWork.IDLE, pending = null, applied = true, importedDraft = imported,
+                            message = "已应用这些更改。", noticeLevel = NoticeLevel.INFO)
                     }
                     is CommitResult.Rejected -> {
                         val stale = receipt.code == CommitFailure.STALE_PREVIEW
                         if (!stale) commands = null
-                        ui = ui.copy(work = AssistantWork.IDLE, pending = null, reviewAgain = stale, message = receipt.message)
+                        ui = ui.copy(work = AssistantWork.IDLE, pending = null, reviewAgain = stale, message = receipt.message,
+                            noticeLevel = if (stale) NoticeLevel.WARNING else NoticeLevel.ERROR)
                     }
                 }
             } catch (e: CancellationException) { throw e }
-            catch (_: Exception) { commands = null; ui = ui.copy(work = AssistantWork.IDLE, pending = null, message = "未取得保存回执，请核对日程；不会重新提交。") }
+            catch (_: Exception) { commands = null; ui = ui.copy(work = AssistantWork.IDLE, pending = null,
+                message = "未取得保存回执，请核对日程；不会重新提交。", noticeLevel = NoticeLevel.ERROR) }
             finally { api.discard(id) }
         }
     }
@@ -240,7 +252,7 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
             is IllegalArgumentException, is IllegalStateException -> e.message?.take(300) ?: "模型或服务配置不符合要求。"
             else -> "无法完成此次请求，请检查服务配置与网络。"
         }
-        ui = ui.copy(work = AssistantWork.IDLE, message = message, applied = false)
+        ui = ui.copy(work = AssistantWork.IDLE, message = message, noticeLevel = NoticeLevel.ERROR, applied = false)
     }
 
     override fun onCleared() { clearTurn() }

@@ -21,22 +21,21 @@ import java.time.temporal.ChronoUnit
 @Composable
 internal fun CoursesRoute(model: WorkspaceViewModel, termId: String?, selectedWeek: Int?, onTerm: (TermSpec) -> Unit,
     onWeek: (Int) -> Unit, onImport: () -> Unit, onRemove: (TermSpec) -> Unit, onSettings: () -> Unit,
-    navigationBar: @Composable () -> Unit) {
+    onScope: (AssistantPage) -> Unit) {
     val state by remember(model) { model.terms() }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
     ReadPanel(state) { all ->
         val today = LocalDate.now(campusZone)
         val term = all.terms.firstOrNull { it.id == termId } ?: all.terms.firstOrNull {
             today >= it.firstMonday && today < it.firstMonday.plusWeeks(it.weeks.toLong())
         } ?: all.terms.firstOrNull()
-        if (term == null) CourseHome(all.terms, null, onTerm, onWeek, onImport, onRemove, onSettings, navigationBar)
-        else {
-            val week = (selectedWeek?.takeIf { term.id == termId } ?: (ChronoUnit.WEEKS.between(term.firstMonday, today).toInt() + 1)).coerceIn(1, term.weeks)
-            val query = PlannerQuery.Week(term.id, week)
-            key(query) {
-                val data by remember(model) { model.week(query) }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
-                ReadPanel(data) { CourseHome(all.terms, it, onTerm, { n -> onTerm(term); onWeek(n) }, onImport, onRemove, onSettings, navigationBar) }
-            }
+        val week = term?.let {
+            (selectedWeek?.takeIf { term.id == termId } ?: (ChronoUnit.WEEKS.between(term.firstMonday, today).toInt() + 1))
+                .coerceIn(1, term.weeks)
         }
+        val scope = if (term != null && week != null) AssistantPage.Week(term.id, week) else AssistantPage.Terms
+        SideEffect { onScope(scope) }
+        CourseHome(model, all.terms, term, week, onTerm, { n -> if (term != null) { onTerm(term); onWeek(n) } },
+            onImport, onRemove, onSettings)
     }
 }
 

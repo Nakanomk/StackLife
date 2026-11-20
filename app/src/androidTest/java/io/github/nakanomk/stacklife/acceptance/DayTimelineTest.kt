@@ -56,6 +56,25 @@ class DayTimelineTest {
         root.performTouchInput { for (i in 1..8) moveTo(start + (end - start) * (i / 8f), delayMillis = 16) }
     }
 
+    @Test fun horizontalSwipeChangesCivilDayAndKeepsItsScrollOnReturn() {
+        show()
+        centerTick("12:00")
+        val axis = hasTestTag("day-axis")
+        val before = await(axis).fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+        fun dateHeading(date: LocalDate) = hasTestTag("day-date") and
+            hasContentDescription("${date.year}年${date.monthValue}月${date.dayOfMonth}日", substring = true)
+        await(axis).performTouchInput { swipeLeft() }
+        await(dateHeading(query.date.plusDays(1))).assertIsDisplayed()
+        await(hasTestTag("nav:workspace")).performClick()
+        await(hasTestTag("nav:today")).performClick()
+        await(dateHeading(query.date.plusDays(1))).assertIsDisplayed()
+        await(axis).performTouchInput { swipeRight() }
+        await(dateHeading(query.date)).assertIsDisplayed()
+        val restored = await(axis).fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+        assertEquals(before, restored, 1f)
+        assertEquals(0L, readDay().revision)
+    }
+
     @Test fun dragFromTrayThenMoveSameBlockAndCancelInEditor() {
         runBlocking { store.apply(TaskAdd(TaskInput("报告提纲"))) }
         val task = readDay().tray.single()

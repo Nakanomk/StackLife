@@ -8,7 +8,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.*
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -29,22 +28,25 @@ import io.github.nakanomk.stacklife.workspace.*
 
 @Composable
 internal fun GraphEditorRoute(model: WorkspaceViewModel, graphId: String, onBack: () -> Unit, onFrame: (String) -> Unit) = key(graphId) {
-    val pages = rememberSaveableStateHolder()
+    val state by remember(model, graphId) { model.graph(graphId) }.collectAsStateWithLifecycle(ReadState.Loading)
+    var reviewing by rememberSaveable { mutableStateOf(false) }
     var goal by rememberSaveable { mutableStateOf<String?>(null) }
-    val target = goal
-    if (target != null) key(target) {
-        GoalReview(model, graphId, target, onBack = { goal = null }, onFrame = { id -> goal = null; onFrame(id) })
-    } else pages.SaveableStateProvider("editor") {
-        val state by remember(model, graphId) { model.graph(graphId) }.collectAsStateWithLifecycle(ReadState.Loading)
-        ReadPanel(state) { detail ->
-            if (detail.graph == null) Page { PageTitle("流程图不存在", back = onBack) }
-            else GraphEditor(model, detail, onBack, onGoal = { goal = it })
-        }
+    ReadPanel(state) { detail ->
+        if (detail.graph == null) Page { PageTitle("流程图不存在", back = onBack) }
+        else GraphEditor(model, detail, onBack, onGoal = { selected ->
+            goal = selected ?: run {
+                val predecessors = detail.edges.mapTo(HashSet()) { it.from }
+                detail.nodes.singleOrNull { it.id !in predecessors }?.id
+            }
+            reviewing = true
+        })
     }
+    if (reviewing) GoalReview(model, graphId, state, goal, onGoal = { goal = it }, onClose = { reviewing = false },
+        onFrame = { reviewing = false; onFrame(it) })
 }
 
 @Composable
-private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: () -> Unit, onGoal: (String) -> Unit) {
+private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: () -> Unit, onGoal: (String?) -> Unit) {
     val graph = checkNotNull(detail.graph)
     val currentRevision by rememberUpdatedState(detail.revision)
     var listMode by rememberSaveable { mutableStateOf(false) }
@@ -88,9 +90,9 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
                 Secondary("取消连线") { sourceId = null }
                 Text("${source.title} → 请选择后继", style = MaterialTheme.typography.labelLarge)
             } else {
+                FilledTonalButton(onClick = { onGoal(selected?.id) }, enabled = detail.nodes.isNotEmpty() && !submission.busy,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("graph-goal")) { Text("生成拓扑排序") }
                 if (selected != null) {
-                    TextButton(onClick = { onGoal(selected.id) }, enabled = !submission.busy,
-                        modifier = Modifier.heightIn(min = 48.dp).testTag("graph-goal")) { Text("预览目标顺序") }
                     var menu by remember { mutableStateOf(false) }
                     Box {
                         TextButton(onClick = { menu = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("graph-node-actions")) {

@@ -39,7 +39,7 @@ internal class KitApplication : StackLifeApplication(), DetailTransitionHost {
     internal val sources = mutableMapOf<SourceKey, KitCardSource>()
 
     @Composable
-    override fun listSource(scroll: LazyListState, bottomClearance: Dp, revision: Long): DetailListSource? {
+    override fun listSource(scroll: LazyListState, topClearance: Dp, bottomClearance: Dp, revision: Long): DetailListSource? {
         if (protocol <= 0) return null
         val activity = LocalActivity.current ?: return null
         val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -47,8 +47,10 @@ internal class KitApplication : StackLifeApplication(), DetailTransitionHost {
         val list = remember(activity, scroll, lifecycle, config) {
             KitListSource(this, activity, lifecycle, scroll, Configuration(config))
         }
-        val clearance = with(LocalDensity.current) { bottomClearance.roundToPx() }
-        SideEffect { list.clearancePx = clearance; list.revision = revision }
+        val density = LocalDensity.current
+        val top = with(density) { topClearance.roundToPx() }
+        val bottom = with(density) { bottomClearance.roundToPx() }
+        SideEffect { list.topClearancePx = top; list.clearancePx = bottom; list.revision = revision }
         DisposableEffect(list) {
             val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_PAUSE) list.opening = null }
             lifecycle.addObserver(observer)

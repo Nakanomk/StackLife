@@ -12,6 +12,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import io.github.nakanomk.stacklife.R
+import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.planner.AppearanceGroup
 import io.github.nakanomk.stacklife.planner.PlannerCommand
@@ -83,17 +85,19 @@ internal fun SettingsScreen(restorePolicy: RestorePolicy, actions: WorkspaceActi
     onConnection: () -> Unit, onAppearance: (AppearanceGroup) -> Unit) {
     val action = rememberSubmission(actions)
     Page(AssistantPage.Settings) {
-        PageTitle("设置", back = onBack)
-        LazyColumn(contentPadding = pagePadding) {
-            item { SectionTitle("外观") }
-            item { PreferenceRow("色彩") { onAppearance(AppearanceGroup.COLOR) } }
-            item { PreferenceRow("布局") { onAppearance(AppearanceGroup.LAYOUT) } }
-            item { PreferenceRow("材质与动态") { onAppearance(AppearanceGroup.MATERIAL) } }
-            item { HorizontalDivider(); Spacer(Modifier.height(12.dp)); SectionTitle("日程助理") }
-            item { PreferenceRow("模型服务配置", onClick = onConnection) }
-            item { HorizontalDivider(); Spacer(Modifier.height(12.dp)); SectionTitle("工作台 · 恢复策略") }
-            item {
-                Column(Modifier.selectableGroup()) {
+        RootPane(header = { PageTitle("设置", back = onBack) }) { top, _ ->
+            LazyColumn(contentPadding = dockListPadding(top, 0.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                item { SettingsGroup("外观") {
+                    PreferenceRow("色彩", leadingIcon = R.drawable.ic_palette) { onAppearance(AppearanceGroup.COLOR) }
+                    HorizontalDivider(Modifier.padding(start = 32.dp))
+                    PreferenceRow("布局", leadingIcon = R.drawable.ic_apps) { onAppearance(AppearanceGroup.LAYOUT) }
+                    HorizontalDivider(Modifier.padding(start = 32.dp))
+                    PreferenceRow("材质与动态", leadingIcon = R.drawable.ic_blur_on) { onAppearance(AppearanceGroup.MATERIAL) }
+                } }
+                item { SettingsGroup("日程助理") {
+                    PreferenceRow("模型服务配置", leadingIcon = R.drawable.ic_chat, onClick = onConnection)
+                } }
+                item { SettingsGroup("工作台 · 恢复策略") { Column(Modifier.selectableGroup()) {
                     for (policy in RestorePolicy.entries) {
                         val selected = restorePolicy == policy
                         val muted = MaterialTheme.colorScheme.onSurfaceVariant
@@ -116,8 +120,18 @@ internal fun SettingsScreen(restorePolicy: RestorePolicy, actions: WorkspaceActi
                             }
                         }
                     }
-                }
+                } } }
             }
+        }
+    }
+}
+
+@Composable
+private fun SettingsGroup(label: String, rows: @Composable ColumnScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SectionTitle(label)
+        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp), content = rows)
         }
     }
 }

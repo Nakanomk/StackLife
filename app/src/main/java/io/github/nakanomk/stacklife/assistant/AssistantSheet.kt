@@ -14,7 +14,11 @@ import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.LocalFocusManager
@@ -23,10 +27,13 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.R
@@ -40,19 +47,19 @@ import java.util.UUID
 internal val LocalAssistant = staticCompositionLocalOf<AssistantModel?> { null }
 
 @Composable
-internal fun AssistantComposer(page: AssistantPage) {
-    key(page) { ScopedComposer(page.label) { page } }
+internal fun AssistantComposer(page: AssistantPage, persistentRoot: Boolean = false) {
+    ScopedComposer(page.label, page, if (persistentRoot) null else page) { page }
 }
 
 @Composable
 internal fun AssistantComposer(target: () -> AssistantPage) {
-    ScopedComposer("课表导入", target)
+    ScopedComposer("课表导入", null, null, target)
 }
 
 @Composable
-private fun ScopedComposer(scope: String, target: () -> AssistantPage) {
+private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: AssistantPage?, target: () -> AssistantPage) {
     val model = LocalAssistant.current ?: return
-    val id = rememberSaveable { UUID.randomUUID().toString() }
+    val id = rememberSaveable(privateScope) { UUID.randomUUID().toString() }
     DisposableEffect(model, id) {
         model.composerReturned(id)
         onDispose { model.composerLeft(id) }
@@ -60,13 +67,15 @@ private fun ScopedComposer(scope: String, target: () -> AssistantPage) {
     val ui by model.state.collectAsStateWithLifecycle()
     if (ui.page != null) return
     StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth(), MaterialTheme.colorScheme.surfaceContainerHigh) {
-        MessageEditor(if (ui.composerId == id) ui.draft else "", scope,
-            { model.editLocal(id, it) }, { model.submitLocal(id, target) })
+        val origin = ui.draftPage.takeIf { ui.composerId == id }
+        MessageEditor(if (ui.composerId == id) ui.draft else "", origin?.scopeName() ?: scope,
+            { model.editLocal(id, it, page) }, { model.submitLocal(id, target) },
+            origin?.takeIf { page != null && privateScope == null }?.let { "草稿范围：${it.scopeName()}" })
     }
 }
 
 @Composable
-private fun MessageEditor(text: String, scope: String, onChange: (String) -> Unit, onSend: () -> Unit) {
+private fun MessageEditor(text: String, scope: String, onChange: (String) -> Unit, onSend: () -> Unit, originHint: String? = null) {
     val colors = MaterialTheme.colorScheme
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -92,9 +101,13 @@ private fun MessageEditor(text: String, scope: String, onChange: (String) -> Uni
                 cursorBrush = SolidColor(colors.primary),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { submit() }),
-                decorationBox = { field -> Box(contentAlignment = Alignment.CenterStart) {
-                    if (text.isEmpty()) Text("给日程助理发消息", style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
-                    field()
+                decorationBox = { field -> Column(verticalArrangement = Arrangement.Center) {
+                    if (originHint != null) Text(originHint, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (text.isEmpty()) Text("给日程助理发消息", style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
+                        field()
+                    }
                 } })
         }
         IconButton(onClick = ::submit, enabled = enabled, modifier = Modifier.size(48.dp).testTag("assistant-send"),
@@ -127,40 +140,96 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true,
         confirmValueChange = { it != SheetValue.Hidden || model.state.value.work != AssistantWork.COMMIT })
     var options by remember(page) { mutableStateOf(false) }
+    val service = ui.profile
+    val ready = ui.pending
+    val severity = when {
+        ui.message != null -> ui.noticeLevel
+        ready != null || service == null && ui.work != AssistantWork.LOADING -> NoticeLevel.WARNING
+        else -> NoticeLevel.INFO
+    }
+    val help = ui.message ?: when {
+        ui.work == AssistantWork.LOADING -> "正在读取本机服务配置，尚未联网。"
+        service == null -> "手动日程可离线使用。配置模型服务后再发送，草稿留在本机。"
+        ready != null -> "以下差异由本机计算；应用只提交这一份提案，放弃不会写入。"
+        !ui.allowed -> "授权只在此次对话有效。不会发送密钥正文、Cookie 或原始课表。"
+        else -> "关闭会清空对话并取消请求。模型只能提案，不能直接保存。"
+    }
+    var noticeOpen by remember(page, help, severity) { mutableStateOf(false) }
+    val dark = MaterialTheme.colorScheme.surface.luminance() < .5f
+    val tint = when (severity) {
+        NoticeLevel.INFO -> if (dark) Color(0xFF0C2D6B) else Color(0xFFDDF4FF)
+        NoticeLevel.WARNING -> if (dark) Color(0xFF4B2900) else Color(0xFFFFF8C5)
+        NoticeLevel.ERROR -> if (dark) Color(0xFF67060C) else Color(0xFFFFEBE9)
+    }
+    val ink = when (severity) {
+        NoticeLevel.INFO -> if (dark) Color(0xFFA5D6FF) else Color(0xFF0550AE)
+        NoticeLevel.WARNING -> if (dark) Color(0xFFF2CC60) else Color(0xFF7D4E00)
+        NoticeLevel.ERROR -> if (dark) Color(0xFFFFC1BA) else Color(0xFFA40E26)
+    }
     val list = rememberLazyListState()
     val groups = remember(ui.pending) { ui.pending?.changes?.groupBy { it.entityId }.orEmpty() }
     LaunchedEffect(ui.pending?.proposalId) { if (ui.pending != null) expanded = true }
-    LaunchedEffect(ui.lines.size, ui.pending, ui.allowed) {
-        if (ui.pending != null || !ui.allowed) list.scrollToItem(0)
+    LaunchedEffect(ui.lines.lastOrNull(), ui.pending, ui.allowed, noticeOpen) {
+        if (noticeOpen || ui.pending != null || !ui.allowed) list.scrollToItem(0)
         else if (ui.lines.isNotEmpty()) list.scrollToItem(ui.lines.lastIndex)
     }
     val compact = ui.profile == null
     ModalBottomSheet(onDismissRequest = model::close, sheetState = sheet) {
-        Column(Modifier.fillMaxWidth().then(if (compact) Modifier else Modifier.fillMaxHeight(if (expanded) .90f else .53f))
+        val density = LocalDensity.current
+        val needsHeight = LocalConfiguration.current.screenHeightDp < 480 || density.fontScale >= 1.5f ||
+            WindowInsets.ime.getBottom(density) > 0
+        Column(Modifier.fillMaxWidth().then(if (compact) Modifier else Modifier.fillMaxHeight(if (expanded || needsHeight) .94f else .56f))
             .imePadding().padding(horizontal = 16.dp, vertical = 4.dp).testTag("assistant-sheet")) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("${page.label}助理", style = MaterialTheme.typography.titleLarge)
-                    Hint(page.scopeName())
+                    Text("${page.label}助理", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(page.scopeName(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                if (!compact) TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起" else "展开") }
+                IconButton(onClick = { noticeOpen = !noticeOpen }, modifier = Modifier.size(48.dp).testTag("assistant-notice")
+                    .semantics {
+                        contentDescription = "${severity.label}与说明"
+                        stateDescription = if (noticeOpen) "已展开" else "已收起"
+                    }) {
+                    Surface(shape = CircleShape, color = tint, contentColor = ink) {
+                        Box(Modifier.sizeIn(minWidth = 28.dp, minHeight = 28.dp).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
+                            Text("!", style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                }
+                if (!compact && !needsHeight) IconButton(onClick = { expanded = !expanded }) {
+                    Icon(painterResource(if (expanded) R.drawable.ic_expand_more else R.drawable.ic_expand_less),
+                        contentDescription = if (expanded) "收起对话" else "展开对话")
+                }
                 TextButton(onClick = model::close, enabled = ui.work != AssistantWork.COMMIT) { Text("关闭") }
             }
-            val service = ui.profile
-            val ready = ui.pending
-            if (service != null) Text("${service.origin} · ${service.model}", style = MaterialTheme.typography.labelMedium)
+            if (service != null) Text("${service.origin} · ${service.model}", style = MaterialTheme.typography.labelMedium,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
             HorizontalDivider(Modifier.padding(vertical = 6.dp))
             LazyColumn(Modifier.weight(1f, fill = !compact).fillMaxWidth().testTag("assistant-scroll"), state = list,
                 verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
+                if (noticeOpen) item {
+                    Surface(Modifier.fillMaxWidth().testTag("assistant-notice-details"), shape = MaterialTheme.shapes.small,
+                        color = tint, contentColor = ink) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(severity.label, style = MaterialTheme.typography.labelLarge)
+                            Text(help, style = MaterialTheme.typography.bodyMedium)
+                            if (ui.allowed) {
+                                Text(grantSummary(ui.grant), style = MaterialTheme.typography.bodyMedium)
+                                if (ready == null && !ui.reviewAgain && !ui.importRequested) TextButton(enabled = ui.work == AssistantWork.IDLE,
+                                    onClick = { options = true; model.setGrant(ui.grant) }) { Text("重新选择授权范围") }
+                            }
+                        }
+                    }
+                }
                 when {
                     ui.work == AssistantWork.LOADING -> item { LinearProgressIndicator() }
-                    service == null -> item { Text("尚未连接模型服务", style = MaterialTheme.typography.titleMedium)
-                        Hint("手动日程可离线使用。选择 DeepSeek、Claude、GPT 或自定义服务后，再发送这条消息。") }
+                    service == null -> item { Text("尚未连接模型服务", style = MaterialTheme.typography.titleMedium) }
                     !ui.allowed -> {
                         item { Text("发送前核对", style = MaterialTheme.typography.titleMedium)
-                            Text("你的消息将发往 ${service.origin}。模型可按需读取${page.scopeName()}的标题、顺序、时段及必要 ID；课程默认只披露忙碌时段。")
-                            Hint("不发送密钥正文、Cookie 或原始课表。授权仅限此次对话；关闭会清空对话并取消请求。") }
-                        if (ui.draft.isNotEmpty()) item { Text("待发送消息", style = MaterialTheme.typography.labelMedium); Text(ui.draft) }
+                            Text("将发往 ${service.origin}。范围：${page.scopeName()}的标题、顺序、时段及必要 ID；课程默认只披露忙碌时段。")
+                            Hint(grantSummary(ui.grant)) }
+                        if (ui.draft.isNotEmpty()) item { ChatBubble(ChatLine(true, ui.draft), "待发送消息") }
                         item { TextButton(onClick = { options = !options }) { Text(if (options) "收起授权选项" else "调整范围与字段") } }
                         if (options) {
                             items(ReadArea.entries) { area -> CheckRow(area.label, area in ui.grant.extra) { model.setGrant(ui.grant.copy(extra =
@@ -169,27 +238,27 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
                                 CheckRow("发送栈帧原因", ui.grant.reasons) { model.setGrant(ui.grant.copy(reasons = !ui.grant.reasons)) }
                                 CheckRow("发送课程名与地点", ui.grant.courseDetails) { model.setGrant(ui.grant.copy(courseDetails = !ui.grant.courseDetails)) } }
                         }
-                        item { Hint(grantSummary(ui.grant)) }
                     }
                     ready != null -> {
-                        item { Text("变更预览 · 尚未写入", style = MaterialTheme.typography.titleLarge); Hint("以下是本机计算的完整差异。只会应用这一份提案。") }
+                        item { Text("变更预览 · 尚未写入", style = MaterialTheme.typography.titleMedium) }
                         groups.forEach { (id, changes) ->
                             item(key = "head:$id") { Text(changeTitle(id, changes), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium) }
                             items(changes) { change -> Text("${change.field}：${change.before ?: "无"} → ${change.after ?: "无"}", style = MaterialTheme.typography.bodyMedium) }
                         }
                     }
                     else -> {
-                        items(ui.lines) { line -> Surface(color = if (line.user) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-                            shape = MaterialTheme.shapes.medium) { Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                            Text(if (line.user) "你" else "模型答复", style = MaterialTheme.typography.labelMedium); Text(line.text)
-                        } } }
-                        if (ui.lines.isEmpty()) item { Text("想怎么安排？", style = MaterialTheme.typography.titleMedium); Hint("可以询问当前页面，也可以描述一组日程更改。模型不能直接保存。") }
-                        item { Hint(grantSummary(ui.grant)); TextButton(enabled = ui.work == AssistantWork.IDLE, onClick = { options = true; model.setGrant(ui.grant) }) { Text("重新选择授权范围") } }
+                        items(ui.lines) { ChatBubble(it) }
+                        if (ui.lines.isEmpty()) item { Hint("可以询问当前日程，也可以描述想做的更改。") }
                     }
                 }
             }
-            ui.message?.let { Text(it, color = if (ui.applied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("assistant-status")) }
+            ui.message?.takeIf { !noticeOpen && (severity != NoticeLevel.INFO || ui.applied || !ui.allowed || ui.importRequested) }?.let {
+                Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }
+                    .testTag("assistant-status"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(severity.label, color = ink, style = MaterialTheme.typography.labelLarge)
+                    Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
             when {
                 ui.work == AssistantWork.LOADING -> Unit
                 service == null -> Button(onClick = { model.leaveForConfiguration(); onSettings() }) { Text("配置模型服务") }
@@ -197,15 +266,33 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
                     Text(if (ui.draft.isNotEmpty()) "允许并发送" else "允许本次范围")
                 }
                 ui.work == AssistantWork.COMMIT -> Text("正在保存已确认的更改…")
-                ui.work == AssistantWork.REQUEST -> Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(24.dp)); TextButton(onClick = model::cancel) { Text("取消请求") } }
+                ui.work == AssistantWork.REQUEST -> Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CircularProgressIndicator(Modifier.size(20.dp))
+                    Text("正在处理请求…", Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    TextButton(onClick = model::cancel) { Text("取消请求") }
+                }
                 ready != null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = model::cancel) { Text("放弃提案") }
                     Button(onClick = { model.apply(ready.proposalId) }, modifier = Modifier.testTag("assistant-apply")) { Text("应用这些更改") } }
                 ui.reviewAgain -> Row { TextButton(onClick = model::cancel) { Text("放弃提案") }; Button(onClick = model::refreshProposal) { Text("重新预览") } }
                 ui.importRequested -> Row { TextButton(onClick = model::cancel) { Text("取消") }; Button(onClick = { model.close(); onImport() }) { Text("打开本地课表导入器") } }
                 else -> Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                    MessageEditor(ui.draft, page.label, model::editMessage, model::send)
+                    MessageEditor(ui.draft, page.scopeName(), model::editMessage, model::send)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ChatBubble(line: ChatLine, author: String = if (line.user) "你" else "模型答复") {
+    val colors = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth().padding(start = if (line.user) 40.dp else 0.dp, end = if (line.user) 0.dp else 40.dp),
+        horizontalArrangement = if (line.user) Arrangement.End else Arrangement.Start) {
+        Surface(Modifier.widthIn(max = 440.dp).semantics(mergeDescendants = true) { stateDescription = author },
+            shape = MaterialTheme.shapes.large, color = if (line.user) colors.secondaryContainer else colors.surfaceContainerHigh,
+            contentColor = if (line.user) colors.onSecondaryContainer else colors.onSurface) {
+            Text(line.text, Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge)
         }
     }
 }

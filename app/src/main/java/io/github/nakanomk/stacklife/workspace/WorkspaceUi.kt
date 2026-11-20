@@ -18,6 +18,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.assistant.*
 import io.github.nakanomk.stacklife.DockOverlay
+import io.github.nakanomk.stacklife.GlassIcon
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.planner.NavStyle
@@ -58,8 +59,8 @@ internal fun PageTitle(title: String, back: (() -> Unit)? = null, backEnabled: B
     CenterAlignedTopAppBar(
         title = { Text(title, Modifier.semantics { heading() }, maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.titleLarge) },
-        navigationIcon = { if (back != null) ToolbarIcon(R.drawable.ic_arrow_back, "返回", backEnabled, back) },
-        actions = { if (settings != null) ToolbarIcon(R.drawable.ic_settings, "设置", onClick = settings) },
+        navigationIcon = { if (back != null) GlassIcon(R.drawable.ic_arrow_back, "返回", back, enabled = backEnabled) },
+        actions = { if (settings != null) GlassIcon(R.drawable.ic_settings, "设置", settings) },
         windowInsets = WindowInsets(0), expandedHeight = 56.dp,
         colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent))
 }
@@ -70,10 +71,12 @@ internal fun ToolbarIcon(icon: Int, description: String, enabled: Boolean = true
 }
 
 @Composable
-internal fun PreferenceRow(label: String, value: String? = null, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun PreferenceRow(label: String, value: String? = null, modifier: Modifier = Modifier, enabled: Boolean = true,
+    leadingIcon: Int? = null, onClick: () -> Unit) {
     Row(modifier.fillMaxWidth().clickable(enabled = enabled, role = Role.Button, onClick = onClick).heightIn(min = 52.dp)
         .padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (leadingIcon != null) Icon(painterResource(leadingIcon), null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
         if (value != null) Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Icon(painterResource(R.drawable.ic_chevron_right), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)

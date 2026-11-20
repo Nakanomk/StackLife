@@ -30,6 +30,7 @@ internal class KitListSource(
 ) : DetailListSource {
     val viewport = LayoutBoundsHolder()
     override val modifier = Modifier.layoutBounds(viewport)
+    var topClearancePx = 0
     var clearancePx = 0
     var revision = -1L
     var opening: Any? = null
@@ -72,7 +73,7 @@ internal class KitCardSource(
         val bounds = card.boundsInWindow
         if (bounds.width <= 0 || bounds.height <= 0 || bounds.width != coords.size.width || bounds.height != coords.size.height ||
             bounds != coords.boundsInWindow().roundToIntRect() || card.fractionVisibleInWindow() < 1f ||
-            bounds.left < viewport.left || bounds.right > viewport.right || bounds.top < viewport.top ||
+            bounds.left < viewport.left || bounds.right > viewport.right || bounds.top < viewport.top + list.topClearancePx ||
             bounds.bottom > viewport.bottom - list.clearancePx || card.calculateOcclusions().isNotEmpty()) return null
         val size = Size(bounds.width.toFloat(), bounds.height.toFloat())
         val radius = when (val outline = shape.createOutline(size, direction, density)) {

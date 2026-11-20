@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.acceptance
 
+import androidx.compose.ui.graphics.luminance
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.courses.*
@@ -34,6 +35,26 @@ class CourseTimelineTest {
     private suspend fun commit(result: PreviewResult) {
         assertTrue("Unexpected preview: $result", result is PreviewResult.Ready)
         assertTrue(store.api.commit((result as PreviewResult.Ready).proposalId) is CommitResult.Applied)
+    }
+
+    @Test fun courseHuesUseTermOrderNotTheCurrentWeekAndSurviveReopen() = runBlocking {
+        val meetings = listOf(term.meeting(1, 1, "实验", "A", 1, 2), term.meeting(1, 2, "代数", "B", 3, 3),
+            term.meeting(2, 3, "实验", "不同教室", 5, 6), term.meeting(2, 5, "物理", "C", 7, 8))
+        commit(proposal(term, meetings))
+        val first = week(1).colorIndices
+        val second = week(2).colorIndices
+        assertEquals(setOf("实验", "代数"), first.keys)
+        assertEquals(setOf("实验", "物理"), second.keys)
+        assertEquals(first.getValue("实验"), second.getValue("实验"))
+        for (dark in listOf(false, true)) {
+            val swatches = (first + second).values.map { courseColor(term.id, it, dark) }
+            assertEquals(3, swatches.distinct().size)
+            for (color in swatches) assertTrue("White course labels must remain readable",
+                1.05f / (color.luminance() + .05f) >= 6f)
+        }
+        store.reopen()
+        assertEquals(first, week(1).colorIndices)
+        assertEquals(second, week(2).colorIndices)
     }
 
     @Test fun rawFileReimportAndRemovalAreScopedToTheTermAndSource() = runBlocking {

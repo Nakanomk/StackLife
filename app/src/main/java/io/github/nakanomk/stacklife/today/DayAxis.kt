@@ -38,7 +38,7 @@ import kotlin.math.roundToInt
 @Composable
 internal fun DayAxis(
     drag: AxisDrag, revision: Long, enabled: Boolean, onEdit: (String) -> Unit,
-    send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier,
+    send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier, topInset: Dp,
 ) {
     val density = LocalDensity.current
     val scale = drag.scale
@@ -50,8 +50,8 @@ internal fun DayAxis(
         with(density) { (clockWidth.toDp() + 16.dp).coerceAtLeast(56.dp) }
     }
     val gutter = spine + 16.dp
-    Box(modifier.fillMaxWidth().clipToBounds().onGloballyPositioned { drag.viewport = it.boundsInRoot() }) {
-        Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll)) {
+    Box(modifier.fillMaxWidth().clipToBounds()) {
+        Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll).padding(top = topInset)) {
             Box(Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() }).drawBehind {
                 val x = spine.toPx()
                 drawLine(colors.outlineVariant, Offset(x, 0f), Offset(x, size.height), 2.dp.toPx())
@@ -97,8 +97,13 @@ internal fun DayAxis(
                 }
             }
         }
-        CurrentLine(drag, spine)
-        DropPreview(drag, gutter)
+        // Paint through the toolbar, but never allow a hidden slot to receive a drop.
+        Box(Modifier.fillMaxSize().padding(top = topInset)) {
+            Box(Modifier.fillMaxSize().onGloballyPositioned { drag.viewport = it.boundsInRoot() }) {
+                CurrentLine(drag, spine)
+                DropPreview(drag, gutter)
+            }
+        }
     }
 }
 

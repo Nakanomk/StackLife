@@ -11,8 +11,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import io.github.nakanomk.stacklife.DockOverlay
-import io.github.nakanomk.stacklife.assistant.AssistantPage
+import io.github.nakanomk.stacklife.RootPane
+import io.github.nakanomk.stacklife.RootToolbar
 import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.WorkspaceViewModel
@@ -20,19 +20,17 @@ import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.*
 
 @Composable
-internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Unit, onSettings: () -> Unit,
-    navigationBar: @Composable () -> Unit) {
+internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Unit, onSettings: () -> Unit) {
     val state by remember(model) { model.graphs() }.collectAsStateWithLifecycle(ReadState.Loading)
     var creating by rememberSaveable { mutableStateOf(false) }
     var rename by rememberSaveable { mutableStateOf<String?>(null) }
     var remove by rememberSaveable { mutableStateOf<String?>(null) }
     ReadPanel(state) { list ->
-        Page {
-            PageTitle("流程图", settings = onSettings)
-            DockOverlay(navigationBar, AssistantPage.Graphs) { bottom ->
+        RootPane(header = { RootToolbar(onSettings) {
+            TextButton(onClick = { creating = true }) { Text("新建流程图") }
+        } }) { top, bottom ->
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = listSpacing,
-                    contentPadding = dockListPadding(bottom)) {
-                    item { PreferenceRow("新建流程图") { creating = true } }
+                    contentPadding = dockListPadding(top, bottom)) {
                     if (list.graphs.isEmpty()) item {
                         SectionTitle("还没有流程图")
                         Hint("把目标拆成节点，用箭头连接前置任务。")
@@ -56,7 +54,6 @@ internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Uni
                         }
                     }
                 }
-            }
         }
         val renamed = list.graphs.find { it.id == rename }
         if (creating || renamed != null) key(renamed?.id) {

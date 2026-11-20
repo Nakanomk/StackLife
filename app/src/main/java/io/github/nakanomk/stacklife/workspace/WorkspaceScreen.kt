@@ -1,17 +1,24 @@
 package io.github.nakanomk.stacklife.workspace
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -20,14 +27,16 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
-import io.github.nakanomk.stacklife.DockOverlay
+import io.github.nakanomk.stacklife.RootPane
+import io.github.nakanomk.stacklife.RootToolbar
+import io.github.nakanomk.stacklife.segmentHighlight
 import io.github.nakanomk.stacklife.AddTaskFab
 import io.github.nakanomk.stacklife.taskFabClearance
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.planner.Workspace
-import io.github.nakanomk.stacklife.assistant.AssistantPage
+import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.transitions.DetailCard
 import io.github.nakanomk.stacklife.transitions.detailListSource
@@ -35,39 +44,39 @@ import kotlinx.coroutines.flow.collect
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
-private enum class Editor { PUSH, FRAME }
-
 @Composable
-fun WorkspaceScreen(
+internal fun WorkspaceScreen(
     state: Workspace,
     actions: WorkspaceActions,
     onTask: (String) -> Unit,
     onFrame: (String) -> Unit,
     onSettings: () -> Unit,
     shared: SharedModifier,
-    navigationBar: @Composable () -> Unit,
+    stack: Boolean, setStack: (Boolean) -> Unit, onPush: () -> Unit, onCreateFrame: () -> Unit,
     onAdd: () -> Unit,
 ) {
-    var stack by rememberSaveable { mutableStateOf(false) }
-    var editor by rememberSaveable { mutableStateOf<Editor?>(null) }
     val queueScroll = rememberLazyListState()
     val stackScroll = rememberLazyListState()
-    val close = { editor = null }
-    when (editor) {
-        Editor.PUSH -> PushEditor(state.queue, actions, close)
-        Editor.FRAME -> TaskEditor(actions, close, createFrame = true)
-        null -> Page {
-            PageTitle("工作台", settings = onSettings)
-            SecondaryTabRow(selectedTabIndex = if (stack) 1 else 0, containerColor = MaterialTheme.colorScheme.surface) {
-                Tab(selected = !stack, onClick = { stack = false }, text = { Text("队列") })
-                Tab(selected = stack, onClick = { stack = true }, text = { Text("栈") })
-            }
-            DockOverlay(navigationBar, if (stack) AssistantPage.Frames else AssistantPage.Queue) { clearance ->
-                if (stack) FrameList(state.frames, stackScroll, onFrame, { editor = Editor.FRAME }, shared, clearance, state.revision)
-                else Box(Modifier.fillMaxSize()) {
-                    QueueList(state.queue, queueScroll, actions, onTask, { editor = Editor.PUSH }, shared, clearance + taskFabClearance, state.revision)
-                    AddTaskFab(onAdd, bottomInset = clearance)
-                }
+    RootPane(header = { RootToolbar(onSettings) { WorkspaceSegments(stack, setStack) } },
+        overlay = { _, bottom -> if (!stack) AddTaskFab(onAdd, bottomInset = bottom) }) { top, bottom ->
+        if (stack) FrameList(state.frames, stackScroll, onFrame, onCreateFrame, shared, top, bottom, state.revision)
+        else QueueList(state.queue, queueScroll, actions, onTask, onPush, shared, top, bottom + taskFabClearance, state.revision)
+    }
+}
+
+@Composable
+private fun WorkspaceSegments(stack: Boolean, change: (Boolean) -> Unit) {
+    val position = animateFloatAsState(if (stack) 1f else 0f, if (LocalMotionEnabled.current) tween(200) else snap(), label = "workspace segment")
+    val colors = MaterialTheme.colorScheme
+    Row(Modifier.widthIn(max = 168.dp).fillMaxWidth().selectableGroup()
+        .segmentHighlight(position, 2, colors.secondaryContainer)) {
+        for (index in 0..1) {
+            val frame = index == 1
+            val selected = stack == frame
+            Box(Modifier.weight(1f).clip(CircleShape).selectable(selected, role = Role.Tab) { change(frame) }
+                .heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
+                Text(if (frame) "栈" else "队列", style = MaterialTheme.typography.labelLarge,
+                    color = if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant)
             }
         }
     }
@@ -76,10 +85,10 @@ fun WorkspaceScreen(
 @Composable
 private fun QueueList(
     tasks: List<QueueTask>, scroll: LazyListState, actions: WorkspaceActions, onTask: (String) -> Unit,
-    onPush: () -> Unit, shared: SharedModifier, bottomClearance: Dp, revision: Long,
+    onPush: () -> Unit, shared: SharedModifier, topClearance: Dp, bottomClearance: Dp, revision: Long,
 ) {
     val appearance = LocalAppearance.current
-    val source = detailListSource(scroll, bottomClearance, revision)
+    val source = detailListSource(scroll, topClearance, bottomClearance, revision)
     var order by remember(tasks) { mutableStateOf(tasks) }
     val settledSource = if (source != null && order != tasks) null else source
     val action = rememberSubmission(actions) { if (it != SaveOutcome.APPLIED) order = tasks }
@@ -99,7 +108,7 @@ private fun QueueList(
         }
     }
     LazyColumn(Modifier.fillMaxSize().then(source?.modifier ?: Modifier).testTag("queue"), state = scroll,
-        contentPadding = dockListPadding(bottomClearance)) {
+        contentPadding = dockListPadding(topClearance, bottomClearance)) {
         item {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("${tasks.size} 项未完成 · 预计 ${tasks.sumOf { it.minutes.toLong() }} 分钟", Modifier.weight(1f),
@@ -155,7 +164,7 @@ private fun QueueList(
     }
 }
 
-internal fun dockListPadding(bottom: Dp) = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = bottom + 8.dp)
+internal fun dockListPadding(top: Dp, bottom: Dp) = PaddingValues(start = 16.dp, top = top + 4.dp, end = 16.dp, bottom = bottom + 8.dp)
 
 private fun <T> List<T>.moved(from: Int, to: Int): List<T> = toMutableList().apply { add(to, removeAt(from)) }
 

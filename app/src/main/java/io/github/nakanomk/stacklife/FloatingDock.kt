@@ -30,7 +30,6 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 
 import dev.chrisbanes.haze.hazeSource
-import dev.chrisbanes.haze.rememberHazeState
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.assistant.AssistantComposer
 import io.github.nakanomk.stacklife.assistant.AssistantPage
@@ -49,15 +48,12 @@ internal fun DockOverlay(
     val docked = appearance.navStyle == NavStyle.DOCKED
     val composer = assistantPage?.takeIf { LocalAssistant.current != null }
     val showNav = navigationBar != null && WindowInsets.ime.getBottom(density) == 0
-    val glass = LocalPlannerGlassAllowed.current && appearance.glass &&
-        ((!docked && showNav && appearance.navGlass) || (composer != null && appearance.assistantGlass)) &&
-        glassUnavailableReason(appearance) == null
-    val source = if (glass) rememberHazeState() else null
+    val source = rememberPlannerBackdrop((!docked && showNav && appearance.navGlass) || (composer != null && appearance.assistantGlass))
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val shareRow = maxWidth >= 600.dp && maxWidth > maxHeight && composer != null && showNav
         val navSlot: @Composable () -> Unit = {
-            if (showNav) Box(if (docked) Modifier.fillMaxWidth() else Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                navigationBar?.invoke()
+            if (showNav) Box(if (docked) Modifier.fillMaxWidth() else chromeRail()) {
+                navigationBar()
             }
         }
         Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), bottomBar = {
@@ -65,8 +61,8 @@ internal fun DockOverlay(
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     if (composer != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            Box(Modifier.widthIn(max = 520.dp).fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                                AssistantComposer(composer)
+                            Box(chromeRail()) {
+                                AssistantComposer(composer, persistentRoot = navigationBar != null)
                             }
                         }
                         if (shareRow) Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { navSlot() }
@@ -82,11 +78,19 @@ internal fun DockOverlay(
     }
 }
 
+private fun chromeRail() = Modifier.widthIn(max = 520.dp).fillMaxWidth().padding(horizontal = chromeGutter, vertical = 4.dp)
+
+internal fun Modifier.segmentHighlight(position: State<Float>, count: Int, ink: Color) = drawBehind {
+    val width = size.width / count
+    val index = if (layoutDirection == LayoutDirection.Ltr) position.value else count - 1 - position.value
+    drawRoundRect(ink, Offset(index * width, 0f), Size(width, size.height), CornerRadius(size.height / 2))
+}
+
 @Composable
-internal fun rememberDestinationCapsule(active: String, onSelect: (String) -> Unit): @Composable () -> Unit {
+internal fun rememberDestinationCapsule(active: String, pagerPosition: State<Float>? = null, onSelect: (String) -> Unit): @Composable () -> Unit {
     val appearance = LocalAppearance.current
     val position = appearance.order.indexOfFirst { it.key == active }.coerceAtLeast(0).toFloat()
-    val slot = animateFloatAsState(position, if (LocalMotionEnabled.current) tween(200) else snap(), label = "navigation slot")
+    val slot = pagerPosition ?: animateFloatAsState(position, if (LocalMotionEnabled.current) tween(200) else snap(), label = "navigation slot")
     return {
         val haptics = LocalHapticFeedback.current
         val select: (String) -> Unit = { key ->
@@ -116,14 +120,10 @@ private fun DockedNavigation(tabs: List<Destination>, active: String, onSelect: 
 private fun DestinationCapsule(tabs: List<Destination>, active: String, slot: State<Float>, onSelect: (String) -> Unit) {
     val colors = MaterialTheme.colorScheme
     val appearanceGlass = LocalCapsuleBackdrop.current != null && LocalAppearance.current.navGlass
-    StackLifeSurface(CapsuleScene.NAVIGATION, Modifier.widthIn(max = 320.dp).fillMaxWidth().testTag("navigation-capsule"),
+    StackLifeSurface(CapsuleScene.NAVIGATION, Modifier.fillMaxWidth().testTag("navigation-capsule"),
         solid = colors.surfaceContainerLow, elevation = 2.dp) {
-        Row(Modifier.selectableGroup().padding(horizontal = 4.dp, vertical = 4.dp).drawBehind {
-            val width = size.width / tabs.size
-            val position = if (layoutDirection == LayoutDirection.Ltr) slot.value else tabs.lastIndex - slot.value
-            drawRoundRect(colors.secondaryContainer.copy(alpha = if (appearanceGlass) .62f else 1f), Offset(position * width, 0f), Size(width, size.height),
-                CornerRadius(size.height / 2))
-        }) {
+        Row(Modifier.selectableGroup().padding(4.dp).segmentHighlight(slot, tabs.size,
+            colors.secondaryContainer.copy(alpha = if (appearanceGlass) .74f else 1f))) {
             for (tab in tabs) key(tab.key) {
                 val id = tab.key
                 val selected = active == id
