@@ -22,6 +22,8 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import androidx.navigation3.ui.NavDisplay
 import io.github.nakanomk.stacklife.courses.*
+import io.github.nakanomk.stacklife.graphs.GraphEditorRoute
+import io.github.nakanomk.stacklife.graphs.GraphsRoute
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.today.*
 import io.github.nakanomk.stacklife.workspace.*
@@ -46,6 +48,7 @@ class MainActivity : ComponentActivity() {
 @Serializable private data object AddTask : NavKey
 @Serializable private data object ImportCourses : NavKey
 @Serializable private data class RemoveTerm(val id: String) : NavKey
+@Serializable private data class GraphEditor(val id: String) : NavKey
 
 @Composable
 internal fun StackLifeApp(model: WorkspaceViewModel) {
@@ -104,6 +107,8 @@ private fun PlannerNavigation(model: WorkspaceViewModel) {
                         } else if (destination == "workspace") WorkspacePanel(model) { workspace ->
                             WorkspaceScreen(workspace, model, { navigate(TaskDetail(it)) }, { navigate(FrameDetail(it)) },
                                 { navigate(Preferences) }, shared, navigationBar = bar, onAdd = { navigate(AddTask) })
+                        } else if (destination == "graphs") {
+                            GraphsRoute(model, { navigate(GraphEditor(it)) }, { navigate(Preferences) }, bar)
                         } else CoursesRoute(model, selectedTerm, selectedWeek,
                             onTerm = { selectedTerm = it.id; selectedWeek = null }, onWeek = { selectedWeek = it },
                             onImport = { navigate(ImportCourses) }, onRemove = { navigate(RemoveTerm(it.id)) },
@@ -125,6 +130,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel) {
                     selectedTerm = id; selectedWeek = 1; back()
                 } }
                 entry<RemoveTerm> { key -> RemoveTermReview(key.id, model, back) }
+                entry<GraphEditor> { key -> GraphEditorRoute(model, key.id, back) { navigate(FrameDetail(it)) } }
                 entry<TaskDetail> { key -> WorkspacePanel(model) { TaskScreen(key.id, it, model, back, shared) } }
                 entry<FrameDetail> { key -> WorkspacePanel(model) { FrameScreen(key.id, it, model, back, shared) } }
                 entry<Preferences> { WorkspacePanel(model) { SettingsScreen(it, model, back) } }

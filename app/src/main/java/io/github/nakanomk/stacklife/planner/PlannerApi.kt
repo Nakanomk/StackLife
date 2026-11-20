@@ -20,6 +20,9 @@ sealed interface PlannerQuery {
     data object Workspace : PlannerQuery
     data object Terms : PlannerQuery
     data class Week(val termId: String, val week: Int) : PlannerQuery
+    data object Graphs : PlannerQuery
+    data class Graph(val graphId: String) : PlannerQuery
+    data class Goal(val graphId: String, val goalId: String) : PlannerQuery
     data class Day(val date: LocalDate, val zone: ZoneId) : PlannerQuery {
         val startMillis = date.atStartOfDay(zone).toInstant().toEpochMilli()
         val endMillis = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
@@ -56,7 +59,7 @@ data class DayPlan(
     val courses: List<ScheduledCourse> = emptyList(), val conflictingTaskIds: Set<String> = emptySet(),
 ) : QueryResult
 
-enum class FrameSource { PUSH, MANUAL, SWAP }
+enum class FrameSource { PUSH, MANUAL, SWAP, GRAPH }
 enum class RestorePolicy { PREPEND, APPEND, SWAP }
 enum class RestoreMode { ALL, SELECTED }
 
@@ -101,12 +104,20 @@ sealed interface PlannerCommand {
     data class SlotClear(val taskId: String, val expectedRevision: Long? = null) : PlannerCommand
     data class CourseImport(val draftId: String) : PlannerCommand
     data class TermRemove(val termId: String) : PlannerCommand
+    data class GraphCreate(val title: String, val ref: String? = null) : PlannerCommand
+    data class GraphPatch(val graphId: String, val edits: List<GraphEdit>, val expectedRevision: Long? = null) : PlannerCommand
+    data class GraphRemove(val graphId: String, val expectedRevision: Long? = null) : PlannerCommand
+    data class GraphFrame(
+        val graphId: String, val goalId: String, val reason: String? = null, val ref: String? = null,
+        val taskRefs: Map<String, String> = emptyMap(), val expectedRevision: Long? = null,
+    ) : PlannerCommand
 }
 
 data class PlannerChange(val entityId: String, val field: String, val before: String?, val after: String?)
 
 sealed interface PreviewResult {
-    data class Ready(val proposalId: String, val baseRevision: Long, val changes: List<PlannerChange>) : PreviewResult
+    data class Ready(val proposalId: String, val baseRevision: Long, val changes: List<PlannerChange>,
+        val refs: Map<String, String> = emptyMap()) : PreviewResult
     data class Rejected(val message: String) : PreviewResult
 }
 

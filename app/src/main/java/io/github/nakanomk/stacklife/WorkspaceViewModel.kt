@@ -38,6 +38,10 @@ internal class WorkspaceViewModel(private val planner: PlannerApi) : ViewModel()
     fun day(query: PlannerQuery.Day) = read<DayPlan>(query)
     fun terms() = read<Terms>(PlannerQuery.Terms)
     fun week(query: PlannerQuery.Week) = read<CourseWeek>(query)
+    fun graphs() = read<GraphList>(PlannerQuery.Graphs)
+    fun graph(id: String) = read<GraphDetail>(PlannerQuery.Graph(id))
+    fun goal(graphId: String, goalId: String) = read<GoalOrder>(PlannerQuery.Goal(graphId, goalId))
+    suspend fun preview(command: PlannerCommand) = planner.preview(listOf(command))
 
     suspend fun previewImport(term: TermSpec, meetings: List<CourseMeeting>): PreviewResult {
         val draft = planner.stageCourseImport(term, meetings)

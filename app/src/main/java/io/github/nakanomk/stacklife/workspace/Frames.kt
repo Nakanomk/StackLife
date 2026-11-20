@@ -90,6 +90,7 @@ fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack:
                             FrameSource.PUSH -> "队列压栈"
                             FrameSource.MANUAL -> "直接新建"
                             FrameSource.SWAP -> "切换前自动保存"
+                            FrameSource.GRAPH -> "流程图生成"
                         }
                         Text("$source · ${savedTime(frame.savedAtMillis)}", style = MaterialTheme.typography.labelMedium)
                         Text(frame.reason, style = MaterialTheme.typography.headlineMedium)

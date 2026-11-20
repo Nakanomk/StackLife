@@ -20,14 +20,15 @@ import io.github.nakanomk.stacklife.planner.RestorePolicy
 
 @Database(
     entities = [TaskRow::class, FrameRow::class, FrameItemRow::class, SettingsRow::class, TimeBlockRow::class,
-        TermRow::class, CourseRow::class],
-    version = 3,
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
+        TermRow::class, CourseRow::class, GraphRow::class, GraphNodeRow::class, GraphEdgeRow::class],
+    version = 4,
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4)],
     exportSchema = true,
 )
 abstract class PlannerDatabase : RoomDatabase() {
     internal abstract fun plannerDao(): PlannerDao
     internal abstract fun courseDao(): CourseDao
+    internal abstract fun graphDao(): GraphDao
 }
 
 internal enum class Owner { QUEUE, FRAME, DONE, REMOVED }

@@ -5,25 +5,25 @@ import io.github.nakanomk.stacklife.planner.PlannerChange
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.RestoreMode
 import io.github.nakanomk.stacklife.planner.RestorePolicy
-import io.github.nakanomk.stacklife.planner.TaskInput
 import java.time.ZoneId
 import java.util.Collections
 import java.util.UUID
 
 /** Single preview transaction. The overlay contains only addressed tasks; old frame snapshots never change. */
-internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao,
+internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, private val graphDao: GraphDao,
     private val reviewed: Map<String, ReviewedCourses>, private val base: SettingsRow) {
     private val originals = HashMap<String, TaskRow>()
     private val edited = LinkedHashMap<String, TaskRow>()
     private val slots = SlotDraft(dao, originals)
     private val courses = CourseDraft(courseDao)
+    private val graphs = LinkedHashMap<String, GraphDraft>()
     private val frames = ArrayList<FrameRow>()
     private val items = ArrayList<FrameItemRow>()
     private val members = HashMap<String, List<String>>()
     private val changes = ArrayList<PlannerChange>()
     private var policy = base.restorePolicy
 
-    private enum class Kind { TASK, FRAME }
+    private enum class Kind { TASK, FRAME, GRAPH, NODE }
     private data class Binding(val id: String, val kind: Kind)
     private val bindings = HashMap<String, Binding>()
 
@@ -38,13 +38,13 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao,
         if (commands.isEmpty()) invalid("请至少选择一项更改。")
         for (cmd in commands) when (cmd) {
             is PlannerCommand.TaskAdd -> {
-                val row = newTask(cmd.task, frameId = null)
+                val row = newTask(cmd.task.title, cmd.task.notes, cmd.task.minutes, cmd.task.ref, frameId = null)
                 edited[row.id] = row
             }
             is PlannerCommand.TaskEdit -> {
                 if (cmd.task.ref != null) invalid("只能为新建任务声明引用。")
                 val row = activeTask(cmd.taskId)
-                edited[row.id] = row.copy(title = title(cmd.task), notes = cmd.task.notes, minutes = cmd.task.minutes)
+                edited[row.id] = row.copy(title = title(cmd.task.title, cmd.task.minutes), notes = cmd.task.notes, minutes = cmd.task.minutes)
             }
             is PlannerCommand.TaskFinish -> retire(cmd.taskId, Owner.DONE)
             is PlannerCommand.TaskRemove -> retire(cmd.taskId, Owner.REMOVED)
@@ -62,14 +62,10 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao,
             is PlannerCommand.FrameCreate -> {
                 if (cmd.tasks.isEmpty()) invalid("栈帧至少需要一项任务。")
                 val frame = newFrame(cmd.reason, FrameSource.MANUAL, cmd.ref)
-                val ids = ArrayList<String>(cmd.tasks.size)
-                for ((position, input) in cmd.tasks.withIndex()) {
-                    val row = newTask(input, frame.id)
-                    edited[row.id] = row
-                    ids.add(row.id)
-                    snapshot(frame.id, position, row)
+                populateFrame(frame, cmd.tasks.size) { index ->
+                    val input = cmd.tasks[index]
+                    newTask(input.title, input.notes, input.minutes, input.ref, frame.id)
                 }
-                members[frame.id] = ids
             }
             is PlannerCommand.FramePush -> {
                 val ids = taskIds(cmd.taskIds)
@@ -78,6 +74,21 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao,
             }
             is PlannerCommand.FrameRestore -> restore(cmd)
             is PlannerCommand.SetRestorePolicy -> policy = cmd.policy
+            is PlannerCommand.GraphCreate -> {
+                val id = newId(cmd.ref, Kind.GRAPH)
+                graphs[id] = GraphDraft(graphDao, id, null, cmd.title)
+            }
+            is PlannerCommand.GraphPatch -> {
+                checkRevision(cmd.expectedRevision)
+                if (cmd.edits.isEmpty()) invalid("请至少选择一项流程图更改。")
+                val graph = graph(cmd.graphId)
+                for (edit in cmd.edits) graph.edit(edit, newNodeRef, resolveNodeRef)
+            }
+            is PlannerCommand.GraphRemove -> {
+                checkRevision(cmd.expectedRevision)
+                graph(cmd.graphId).remove()
+            }
+            is PlannerCommand.GraphFrame -> generateFrame(cmd)
         }
         return finish()
     }
@@ -85,7 +96,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao,
     private fun invalid(message: String): Nothing = throw InvalidCommand(message)
 
     private fun checkRevision(expected: Long?) {
-        if (expected != null && expected != base.revision) invalid("日程已有变更，请按最新时段重新安排。")
+        if (expected != null && expected != base.revision) invalid("日程已有变更，请按最新内容重新预览。")
     }
 
     private fun newId(ref: String?, kind: Kind): String {
@@ -104,20 +115,51 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao,
         return binding.id
     }
 
+    private val newNodeRef: (String?) -> String = { newId(it, Kind.NODE) }
+    private val resolveNodeRef: (String) -> String = { resolve(it, Kind.NODE) }
+
+    private fun graph(raw: String): GraphDraft {
+        val id = resolve(raw, Kind.GRAPH)
+        val draft = graphs.getOrPut(id) {
+            val stored = graphDao.graph(id) ?: invalid("流程图「$raw」不存在。")
+            GraphDraft(graphDao, id, stored, stored.title)
+        }
+        if (draft.title == null) invalid("流程图「$raw」已移除。")
+        return draft
+    }
+
+    private fun generateFrame(cmd: PlannerCommand.GraphFrame) {
+        checkRevision(cmd.expectedRevision)
+        val graph = graph(cmd.graphId)
+        val ordered = graph.order(resolveNodeRef(cmd.goalId))
+        // In the ancestor closure every other vertex precedes the goal.
+        val reason = cmd.reason ?: "为目标〈${ordered.last().title}〉生成"
+        val refs = if (cmd.taskRefs.isEmpty()) null else HashMap<String, String>(cmd.taskRefs.size).apply {
+            for ((node, ref) in cmd.taskRefs) if (put(resolveNodeRef(node), ref) != null)
+                invalid("同一个节点「$node」不能重复声明生成任务的引用。")
+        }
+        val frame = newFrame(reason, FrameSource.GRAPH, cmd.ref)
+        populateFrame(frame, ordered.size) { index ->
+            val node = ordered[index]
+            newTask(node.title, node.notes, node.minutes, refs?.remove(node.id), frame.id)
+        }
+        if (!refs.isNullOrEmpty()) invalid("节点「${refs.keys.first()}」不属于该目标及其前置清单，不能为它声明任务引用。")
+    }
+
     private fun taskIds(raw: List<String>): Set<String> {
         val result = LinkedHashSet<String>(raw.size)
         for (id in raw) if (!result.add(resolve(id, Kind.TASK))) invalid("任务不能重复选择。")
         return result
     }
 
-    private fun title(input: TaskInput): String {
-        if (input.minutes <= 0) invalid("预计时长必须大于零。")
-        return input.title.trim().ifEmpty { invalid("任务标题不能为空。") }
+    private fun title(raw: String, minutes: Int): String {
+        if (minutes <= 0) invalid("预计时长必须大于零。")
+        return raw.trim().ifEmpty { invalid("任务标题不能为空。") }
     }
 
-    private fun newTask(input: TaskInput, frameId: String?): TaskRow {
-        val id = newId(input.ref, Kind.TASK)
-        return TaskRow(id, title(input), input.notes, input.minutes,
+    private fun newTask(raw: String, notes: String, minutes: Int, ref: String?, frameId: String?): TaskRow {
+        val id = newId(ref, Kind.TASK)
+        return TaskRow(id, title(raw, minutes), notes, minutes,
             if (frameId == null) Owner.QUEUE else Owner.FRAME, frameId,
             if (frameId == null) append(id) else null)
     }
@@ -127,8 +169,18 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao,
         return FrameRow(newId(ref, Kind.FRAME), label, System.currentTimeMillis(), source).also(frames::add)
     }
 
-    private fun snapshot(frameId: String, position: Int, row: TaskRow) {
-        val slot = slots.current(row.id)
+    private inline fun populateFrame(frame: FrameRow, count: Int, makeTask: (Int) -> TaskRow) {
+        val ids = ArrayList<String>(count)
+        for (position in 0 until count) {
+            val row = makeTask(position)
+            edited[row.id] = row
+            ids.add(row.id)
+            snapshot(frame.id, position, row, slot = null)
+        }
+        members[frame.id] = ids
+    }
+
+    private fun snapshot(frameId: String, position: Int, row: TaskRow, slot: TimeBlockRow?) {
         items.add(FrameItemRow(frameId, position, row.id, row.title, row.notes, row.minutes,
             slot?.startMillis, slot?.endMillis))
     }
@@ -212,7 +264,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao,
             val id = queue[position]
             if (selection == null || id in selection) {
                 val row = task(id)
-                snapshot(frame.id, position, row)
+                snapshot(frame.id, position, row, slots.current(id))
                 edited[id] = row.copy(owner = Owner.FRAME, frameId = frame.id, queuePosition = null)
                 saved.add(id)
             } else {
@@ -297,6 +349,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao,
                 FrameSource.PUSH -> "从队列保存"
                 FrameSource.MANUAL -> "手动新建"
                 FrameSource.SWAP -> "切换前自动保存"
+                FrameSource.GRAPH -> "从流程图目标生成"
             })
         }
         for (item in items) {
@@ -312,8 +365,10 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao,
         if (base.restorePolicy != policy) change("工作台", "恢复策略", base.restorePolicy.label(), policy.label())
         val slotDelta = slots.finish(changes, edited)
         val courseWrites = courses.finish(changes) { start, end -> slots.effective(start, end, edited) }
+        val graphWrites = graphs.values.mapNotNull { it.finish(changes) }
+        val refs = if (bindings.isEmpty()) emptyMap() else Collections.unmodifiableMap(bindings.mapValues { it.value.id })
         return Proposal(base.revision, base.copy(revision = base.revision + 1, restorePolicy = policy),
-            Collections.unmodifiableList(changes), frames, inserts, updates, positions, items, slotDelta, courseWrites)
+            Collections.unmodifiableList(changes), frames, inserts, updates, positions, items, slotDelta, courseWrites, graphWrites, refs)
     }
 
     private fun change(id: String, field: String, before: Any?, after: Any?) {

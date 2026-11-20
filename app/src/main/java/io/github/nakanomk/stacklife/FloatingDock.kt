@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 
-private val tabs = listOf("today" to "今天", "workspace" to "工作台", "courses" to "课表")
+private val tabs = listOf("today" to "今天", "workspace" to "工作台", "graphs" to "流程图", "courses" to "课表")
 
 /** Page already insets its children from system gestures. Lists scroll under this overlay, but
  * can bring their last item fully above its measured height, including at large font sizes. */
@@ -57,7 +57,7 @@ internal fun rememberDestinationCapsule(active: String, onSelect: (String) -> Un
 @Composable
 private fun DestinationCapsule(active: String, slot: State<Float>, onSelect: (String) -> Unit) {
     val colors = MaterialTheme.colorScheme
-    Surface(Modifier.widthIn(max = 256.dp).fillMaxWidth().testTag("navigation-capsule"), shape = CircleShape,
+    Surface(Modifier.widthIn(max = 336.dp).fillMaxWidth().testTag("navigation-capsule"), shape = CircleShape,
         color = colors.surfaceContainerHigh, shadowElevation = 6.dp) {
         Row(Modifier.selectableGroup().padding(horizontal = 6.dp, vertical = 5.dp).drawBehind {
             val width = size.width / tabs.size
@@ -95,6 +95,11 @@ private fun DockIcon(id: String, ink: Color) {
             "workspace" -> {
                 drawRoundRect(ink, point(3, 2), Size(14 * unit, 9 * unit), CornerRadius(2 * unit), style = Stroke(stroke))
                 line(4, 14, 16, 14); line(6, 17, 14, 17)
+            }
+            "graphs" -> {
+                line(5, 6, 5, 10); line(5, 10, 15, 10); line(15, 10, 15, 14)
+                drawCircle(ink, 2.4f * unit, point(5, 4), style = Stroke(stroke))
+                drawCircle(ink, 2.4f * unit, point(15, 16), style = Stroke(stroke))
             }
             "courses" -> {
                 drawRoundRect(ink, point(2, 3), Size(16 * unit, 14 * unit), CornerRadius(2 * unit), style = Stroke(stroke))

@@ -1,0 +1,670 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 4,
+    "identityHash": "1a13bd07f6886efc99e60419c7542a69",
+    "entities": [
+      {
+        "tableName": "tasks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `notes` TEXT NOT NULL, `minutes` INTEGER NOT NULL, `owner` TEXT NOT NULL, `frameId` TEXT, `queuePosition` INTEGER, PRIMARY KEY(`id`), FOREIGN KEY(`frameId`) REFERENCES `frames`(`id`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "minutes",
+            "columnName": "minutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "owner",
+            "columnName": "owner",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "frameId",
+            "columnName": "frameId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "queuePosition",
+            "columnName": "queuePosition",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_tasks_owner_queuePosition",
+            "unique": false,
+            "columnNames": [
+              "owner",
+              "queuePosition"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tasks_owner_queuePosition` ON `${TABLE_NAME}` (`owner`, `queuePosition`)"
+          },
+          {
+            "name": "index_tasks_frameId",
+            "unique": false,
+            "columnNames": [
+              "frameId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tasks_frameId` ON `${TABLE_NAME}` (`frameId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "frames",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "frameId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "frames",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `reason` TEXT NOT NULL, `savedAtMillis` INTEGER NOT NULL, `source` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "savedAtMillis",
+            "columnName": "savedAtMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_frames_savedAtMillis",
+            "unique": false,
+            "columnNames": [
+              "savedAtMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_frames_savedAtMillis` ON `${TABLE_NAME}` (`savedAtMillis`)"
+          }
+        ]
+      },
+      {
+        "tableName": "frame_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`frameId` TEXT NOT NULL, `originalPosition` INTEGER NOT NULL, `taskId` TEXT NOT NULL, `title` TEXT NOT NULL, `notes` TEXT NOT NULL, `minutes` INTEGER NOT NULL, `scheduledStartMillis` INTEGER, `scheduledEndMillis` INTEGER, PRIMARY KEY(`frameId`, `originalPosition`), FOREIGN KEY(`frameId`) REFERENCES `frames`(`id`) ON UPDATE NO ACTION ON DELETE NO ACTION , FOREIGN KEY(`taskId`) REFERENCES `tasks`(`id`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "frameId",
+            "columnName": "frameId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originalPosition",
+            "columnName": "originalPosition",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "taskId",
+            "columnName": "taskId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "minutes",
+            "columnName": "minutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduledStartMillis",
+            "columnName": "scheduledStartMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "scheduledEndMillis",
+            "columnName": "scheduledEndMillis",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "frameId",
+            "originalPosition"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_frame_items_frameId_taskId",
+            "unique": true,
+            "columnNames": [
+              "frameId",
+              "taskId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_frame_items_frameId_taskId` ON `${TABLE_NAME}` (`frameId`, `taskId`)"
+          },
+          {
+            "name": "index_frame_items_taskId",
+            "unique": false,
+            "columnNames": [
+              "taskId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_frame_items_taskId` ON `${TABLE_NAME}` (`taskId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "frames",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "frameId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "tasks",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "taskId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "planner_settings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `revision` INTEGER NOT NULL, `restorePolicy` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "restorePolicy",
+            "columnName": "restorePolicy",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "time_blocks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`taskId` TEXT NOT NULL, `startMillis` INTEGER NOT NULL, `endMillis` INTEGER NOT NULL, PRIMARY KEY(`taskId`), FOREIGN KEY(`taskId`) REFERENCES `tasks`(`id`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "taskId",
+            "columnName": "taskId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startMillis",
+            "columnName": "startMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endMillis",
+            "columnName": "endMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "taskId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_time_blocks_endMillis",
+            "unique": false,
+            "columnNames": [
+              "endMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_time_blocks_endMillis` ON `${TABLE_NAME}` (`endMillis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "tasks",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "taskId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "course_terms",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`termId` TEXT NOT NULL, `source` TEXT NOT NULL, `monday` INTEGER NOT NULL, `weeks` INTEGER NOT NULL, `initial` TEXT NOT NULL, `switchDay` INTEGER, PRIMARY KEY(`termId`, `source`))",
+        "fields": [
+          {
+            "fieldPath": "termId",
+            "columnName": "termId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "monday",
+            "columnName": "monday",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "weeks",
+            "columnName": "weeks",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "initial",
+            "columnName": "initial",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "switchDay",
+            "columnName": "switchDay",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "termId",
+            "source"
+          ]
+        }
+      },
+      {
+        "tableName": "course_meetings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`termId` TEXT NOT NULL, `source` TEXT NOT NULL, `week` INTEGER NOT NULL, `day` INTEGER NOT NULL, `title` TEXT NOT NULL, `room` TEXT NOT NULL, `firstPeriod` INTEGER NOT NULL, `lastPeriod` INTEGER NOT NULL, `startMillis` INTEGER NOT NULL, `endMillis` INTEGER NOT NULL, PRIMARY KEY(`termId`, `source`, `week`, `day`, `firstPeriod`, `lastPeriod`, `title`, `room`), FOREIGN KEY(`termId`, `source`) REFERENCES `course_terms`(`termId`, `source`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "termId",
+            "columnName": "termId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "meeting.week",
+            "columnName": "week",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "meeting.day",
+            "columnName": "day",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "meeting.title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "meeting.room",
+            "columnName": "room",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "meeting.firstPeriod",
+            "columnName": "firstPeriod",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "meeting.lastPeriod",
+            "columnName": "lastPeriod",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "meeting.startMillis",
+            "columnName": "startMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "meeting.endMillis",
+            "columnName": "endMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "termId",
+            "source",
+            "week",
+            "day",
+            "firstPeriod",
+            "lastPeriod",
+            "title",
+            "room"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_course_meetings_endMillis",
+            "unique": false,
+            "columnNames": [
+              "endMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_course_meetings_endMillis` ON `${TABLE_NAME}` (`endMillis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "course_terms",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "termId",
+              "source"
+            ],
+            "referencedColumns": [
+              "termId",
+              "source"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "plan_graphs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "graph_nodes",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`graphId` TEXT NOT NULL, `id` TEXT NOT NULL, `title` TEXT NOT NULL, `notes` TEXT NOT NULL, `minutes` INTEGER NOT NULL, `creationOrder` INTEGER NOT NULL, `x` REAL NOT NULL, `y` REAL NOT NULL, PRIMARY KEY(`graphId`, `id`), FOREIGN KEY(`graphId`) REFERENCES `plan_graphs`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "graphId",
+            "columnName": "graphId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "minutes",
+            "columnName": "minutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "creationOrder",
+            "columnName": "creationOrder",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "x",
+            "columnName": "x",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "y",
+            "columnName": "y",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "graphId",
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_graph_nodes_graphId_creationOrder_id",
+            "unique": false,
+            "columnNames": [
+              "graphId",
+              "creationOrder",
+              "id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_graph_nodes_graphId_creationOrder_id` ON `${TABLE_NAME}` (`graphId`, `creationOrder`, `id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "plan_graphs",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "graphId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "graph_edges",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`graphId` TEXT NOT NULL, `fromId` TEXT NOT NULL, `toId` TEXT NOT NULL, PRIMARY KEY(`graphId`, `fromId`, `toId`), FOREIGN KEY(`graphId`, `fromId`) REFERENCES `graph_nodes`(`graphId`, `id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`graphId`, `toId`) REFERENCES `graph_nodes`(`graphId`, `id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "graphId",
+            "columnName": "graphId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fromId",
+            "columnName": "fromId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "toId",
+            "columnName": "toId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "graphId",
+            "fromId",
+            "toId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_graph_edges_graphId_toId",
+            "unique": false,
+            "columnNames": [
+              "graphId",
+              "toId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_graph_edges_graphId_toId` ON `${TABLE_NAME}` (`graphId`, `toId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "graph_nodes",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "graphId",
+              "fromId"
+            ],
+            "referencedColumns": [
+              "graphId",
+              "id"
+            ]
+          },
+          {
+            "table": "graph_nodes",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "graphId",
+              "toId"
+            ],
+            "referencedColumns": [
+              "graphId",
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1a13bd07f6886efc99e60419c7542a69')"
+    ]
+  }
+}

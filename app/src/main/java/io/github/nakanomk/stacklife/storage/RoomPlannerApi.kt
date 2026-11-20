@@ -2,6 +2,7 @@ package io.github.nakanomk.stacklife.storage
 
 import androidx.room.withTransaction
 import io.github.nakanomk.stacklife.courses.*
+import io.github.nakanomk.stacklife.graphs.goalOrder
 import io.github.nakanomk.stacklife.planner.*
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -13,6 +14,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
     private val dao = db.plannerDao()
     private val pending = ConcurrentHashMap<String, Proposal>()
     private val courses = db.courseDao()
+    private val graphs = db.graphDao()
     private val reviewed = ConcurrentHashMap<String, ReviewedCourses>()
 
     // Every successful commit touches the singleton, including commits that only move slots.
@@ -33,6 +35,19 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
                     }
                     PlannerQuery.Terms -> Terms(courses.terms(HUST_SOURCE).map(TermRow::spec))
                     is PlannerQuery.Week -> week(query)
+                    PlannerQuery.Graphs -> GraphList(graphs.list())
+                    is PlannerQuery.Graph -> {
+                        val graph = graphs.graph(query.graphId)
+                        if (graph == null) GraphDetail(settings.revision, null, emptyList(), emptyList())
+                        else GraphDetail(settings.revision, graph, graphs.nodes(graph.id), graphs.edges(graph.id))
+                    }
+                    is PlannerQuery.Goal -> {
+                        try {
+                            GoalOrder(settings.revision, goalOrder(graphs.nodes(query.graphId), graphs.edges(query.graphId), query.goalId))
+                        } catch (e: IllegalArgumentException) {
+                            GoalOrder(settings.revision, emptyList(), e.message ?: "无法生成目标顺序")
+                        }
+                    }
                 }
             }
         }
@@ -69,7 +84,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
 
     override suspend fun preview(commands: List<PlannerCommand>): PreviewResult {
         val proposal = try {
-            db.withTransaction { BatchDraft(dao, courses, reviewed, dao.settings() ?: SettingsRow()).plan(commands) }
+            db.withTransaction { BatchDraft(dao, courses, graphs, reviewed, dao.settings() ?: SettingsRow()).plan(commands) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: InvalidCommand) {
@@ -79,7 +94,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
         }
         val id = UUID.randomUUID().toString()
         pending[id] = proposal
-        return PreviewResult.Ready(id, proposal.baseRevision, proposal.changes)
+        return PreviewResult.Ready(id, proposal.baseRevision, proposal.changes, proposal.refs)
     }
 
     override fun discard(proposalId: String) {
@@ -95,7 +110,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
                 if (revision != proposal.baseRevision) {
                     CommitResult.Rejected(CommitFailure.STALE_PREVIEW, "工作台已有变更，请重新预览。")
                 } else {
-                    proposal.applyTo(dao, courses)
+                    proposal.applyTo(dao, courses, graphs)
                     CommitResult.Applied(proposal.settings.revision)
                 }
             }
@@ -121,8 +136,10 @@ internal class Proposal(
     private val items: List<FrameItemRow>,
     private val slots: SlotDelta?,
     private val courses: List<CourseWrites>,
+    private val graphs: List<GraphWrites>,
+    val refs: Map<String, String>,
 ) {
-    fun applyTo(dao: PlannerDao, courseDao: CourseDao) {
+    fun applyTo(dao: PlannerDao, courseDao: CourseDao, graphDao: GraphDao) {
         if (frames.isNotEmpty()) dao.insertFrames(frames)
         if (inserts.isNotEmpty()) dao.insertTasks(inserts)
         if (updates.isNotEmpty()) dao.updateTasks(updates)
@@ -130,6 +147,7 @@ internal class Proposal(
         if (items.isNotEmpty()) dao.insertItems(items)
         slots?.applyTo(dao)
         for (write in courses) write.applyTo(courseDao)
+        for (write in graphs) write.applyTo(graphDao)
         dao.saveSettings(settings)
     }
 }
