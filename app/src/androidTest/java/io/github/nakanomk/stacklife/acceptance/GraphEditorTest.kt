@@ -192,7 +192,7 @@ class GraphEditorTest {
             ui.onNode(confirm).performClick().assertIsNotEnabled()
             ui.activityRule.scenario.recreate()
             attach()
-            bringIntoReview(hasText("返回")).assertIsNotEnabled()
+            bringIntoReview(hasContentDescription("返回")).assertIsNotEnabled()
         } finally {
             release.complete(Unit)
             writer.join()
@@ -230,7 +230,7 @@ class GraphEditorTest {
         review("x")
         bringIntoReview(hasText("1. X")).assertIsDisplayed()
         bringIntoReview(hasTestTag("graph-generate")); await(hasTestTag("graph-generate") and isEnabled())
-        bringIntoReview(hasText("返回")).performClick()
+        bringIntoReview(hasContentDescription("返回")).performClick()
         canvas("x").assertIsDisplayed(); assertTrue(runBlocking { store.state().frames.isEmpty() })
         review("x")
         bringIntoReview(hasTestTag("graph-generate")); await(hasTestTag("graph-generate") and isEnabled())

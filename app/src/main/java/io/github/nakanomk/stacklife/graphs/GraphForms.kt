@@ -61,9 +61,9 @@ internal fun NodeForm(model: WorkspaceViewModel, graphId: String, revision: Long
             } else GraphEdit.EditNode(node.id, title, notes, checkNotNull(duration))
             PlannerCommand.GraphPatch(graphId, listOf(edit), revision)
         }, onClose = onClose) {
-        OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth().testTag("node-title"), singleLine = true, label = { Text("节点标题") })
-        OutlinedTextField(notes, { notes = it }, Modifier.fillMaxWidth().testTag("node-notes"), maxLines = 4, label = { Text("备注（选填）") })
-        OutlinedTextField(minutes, { minutes = it }, Modifier.fillMaxWidth().testTag("node-minutes"), singleLine = true,
+        TextField(title, { title = it }, Modifier.fillMaxWidth().testTag("node-title"), colors = lineFieldColors(), singleLine = true, label = { Text("节点标题") })
+        TextField(notes, { notes = it }, Modifier.fillMaxWidth().testTag("node-notes"), colors = lineFieldColors(), maxLines = 4, label = { Text("备注（选填）") })
+        TextField(minutes, { minutes = it }, Modifier.fillMaxWidth().testTag("node-minutes"), colors = lineFieldColors(), singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), label = { Text("预计分钟") }, placeholder = { Text("30") })
     }
 }
@@ -76,7 +76,7 @@ internal fun MoveForm(model: WorkspaceViewModel, graphId: String, revision: Long
     GraphSaveDialog(model, "移动「${node.title}」", "保存位置", x != null && y != null, command = {
         PlannerCommand.GraphPatch(graphId, listOf(GraphEdit.MoveNode(node.id, checkNotNull(x), checkNotNull(y))), revision)
     }, onClose = onClose) {
-        OutlinedTextField(left, { left = it }, singleLine = true, label = { Text("横坐标（dp）") })
-        OutlinedTextField(top, { top = it }, singleLine = true, label = { Text("纵坐标（dp）") })
+        TextField(left, { left = it }, colors = lineFieldColors(), singleLine = true, label = { Text("横坐标（dp）") })
+        TextField(top, { top = it }, colors = lineFieldColors(), singleLine = true, label = { Text("纵坐标（dp）") })
     }
 }

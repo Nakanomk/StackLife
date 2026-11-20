@@ -28,25 +28,25 @@ internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Uni
     var remove by rememberSaveable { mutableStateOf<String?>(null) }
     ReadPanel(state) { list ->
         Page {
-            DockOverlay(navigationBar) { bottom ->
+            PageTitle("流程图", settings = onSettings)
+            DockOverlay(navigationBar, AssistantPage.Graphs) { bottom ->
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = listSpacing,
-                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = bottom + 12.dp)) {
-                    item { PageTitle("流程图", settings = onSettings, assistantPage = AssistantPage.Graphs) }
-                    item { Primary("新建流程图") { creating = true } }
+                    contentPadding = dockListPadding(bottom)) {
+                    item { PreferenceRow("新建流程图") { creating = true } }
                     if (list.graphs.isEmpty()) item {
                         SectionTitle("还没有流程图")
                         Hint("把目标拆成节点，用箭头连接前置任务。")
                     }
                     items(list.graphs, key = { it.id }) { graph ->
-                        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
+                        Surface(color = MaterialTheme.colorScheme.surface) {
                             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 TextButton(onClick = { onOpenGraph(graph.id) }, modifier = Modifier.weight(1f).heightIn(min = 60.dp)
                                     .testTag("open-graph:${graph.id}")) {
-                                    Text(graph.title, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium)
+                                    Text(graph.title, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
                                 }
                                 var menu by remember { mutableStateOf(false) }
                                 Box {
-                                    TextButton(onClick = { menu = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text("管理") }
+                                    ToolbarIcon(io.github.nakanomk.stacklife.R.drawable.ic_more_vert, "管理") { menu = true }
                                     DropdownMenu(menu, { menu = false }) {
                                         DropdownMenuItem({ Text("重命名") }, { menu = false; rename = graph.id })
                                         DropdownMenuItem({ Text("删除流程图") }, { menu = false; remove = graph.id })
@@ -65,7 +65,7 @@ internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Uni
                 command = { if (renamed == null) PlannerCommand.GraphCreate(title)
                     else PlannerCommand.GraphPatch(renamed.id, listOf(GraphEdit.Rename(title))) },
                 onClose = { creating = false; rename = null }) {
-                OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth().testTag("graph-title"),
+                TextField(title, { title = it }, Modifier.fillMaxWidth().testTag("graph-title"), colors = lineFieldColors(),
                     label = { Text("流程图名称") }, singleLine = true)
             }
         }

@@ -81,13 +81,13 @@ internal fun SlotEditor(
     BackHandler(enabled = submission.busy) { /* Let the outstanding receipt finish once. */ }
     val editable = !submission.busy
     val validate by rememberUpdatedState(checkSlot)
-    Page {
+    Page(AssistantPage.Task(entry.taskId)) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(pagePadding),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            PageTitle(if (original == null) "安排时间" else "调整时段", back = { if (editable) onBack() }, assistantPage = AssistantPage.Task(entry.taskId))
-            Text(entry.title, style = MaterialTheme.typography.headlineSmall)
+            PageTitle(if (original == null) "安排时间" else "调整时段", back = { if (editable) onBack() })
+            Text(entry.title, style = MaterialTheme.typography.titleMedium)
             Text("当地时区 · ${zone.id}", style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(onClick = { pickDate = true }, enabled = editable,
+            TextButton(onClick = { pickDate = true }, enabled = editable,
                 modifier = Modifier.heightIn(min = 48.dp).testTag("slot:date")) { Text("开始日期：$date") }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 NumberField("开始小时（0–23）", hour, editable, Modifier.weight(1f).testTag("slot:hour")) { hour = it }
@@ -140,6 +140,6 @@ internal fun SlotEditor(
 
 @Composable
 private fun NumberField(label: String, value: String, enabled: Boolean, modifier: Modifier, change: (String) -> Unit) {
-    OutlinedTextField(value = value, onValueChange = change, label = { Text(label) }, enabled = enabled,
+    TextField(colors = lineFieldColors(), value = value, onValueChange = change, label = { Text(label) }, enabled = enabled,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = modifier)
 }

@@ -5,7 +5,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,7 +23,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.courses.CourseDetails
@@ -34,9 +35,6 @@ import io.github.nakanomk.stacklife.planner.ScheduledState
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
-private val spine = 56.dp
-private val gutter = 72.dp
-
 @Composable
 internal fun DayAxis(
     drag: AxisDrag, revision: Long, enabled: Boolean, onEdit: (String) -> Unit,
@@ -45,6 +43,13 @@ internal fun DayAxis(
     val density = LocalDensity.current
     val scale = drag.scale
     val colors = MaterialTheme.colorScheme
+    val hourStyle = MaterialTheme.typography.labelMedium
+    val measurer = rememberTextMeasurer()
+    val spine = remember(measurer, hourStyle, density) {
+        val clockWidth = measurer.measure("00:00", style = hourStyle).size.width
+        with(density) { (clockWidth.toDp() + 16.dp).coerceAtLeast(56.dp) }
+    }
+    val gutter = spine + 16.dp
     Box(modifier.fillMaxWidth().clipToBounds().onGloballyPositioned { drag.viewport = it.boundsInRoot() }) {
         Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll)) {
             Box(Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() }).drawBehind {
@@ -64,7 +69,7 @@ internal fun DayAxis(
                 for (band in scale.bands) for (tick in band.ticks) {
                     Box(Modifier.offset { IntOffset(0, band.top + band.yAt(tick.millis)) }.width(spine - 10.dp)
                         .testTag(tick.tag)) {
-                        if (tick.major) Text(tick.label, Modifier.padding(start = 4.dp), style = MaterialTheme.typography.labelMedium,
+                        if (tick.major) Text(tick.label, Modifier.padding(start = 4.dp), style = hourStyle, softWrap = false,
                             color = colors.onSurfaceVariant)
                         else Spacer(Modifier.align(Alignment.TopEnd).size(4.dp, 1.dp).background(colors.outlineVariant))
                     }
@@ -92,8 +97,8 @@ internal fun DayAxis(
                 }
             }
         }
-        CurrentLine(drag)
-        DropPreview(drag)
+        CurrentLine(drag, spine)
+        DropPreview(drag, gutter)
     }
 }
 
@@ -143,7 +148,7 @@ private fun CourseCard(course: ScheduledCourse, scale: DayAxisScale, modifier: M
 }
 
 @Composable
-private fun CurrentLine(drag: AxisDrag) {
+private fun CurrentLine(drag: AxisDrag, spine: Dp) {
     val millis by produceState(System.currentTimeMillis(), drag.scale.day) {
         while (true) {
             value = System.currentTimeMillis()
@@ -154,16 +159,12 @@ private fun CurrentLine(drag: AxisDrag) {
     val top = drag.scale.yAt(millis) - drag.scroll.value
     if (top < 0 || top >= drag.viewport.height) return
     val color = MaterialTheme.colorScheme.primary
-    Box(Modifier.fillMaxWidth().offset { IntOffset(0, top) }.testTag("now-line")
-        .semantics { contentDescription = "现在 ${clockLabel(millis, drag.scale.day)}" }) {
-        HorizontalDivider(Modifier.padding(start = spine), color = color, thickness = 1.dp)
-        Text("现在", Modifier.background(color, CircleShape).padding(horizontal = 6.dp),
-            color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall)
-    }
+    HorizontalDivider(Modifier.offset { IntOffset(0, top) }.padding(start = spine).testTag("now-line")
+        .semantics { contentDescription = "现在 ${clockLabel(millis, drag.scale.day)}" }, color = color, thickness = 2.dp)
 }
 
 @Composable
-private fun DropPreview(drag: AxisDrag) {
+private fun DropPreview(drag: AxisDrag, gutter: Dp) {
     val slot = drag.candidate ?: return
     val checked = drag.checked?.takeIf { it.slot == slot }
     val start = slot.start.toInstant().toEpochMilli()

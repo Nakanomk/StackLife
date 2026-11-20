@@ -56,11 +56,10 @@ internal fun TaskEditor(
     val scroll = rememberLazyListState()
     val close = { if (!action.busy) onClose() }
     BackHandler(onBack = close)
-    Page {
+    Page(original?.let { AssistantPage.Task(it.id) } ?: if (createFrame) AssistantPage.Frames else AssistantPage.Queue) {
         LazyColumn(state = scroll, contentPadding = pagePadding, verticalArrangement = listSpacing) {
             item {
-                PageTitle(if (createFrame) "新建栈帧" else if (original != null) "编辑任务" else "新增任务", back = close,
-                    assistantPage = original?.let { AssistantPage.Task(it.id) } ?: if (createFrame) AssistantPage.Frames else AssistantPage.Queue)
+                PageTitle(if (createFrame) "新建栈帧" else if (original != null) "编辑任务" else "新增任务", back = close)
             }
             if (createFrame) item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -69,31 +68,18 @@ internal fun TaskEditor(
                 }
             }
             itemsIndexed(drafts, key = { _, draft -> draft.key }) { index, row ->
-                Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
-                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (createFrame) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                            Text("任务 ${index + 1}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                            if (drafts.size > 1) TextButton(
-                                enabled = !action.busy, modifier = Modifier.heightIn(min = 48.dp), onClick = { drafts.remove(row) },
-                            ) { Text("删除此项") }
-                        }
-                        OutlinedTextField(
-                            value = row.title, onValueChange = { drafts[index] = row.copy(title = it) },
-                            modifier = Modifier.fillMaxWidth().testTag("title:$index"), label = { Text("标题") }, singleLine = true,
-                        )
-                        OutlinedTextField(
-                            value = row.notes, onValueChange = { drafts[index] = row.copy(notes = it) },
-                            modifier = Modifier.fillMaxWidth().testTag("notes:$index"), label = { Text("备注（选填）") },
-                            minLines = 2, maxLines = 5,
-                        )
-                        OutlinedTextField(
-                            value = row.minutes, onValueChange = { drafts[index] = row.copy(minutes = it) },
-                            modifier = Modifier.fillMaxWidth().testTag("minutes:$index"), label = { Text("预计分钟") },
-                            placeholder = { Text("30") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            isError = row.duration() == null,
-                            supportingText = { Text(if (row.duration() == null) "请输入有效的整数分钟" else "留空按 30 分钟计算") },
-                        )
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (createFrame) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text("任务 ${index + 1}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                        if (drafts.size > 1) TextButton(enabled = !action.busy, onClick = { drafts.remove(row) }) { Text("删除此项") }
                     }
+                    TextField(row.title, { drafts[index] = row.copy(title = it) }, enabled = !action.busy,
+                        modifier = Modifier.fillMaxWidth().testTag("title:$index"), colors = lineFieldColors(),
+                        label = { Text("标题") }, singleLine = true)
+                    TextField(row.notes, { drafts[index] = row.copy(notes = it) }, enabled = !action.busy,
+                        modifier = Modifier.fillMaxWidth().testTag("notes:$index"), colors = lineFieldColors(),
+                        label = { Text("备注（选填）") }, maxLines = 5)
+                    DurationRow(row.minutes, !action.busy) { drafts[index] = row.copy(minutes = it) }
                 }
             }
             item {
@@ -121,8 +107,24 @@ internal fun TaskEditor(
 }
 
 @Composable
+private fun DurationRow(value: TextFieldValue, enabled: Boolean, update: (TextFieldValue) -> Unit) {
+    var editing by rememberSaveable { mutableStateOf(false) }
+    PreferenceRow("预计时长", "${value.text.ifBlank { "30" }} 分钟", enabled = enabled) { editing = true }
+    if (editing) {
+        var draft by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(value) }
+        val valid = draft.text.isBlank() || (draft.text.toIntOrNull() ?: 0) > 0
+        AlertDialog(onDismissRequest = { editing = false }, title = { Text("预计时长") },
+            text = { TextField(draft, { draft = it }, colors = lineFieldColors(), label = { Text("分钟") },
+                singleLine = true, isError = !valid, placeholder = { Text("30") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)) },
+            confirmButton = { TextButton(enabled = valid, onClick = { update(draft); editing = false }) { Text("确定") } },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("取消") } })
+    }
+}
+
+@Composable
 private fun ReasonField(reason: TextFieldValue, onChange: (TextFieldValue) -> Unit) {
-    OutlinedTextField(
+    TextField(colors = lineFieldColors(),
         value = reason, onValueChange = onChange, modifier = Modifier.fillMaxWidth().testTag("reason"),
         label = { Text("保存原因") }, placeholder = { Text("为什么把这些任务留到稍后？") }, maxLines = 4,
     )
@@ -135,9 +137,9 @@ internal fun PushEditor(queue: List<QueueTask>, actions: WorkspaceActions, onClo
     var selected by rememberSaveable { mutableStateOf(ArrayList(queue.map { it.id })) }
     val close = { if (!action.busy) onClose() }
     BackHandler(onBack = close)
-    Page {
+    Page(AssistantPage.Queue) {
         LazyColumn(Modifier.weight(1f), contentPadding = pagePadding, verticalArrangement = listSpacing) {
-            item { PageTitle("压栈", back = close, assistantPage = AssistantPage.Queue) }
+            item { PageTitle("压栈", back = close) }
             item { ReasonField(reason) { reason = it } }
             item {
                 SectionTitle("保存哪些任务 · 已选 ${selected.size} 项")

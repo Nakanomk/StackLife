@@ -73,12 +73,11 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
     fun dismiss() { editing = null }
     BackHandler(enabled = source != null) { sourceId = null }
 
-    Page {
+    Page(AssistantPage.Graph(graph.id, selected?.id)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp)) { Text("返回") }
+            ToolbarIcon(io.github.nakanomk.stacklife.R.drawable.ic_arrow_back, "返回", onClick = onBack)
             Text(graph.title, Modifier.weight(1f).semantics { heading() }.padding(horizontal = 6.dp), maxLines = 1,
-                overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.headlineSmall)
-            AssistantEntry(AssistantPage.Graph(graph.id, selected?.id))
+                overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
             TextButton(onClick = { listMode = !listMode }, modifier = Modifier.heightIn(min = 48.dp).testTag("graph-toggle-view")) {
                 Text(if (listMode) "画布" else "依赖列表")
             }
@@ -90,11 +89,11 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
                 Text("${source.title} → 请选择后继", style = MaterialTheme.typography.labelLarge)
             } else {
                 if (selected != null) {
-                    Button(onClick = { onGoal(selected.id) }, enabled = !submission.busy,
+                    TextButton(onClick = { onGoal(selected.id) }, enabled = !submission.busy,
                         modifier = Modifier.heightIn(min = 48.dp).testTag("graph-goal")) { Text("预览目标顺序") }
                     var menu by remember { mutableStateOf(false) }
                     Box {
-                        FilledTonalButton(onClick = { menu = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("graph-node-actions")) {
+                        TextButton(onClick = { menu = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("graph-node-actions")) {
                             Text("节点操作")
                         }
                         DropdownMenu(menu, { menu = false }) {
@@ -107,7 +106,7 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
                         }
                     }
                 }
-                Button(onClick = { form("add") }, modifier = Modifier.heightIn(min = 48.dp).testTag("graph-add")) { Text("添加节点") }
+                TextButton(onClick = { form("add") }, modifier = Modifier.heightIn(min = 48.dp).testTag("graph-add")) { Text("添加节点") }
             }
         }
         if (listMode) GraphDependencies(detail, selected?.id, select, onRemove = { edge ->

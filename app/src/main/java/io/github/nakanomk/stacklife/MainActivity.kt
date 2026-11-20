@@ -167,10 +167,10 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 entry<GraphEditor> { key -> CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
                     GraphEditorRoute(model, key.id, back) { navigate(FrameDetail(it)) }
                 } }
-                entry<TaskDetail> { key -> CompositionLocalProvider(LocalAssistantPage provides AssistantPage.Task(key.id), LocalPlannerGlassAllowed provides true) {
+                entry<TaskDetail> { key -> CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
                     WorkspacePanel(model) { TaskScreen(key.id, it, model, back, shared) }
                 } }
-                entry<FrameDetail> { key -> CompositionLocalProvider(LocalAssistantPage provides AssistantPage.Frame(key.id), LocalPlannerGlassAllowed provides true) {
+                entry<FrameDetail> { key -> CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
                     WorkspacePanel(model) { FrameScreen(key.id, it, model, back, shared) }
                 } }
                 entry<Preferences> {

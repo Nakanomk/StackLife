@@ -36,6 +36,7 @@ private val LocalSystemDark = staticCompositionLocalOf<Boolean?> { null }
 private val LocalSystemHaptics = staticCompositionLocalOf<HapticFeedback?> { null }
 private val LocalBarPreviews = staticCompositionLocalOf<SnapshotStateList<State<Boolean>>?> { null }
 private val defaultSeed = Appearance().seed
+private val plannerTypography = Typography()
 
 @Composable
 internal fun StackLifeTheme(appearance: Appearance = Appearance(), content: @Composable () -> Unit) {
@@ -100,7 +101,8 @@ internal fun StackLifeTheme(appearance: Appearance = Appearance(), content: @Com
     CompositionLocalProvider(LocalSystemDark provides systemDark, LocalSystemHaptics provides systemHaptics, LocalBarPreviews provides barPreviews,
         LocalConfiguration provides themeConfig, LocalAppearance provides appearance,
         LocalPlatformAppearance provides platform, LocalMotionEnabled provides motion, LocalHapticFeedback provides haptics) {
-        MaterialExpressiveTheme(colorScheme = colors, motionScheme = if (motion) MotionScheme.expressive() else StillMotion, content = content)
+        MaterialTheme(colorScheme = colors, typography = plannerTypography,
+            motionScheme = if (motion) MotionScheme.standard() else StillMotion, content = content)
     }
 }
 

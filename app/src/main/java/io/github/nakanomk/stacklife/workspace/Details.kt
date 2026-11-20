@@ -35,18 +35,17 @@ fun TaskScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: 
         TaskEditor(actions, { editing = false }, original = task)
         return
     }
-    Page {
+    Page(AssistantPage.Task(id)) {
         LazyColumn(contentPadding = pagePadding, verticalArrangement = listSpacing) {
             item { PageTitle("任务详情", back = back) }
             item {
-                Surface(modifier = shared("task:$id").fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge,
-                    color = if (index == 0) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer) {
-                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(if (index == 0) "当前优先" else "队列第 ${index + 1} 项", style = MaterialTheme.typography.labelLarge)
-                        Text(task.title, style = MaterialTheme.typography.headlineMedium)
+                Surface(modifier = shared("task:$id").fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
+                    Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(if (index == 0) "当前优先" else "队列第 ${index + 1} 项", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Text(task.title, style = MaterialTheme.typography.titleLarge)
                         Text("预计 ${task.minutes} 分钟", style = MaterialTheme.typography.bodyMedium)
                         if (task.scheduledStartMillis != null && task.scheduledEndMillis != null) {
-                            Text("已安排：${savedTime(task.scheduledStartMillis)} 至 ${savedTime(task.scheduledEndMillis)}")
+                            Hint("已安排 ${scheduledRange(task.scheduledStartMillis, task.scheduledEndMillis)}")
                         }
                     }
                 }
@@ -83,40 +82,37 @@ internal fun MissingDetail(title: String, message: String, onBack: () -> Unit) {
 internal fun SettingsScreen(restorePolicy: RestorePolicy, actions: WorkspaceActions, onBack: () -> Unit,
     onConnection: () -> Unit, onAppearance: (AppearanceGroup) -> Unit) {
     val action = rememberSubmission(actions)
-    Page {
-        LazyColumn(contentPadding = pagePadding, verticalArrangement = listSpacing) {
-            item { PageTitle("设置", back = onBack, assistantPage = AssistantPage.Settings) }
-            item { Secondary("色彩", onClick = { onAppearance(AppearanceGroup.COLOR) }) }
-            item { Secondary("布局", onClick = { onAppearance(AppearanceGroup.LAYOUT) }) }
-            item { Secondary("材质与动态", onClick = { onAppearance(AppearanceGroup.MATERIAL) }) }
-            item { Secondary("模型服务配置", onClick = onConnection) }
+    Page(AssistantPage.Settings) {
+        PageTitle("设置", back = onBack)
+        LazyColumn(contentPadding = pagePadding) {
+            item { SectionTitle("外观") }
+            item { PreferenceRow("色彩") { onAppearance(AppearanceGroup.COLOR) } }
+            item { PreferenceRow("布局") { onAppearance(AppearanceGroup.LAYOUT) } }
+            item { PreferenceRow("材质与动态") { onAppearance(AppearanceGroup.MATERIAL) } }
+            item { HorizontalDivider(); Spacer(Modifier.height(12.dp)); SectionTitle("日程助理") }
+            item { PreferenceRow("模型服务配置", onClick = onConnection) }
+            item { HorizontalDivider(); Spacer(Modifier.height(12.dp)); SectionTitle("工作台 · 恢复策略") }
             item {
-                SectionTitle("工作台 · 恢复策略")
-                Hint("决定如何把栈帧里的任务接回队列。选中即保存，帧内的顺序始终保留。")
-            }
-            item {
-                Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.selectableGroup()) {
                     for (policy in RestorePolicy.entries) {
                         val selected = restorePolicy == policy
-                        Surface(shape = MaterialTheme.shapes.large,
-                            color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow) {
-                            Row(Modifier.fillMaxWidth().selectable(selected, enabled = !action.busy, role = Role.RadioButton,
-                                onClick = { if (!selected) action.send(PlannerCommand.SetRestorePolicy(policy)) })
-                                .heightIn(min = 48.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                RadioButton(selected = selected, onClick = null)
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(when (policy) {
-                                        RestorePolicy.PREPEND -> "插入队首"
-                                        RestorePolicy.APPEND -> "追加队尾"
-                                        RestorePolicy.SWAP -> "整帧切换"
-                                    }, style = MaterialTheme.typography.titleMedium)
-                                    Text(when (policy) {
-                                        RestorePolicy.PREPEND -> "先做恢复的任务，再继续眼前的队列。"
-                                        RestorePolicy.APPEND -> "保持眼前任务优先，把恢复的任务接在后面。"
-                                        RestorePolicy.SWAP -> "全部恢复前将非空队列另存为一帧；选择恢复只插队首，不另存。"
-                                    }, style = MaterialTheme.typography.bodyMedium)
-                                }
+                        val muted = MaterialTheme.colorScheme.onSurfaceVariant
+                        Row(Modifier.fillMaxWidth().selectable(selected, enabled = !action.busy, role = Role.RadioButton,
+                            onClick = { if (!selected) action.send(PlannerCommand.SetRestorePolicy(policy)) })
+                            .heightIn(min = 56.dp).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            RadioButton(selected = selected, onClick = null)
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(when (policy) {
+                                    RestorePolicy.PREPEND -> "插入队首"
+                                    RestorePolicy.APPEND -> "追加队尾"
+                                    RestorePolicy.SWAP -> "整帧切换"
+                                }, style = MaterialTheme.typography.bodyLarge)
+                                Text(when (policy) {
+                                    RestorePolicy.PREPEND -> "先做恢复的任务，再继续眼前的队列。"
+                                    RestorePolicy.APPEND -> "保持眼前任务优先，把恢复的任务接在后面。"
+                                    RestorePolicy.SWAP -> "全部恢复前将非空队列另存为一帧；选择恢复只插队首，不另存。"
+                                }, style = MaterialTheme.typography.bodyMedium, color = muted)
                             }
                         }
                     }

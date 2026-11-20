@@ -29,7 +29,7 @@ class AppearanceTest {
         ui.waitUntil(timeoutMillis = 12_000) { ui.onAllNodes(matcher).fetchSemanticsNodes().size == 1 }
         return ui.onNode(matcher)
     }
-    private fun editor(label: String) { visible(hasText("设置") and hasClickAction()).performClick(); visible(hasText(label) and hasClickAction()).performClick() }
+    private fun editor(label: String) { visible(hasContentDescription("设置") and hasClickAction()).performClick(); visible(hasText(label) and hasClickAction()).performClick() }
     private fun field(label: String): SemanticsNodeInteraction {
         val node = hasText(label) and hasClickAction()
         ui.onNodeWithTag("appearance-scroll").performScrollToNode(node)
@@ -46,7 +46,7 @@ class AppearanceTest {
         ui.onNodeWithText("保存外观").performClick(); visible(hasText("模型服务配置"))
         val saved = runBlocking { preferences() }
         assertTrue(saved.appearance.glass && saved.appearance.reduceTransparency); assertEquals(RestorePolicy.SWAP, saved.policy)
-        ui.onNodeWithText("返回").performClick()
+        ui.onNodeWithContentDescription("返回").performClick()
         visible(hasTestTag("navigation-capsule")).assert(hasStateDescription("实色胶囊"))
     }
 
@@ -58,7 +58,7 @@ class AppearanceTest {
         val task = visible(hasText("持久队列")); task.assertIsDisplayed(); ui.onNodeWithText("备注不应显示").assertDoesNotExist()
         ui.onNodeWithText("23 分钟").assertDoesNotExist()
         assertTrue(ui.onNodeWithTag("nav:courses").fetchSemanticsNode().boundsInRoot.left < ui.onNodeWithTag("nav:today").fetchSemanticsNode().boundsInRoot.left)
-        task.performClick(); visible(hasText("任务详情")).assertIsDisplayed(); ui.onNodeWithText("返回").performClick(); visible(hasText("持久队列"))
+        task.performClick(); visible(hasText("任务详情")).assertIsDisplayed(); ui.onNodeWithContentDescription("返回").performClick(); visible(hasText("持久队列"))
         editor("色彩"); field("恢复默认外观").performClick(); ui.onNodeWithText("保存外观").performClick(); visible(hasText("模型服务配置"))
         assertEquals(Appearance(), runBlocking { preferences().appearance })
     }

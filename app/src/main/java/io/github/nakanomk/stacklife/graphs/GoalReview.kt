@@ -63,9 +63,9 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, goalId: Stri
     }
     val close = { if (!submission.busy) onBack() }
     BackHandler(onBack = close)
-    Page {
+    Page(AssistantPage.Graph(graphId, goalId)) {
         LazyColumn(Modifier.fillMaxSize().testTag("goal-order"), contentPadding = pagePadding, verticalArrangement = listSpacing) {
-            item { PageTitle("目标顺序", back = close, backEnabled = !submission.busy, assistantPage = AssistantPage.Graph(graphId, goalId)) }
+            item { PageTitle("目标顺序", back = close, backEnabled = !submission.busy) }
             when {
                 read == ReadState.Loading -> item { CircularProgressIndicator() }
                 read == ReadState.ReadFailed -> item { Text("未能读取流程图") }
@@ -81,7 +81,7 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, goalId: Stri
                         }
                     }
                     item {
-                        OutlinedTextField(reason, { reasonOverride = it }, enabled = !submission.busy,
+                        TextField(reason, { reasonOverride = it }, colors = lineFieldColors(), enabled = !submission.busy,
                             modifier = Modifier.fillMaxWidth().testTag("graph-frame-reason"), label = { Text("生成原因") }, maxLines = 4)
                     }
                     item {

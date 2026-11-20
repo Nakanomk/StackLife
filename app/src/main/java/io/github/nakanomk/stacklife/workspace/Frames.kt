@@ -8,6 +8,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
@@ -15,6 +17,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
+import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.transitions.DetailCard
 import io.github.nakanomk.stacklife.transitions.DetailListSource
 import io.github.nakanomk.stacklife.transitions.detailListSource
@@ -31,16 +34,16 @@ internal fun FrameList(
     LazyColumn(Modifier.fillMaxSize().then(source?.modifier ?: Modifier).testTag("frames"), state = scroll,
         contentPadding = dockListPadding(bottomClearance), verticalArrangement = listSpacing) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SectionTitle("栈帧")
-                Hint("$available 帧可恢复 · ${frames.size - available} 帧已取空")
-                Primary("新建栈帧", onClick = onCreate)
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("$available 帧可恢复 · ${frames.size - available} 帧已取空", Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Secondary("新建栈帧", onClick = onCreate)
             }
         }
         if (frames.isEmpty()) item {
-            Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainer) {
-                Column(Modifier.fillMaxWidth().padding(22.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("还没有栈帧", style = MaterialTheme.typography.titleLarge)
+            Surface(color = MaterialTheme.colorScheme.surface) {
+                Column(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("还没有栈帧", style = MaterialTheme.typography.titleMedium)
                     Hint("中断时，把队列和原因一起存到这里。也可以直接新建一份稍后再做的清单。")
                 }
             }
@@ -58,15 +61,16 @@ internal fun FrameList(
 private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: SharedModifier, source: DetailListSource?) {
     val appearance = LocalAppearance.current
     DetailCard(source, "frame", frame.id, onFrame, modifier = shared("frame:${frame.id}").fillMaxWidth().testTag("frame:${frame.id}"),
-        shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer) {
-        Column(Modifier.padding(if (appearance.compact) 12.dp else 18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(savedTime(frame.savedAtMillis), style = MaterialTheme.typography.labelMedium)
-            Text(frame.reason, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
-            Text("原有 ${frame.items.size} 项 · 剩余 ${frame.remaining} 项", style = MaterialTheme.typography.bodyMedium)
+        shape = RectangleShape, color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.fillMaxWidth().padding(vertical = if (appearance.compact) 4.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(frame.reason, style = MaterialTheme.typography.bodyLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Text("${savedTime(frame.savedAtMillis)} · 原有 ${frame.items.size} 项 · 剩余 ${frame.remaining} 项",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(frame.items.joinToString("、", limit = 3, truncated = "…") { it.title }, style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 @Composable
@@ -86,13 +90,12 @@ fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack:
         entries.mapNotNull { if (it.taskId in ids) it.taskId else null }
     }
     BackHandler(enabled = choosing) { if (!action.busy) leaveSelection() }
-    Page {
+    Page(AssistantPage.Frame(id)) {
         LazyColumn(Modifier.weight(1f), contentPadding = pagePadding, verticalArrangement = listSpacing) {
             item { PageTitle("栈帧详情", back = { if (!action.busy) { if (choosing) leaveSelection() else onBack() } }) }
             item {
-                Surface(modifier = shared("frame:$id").fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge,
-                    color = MaterialTheme.colorScheme.secondaryContainer) {
-                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Surface(modifier = shared("frame:$id").fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
+                    Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         val source = when (frame.source) {
                             FrameSource.PUSH -> "队列压栈"
                             FrameSource.MANUAL -> "直接新建"
@@ -100,7 +103,7 @@ fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack:
                             FrameSource.GRAPH -> "流程图生成"
                         }
                         Text("$source · ${savedTime(frame.savedAtMillis)}", style = MaterialTheme.typography.labelMedium)
-                        Text(frame.reason, style = MaterialTheme.typography.headlineMedium)
+                        Text(frame.reason, style = MaterialTheme.typography.titleLarge)
                         Text("原有 ${entries.size} 项 · 剩余 ${frame.remaining} 项", style = MaterialTheme.typography.bodyMedium)
                     }
                 }

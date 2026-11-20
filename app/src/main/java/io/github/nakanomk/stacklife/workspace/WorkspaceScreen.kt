@@ -1,6 +1,5 @@
 package io.github.nakanomk.stacklife.workspace
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -13,8 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
@@ -59,16 +57,12 @@ fun WorkspaceScreen(
         Editor.PUSH -> PushEditor(state.queue, actions, close)
         Editor.FRAME -> TaskEditor(actions, close, createFrame = true)
         null -> Page {
-            Column(Modifier.fillMaxWidth().padding(start = 20.dp, top = 12.dp, end = 20.dp)) {
-                PageTitle("工作台", settings = onSettings, assistantPage = if (stack) AssistantPage.Frames else AssistantPage.Queue)
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    SegmentedButton(selected = !stack, onClick = { stack = false }, shape = SegmentedButtonDefaults.itemShape(0, 2),
-                        modifier = Modifier.heightIn(min = 48.dp)) { Text("队列") }
-                    SegmentedButton(selected = stack, onClick = { stack = true }, shape = SegmentedButtonDefaults.itemShape(1, 2),
-                        modifier = Modifier.heightIn(min = 48.dp)) { Text("栈") }
-                }
+            PageTitle("工作台", settings = onSettings)
+            SecondaryTabRow(selectedTabIndex = if (stack) 1 else 0, containerColor = MaterialTheme.colorScheme.surface) {
+                Tab(selected = !stack, onClick = { stack = false }, text = { Text("队列") })
+                Tab(selected = stack, onClick = { stack = true }, text = { Text("栈") })
             }
-            DockOverlay(navigationBar) { clearance ->
+            DockOverlay(navigationBar, if (stack) AssistantPage.Frames else AssistantPage.Queue) { clearance ->
                 if (stack) FrameList(state.frames, stackScroll, onFrame, { editor = Editor.FRAME }, shared, clearance, state.revision)
                 else Box(Modifier.fillMaxSize()) {
                     QueueList(state.queue, queueScroll, actions, onTask, { editor = Editor.PUSH }, shared, clearance + taskFabClearance, state.revision)
@@ -105,20 +99,20 @@ private fun QueueList(
         }
     }
     LazyColumn(Modifier.fillMaxSize().then(source?.modifier ?: Modifier).testTag("queue"), state = scroll,
-        contentPadding = dockListPadding(bottomClearance), verticalArrangement = listSpacing) {
+        contentPadding = dockListPadding(bottomClearance)) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SectionTitle("待办队列")
-                Hint("${tasks.size} 项未完成 · 预计 ${tasks.sumOf { it.minutes.toLong() }} 分钟")
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${tasks.size} 项未完成 · 预计 ${tasks.sumOf { it.minutes.toLong() }} 分钟", Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (tasks.isNotEmpty()) Secondary("压栈", !action.busy, onPush)
             }
         }
         if (order.isEmpty()) item {
-            Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainer) {
+            Surface(color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(painterResource(R.drawable.fumo_face), contentDescription = null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
-                    Text("队列是空的", style = MaterialTheme.typography.titleLarge)
+                    Text("队列是空的", style = MaterialTheme.typography.titleMedium)
                     Hint("添加下一件要做的事，或从栈中恢复任务。")
                 }
             }
@@ -129,24 +123,24 @@ private fun QueueList(
                 DetailCard(
                     source = if (dragging) null else settledSource, kind = "task", id = task.id, onDetail = onTask,
                     modifier = shared("task:${task.id}").fillMaxWidth().testTag("task:${task.id}"),
-                    shape = if (head) MaterialTheme.shapes.extraLarge else MaterialTheme.shapes.large,
-                    color = if (head) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                    shape = RectangleShape, color = MaterialTheme.colorScheme.surface,
                     shadowElevation = if (dragging) 6.dp else 0.dp,
                 ) {
-                    val inset = if (appearance.compact) 8.dp else 14.dp
-                    Row(Modifier.padding(start = if (appearance.compact) 12.dp else 18.dp, top = inset, end = 6.dp, bottom = inset),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(if (head) "当前优先" else "第 ${index + 1} 项", style = MaterialTheme.typography.labelMedium)
-                            Text(task.title, style = if (head) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
-                                maxLines = 3, overflow = TextOverflow.Ellipsis)
-                            if (appearance.showDuration) Text("${task.minutes} 分钟", style = MaterialTheme.typography.bodyMedium)
-                            if (task.scheduledStartMillis != null && task.scheduledEndMillis != null) {
-                                Text("已安排：${savedTime(task.scheduledStartMillis)} 至 ${savedTime(task.scheduledEndMillis)}",
-                                    style = MaterialTheme.typography.bodySmall)
+                    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+                    Row(Modifier.fillMaxWidth().heightIn(min = if (appearance.compact) 52.dp else 64.dp)
+                        .padding(vertical = if (appearance.compact) 4.dp else 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            if (head) Text("当前优先", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                            Text(task.title, style = MaterialTheme.typography.bodyLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                            val meta = remember(task.minutes, task.notes, appearance.showDuration, appearance.showNotes) {
+                                listOfNotNull("${task.minutes} 分钟".takeIf { appearance.showDuration },
+                                    task.notes.takeIf { appearance.showNotes && it.isNotBlank() }).joinToString(" · ")
                             }
-                            if (appearance.showNotes && task.notes.isNotBlank()) Text(task.notes, style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (meta.isNotEmpty()) Text(meta, color = muted, style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            if (task.scheduledStartMillis != null && task.scheduledEndMillis != null)
+                                Text("已安排 ${scheduledRange(task.scheduledStartMillis, task.scheduledEndMillis)}", color = muted,
+                                    style = MaterialTheme.typography.bodySmall)
                         }
                         if (order.size > 1) MoveMenu(
                             modifier = Modifier.longPressDraggableHandle(enabled = !action.busy, interactionSource = drags),
@@ -155,29 +149,23 @@ private fun QueueList(
                         )
                     }
                 }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
         }
     }
 }
 
-internal fun dockListPadding(bottom: Dp) = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = bottom + 12.dp)
+internal fun dockListPadding(bottom: Dp) = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = bottom + 8.dp)
 
 private fun <T> List<T>.moved(from: Int, to: Int): List<T> = toMutableList().apply { add(to, removeAt(from)) }
 
 @Composable
 private fun MoveMenu(modifier: Modifier, title: String, index: Int, lastIndex: Int, enabled: Boolean, onMove: (Int) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    val ink = LocalContentColor.current
     Box {
         IconButton(onClick = { expanded = true }, enabled = enabled,
             modifier = modifier.size(48.dp).semantics { contentDescription = "移动$title，长按拖动或点按选择位置" }) {
-            Canvas(Modifier.size(22.dp)) {
-                val left = 3.dp.toPx()
-                val right = size.width - left
-                val stroke = 2.dp.toPx()
-                drawLine(ink, Offset(left, size.height * 0.35f), Offset(right, size.height * 0.35f), stroke, StrokeCap.Round)
-                drawLine(ink, Offset(left, size.height * 0.65f), Offset(right, size.height * 0.65f), stroke, StrokeCap.Round)
-            }
+            Icon(painterResource(R.drawable.ic_drag_handle), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             for ((label, target) in listOf("移到队首" to 0, "上移一位" to index - 1, "下移一位" to index + 1, "移到队尾" to lastIndex)) {

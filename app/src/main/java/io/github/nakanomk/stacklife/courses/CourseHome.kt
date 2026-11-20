@@ -50,14 +50,14 @@ internal fun CourseHome(
     var detail by rememberSaveable(week?.classes, term?.id, week?.week) { mutableIntStateOf(-1) }
     week?.classes?.getOrNull(detail)?.let { CourseDetails(it) { detail = -1 } }
     Page {
-        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 6.dp)) {
-            PageTitle("课表", settings = onSettings, assistantPage = if (term != null && week != null) AssistantPage.Week(term.id, week.week) else AssistantPage.Terms)
+        PageTitle("课表", settings = onSettings)
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 if (terms.isNotEmpty()) {
                     var expanded by remember { mutableStateOf(false) }
                     Box {
-                        FilledTonalButton(onClick = { expanded = true }, modifier = Modifier.widthIn(max = 180.dp).heightIn(min = 48.dp).testTag("course-term")) {
+                        TextButton(onClick = { expanded = true }, modifier = Modifier.widthIn(max = 180.dp).testTag("course-term")) {
                             Text(term?.id ?: "选择学期", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         DropdownMenu(expanded, { expanded = false }) {
@@ -65,7 +65,7 @@ internal fun CourseHome(
                         }
                     }
                 }
-                Button(onClick = onImport, modifier = Modifier.heightIn(min = 48.dp).testTag("course-import")) { Text("导入课表") }
+                TextButton(onClick = onImport, modifier = Modifier.testTag("course-import")) { Text("导入课表") }
                 if (term != null) TextButton(onClick = { onRemove(term) }, modifier = Modifier.heightIn(min = 48.dp).testTag("course-remove")) { Text("移除学期") }
             }
             if (term != null && week != null) {
@@ -87,11 +87,11 @@ internal fun CourseHome(
                 }
             }
         }
-        DockOverlay(navigationBar) { bottom ->
+        DockOverlay(navigationBar, if (term != null && week != null) AssistantPage.Week(term.id, week.week) else AssistantPage.Terms) { bottom ->
             when {
                 terms.isEmpty() || term == null || week == null -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-                    .padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = bottom)) {
-                    Text(if (terms.isEmpty()) "还没有课表" else "请选择学期", style = MaterialTheme.typography.headlineSmall)
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = bottom)) {
+                    Text(if (terms.isEmpty()) "还没有课表" else "请选择学期", style = MaterialTheme.typography.titleMedium)
                     if (terms.isEmpty()) Text("从华科 HUB 登录提取，或选择自己导出的周数组文件。确认预览后，课程也会出现在今天。",
                         Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
                 }
@@ -101,8 +101,8 @@ internal fun CourseHome(
                     if (week.classes.isEmpty()) item { Text("本周没有课程") }
                     itemsIndexed(week.classes) { i, course ->
                         Surface(onClick = { detail = i }, modifier = Modifier.fillMaxWidth().testTag("week-course:$i"),
-                            shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer) {
-                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            color = MaterialTheme.colorScheme.surface) {
+                            Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(course.meeting.title, style = MaterialTheme.typography.titleMedium)
                                 CourseInfo(course)
                             }
@@ -164,7 +164,7 @@ internal fun CourseDetails(course: ScheduledCourse, close: () -> Unit) {
                 Text(course.meeting.title, style = MaterialTheme.typography.titleLarge)
                 Text(course.termId, style = MaterialTheme.typography.labelLarge)
                 CourseInfo(course)
-                AssistantEntry(AssistantPage.Week(course.termId, course.meeting.week))
+                AssistantComposer(AssistantPage.Week(course.termId, course.meeting.week))
             }
         }, confirmButton = { TextButton(onClick = close) { Text("关闭") } })
 }

@@ -53,7 +53,9 @@ class AppearanceBenchmark(private val glass: Boolean) {
         await(By.textContains("基准任务 01")).click(); await(By.text("任务详情")); pressBack(); await(By.res("queue"))
     }
     @Test fun assistantPanel() = measure {
-        await(By.res("ask-planner")).click(); await(By.text("关闭")).click()
-        check(wait(Until.gone(By.text("关闭")), 6_000)); await(By.res("queue"))
+        await(By.res("assistant-input")).text = "查看今天的队列"
+        await(By.res("assistant-send").enabled(true)).click()
+        await(By.text("关闭")).click()
+        check(wait(Until.gone(By.text("关闭")), 6_000)); await(By.res("assistant-input")); await(By.res("queue"))
     }
 }

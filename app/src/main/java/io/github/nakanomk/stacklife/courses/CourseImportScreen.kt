@@ -25,7 +25,9 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.WorkspaceViewModel
-import io.github.nakanomk.stacklife.assistant.AssistantEntry
+import io.github.nakanomk.stacklife.assistant.AssistantComposer
+import io.github.nakanomk.stacklife.workspace.PreferenceRow
+import io.github.nakanomk.stacklife.workspace.lineFieldColors
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.assistant.LocalAssistant
 import io.github.nakanomk.stacklife.planner.PreviewResult
@@ -160,8 +162,7 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
     BackHandler { cancel() }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("导入课表", style = MaterialTheme.typography.headlineSmall)
-            if (rows == null) AssistantEntry(AssistantPage.Terms)
+            Text("导入课表", style = MaterialTheme.typography.titleLarge)
             TextButton(enabled = !writing, onClick = ::cancel, modifier = Modifier.testTag("cancelCourseImport")) { Text("取消导入") }
         }
         message?.let { Text(it, color = MaterialTheme.colorScheme.error,
@@ -173,10 +174,13 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
         val ready = proposal
         when {
             writing && raw == null -> Unit
-            raw == null -> Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = { message = null; hub = true }, enabled = !busy, modifier = Modifier.testTag("importCourseHub")) { Text("从 HUB 网页提取课表") }
-                OutlinedButton(onClick = ::openChrome, enabled = !busy, modifier = Modifier.testTag("browseHubChrome")) { Text("用 Chrome 浏览 HUB") }
-                TextButton(onClick = ::chooseFile, enabled = !busy, modifier = Modifier.testTag("importCourseFile")) { Text("选择原始 JSON 文件") }
+            raw == null -> {
+                Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                    PreferenceRow("从 HUB 网页提取课表", modifier = Modifier.testTag("importCourseHub"), enabled = !busy) { message = null; hub = true }
+                    PreferenceRow("用 Chrome 浏览 HUB", modifier = Modifier.testTag("browseHubChrome"), enabled = !busy, onClick = ::openChrome)
+                    PreferenceRow("选择原始 JSON 文件", modifier = Modifier.testTag("importCourseFile"), enabled = !busy, onClick = ::chooseFile)
+                }
+                if (!busy) AssistantComposer(AssistantPage.Terms)
             }
             parsed == null -> Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("确认学期与校区作息", style = MaterialTheme.typography.titleLarge)
@@ -301,7 +305,7 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
 private fun ImportField(label: String, value: String, tag: String, enabled: Boolean = true, change: (String) -> Unit) {
     // Don't let framework text-editing state save even a course name to an Activity Bundle.
     CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
-        OutlinedTextField(value = value, onValueChange = change, enabled = enabled, label = { Text(label) },
+        TextField(value = value, onValueChange = change, enabled = enabled, colors = lineFieldColors(), label = { Text(label) },
             singleLine = true, modifier = Modifier.fillMaxWidth().testTag(tag))
     }
 }
@@ -332,25 +336,27 @@ private fun ImportDiff(draft: ImportDraft, meetings: List<CourseMeeting>, propos
         CourseGroup(it.title, it.room, it.day, it.firstPeriod, it.lastPeriod, time(it.startMillis), time(it.endMillis))
     }.entries.toList() }
     val locations = remember(groups) { groups.groupBy { it.key.title }.mapValues { (_, entries) -> entries.map { it.key.room }.distinct() }.filterValues { it.size > 1 } }
-    LazyColumn(Modifier.testTag("courseImportDiff"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item {
-            Text("确认导入差异", style = MaterialTheme.typography.titleLarge)
-            if (!busy) AssistantEntry("问这份导入", ask)
-            Text("只替换 ${draft.term.id} 的 HUB 课表；已有任务保留。最终 ${meetings.size} 次课程，${groups.size} 个时段分组。")
-            Text("首周 ${draft.term.firstMonday} · ${draft.term.weeks} 周 · ${if (draft.term.initial == BellSchedule.SUMMER) "夏令" else "冬令"}起始" +
-                (draft.term.switchDate?.let { " · $it 起切换" } ?: " · 全期不切换"))
-            if (locations.isNotEmpty()) Text("同名不同地点", style = MaterialTheme.typography.titleMedium)
+    Column(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.weight(1f).testTag("courseImportDiff"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            item {
+                Text("确认导入差异", style = MaterialTheme.typography.titleLarge)
+                Text("只替换 ${draft.term.id} 的 HUB 课表；已有任务保留。最终 ${meetings.size} 次课程，${groups.size} 个时段分组。")
+                Text("首周 ${draft.term.firstMonday} · ${draft.term.weeks} 周 · ${if (draft.term.initial == BellSchedule.SUMMER) "夏令" else "冬令"}起始" +
+                    (draft.term.switchDate?.let { " · $it 起切换" } ?: " · 全期不切换"))
+                if (locations.isNotEmpty()) Text("同名不同地点", style = MaterialTheme.typography.titleMedium)
+            }
+            items(locations.entries.toList()) { (title, rooms) -> Text("$title：${rooms.joinToString("、") { it.ifEmpty { "未提供地点" } }}") }
+            items(groups) { (g, classes) ->
+                Text("${g.title} · ${g.room.ifEmpty { "未提供地点" }}\n第 ${classes.joinToString("、") { it.week.toString() }} 周 · ${weekday(g.day)} · ${g.first}–${g.last} 节 · ${g.start}–${g.end}")
+            }
+            item { Text("数据库差异与冲突", style = MaterialTheme.typography.titleMedium)
+                if (proposal.changes.isEmpty()) Text("与当前课表一致，无新增或移除。") }
+            items(proposal.changes) { change -> Text("${change.field}：${change.before ?: "无"} → ${change.after ?: "无"}") }
+            item {
+                TextButton(enabled = !busy, onClick = onEdit) { Text("返回核对") }
+                Button(enabled = !busy, onClick = onConfirm, modifier = Modifier.testTag("confirmCourseImport")) { Text("确认导入") }
+            }
         }
-        items(locations.entries.toList()) { (title, rooms) -> Text("$title：${rooms.joinToString("、") { it.ifEmpty { "未提供地点" } }}") }
-        items(groups) { (g, classes) ->
-            Text("${g.title} · ${g.room.ifEmpty { "未提供地点" }}\n第 ${classes.joinToString("、") { it.week.toString() }} 周 · ${weekday(g.day)} · ${g.first}–${g.last} 节 · ${g.start}–${g.end}")
-        }
-        item { Text("数据库差异与冲突", style = MaterialTheme.typography.titleMedium)
-            if (proposal.changes.isEmpty()) Text("与当前课表一致，无新增或移除。") }
-        items(proposal.changes) { change -> Text("${change.field}：${change.before ?: "无"} → ${change.after ?: "无"}") }
-        item {
-            TextButton(enabled = !busy, onClick = onEdit) { Text("返回核对") }
-            Button(enabled = !busy, onClick = onConfirm, modifier = Modifier.testTag("confirmCourseImport")) { Text("确认导入") }
-        }
+        if (!busy) AssistantComposer(ask)
     }
 }

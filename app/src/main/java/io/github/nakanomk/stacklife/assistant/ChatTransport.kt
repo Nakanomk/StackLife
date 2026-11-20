@@ -55,6 +55,9 @@ internal class OpenAiTransport(client: OkHttpClient = OkHttpClient()) : ChatTran
         val payload = buildJsonObject {
             put("model", profile.model); put("messages", messages); put("tools", tools)
             put("stream", false); put("parallel_tool_calls", false)
+            if (profile.origin == ServicePreset.DeepSeek.baseUrl) {
+                putJsonObject("thinking") { put("type", "disabled") }
+            }
         }.toString().encodeToByteArray()
         val body = object : RequestBody() {
             override fun contentType() = JSON_TYPE

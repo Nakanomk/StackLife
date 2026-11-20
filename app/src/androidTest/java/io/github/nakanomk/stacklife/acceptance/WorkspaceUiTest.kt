@@ -34,7 +34,7 @@ class WorkspaceUiTest {
     private fun show() {
         ui.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
         await(hasTestTag("nav:workspace")).performClick()
-        await(hasText("待办队列"))
+        await(hasTestTag("queue"))
     }
 
     private fun await(matcher: SemanticsMatcher): SemanticsNodeInteraction {
@@ -59,6 +59,9 @@ class WorkspaceUiTest {
         fun checkPlacement() {
             val fab = await(hasTestTag("add-task")).fetchSemanticsNode().boundsInRoot
             val nav = ui.onNodeWithTag("navigation-capsule").fetchSemanticsNode().boundsInRoot
+            val compose = ui.onNodeWithTag("assistant-input").fetchSemanticsNode().boundsInRoot
+            assertTrue("Add and the assistant must have independent targets", fab.bottom < compose.top)
+            assertTrue("Composer is above destination navigation", compose.bottom <= nav.top)
             val page = ui.onRoot().fetchSemanticsNode().boundsInRoot
             assertTrue("Add belongs above navigation, not alongside it", fab.bottom < nav.top)
             assertTrue("Add belongs on the right of the page", fab.left > page.center.x)
@@ -143,7 +146,7 @@ class WorkspaceUiTest {
             release.complete(Unit)
             writer.join()
         }
-        await(hasText("待办队列")).assertIsDisplayed()
+        await(hasTestTag("queue")).assertIsDisplayed()
         assertEquals(listOf("只创建一次"), store.state().queue.map { it.title })
         ui.onNodeWithTag("title:0").assertDoesNotExist()
     }

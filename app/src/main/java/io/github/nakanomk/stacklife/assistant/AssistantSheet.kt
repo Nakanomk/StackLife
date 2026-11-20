@@ -4,44 +4,103 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.key.*
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.appearance.CapsuleScene
 import io.github.nakanomk.stacklife.appearance.StackLifeSurface
 import io.github.nakanomk.stacklife.planner.PlannerChange
 import io.github.nakanomk.stacklife.workspace.CheckRow
 import io.github.nakanomk.stacklife.workspace.Hint
+import java.util.UUID
 
 internal val LocalAssistant = staticCompositionLocalOf<AssistantModel?> { null }
-internal val LocalAssistantPage = staticCompositionLocalOf<AssistantPage?> { null }
 
 @Composable
-internal fun AssistantEntry(page: AssistantPage? = LocalAssistantPage.current) {
-    if (page != null) AssistantEntry(page.label) { page }
+internal fun AssistantComposer(page: AssistantPage) {
+    key(page) { ScopedComposer(page.label) { page } }
 }
 
 @Composable
-internal fun AssistantEntry(label: String, target: () -> AssistantPage) {
-    val assistant = LocalAssistant.current ?: return
+internal fun AssistantComposer(target: () -> AssistantPage) {
+    ScopedComposer("课表导入", target)
+}
+
+@Composable
+private fun ScopedComposer(scope: String, target: () -> AssistantPage) {
+    val model = LocalAssistant.current ?: return
+    val id = rememberSaveable { UUID.randomUUID().toString() }
+    DisposableEffect(model, id) {
+        model.composerReturned(id)
+        onDispose { model.composerLeft(id) }
+    }
+    val ui by model.state.collectAsStateWithLifecycle()
+    if (ui.page != null) return
+    StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth(), MaterialTheme.colorScheme.surfaceContainerHigh) {
+        MessageEditor(if (ui.composerId == id) ui.draft else "", scope,
+            { model.editLocal(id, it) }, { model.submitLocal(id, target) })
+    }
+}
+
+@Composable
+private fun MessageEditor(text: String, scope: String, onChange: (String) -> Unit, onSend: () -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val haptics = LocalHapticFeedback.current
-    StackLifeSurface(CapsuleScene.ASSISTANT, Modifier, colors.secondaryContainer) {
-        FilledTonalButton(onClick = { haptics.performHapticFeedback(HapticFeedbackType.VirtualKey); assistant.open(target()) },
-            modifier = Modifier.heightIn(min = 48.dp).testTag("ask-planner"),
-            colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color.Transparent, contentColor = colors.onSurface),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) { Text(label) }
+    val enabled = text.isSendable()
+    fun submit() {
+        if (!enabled) return
+        keyboard?.hide()
+        focus.clearFocus()
+        haptics.performHapticFeedback(HapticFeedbackType.VirtualKey)
+        onSend()
+    }
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
+            BasicTextField(value = text, onValueChange = onChange, singleLine = true,
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("assistant-input")
+                    .semantics { contentDescription = "$scope · 助理消息" }
+                    .onPreviewKeyEvent {
+                        if (it.key != Key.Enter && it.key != Key.NumPadEnter) false
+                        else { if (it.type == KeyEventType.KeyUp) submit(); true }
+                    },
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurface),
+                cursorBrush = SolidColor(colors.primary),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { submit() }),
+                decorationBox = { field -> Box(contentAlignment = Alignment.CenterStart) {
+                    if (text.isEmpty()) Text("给日程助理发消息", style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
+                    field()
+                } })
+        }
+        IconButton(onClick = ::submit, enabled = enabled, modifier = Modifier.size(48.dp).testTag("assistant-send"),
+            colors = IconButtonDefaults.iconButtonColors(contentColor = colors.primary)) {
+            Icon(painterResource(R.drawable.ic_assistant_send), contentDescription = "发送消息")
+        }
     }
 }
 
@@ -67,7 +126,6 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
     var expanded by rememberSaveable(page) { mutableStateOf(false) }
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true,
         confirmValueChange = { it != SheetValue.Hidden || model.state.value.work != AssistantWork.COMMIT })
-    var text by remember(page) { mutableStateOf("") }
     var options by remember(page) { mutableStateOf(false) }
     val list = rememberLazyListState()
     val groups = remember(ui.pending) { ui.pending?.changes?.groupBy { it.entityId }.orEmpty() }
@@ -76,29 +134,33 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
         if (ui.pending != null || !ui.allowed) list.scrollToItem(0)
         else if (ui.lines.isNotEmpty()) list.scrollToItem(ui.lines.lastIndex)
     }
+    val compact = ui.profile == null
     ModalBottomSheet(onDismissRequest = model::close, sheetState = sheet) {
-        Column(Modifier.fillMaxWidth().fillMaxHeight(if (expanded) .90f else .53f).imePadding().padding(horizontal = 16.dp, vertical = 4.dp).testTag("assistant-sheet")) {
+        Column(Modifier.fillMaxWidth().then(if (compact) Modifier else Modifier.fillMaxHeight(if (expanded) .90f else .53f))
+            .imePadding().padding(horizontal = 16.dp, vertical = 4.dp).testTag("assistant-sheet")) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(page.label, style = MaterialTheme.typography.titleLarge)
+                    Text("${page.label}助理", style = MaterialTheme.typography.titleLarge)
                     Hint(page.scopeName())
                 }
-                TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起" else "展开") }
+                if (!compact) TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起" else "展开") }
                 TextButton(onClick = model::close, enabled = ui.work != AssistantWork.COMMIT) { Text("关闭") }
             }
             val service = ui.profile
             val ready = ui.pending
             if (service != null) Text("${service.origin} · ${service.model}", style = MaterialTheme.typography.labelMedium)
             HorizontalDivider(Modifier.padding(vertical = 6.dp))
-            LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("assistant-scroll"), state = list,
+            LazyColumn(Modifier.weight(1f, fill = !compact).fillMaxWidth().testTag("assistant-scroll"), state = list,
                 verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
                 when {
                     ui.work == AssistantWork.LOADING -> item { LinearProgressIndicator() }
-                    service == null -> item { Text("尚未连接模型服务"); Hint("手动日程可离线使用。配置支持工具调用的服务后，才会询问联网授权。") }
+                    service == null -> item { Text("尚未连接模型服务", style = MaterialTheme.typography.titleMedium)
+                        Hint("手动日程可离线使用。选择 DeepSeek、Claude、GPT 或自定义服务后，再发送这条消息。") }
                     !ui.allowed -> {
                         item { Text("发送前核对", style = MaterialTheme.typography.titleMedium)
                             Text("你的消息将发往 ${service.origin}。模型可按需读取${page.scopeName()}的标题、顺序、时段及必要 ID；课程默认只披露忙碌时段。")
                             Hint("不发送密钥正文、Cookie 或原始课表。授权仅限此次对话；关闭会清空对话并取消请求。") }
+                        if (ui.draft.isNotEmpty()) item { Text("待发送消息", style = MaterialTheme.typography.labelMedium); Text(ui.draft) }
                         item { TextButton(onClick = { options = !options }) { Text(if (options) "收起授权选项" else "调整范围与字段") } }
                         if (options) {
                             items(ReadArea.entries) { area -> CheckRow(area.label, area in ui.grant.extra) { model.setGrant(ui.grant.copy(extra =
@@ -130,18 +192,18 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("assistant-status")) }
             when {
                 ui.work == AssistantWork.LOADING -> Unit
-                service == null -> Button(onClick = { model.close(); onSettings() }) { Text("配置模型服务") }
-                !ui.allowed -> Button(onClick = { model.authorize(); options = false }, modifier = Modifier.testTag("assistant-consent")) { Text("允许本次范围") }
+                service == null -> Button(onClick = { model.leaveForConfiguration(); onSettings() }) { Text("配置模型服务") }
+                !ui.allowed -> Button(onClick = { model.authorize(); options = false }, modifier = Modifier.testTag("assistant-consent")) {
+                    Text(if (ui.draft.isNotEmpty()) "允许并发送" else "允许本次范围")
+                }
                 ui.work == AssistantWork.COMMIT -> Text("正在保存已确认的更改…")
                 ui.work == AssistantWork.REQUEST -> Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(24.dp)); TextButton(onClick = model::cancel) { Text("取消请求") } }
                 ready != null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = model::cancel) { Text("放弃提案") }
                     Button(onClick = { model.apply(ready.proposalId) }, modifier = Modifier.testTag("assistant-apply")) { Text("应用这些更改") } }
                 ui.reviewAgain -> Row { TextButton(onClick = model::cancel) { Text("放弃提案") }; Button(onClick = model::refreshProposal) { Text("重新预览") } }
                 ui.importRequested -> Row { TextButton(onClick = model::cancel) { Text("取消") }; Button(onClick = { model.close(); onImport() }) { Text("打开本地课表导入器") } }
-                else -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(text, { text = it }, Modifier.weight(1f).testTag("assistant-input"), label = { Text("消息") }, maxLines = 3)
-                    Button(onClick = { model.send(text); text = "" },
-                        enabled = text.isNotBlank() && text.length <= 8000, modifier = Modifier.testTag("assistant-send")) { Text("发送") }
+                else -> Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                    MessageEditor(ui.draft, page.label, model::editMessage, model::send)
                 }
             }
         }

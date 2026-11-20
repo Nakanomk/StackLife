@@ -18,7 +18,10 @@ internal data class AssistantState(
     val allowed: Boolean = false, val work: AssistantWork = AssistantWork.IDLE, val lines: List<ChatLine> = emptyList(),
     val pending: PreviewResult.Ready? = null, val reviewAgain: Boolean = false, val importRequested: Boolean = false,
     val message: String? = null, val applied: Boolean = false, val importedDraft: String? = null,
+    val composerId: String? = null, val draft: String = "",
 )
+
+internal fun String.isSendable() = isNotBlank() && length <= 8000
 
 internal class AssistantModel(private val api: PlannerApi, val connections: ConnectionStore, private val transport: ChatTransport) : ViewModel() {
     private val mutable = MutableStateFlow(AssistantState())
@@ -29,15 +32,37 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
     private var tools: PlannerTools? = null
     private var commands: List<PlannerCommand>? = null
 
-    fun open(page: AssistantPage) {
-        if (ui.work == AssistantWork.COMMIT || ui.page == page) return
+    private var configurationDraft: String? = null
+    private var sessionConnection: ServiceConnection? = null
+
+    fun editLocal(id: String, text: String) {
+        if (ui.page != null) return
+        configurationDraft = null
+        ui = ui.copy(composerId = id, draft = text)
+    }
+
+    fun composerReturned(id: String) {
+        if (configurationDraft == id) configurationDraft = null
+    }
+
+    fun composerLeft(id: String) {
+        if (ui.page == null && ui.composerId == id && configurationDraft != id) ui = AssistantState()
+    }
+
+    fun submitLocal(id: String, target: () -> AssistantPage) {
+        if (ui.page != null || ui.composerId != id || !ui.draft.isSendable()) return
+        val page = target()
+        configurationDraft = null
         clearTurn()
-        ui = AssistantState(page = page, work = AssistantWork.LOADING)
+        ui = AssistantState(page = page, work = AssistantWork.LOADING, composerId = id, draft = ui.draft)
         val serial = generation
         job = viewModelScope.launch {
             try {
-                val profile = connections.profile()
-                if (generation == serial) ui = ui.copy(profile = profile, work = AssistantWork.IDLE)
+                val connection = connections.load()
+                if (generation == serial) {
+                    sessionConnection = connection
+                    ui = ui.copy(profile = connection?.profile, work = AssistantWork.IDLE)
+                }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { if (generation == serial) fail(e) }
         }
@@ -45,13 +70,22 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
 
     fun close() {
         if (ui.work == AssistantWork.COMMIT) return
-        clearTurn(); ui = AssistantState()
+        clearTurn(); sessionConnection = null; configurationDraft = null; ui = AssistantState()
+    }
+
+    fun leaveForConfiguration() {
+        if (ui.work != AssistantWork.IDLE || ui.profile != null || ui.page == null) return
+        configurationDraft = ui.composerId
+        clearTurn()
+        sessionConnection = null
+        ui = AssistantState(composerId = ui.composerId, draft = ui.draft)
     }
 
     fun setGrant(grant: Disclosure) {
         if (ui.work != AssistantWork.IDLE || ui.page == null) return
         clearTurn()
-        ui = AssistantState(page = ui.page, profile = ui.profile, grant = grant)
+        ui = AssistantState(page = ui.page, profile = ui.profile, grant = grant,
+            composerId = ui.composerId, draft = if (ui.allowed) "" else ui.draft)
     }
 
     fun authorize() {
@@ -59,13 +93,14 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
         if (ui.profile == null || ui.work != AssistantWork.IDLE || ui.allowed) return
         tools = PlannerTools(api, page, ui.grant)
         ui = ui.copy(allowed = true, message = null)
+        if (ui.draft.isSendable()) send()
     }
 
     fun cancel() {
         if (ui.work == AssistantWork.COMMIT || ui.work == AssistantWork.LOADING) return
         clearTurn()
         ui = ui.copy(work = AssistantWork.IDLE, pending = null, reviewAgain = false, importRequested = false,
-            message = "已取消，未应用更改。", applied = false, allowed = false, lines = emptyList())
+            message = "已取消，未应用更改。", applied = false, allowed = false, lines = emptyList(), draft = "")
     }
 
     private fun clearTurn() {
@@ -75,20 +110,30 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
         commands = null; tools = null
     }
 
-    fun send(text: String) {
+    fun editMessage(text: String) {
+        if (ui.allowed && ui.work == AssistantWork.IDLE && ui.pending == null && !ui.reviewAgain && !ui.importRequested) {
+            ui = ui.copy(draft = text)
+        }
+    }
+
+    fun send() {
         val old = ui
         val page = old.page ?: return
         val policy = tools ?: return
         if (old.work != AssistantWork.IDLE || !old.allowed || old.profile == null || old.pending != null || old.reviewAgain || old.importRequested) return
-        val prompt = text.trim()
-        if (prompt.isEmpty() || prompt.length > 8000) { ui = old.copy(message = "请输入 1–8000 个字符。", applied = false); return }
+        if (!old.draft.isSendable()) return
+        val prompt = old.draft.trim()
         val serial = ++generation
-        ui = old.copy(lines = (old.lines + ChatLine(true, prompt)).takeLast(20), work = AssistantWork.REQUEST, message = null, applied = false)
+        ui = old.copy(lines = (old.lines + ChatLine(true, prompt)).takeLast(20), work = AssistantWork.REQUEST, message = null, applied = false, draft = "")
         job = viewModelScope.launch {
             try {
                 val connection = connections.load()
-                if (connection == null || connection.profile != old.profile) {
-                    if (serial == generation) { tools = null; ui = AssistantState(page = page, profile = connection?.profile, message = "服务配置已变更，请重新授权。") }; return@launch
+                if (connection == null || connection.profile != old.profile || connection.key != sessionConnection?.key) {
+                    if (serial == generation) {
+                        tools = null; sessionConnection = connection
+                        ui = AssistantState(page = page, profile = connection?.profile, message = "服务配置已变更，请重新授权。")
+                    }
+                    return@launch
                 }
                 val messages = ArrayList<JsonElement>()
                 messages.add(message("system", instructions))
