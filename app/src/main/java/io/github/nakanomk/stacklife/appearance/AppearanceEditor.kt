@@ -16,14 +16,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.DockOverlay
 import io.github.nakanomk.stacklife.StackLifeTheme
-import io.github.nakanomk.stacklife.RootPane
+import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.rememberDestinationCapsule
+import io.github.nakanomk.stacklife.courses.CourseTimetablePreview
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.*
 
@@ -48,32 +47,39 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
     val reload = { baseline = saved; draft = saved; seedInput = saved.seed; message = "" }
     BackHandler(enabled = receipt.busy) { }
     StackLifeTheme(preview) {
-        Page {
-            Box(Modifier.weight(1f)) {
-                RootPane(header = { PageTitle(group.title, back = onBack, backEnabled = !receipt.busy) }) { top, _ ->
-                    LazyColumn(Modifier.fillMaxSize().testTag("appearance-scroll"), contentPadding = dockListPadding(top, 0.dp), verticalArrangement = listSpacing) {
-                        item { AppearancePreview(preview) }
-                        item {
-                            when (group) {
-                                AppearanceGroup.COLOR -> ColorFields(draft, seedInput, { seedInput = it }, { draft = it })
-                                AppearanceGroup.LAYOUT -> LayoutFields(draft) { draft = it }
-                                AppearanceGroup.MATERIAL -> MaterialFields(draft) { draft = it }
-                            }
-                        }
-                        item { HorizontalDivider(); Secondary("恢复本页默认", enabled = !receipt.busy) {
-                            draft = AppearanceFields(group, null).applyTo(draft); seedInput = draft.seed; message = ""
-                        } }
-                        if (stale) item { Secondary("重新载入已保存设置", enabled = !receipt.busy, onClick = reload) }
+        EditorPage(group.title, onBack, backEnabled = !receipt.busy, footer = {
+            Column {
+                if (message.isNotEmpty()) Text(message, color = MaterialTheme.colorScheme.error)
+                Actions {
+                    Secondary("取消", enabled = !receipt.busy, onClick = onBack)
+                    Primary("保存外观", enabled = !receipt.busy && seedOK && !stale && selected != persisted) {
+                        receipt.send(PlannerCommand.EditAppearance(AppearanceFields(group, selected), expected = baseline))
                     }
                 }
             }
-            HorizontalDivider()
-            if (message.isNotEmpty()) Text(message, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
-                TextButton(onClick = onBack, enabled = !receipt.busy, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消") }
-                TextButton(enabled = !receipt.busy && seedOK && !stale && selected != persisted, onClick = {
-                    receipt.send(PlannerCommand.EditAppearance(AppearanceFields(group, selected), expected = baseline))
-                }) { Text("保存外观") }
+        }) { top, bottom ->
+            LazyColumn(Modifier.fillMaxSize().testTag("appearance-scroll"), contentPadding = dockListPadding(top, bottom),
+                verticalArrangement = listSpacing) {
+                item { AppearancePreview(preview) }
+                when (group) {
+                    AppearanceGroup.COLOR -> item { ColorFields(draft, seedInput, { seedInput = it }, { draft = it }) }
+                    AppearanceGroup.LAYOUT -> item { LayoutFields(draft) { draft = it } }
+                    AppearanceGroup.MATERIAL -> {
+                        item { MaterialFields(draft) { draft = it } }
+                        item {
+                            Column {
+                                SectionTitle("课表预览 · 示例课程")
+                                CompositionLocalProvider(LocalPlannerGlassAllowed provides true) { CourseTimetablePreview() }
+                                SwitchRow("课程文字描边", draft.courseTextOutline) { draft = draft.copy(courseTextOutline = !draft.courseTextOutline) }
+                            }
+                        }
+                        item { AccessibilityFields(draft) { draft = it } }
+                    }
+                }
+                item { HorizontalDivider(); Secondary("恢复本页默认", enabled = !receipt.busy) {
+                    draft = AppearanceFields(group, null).applyTo(draft); seedInput = draft.seed; message = ""
+                } }
+                if (stale) item { Secondary("重新载入已保存设置", enabled = !receipt.busy, onClick = reload) }
             }
         }
     }
@@ -135,8 +141,7 @@ private fun LayoutFields(d: Appearance, update: (Appearance) -> Unit) {
 @Composable
 private fun MoveButton(dest: Destination, up: Boolean, enabled: Boolean, move: () -> Unit) {
     val label = if (up) "上移" else "下移"
-    IconButton(onClick = move, enabled = enabled, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-        .semantics { contentDescription = "$label${dest.label}" }) { Text(if (up) "↑" else "↓") }
+    ToolbarIcon(if (up) R.drawable.ic_expand_less else R.drawable.ic_expand_more, "$label${dest.label}", enabled, move)
 }
 
 @Composable
@@ -149,6 +154,12 @@ private fun MaterialFields(d: Appearance, update: (Appearance) -> Unit) {
         SwitchRow("助理胶囊玻璃", d.assistantGlass, enabled = d.glass) { update(d.copy(assistantGlass = !d.assistantGlass)) }
         Hint(when { reason != null -> "当前使用实色：$reason"; !d.glass -> "当前使用实色：总开关已关闭。";
             else -> "页眉、圆形操作与课程块使用玻璃；关闭后保持相同布局。" })
+    }
+}
+
+@Composable
+private fun AccessibilityFields(d: Appearance, update: (Appearance) -> Unit) {
+    Column {
         SectionTitle("动态与辅助功能")
         SwitchRow("减弱动效", d.reduceMotion) { update(d.copy(reduceMotion = !d.reduceMotion)) }
         SwitchRow("减少透明度", d.reduceTransparency) { update(d.copy(reduceTransparency = !d.reduceTransparency)) }
@@ -161,7 +172,7 @@ private fun MaterialFields(d: Appearance, update: (Appearance) -> Unit) {
 private fun <T> Choice(title: String, options: List<T>, selected: T, label: (T) -> String, change: (T) -> Unit) {
     var open by rememberSaveable { mutableStateOf(false) }
     PreferenceRow(title, label(selected)) { open = true }
-    if (open) AlertDialog(onDismissRequest = { open = false }, title = { Text(title) },
+    if (open) PlannerAlertDialog(onDismissRequest = { open = false }, title = { Text(title) },
         text = {
             Column(Modifier.selectableGroup().verticalScroll(rememberScrollState())) {
                 for (option in options) Row(Modifier.fillMaxWidth()

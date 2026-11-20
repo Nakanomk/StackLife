@@ -18,6 +18,15 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -25,14 +34,14 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.WorkspaceViewModel
+import io.github.nakanomk.stacklife.RootPane
+import io.github.nakanomk.stacklife.SegmentTrack
+import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.assistant.AssistantComposer
-import io.github.nakanomk.stacklife.workspace.PreferenceRow
-import io.github.nakanomk.stacklife.workspace.lineFieldColors
+import io.github.nakanomk.stacklife.workspace.*
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.assistant.LocalAssistant
 import io.github.nakanomk.stacklife.planner.PreviewResult
-import io.github.nakanomk.stacklife.workspace.SaveOutcome
-import io.github.nakanomk.stacklife.workspace.rememberSubmission
 import java.io.IOException
 import java.time.Instant
 import java.time.LocalDate
@@ -62,13 +71,6 @@ private data class TermForm(val id: String = "", val monday: String = "", val we
 
 @Composable
 internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onImported: (String) -> Unit) {
-    Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
-        CourseImportContent(model, onBack, onImported)
-    }
-}
-
-@Composable
-private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, onImported: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val resolver = context.contentResolver
@@ -143,7 +145,11 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
         catch (_: SecurityException) { message = "系统不允许启动 Chrome 浏览器" }
     }
     if (hub) {
-        HubWebView(onRows = ::receive, onBack = { hub = false }, onFile = { hub = false; chooseFile() })
+        CompositionLocalProvider(LocalPlannerGlassAllowed provides false, LocalCapsuleBackdrop provides null) {
+            Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
+                HubWebView(onRows = ::receive, onBack = { hub = false }, onFile = { hub = false; chooseFile() })
+            }
+        }
         return
     }
     fun leavePreview() {
@@ -160,44 +166,52 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
         onBack()
     }
     BackHandler { cancel() }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("导入课表", style = MaterialTheme.typography.titleLarge)
-            TextButton(enabled = !writing, onClick = ::cancel, modifier = Modifier.testTag("cancelCourseImport")) { Text("取消导入") }
-        }
-        message?.let { Text(it, color = MaterialTheme.colorScheme.error,
-            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("courseImportError")) }
-        if (writing) Text("正在保存已确认的课表…", modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+    val steps: @Composable (Dp) -> Unit = { top ->
         val raw = rows
         val parsed = draft
         val ready = proposal
         when {
             writing && raw == null -> Unit
             raw == null -> {
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                    PreferenceRow("从 HUB 网页提取课表", modifier = Modifier.testTag("importCourseHub"), enabled = !busy) { message = null; hub = true }
-                    PreferenceRow("用 Chrome 浏览 HUB", modifier = Modifier.testTag("browseHubChrome"), enabled = !busy, onClick = ::openChrome)
-                    PreferenceRow("选择原始 JSON 文件", modifier = Modifier.testTag("importCourseFile"), enabled = !busy, onClick = ::chooseFile)
+                ImportPane(composer = { if (!busy) AssistantComposer(AssistantPage.Terms) }) { bottom ->
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, bottom))) {
+                        SectionTitle("选择课表来源")
+                        FormGroup {
+                            PreferenceRow("从 HUB 网页提取课表", modifier = Modifier.testTag("importCourseHub"), enabled = !busy) { message = null; hub = true }
+                            HorizontalDivider()
+                            PreferenceRow("用 Chrome 浏览 HUB", modifier = Modifier.testTag("browseHubChrome"), enabled = !busy, onClick = ::openChrome)
+                            HorizontalDivider()
+                            PreferenceRow("选择原始 JSON 文件", modifier = Modifier.testTag("importCourseFile"), enabled = !busy, onClick = ::chooseFile)
+                        }
+                    }
                 }
-                if (!busy) AssistantComposer(AssistantPage.Terms)
             }
-            parsed == null -> Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            parsed == null -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, 0.dp)), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("确认学期与校区作息", style = MaterialTheme.typography.titleLarge)
                 Text("时间按 Asia/Shanghai。首周日期只作候选，请自行核实校历。")
                 if (hints.isNotEmpty()) Text("第一周 KS 候选：${hints.joinToString("、")}")
-                ImportField("学期标识", form.id, "termId", !busy) { form = form.copy(id = it) }
-                ImportField("首周周一 YYYY-MM-DD", form.monday, "termMonday", !busy) { form = form.copy(monday = it) }
-                ImportField("总周数", form.weeks, "termWeeks", !busy) { form = form.copy(weeks = it) }
+                FormGroup {
+                    ImportField("学期标识", form.id, "termId", !busy) { form = form.copy(id = it) }
+                    ImportField("首周周一 YYYY-MM-DD", form.monday, "termMonday", !busy) { form = form.copy(monday = it) }
+                    ImportField("总周数", form.weeks, "termWeeks", !busy) { form = form.copy(weeks = it) }
+                }
                 Text("首周作息")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    BellSchedule.entries.forEach { bell -> FilterChip(selected = form.initial == bell, enabled = !busy,
-                        onClick = { form = form.copy(initial = bell) }, label = { Text(if (bell == BellSchedule.SUMMER) "夏令" else "冬令") }) }
+                val initial = rememberUpdatedState(form.initial.ordinal.toFloat())
+                ControlGroup {
+                    SegmentTrack(initial, BellSchedule.entries.size, MaterialTheme.colorScheme.secondaryContainer) {
+                        Row(Modifier.selectableGroup()) {
+                            BellSchedule.entries.forEach { bell ->
+                                Box(Modifier.clip(CircleShape).selectable(form.initial == bell, enabled = !busy, role = Role.RadioButton,
+                                    onClick = { form = form.copy(initial = bell) }).heightIn(min = 48.dp).padding(horizontal = 16.dp),
+                                    contentAlignment = Alignment.Center) { Text(if (bell == BellSchedule.SUMMER) "夏令" else "冬令") }
+                            }
+                        }
+                    }
                 }
                 ImportField("切换为另一作息的生效日（选填）", form.switchDate, "termSwitchDate", !busy) { form = form.copy(switchDate = it) }
                 Text("填写后从该日开始切换；留空则整个学期不变。")
-                Button(enabled = !busy, modifier = Modifier.testTag("reviewCourseRows"), onClick = {
-                    if (busy) return@Button
+                ActionPill("确认学期并核对条目", enabled = !busy, prominent = true, modifier = Modifier.testTag("reviewCourseRows"), onClick = {
+                    if (busy) return@ActionPill
                     busy = true; message = null
                     scope.launch {
                         try {
@@ -207,15 +221,16 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
                         } catch (e: IllegalArgumentException) { message = e.message }
                         finally { busy = false }
                     }
-                }) { Text("确认学期并核对条目") }
-                TextButton(enabled = !busy, onClick = { rows = null; hints = emptyList(); message = null }) { Text("重选来源") }
+                })
+                Secondary("重选来源", !busy) { rows = null; hints = emptyList(); message = null }
             }
-            ready == null -> LazyColumn(Modifier.testTag("courseIssues"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ready == null -> LazyColumn(Modifier.fillMaxSize().testTag("courseIssues"), contentPadding = dockListPadding(top, 0.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     Text("核对原始条目", style = MaterialTheme.typography.titleLarge)
                     Text("${parsed.term.id} · 去重后有效 ${parsed.validCount} 次 · 待修正 ${parsed.issues.size - decisions.size} 项")
                     Text("已修正 ${decisions.values.count { it is IssueDecision.Correct }} 项 · 已排除 ${decisions.values.count { it == IssueDecision.Exclude }} 项")
-                    TextButton(enabled = !busy, onClick = { draft = null; decisions.clear(); message = null }) { Text("修改学期设置") }
+                    Secondary("修改学期设置", !busy) { draft = null; decisions.clear(); message = null }
                 }
                 itemsIndexed(parsed.issues, key = { _, issue -> issue.position }) { index, issue ->
                     val decision = decisions[issue.position]
@@ -229,7 +244,7 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
                                 IssueDecision.Exclude -> Text("已明确排除此项")
                                 is IssueDecision.Correct -> Text("已修正：第 ${decision.fields.week} 周 · ${decision.fields.title} · ${decision.fields.period} 节 · ${decision.fields.room.ifEmpty { "未提供地点" }}")
                             }
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Actions {
                                 if (issue.fields != null) TextButton(enabled = !busy, onClick = { editing = issue }, modifier = Modifier.testTag("correctIssue-$index")) { Text("修正") }
                                 if (decision == null || decision is IssueDecision.Correct) TextButton(enabled = !busy,
                                     onClick = { decisions[issue.position] = IssueDecision.Exclude; message = null }, modifier = Modifier.testTag("excludeIssue-$index")) { Text("排除此项") }
@@ -239,8 +254,9 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
                     }
                 }
                 item {
-                    Button(enabled = !busy && decisions.size == parsed.issues.size, modifier = Modifier.testTag("previewCourseImport"), onClick = {
-                        if (busy) return@Button
+                    ActionPill("预览导入差异", enabled = !busy && decisions.size == parsed.issues.size, prominent = true,
+                        modifier = Modifier.testTag("previewCourseImport"), onClick = {
+                        if (busy) return@ActionPill
                         busy = true; message = null
                         val choices = decisions.toMap()
                         scope.launch {
@@ -258,7 +274,7 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
                             } catch (e: IllegalArgumentException) { message = e.message }
                             finally { busy = false }
                         }
-                    }) { Text("预览导入差异") }
+                    })
                 }
             }
             else -> {
@@ -280,7 +296,7 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
                         if (imported && chat.page == null) onImported(parsed.term.id)
                     }
                 }
-                ImportDiff(parsed, effective, ready, busy || writing, ask = {
+                ImportDiff(parsed, effective, ready, busy || writing, top, ask = {
                     val id = staged ?: model.planner.stageCourseImport(parsed.term, effective).also { staged = it }
                     AssistantPage.CourseDraft(id, parsed.term.id)
                 }, onEdit = ::leavePreview, onConfirm = {
@@ -292,12 +308,29 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
             }
         }
     }
-    editing?.let { issue ->
-        val parsed = draft ?: return@let
-        val fields = (decisions[issue.position] as? IssueDecision.Correct)?.fields ?: issue.fields ?: return@let
-        Correction(issue.position, fields, parsed.term, onClose = { editing = null }, onSave = {
-            decisions[issue.position] = IssueDecision.Correct(it); editing = null; message = null
-        })
+    PlannerPopupHost {
+        Page {
+            RootPane(header = {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SectionTitle("导入课表")
+                        Spacer(Modifier.weight(1f))
+                        ActionPill("取消导入", ::cancel, Modifier.testTag("cancelCourseImport"), enabled = !writing)
+                    }
+                    message?.let { Text(it, color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("courseImportError")) }
+                    if (writing) Text("正在保存已确认的课表…", modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            }) { top, _ -> steps(top) }
+        }
+        editing?.let { issue ->
+            val parsed = draft ?: return@let
+            val fields = (decisions[issue.position] as? IssueDecision.Correct)?.fields ?: issue.fields ?: return@let
+            Correction(issue.position, fields, parsed.term, onClose = { editing = null }, onSave = {
+                decisions[issue.position] = IssueDecision.Correct(it); editing = null; message = null
+            })
+        }
     }
 }
 
@@ -313,7 +346,7 @@ private fun ImportField(label: String, value: String, tag: String, enabled: Bool
 @Composable
 private fun Correction(position: String, source: CourseFields, term: TermSpec, onClose: () -> Unit, onSave: (CourseFields) -> Unit) {
     var fields by remember(position) { mutableStateOf(source) }
-    AlertDialog(onDismissRequest = onClose, title = { Text("修正课程项") }, text = {
+    PlannerAlertDialog(onDismissRequest = onClose, title = { Text("修正课程项") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(position)
             ImportField("周次", fields.week, "fixWeek") { fields = fields.copy(week = it) }
@@ -329,15 +362,16 @@ private fun Correction(position: String, source: CourseFields, term: TermSpec, o
 private data class CourseGroup(val title: String, val room: String, val day: Int, val first: Int, val last: Int, val start: String, val end: String)
 
 @Composable
-private fun ImportDiff(draft: ImportDraft, meetings: List<CourseMeeting>, proposal: PreviewResult.Ready, busy: Boolean,
+private fun ImportDiff(draft: ImportDraft, meetings: List<CourseMeeting>, proposal: PreviewResult.Ready, busy: Boolean, top: Dp,
     ask: () -> AssistantPage.CourseDraft, onEdit: () -> Unit, onConfirm: () -> Unit) {
     val groups = remember(meetings) { meetings.groupBy {
         fun time(millis: Long) = Instant.ofEpochMilli(millis).atZone(campusZone).toLocalTime().toString()
         CourseGroup(it.title, it.room, it.day, it.firstPeriod, it.lastPeriod, time(it.startMillis), time(it.endMillis))
     }.entries.toList() }
     val locations = remember(groups) { groups.groupBy { it.key.title }.mapValues { (_, entries) -> entries.map { it.key.room }.distinct() }.filterValues { it.size > 1 } }
-    Column(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.weight(1f).testTag("courseImportDiff"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    ImportPane(composer = { if (!busy) AssistantComposer(ask) }) { bottom ->
+        LazyColumn(Modifier.fillMaxSize().testTag("courseImportDiff"), contentPadding = dockListPadding(top, bottom),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item {
                 Text("确认导入差异", style = MaterialTheme.typography.titleLarge)
                 Text("只替换 ${draft.term.id} 的 HUB 课表；已有任务保留。最终 ${meetings.size} 次课程，${groups.size} 个时段分组。")
@@ -353,10 +387,22 @@ private fun ImportDiff(draft: ImportDraft, meetings: List<CourseMeeting>, propos
                 if (proposal.changes.isEmpty()) Text("与当前课表一致，无新增或移除。") }
             items(proposal.changes) { change -> Text("${change.field}：${change.before ?: "无"} → ${change.after ?: "无"}") }
             item {
-                TextButton(enabled = !busy, onClick = onEdit) { Text("返回核对") }
-                Button(enabled = !busy, onClick = onConfirm, modifier = Modifier.testTag("confirmCourseImport")) { Text("确认导入") }
+                Actions {
+                    Secondary("返回核对", !busy, onEdit)
+                    ActionPill("确认导入", onConfirm, Modifier.testTag("confirmCourseImport"), enabled = !busy, prominent = true)
+                }
             }
         }
-        if (!busy) AssistantComposer(ask)
+    }
+}
+
+@Composable
+private fun ImportPane(composer: @Composable () -> Unit, content: @Composable (bottom: Dp) -> Unit) {
+    val density = LocalDensity.current
+    var height by remember { mutableIntStateOf(0) }
+    GlassBacking(Modifier.fillMaxSize(), background = { content(with(density) { height.toDp() }) }) {
+        Box(Modifier.align(Alignment.BottomCenter).onSizeChanged { height = it.height }.padding(horizontal = 16.dp, vertical = 4.dp)) {
+            composer()
+        }
     }
 }

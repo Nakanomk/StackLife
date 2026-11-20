@@ -20,6 +20,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.ReadPanel
+import io.github.nakanomk.stacklife.RootPane
+import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
+import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
+import androidx.compose.ui.unit.Dp
 import io.github.nakanomk.stacklife.assistant.*
 import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.WorkspaceViewModel
@@ -32,7 +36,7 @@ internal fun GraphEditorRoute(model: WorkspaceViewModel, graphId: String, onBack
     var reviewing by rememberSaveable { mutableStateOf(false) }
     var goal by rememberSaveable { mutableStateOf<String?>(null) }
     ReadPanel(state) { detail ->
-        if (detail.graph == null) Page { PageTitle("流程图不存在", back = onBack) }
+        if (detail.graph == null) MissingDetail("流程图", "流程图不存在", onBack)
         else GraphEditor(model, detail, onBack, onGoal = { selected ->
             goal = selected ?: run {
                 val predecessors = detail.edges.mapTo(HashSet()) { it.from }
@@ -75,30 +79,19 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
     fun dismiss() { editing = null }
     BackHandler(enabled = source != null) { sourceId = null }
 
-    Page(AssistantPage.Graph(graph.id, selected?.id)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            ToolbarIcon(io.github.nakanomk.stacklife.R.drawable.ic_arrow_back, "返回", onClick = onBack)
-            Text(graph.title, Modifier.weight(1f).semantics { heading() }.padding(horizontal = 6.dp), maxLines = 1,
-                overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
-            TextButton(onClick = { listMode = !listMode }, modifier = Modifier.heightIn(min = 48.dp).testTag("graph-toggle-view")) {
-                Text(if (listMode) "画布" else "依赖列表")
-            }
-        }
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+    val tools: @Composable () -> Unit = {
+        ControlGroup(Modifier.horizontalScroll(rememberScrollState())) {
             if (source != null) {
                 Secondary("取消连线") { sourceId = null }
-                Text("${source.title} → 请选择后继", style = MaterialTheme.typography.labelLarge)
+                Text("${source.title} → 请选择后继", Modifier.padding(horizontal = 8.dp), style = MaterialTheme.typography.labelLarge)
             } else {
-                FilledTonalButton(onClick = { onGoal(selected?.id) }, enabled = detail.nodes.isNotEmpty() && !submission.busy,
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("graph-goal")) { Text("生成拓扑排序") }
+                ActionPill("生成拓扑排序", { onGoal(selected?.id) }, Modifier.testTag("graph-goal"),
+                    enabled = detail.nodes.isNotEmpty() && !submission.busy, prominent = true)
                 if (selected != null) {
                     var menu by remember { mutableStateOf(false) }
                     Box {
-                        TextButton(onClick = { menu = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("graph-node-actions")) {
-                            Text("节点操作")
-                        }
-                        DropdownMenu(menu, { menu = false }) {
+                        ActionPill("节点操作", { menu = true }, Modifier.testTag("graph-node-actions"))
+                        PlannerDropdownMenu(menu, { menu = false }) {
                             DropdownMenuItem({ Text("从此节点连线") }, { menu = false; linkFrom(selected.id) })
                             DropdownMenuItem({ Text("移除连线") }, { menu = false; form("edges") },
                                 enabled = detail.edges.any { it.from == selected.id || it.to == selected.id })
@@ -108,15 +101,29 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
                         }
                     }
                 }
-                TextButton(onClick = { form("add") }, modifier = Modifier.heightIn(min = 48.dp).testTag("graph-add")) { Text("添加节点") }
+                ActionPill("添加节点", { form("add") }, Modifier.testTag("graph-add"))
             }
         }
-        if (listMode) GraphDependencies(detail, selected?.id, select, onRemove = { edge ->
-            edgeFrom = edge.from; edgeTo = edge.to; form("unlink")
-        })
-        else GraphCanvas(detail, selected?.id, select, { id -> if (sourceId != null) select(id) else linkFrom(id) }, patch,
-            { moves, revision -> submission.send(PlannerCommand.GraphPatch(graph.id, moves, revision)) },
-            Modifier.fillMaxSize().padding(start = 8.dp, end = 8.dp, bottom = 8.dp))
+    }
+    Page(AssistantPage.Graph(graph.id, selected?.id)) {
+        RootPane(header = {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ToolbarIcon(io.github.nakanomk.stacklife.R.drawable.ic_arrow_back, "返回", onClick = onBack)
+                    Text(graph.title, Modifier.weight(1f).semantics { heading() }, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
+                    ActionPill(if (listMode) "画布" else "依赖列表", { listMode = !listMode }, Modifier.testTag("graph-toggle-view"))
+                }
+                tools()
+            }
+        }) { top, bottom ->
+            if (listMode) GraphDependencies(detail, selected?.id, select, top, bottom, onRemove = { edge ->
+                edgeFrom = edge.from; edgeTo = edge.to; form("unlink")
+            })
+            else GraphCanvas(detail, selected?.id, select, { id -> if (sourceId != null) select(id) else linkFrom(id) }, patch,
+                { moves, revision -> submission.send(PlannerCommand.GraphPatch(graph.id, moves, revision)) },
+                Modifier.fillMaxSize().padding(start = 8.dp, end = 8.dp, bottom = bottom + 8.dp), headerInset = top)
+        }
     }
     when (editing) {
         "add" -> NodeForm(model, graph.id, editRevision, null, detail.nodes, ::dismiss)
@@ -129,7 +136,7 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
         "edges" -> if (selected != null) {
             val incident = remember(detail.edges, selected.id) { detail.edges.filter { it.from == selected.id || it.to == selected.id } }
             val titles = remember(detail.nodes) { detail.nodes.associate { it.id to it.title } }
-            AlertDialog(onDismissRequest = ::dismiss, title = { Text("选择要移除的连线") }, text = {
+            PlannerAlertDialog(onDismissRequest = ::dismiss, title = { Text("选择要移除的连线") }, text = {
                 LazyColumn {
                     if (incident.isEmpty()) item { Text("没有与此节点相连的依赖") }
                     items(incident) { edge ->
@@ -156,9 +163,9 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
 }
 
 @Composable
-private fun GraphDependencies(detail: GraphDetail, selected: String?, onSelect: (String) -> Unit, onRemove: (GraphEdge) -> Unit) {
+private fun GraphDependencies(detail: GraphDetail, selected: String?, onSelect: (String) -> Unit, top: Dp, bottom: Dp, onRemove: (GraphEdge) -> Unit) {
     val byId = remember(detail.nodes) { detail.nodes.associateBy { it.id } }
-    LazyColumn(Modifier.fillMaxSize().testTag("graph-list"), contentPadding = pagePadding, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    LazyColumn(Modifier.fillMaxSize().testTag("graph-list"), contentPadding = dockListPadding(top, bottom), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         item { SectionTitle("节点 · ${detail.nodes.size}") }
         items(detail.nodes, key = { it.id }) { node ->
             Surface(shape = MaterialTheme.shapes.medium,

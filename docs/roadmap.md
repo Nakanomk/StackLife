@@ -2,7 +2,7 @@
 
 StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Android 日程工具。**队列**回答「我现在要做什么」，**栈帧**记录「我为什么停下、怎样接回去」。**DAG** 决定为选定目标先做什么，**时间轴**决定哪天几点做，**课表**标出已经占用的时段。一项工作不因换视图而变成几份任务。
 
-**当前交付：v0.7.2 · 连续导航与日历。** 四个主页面横向平移，共用底部输入条；日程和课表可独立横滑。课表采用 WakeUp 浅色白字周视图的课程配色。默认液态玻璃，不支持或关闭时用同形 MD3。助理授权与写入差异仍须明确操作。普通包不含联盟 SDK；不以模拟器或回环请求代证真机 OPEN/BACK、帧预算或真实 BYOK。
+**当前交付：v0.8.0 · 液态玻璃与课表外观。** 四个主页面横向平移，共用底部输入条；日程和课表可独立横滑。课表保留 WakeUp 配色和白字，默认开启文字描边与液态玻璃。「设置 → 材质与动态」可在真实课格预览里单独关闭描边。玻璃关闭或不可用时回到同形 MD3。助理授权与写入差异仍须明确操作。普通包不含联盟 SDK。
 
 ## 起点与产品决定
 
@@ -177,7 +177,9 @@ interface PlannerApi {
 
 本地实验变体只接受 `-PstacklifeKitAar=/绝对路径/sharedview-kit-1.0.0.5.aar`，SHA-256 必须为 `7c0937ecde545a262619e5fa19d56a21b0ad3fd8013cbc4fe058c497808702bd`。`./gradlew -PstacklifeKitAar=… :app:assembleKitLab` 生成独立 `.kitlab`，只在获准设备本地测试，不交付；`StackLifeKit` 日志仅记协议值。普通 `:app:assemblePreview` 不需要 AAR，也不会打入适配器或详情 Activity。
 
-**可选光学层。** `StackLifeSurface` 共用同一形状、焦点和布局，使用 [Haze 2.1.0 Glass](https://github.com/chrisbanes/haze/blob/2.1.0/docs/effects/glass/index.md) 的 `GlassStyle.regular` 和 `HazeSourceRetention.ClearWhenUnavailable`。根页滚动边缘采样正文；胶囊、圆形动作和课程块采样与自己并列的背景平面，不递归采样。课程轻微同色发光只在玻璃生效时绘制。正文、长对话、登录和密钥不加滤镜；关闭时使用同尺寸、同圆角的 MD3 实色。
+**可选光学层。** 参考 [BiliPai 的浮动导航](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/FloatingDockChrome.kt)、[场景调校](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/LiquidGlassTuning.kt)及 [Apple 材质层级](https://developer.apple.com/design/human-interface-guidelines/materials)。Android 端用 Apache-2.0 的 [Kyant Backdrop 2.0.1](https://github.com/Kyant0/AndroidLiquidGlass/tree/2.0.1)，不是 iOS 系统控件。根页工具栏、加号与导航从后方的真实内容采样；控件自己、文字和图标不进入自己的采样层。壳体用 4 dp 模糊与 24 dp 边缘折射，消息栏和弹层采用更强的磨砂；滑动选中项只取父壳的光学层。主操作、菜单和编辑器按同一层级处理。正文不叠玻璃；不采样登录网页、模型密钥或地址输入区。
+
+课块将课程色、节次线和按日底色一起送进透镜，文字最后绘制，因此折射不会扭曲白字。材质页的示例和真实周视图共用 `PeriodGrid` / `CourseTile`；草稿即时预览，保存后应用到真实课表，取消不改已保存的值。关闭玻璃只换材质，不改变色号分配、课程位置、点击区或文字描边选项。
 
 玻璃仅在 API 33+、硬件加速、非低内存/省电、无减少透明度/高对比要求时可用。否则提示「当前使用实色」及原因，不把模糊称为折射；关玻璃完全卸下光学层。按 [Google 无障碍标准](https://developer.android.com/guide/topics/ui/accessibility/apps)，触控目标至少 48×48 dp，普通文字对比 4.5:1、大字 3:1；TalkBack 读状态并有等价非拖拽操作。系统字体缩放、edge-to-edge 安全区、输入法和旋转都不能遮操作。减少动态与减少透明度分开处理。
 
@@ -260,6 +262,8 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 **v0.7.2 课表配色复审。** 八个底色取自 WakeUp 官方商店[浅色白字周视图](https://is1-ssl.mzstatic.com/image/thumb/PurpleSource211/v4/ea/24/ff/ea24ff53-5522-1793-2759-0e5f55df649d/8f020f24-d925-446a-bdba-41ba3eedf0d2_Apple_iPad_Pro_13_Inch_Screenshot_0.png/576x768bb.png)的课块内部，不取壁纸或品牌色。课程超过八门时在相邻取样色之间补色。浅深主题共用色板；玻璃保留底下的明暗，白字只加贴近笔画的细灰边。
 
 在同一 API 37 模拟器、同一学期与周次、100% 字号下，对照了浅深主题的玻璃和实色截图。实色中「数据结构」为杏色 `#F3C383`，「大学物理」为薄荷色 `#8AE8D8`；浅色玻璃中分别为 `#F4C78D`、`#93E9DB`。设备用例验证了三件事：32 门课各有不同颜色且都在参考明度及饱和度范围内；换周、换教室或重启不改变分色；课程名、教室和冲突标记均能渲染出白色笔画和有对比的字边。
+
+**v0.8.0 运行截图复审。** 在同一学期、1080×2340、440 dpi、系统字号 100% 的 API 37 模拟器上，「数据结构」中部的节次线可透过有色课块，切换实色后消失；课程位置不动。将今天的时刻线滚过固定的「＋」，圆内出现随背景移动的折射光带，圆外仍是直线。分别检查了浅色、深色、设置页去除描边和保存后冷启。浅色底配无描边白字的对比较低，保留描边为默认。截图与录屏不代表物理设备的帧率。
 
 |阶段 / 用例|输入 → 可观察结果（校方登录、真实模型、联盟真机和性能有各自的验收条件）|
 |---|---|

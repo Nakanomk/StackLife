@@ -138,6 +138,8 @@ class GraphEditorTest {
         assertEquals(state.frames, runBlocking { store.state().frames })
     }
 
+    private fun goalBack() = await(hasContentDescription("返回") and hasAnyAncestor(isDialog())).assertIsDisplayed()
+
     @Test fun chooseTargetInlineOrUseSoleSinkAndAppendOneReviewedBatchEvenWithSwap() = runBlocking {
         open()
         val initial = store.state()
@@ -146,7 +148,7 @@ class GraphEditorTest {
         tag("goal-item:0")
         bringIntoReview(hasText("1. X")).assertIsDisplayed()
         assertEquals(initial, store.state())
-        bringIntoReview(hasContentDescription("返回")).performClick()
+        goalBack().performClick()
 
         store.apply(SetRestorePolicy(RestorePolicy.SWAP), GraphPatch(id("g"), listOf(
             GraphEdit.RemoveNode(id("x")), GraphEdit.AddEdge(id("a"), id("b")), GraphEdit.AddEdge(id("a"), id("c")))))
@@ -246,7 +248,7 @@ class GraphEditorTest {
             ui.onNode(confirm).performClick().assertIsNotEnabled()
             ui.activityRule.scenario.recreate()
             attach()
-            bringIntoReview(hasContentDescription("返回")).assertIsNotEnabled()
+            goalBack().assertIsNotEnabled()
         } finally {
             release.complete(Unit)
             writer.join()
@@ -284,7 +286,7 @@ class GraphEditorTest {
         review("x")
         bringIntoReview(hasText("1. X")).assertIsDisplayed()
         bringIntoReview(hasTestTag("graph-generate")); await(hasTestTag("graph-generate") and isEnabled())
-        bringIntoReview(hasContentDescription("返回")).performClick()
+        goalBack().performClick()
         canvas("x").assertIsDisplayed(); assertTrue(runBlocking { store.state().frames.isEmpty() })
         review("x")
         bringIntoReview(hasTestTag("graph-generate")); await(hasTestTag("graph-generate") and isEnabled())

@@ -37,9 +37,14 @@ fun TaskScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: 
         TaskEditor(actions, { editing = false }, original = task)
         return
     }
-    Page(AssistantPage.Task(id)) {
-        LazyColumn(contentPadding = pagePadding, verticalArrangement = listSpacing) {
-            item { PageTitle("任务详情", back = back) }
+    EditorPage("任务详情", back, AssistantPage.Task(id), backEnabled = !action.busy, footer = {
+        Actions {
+            Primary("完成任务", enabled = !action.busy) { action.send(PlannerCommand.TaskFinish(id)) }
+            Secondary("编辑任务", enabled = !action.busy) { editing = true }
+            Secondary("移出队列", enabled = !action.busy) { action.send(PlannerCommand.TaskRemove(id)) }
+        }
+    }) { top, bottom ->
+        LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
             item {
                 Surface(modifier = shared("task:$id").fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
                     Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -58,23 +63,14 @@ fun TaskScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: 
                     if (task.notes.isBlank()) Hint("尚未填写备注") else Text(task.notes)
                 }
             }
-            item {
-                Actions {
-                    Primary("完成任务", enabled = !action.busy) { action.send(PlannerCommand.TaskFinish(id)) }
-                    Secondary("编辑任务", enabled = !action.busy) { editing = true }
-                    TextButton(modifier = Modifier.heightIn(min = 48.dp), enabled = !action.busy,
-                        onClick = { action.send(PlannerCommand.TaskRemove(id)) }) { Text("移出队列") }
-                }
-            }
         }
     }
 }
 
 @Composable
 internal fun MissingDetail(title: String, message: String, onBack: () -> Unit) {
-    Page {
-        LazyColumn(contentPadding = pagePadding, verticalArrangement = listSpacing) {
-            item { PageTitle(title, back = onBack) }
+    EditorPage(title, onBack) { top, bottom ->
+        LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
             item { Hint(message) }
         }
     }
@@ -84,9 +80,8 @@ internal fun MissingDetail(title: String, message: String, onBack: () -> Unit) {
 internal fun SettingsScreen(restorePolicy: RestorePolicy, actions: WorkspaceActions, onBack: () -> Unit,
     onConnection: () -> Unit, onAppearance: (AppearanceGroup) -> Unit) {
     val action = rememberSubmission(actions)
-    Page(AssistantPage.Settings) {
-        RootPane(header = { PageTitle("设置", back = onBack) }) { top, _ ->
-            LazyColumn(contentPadding = dockListPadding(top, 0.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+    EditorPage("设置", onBack, AssistantPage.Settings) { top, bottom ->
+            LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 item { SettingsGroup("外观") {
                     PreferenceRow("色彩", leadingIcon = R.drawable.ic_palette) { onAppearance(AppearanceGroup.COLOR) }
                     HorizontalDivider(Modifier.padding(start = 32.dp))
@@ -122,7 +117,6 @@ internal fun SettingsScreen(restorePolicy: RestorePolicy, actions: WorkspaceActi
                     }
                 } } }
             }
-        }
     }
 }
 
@@ -130,8 +124,6 @@ internal fun SettingsScreen(restorePolicy: RestorePolicy, actions: WorkspaceActi
 private fun SettingsGroup(label: String, rows: @Composable ColumnScope.() -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         SectionTitle(label)
-        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp), content = rows)
-        }
+        FormGroup(content = rows)
     }
 }

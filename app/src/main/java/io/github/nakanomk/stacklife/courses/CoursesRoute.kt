@@ -58,21 +58,21 @@ internal fun RemoveTermReview(id: String, model: WorkspaceViewModel, onBack: () 
         }
     }
     BackHandler(enabled = saving) { /* Do not replay or cancel an accepted removal on Back. */ }
-    Page(AssistantPage.Week(id, 1)) {
-        LazyColumn(Modifier.weight(1f), contentPadding = pagePadding, verticalArrangement = listSpacing) {
-            item { PageTitle("移除学期课表", back = cancel, backEnabled = !saving) }
+    EditorPage("移除学期课表", cancel, AssistantPage.Week(id, 1), backEnabled = !saving, footer = {
+        Actions {
+            Secondary("取消", !saving, cancel)
+            if (ready != null || saving) Primary("确认移除", !saving) {
+                if (ready != null) submission.submit { model.confirmProposal(ready.proposalId) }
+            } else if (preview is PreviewResult.Rejected) Secondary("重新预览") { preview = null; version++ }
+        }
+    }) { top, bottom ->
+        LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
             item { Text(id, style = MaterialTheme.typography.titleLarge); Hint("仅移除本学期的华科课程。队列、预约和其他学期不动。") }
             when (val result = preview) {
                 null -> item { CircularProgressIndicator() }
                 is PreviewResult.Rejected -> item { Text(result.message) }
                 is PreviewResult.Ready -> items(result.changes) { change -> Text("${change.field}\n${change.before.orEmpty()}") }
             }
-        }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Secondary("取消", !saving, cancel)
-            if (ready != null || saving) Primary("确认移除", !saving) {
-                if (ready != null) submission.submit { model.confirmProposal(ready.proposalId) }
-            } else if (preview is PreviewResult.Rejected) Secondary("重新预览") { preview = null; version++ }
         }
     }
 }

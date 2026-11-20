@@ -12,10 +12,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
@@ -26,10 +22,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 
-import dev.chrisbanes.haze.hazeSource
+import kotlin.math.roundToInt
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.assistant.AssistantComposer
 import io.github.nakanomk.stacklife.assistant.AssistantPage
@@ -48,7 +44,7 @@ internal fun DockOverlay(
     val docked = appearance.navStyle == NavStyle.DOCKED
     val composer = assistantPage?.takeIf { LocalAssistant.current != null }
     val showNav = navigationBar != null && WindowInsets.ime.getBottom(density) == 0
-    val source = rememberPlannerBackdrop((!docked && showNav && appearance.navGlass) || (composer != null && appearance.assistantGlass))
+    val source = rememberPlannerBackdrop((showNav && appearance.navGlass) || (composer != null && appearance.assistantGlass))
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val shareRow = maxWidth >= 600.dp && maxWidth > maxHeight && composer != null && showNav
         val navSlot: @Composable () -> Unit = {
@@ -71,7 +67,7 @@ internal fun DockOverlay(
                 }
             }
         }) { insets ->
-            Box(if (source == null) Modifier.fillMaxSize() else Modifier.fillMaxSize().hazeSource(source)) {
+            Box(Modifier.fillMaxSize().plannerBackdrop(source)) {
                 content(insets.calculateBottomPadding())
             }
         }
@@ -80,10 +76,17 @@ internal fun DockOverlay(
 
 private fun chromeRail() = Modifier.widthIn(max = 520.dp).fillMaxWidth().padding(horizontal = chromeGutter, vertical = 4.dp)
 
-internal fun Modifier.segmentHighlight(position: State<Float>, count: Int, ink: Color) = drawBehind {
-    val width = size.width / count
-    val index = if (layoutDirection == LayoutDirection.Ltr) position.value else count - 1 - position.value
-    drawRoundRect(ink, Offset(index * width, 0f), Size(width, size.height), CornerRadius(size.height / 2))
+@Composable
+internal fun SegmentTrack(position: State<Float>, count: Int, ink: Color, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Box(modifier) {
+        BoxWithConstraints(Modifier.matchParentSize()) {
+            val width = constraints.maxWidth.toFloat() / count
+            StackLifeSurface(CapsuleScene.INDICATOR, Modifier.offset { IntOffset(
+                (width * position.value.coerceIn(0f, count - 1f)).roundToInt(), 0) }.fillMaxWidth(1f / count).fillMaxHeight(),
+                solid = ink, tint = ink) {}
+        }
+        content()
+    }
 }
 
 @Composable
@@ -106,12 +109,17 @@ internal fun rememberDestinationCapsule(active: String, pagerPosition: State<Flo
 
 @Composable
 private fun DockedNavigation(tabs: List<Destination>, active: String, onSelect: (String) -> Unit) {
-    NavigationBar(Modifier.fillMaxWidth().testTag("navigation-capsule").semantics { stateDescription = "贴底导航" },
-        windowInsets = WindowInsets(0), containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-        for (tab in tabs) key(tab.key) {
-            NavigationBarItem(selected = tab.key == active, onClick = { onSelect(tab.key) },
-                icon = { DockIcon(tab.key, LocalContentColor.current) }, label = { Text(tab.label) },
-                modifier = Modifier.testTag("nav:${tab.key}"))
+    val colors = MaterialTheme.colorScheme
+    val glass = LocalCapsuleBackdrop.current != null && LocalAppearance.current.navGlass
+    StackLifeSurface(CapsuleScene.NAVIGATION, Modifier.fillMaxWidth(), colors.surfaceContainer,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(0.dp)) {
+        NavigationBar(Modifier.fillMaxWidth().testTag("navigation-capsule").semantics { stateDescription = "贴底导航" },
+            windowInsets = WindowInsets(0), containerColor = if (glass) Color.Transparent else colors.surfaceContainer) {
+            for (tab in tabs) key(tab.key) {
+                NavigationBarItem(selected = tab.key == active, onClick = { onSelect(tab.key) },
+                    icon = { DockIcon(tab.key, LocalContentColor.current) }, label = { Text(tab.label) },
+                    modifier = Modifier.testTag("nav:${tab.key}"))
+            }
         }
     }
 }
@@ -122,18 +130,21 @@ private fun DestinationCapsule(tabs: List<Destination>, active: String, slot: St
     val appearanceGlass = LocalCapsuleBackdrop.current != null && LocalAppearance.current.navGlass
     StackLifeSurface(CapsuleScene.NAVIGATION, Modifier.fillMaxWidth().testTag("navigation-capsule"),
         solid = colors.surfaceContainerLow, elevation = 2.dp) {
-        Row(Modifier.selectableGroup().padding(4.dp).segmentHighlight(slot, tabs.size,
-            colors.secondaryContainer.copy(alpha = if (appearanceGlass) .74f else 1f))) {
-            for (tab in tabs) key(tab.key) {
-                val id = tab.key
-                val selected = active == id
-                val ink = if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant
-                Column(Modifier.weight(1f).clip(CircleShape)
-                    .testTag("nav:$id").selectable(selected, role = Role.Tab) { onSelect(id) }
-                    .heightIn(min = 48.dp).padding(vertical = 2.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    DockIcon(id, ink)
-                    Text(tab.label, color = ink, style = MaterialTheme.typography.labelMedium)
+        CompositionLocalProvider(LocalCapsuleBackdrop provides LocalCapsuleBackdrop.current.takeIf { appearanceGlass }) {
+            SegmentTrack(slot, tabs.size, colors.secondaryContainer, Modifier.fillMaxWidth().padding(4.dp)) {
+                Row(Modifier.fillMaxWidth().selectableGroup()) {
+                    for (tab in tabs) key(tab.key) {
+                        val id = tab.key
+                        val selected = active == id
+                        val ink = if (selected) colors.primary else colors.onSurfaceVariant
+                        Column(Modifier.weight(1f).clip(CircleShape)
+                            .testTag("nav:$id").selectable(selected, role = Role.Tab) { onSelect(id) }
+                            .heightIn(min = 48.dp).padding(vertical = 2.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            DockIcon(id, ink)
+                            Text(tab.label, color = ink, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
                 }
             }
         }

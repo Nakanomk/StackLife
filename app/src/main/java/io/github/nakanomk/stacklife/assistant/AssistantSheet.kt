@@ -39,6 +39,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.appearance.CapsuleScene
 import io.github.nakanomk.stacklife.appearance.StackLifeSurface
+import io.github.nakanomk.stacklife.appearance.PlannerModalBottomSheet
+import io.github.nakanomk.stacklife.workspace.ActionPill
 import io.github.nakanomk.stacklife.planner.PlannerChange
 import io.github.nakanomk.stacklife.workspace.CheckRow
 import io.github.nakanomk.stacklife.workspace.Hint
@@ -174,7 +176,7 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
         else if (ui.lines.isNotEmpty()) list.scrollToItem(ui.lines.lastIndex)
     }
     val compact = ui.profile == null
-    ModalBottomSheet(onDismissRequest = model::close, sheetState = sheet) {
+    PlannerModalBottomSheet(onDismissRequest = model::close, sheetState = sheet) {
         val density = LocalDensity.current
         val needsHeight = LocalConfiguration.current.screenHeightDp < 480 || density.fontScale >= 1.5f ||
             WindowInsets.ime.getBottom(density) > 0
@@ -261,10 +263,9 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
             }
             when {
                 ui.work == AssistantWork.LOADING -> Unit
-                service == null -> Button(onClick = { model.leaveForConfiguration(); onSettings() }) { Text("配置模型服务") }
-                !ui.allowed -> Button(onClick = { model.authorize(); options = false }, modifier = Modifier.testTag("assistant-consent")) {
-                    Text(if (ui.draft.isNotEmpty()) "允许并发送" else "允许本次范围")
-                }
+                service == null -> ActionPill("配置模型服务", { model.leaveForConfiguration(); onSettings() }, prominent = true)
+                !ui.allowed -> ActionPill(if (ui.draft.isNotEmpty()) "允许并发送" else "允许本次范围",
+                    { model.authorize(); options = false }, Modifier.testTag("assistant-consent"), prominent = true)
                 ui.work == AssistantWork.COMMIT -> Text("正在保存已确认的更改…")
                 ui.work == AssistantWork.REQUEST -> Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -272,11 +273,13 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
                     Text("正在处理请求…", Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     TextButton(onClick = model::cancel) { Text("取消请求") }
                 }
-                ready != null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = model::cancel) { Text("放弃提案") }
-                    Button(onClick = { model.apply(ready.proposalId) }, modifier = Modifier.testTag("assistant-apply")) { Text("应用这些更改") } }
-                ui.reviewAgain -> Row { TextButton(onClick = model::cancel) { Text("放弃提案") }; Button(onClick = model::refreshProposal) { Text("重新预览") } }
-                ui.importRequested -> Row { TextButton(onClick = model::cancel) { Text("取消") }; Button(onClick = { model.close(); onImport() }) { Text("打开本地课表导入器") } }
-                else -> Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                ready != null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ActionPill("放弃提案", model::cancel)
+                    ActionPill("应用这些更改", { model.apply(ready.proposalId) }, Modifier.testTag("assistant-apply"), prominent = true)
+                }
+                ui.reviewAgain -> Row { ActionPill("放弃提案", model::cancel); ActionPill("重新预览", model::refreshProposal, prominent = true) }
+                ui.importRequested -> Row { ActionPill("取消", model::cancel); ActionPill("打开本地课表导入器", { model.close(); onImport() }, prominent = true) }
+                else -> StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth(), MaterialTheme.colorScheme.surfaceContainerHigh) {
                     MessageEditor(ui.draft, page.scopeName(), model::editMessage, model::send)
                 }
             }

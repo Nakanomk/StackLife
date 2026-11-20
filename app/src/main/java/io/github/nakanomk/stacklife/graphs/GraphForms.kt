@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.WorkspaceViewModel
+import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.*
 import kotlin.math.roundToInt
@@ -21,7 +22,7 @@ internal fun GraphSaveDialog(model: WorkspaceViewModel, title: String, confirm: 
     command: () -> PlannerCommand, onClose: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     val submission = rememberSubmission(model, { error = it }) { if (it == SaveOutcome.APPLIED) onClose() }
-    AlertDialog(onDismissRequest = { if (!submission.busy) onClose() }, title = { Text(title) }, text = {
+    PlannerAlertDialog(onDismissRequest = { if (!submission.busy) onClose() }, title = { Text(title) }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             content()
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

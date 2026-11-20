@@ -24,6 +24,8 @@ import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.GlassIcon
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.RootToolbar
+import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
+import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.assistant.AssistantComposer
 import io.github.nakanomk.stacklife.assistant.AssistantPage
@@ -56,7 +58,7 @@ private fun RowScope.WeekPicker(term: TermSpec, week: Int, onWeek: (Int) -> Unit
                 }
             }
         }
-        DropdownMenu(expanded, { expanded = false }) {
+        PlannerDropdownMenu(expanded, { expanded = false }) {
             for (n in 1..term.weeks) DropdownMenuItem(text = { Text("第 $n 周") }, onClick = { expanded = false; onWeek(n) })
         }
     }
@@ -78,7 +80,7 @@ internal fun CourseHome(
                 var menu by remember { mutableStateOf(false) }
                 Box {
                     GlassIcon(R.drawable.ic_more_vert, "课表选项", { menu = true }, Modifier.testTag("course-options"))
-                    DropdownMenu(menu, { menu = false }) {
+                    PlannerDropdownMenu(menu, { menu = false }) {
                         DropdownMenuItem({ Text(if (listMode) "周网格" else "课程列表") },
                             { menu = false; listMode = !listMode }, modifier = Modifier.testTag("course-view-toggle"))
                         DropdownMenuItem({ Text("导入课表") }, { menu = false; onImport() }, modifier = Modifier.testTag("course-import"))
@@ -158,7 +160,7 @@ private fun CourseInfo(course: ScheduledCourse) {
 
 @Composable
 internal fun CourseDetails(course: ScheduledCourse, close: () -> Unit) {
-    AlertDialog(modifier = Modifier.testTag("course-detail"), onDismissRequest = close, title = { Text("固定课程") },
+    PlannerAlertDialog(modifier = Modifier.testTag("course-detail"), onDismissRequest = close, title = { Text("固定课程") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(course.meeting.title, style = MaterialTheme.typography.titleLarge)

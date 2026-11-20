@@ -16,6 +16,7 @@ internal enum class AppearanceGroup(val key: String, val fields: Map<String, Str
     LAYOUT("layout", mapOf("compact" to "紧凑留白", "navStyle" to "导航样式", "order" to "导航次序", "start" to "启动页",
         "showDuration" to "显示时长", "showNotes" to "显示备注")),
     MATERIAL("material", mapOf("glass" to "液态玻璃", "navGlass" to "导航玻璃", "assistantGlass" to "助理玻璃",
+        "courseTextOutline" to "课程文字描边",
         "reduceMotion" to "减弱动效", "reduceTransparency" to "减少透明度", "highContrast" to "增强对比", "haptics" to "随系统触感"));
 
     fun project(appearance: Appearance) = JsonObject(full(appearance).filterKeys(fields::containsKey))

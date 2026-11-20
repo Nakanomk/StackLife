@@ -74,7 +74,7 @@ class WorkspaceUiTest {
         ui.onNodeWithTag("add-task").performTouchInput { click() }
         await(hasTestTag("title:0")).performTextInput("从时间轴创建")
         val save = hasText("添加到队列") and hasClickAction()
-        scrollTo(save)
+        ui.onNode(save).assertIsDisplayed()
         ui.onNode(save).performClick()
         val task = awaitQueue("从时间轴创建").queue.single()
         await(hasTestTag("tray:${task.id}")).assertIsDisplayed()
@@ -121,7 +121,7 @@ class WorkspaceUiTest {
         ui.onNodeWithContentDescription("新增任务").performClick()
         ui.onNodeWithTag("title:0").performTextInput("X")
         val add = hasText("添加到队列") and hasClickAction()
-        scrollTo(add)
+        ui.onNode(add).assertIsDisplayed()
         ui.onNode(add).performClick()
         val interrupted = awaitQueue("X")
         await(hasText("栈") and hasClickAction()).performClick()
@@ -153,7 +153,7 @@ class WorkspaceUiTest {
         await(hasContentDescription("新增任务") and hasClickAction()).performClick()
         ui.onNodeWithTag("title:0").performTextInput("只创建一次")
         val add = hasText("添加到队列")
-        scrollTo(add)
+        ui.onNode(add).assertIsDisplayed()
 
         // Hold the actual Room writer until the new Activity has restored the in-flight form.
         val locked = CompletableDeferred<Unit>()
@@ -168,8 +168,7 @@ class WorkspaceUiTest {
             scenario.recreate()
             attach()
             await(hasTestTag("title:0")).assertTextContains("只创建一次")
-            scrollTo(add)
-            ui.onNode(add).assertIsNotEnabled()
+            ui.onNode(add).assertIsDisplayed().assertIsNotEnabled()
         } finally {
             release.complete(Unit)
             writer.join()

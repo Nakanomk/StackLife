@@ -17,6 +17,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.WorkspaceViewModel
+import io.github.nakanomk.stacklife.appearance.PlannerModalBottomSheet
+import io.github.nakanomk.stacklife.RootPane
+import androidx.compose.ui.unit.Dp
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.*
 
@@ -68,10 +71,9 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
     val list = rememberLazyListState()
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true,
         confirmValueChange = { it != SheetValue.Hidden || ticket == null })
-    ModalBottomSheet(onDismissRequest = { if (ticket == null) onClose() }, sheetState = sheet) {
-        LazyColumn(Modifier.fillMaxWidth().imePadding().testTag("goal-order"), state = list, contentPadding = pagePadding,
+    val body: @Composable (Dp) -> Unit = { top ->
+        LazyColumn(Modifier.fillMaxWidth().imePadding().testTag("goal-order"), state = list, contentPadding = dockListPadding(top, 0.dp),
             verticalArrangement = listSpacing) {
-            item { PageTitle("生成拓扑排序", back = onClose, backEnabled = !busy) }
             when {
                 receipt != null -> item { SectionTitle(checkNotNull(receipt)); Secondary("完成", onClick = onClose) }
                 graphState == ReadState.Loading -> item { CircularProgressIndicator() }
@@ -119,11 +121,8 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
                                     Hint("加入队列会追加到现有队尾；存为栈帧不动队列。")
                                     val enabled = !busy && reviewedRevision == order.revision && detail.revision == order.revision
                                     Actions {
-                                        Button({ save(order, false) }, enabled = enabled, modifier = Modifier.testTag("graph-append")) {
-                                            Text("加入队列")
-                                        }
-                                        OutlinedButton({ save(order, true) }, enabled = enabled && reason.isNotBlank(),
-                                            modifier = Modifier.testTag("graph-generate")) { Text("存为栈帧") }
+                                        ActionPill("加入队列", { save(order, false) }, Modifier.testTag("graph-append"), enabled, prominent = true)
+                                        ActionPill("存为栈帧", { save(order, true) }, Modifier.testTag("graph-generate"), enabled && reason.isNotBlank())
                                     }
                                     if (busy) Text("正在保存…")
                                 }
@@ -132,6 +131,11 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
                     }
                 }
             }
+        }
+    }
+    PlannerModalBottomSheet(onDismissRequest = { if (ticket == null) onClose() }, sheetState = sheet) {
+        Box(Modifier.fillMaxWidth().fillMaxHeight(.88f)) {
+            RootPane(header = { PageTitle("生成拓扑排序", back = onClose, backEnabled = !busy) }) { top, _ -> body(top) }
         }
     }
 }

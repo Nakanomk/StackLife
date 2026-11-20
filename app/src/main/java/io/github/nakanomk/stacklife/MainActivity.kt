@@ -42,6 +42,9 @@ import io.github.nakanomk.stacklife.appearance.AppearanceEditor
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 import io.github.nakanomk.stacklife.transitions.DetailTarget
+import io.github.nakanomk.stacklife.appearance.LocalGlassLight
+import io.github.nakanomk.stacklife.appearance.PlannerPopupHost
+import io.github.nakanomk.stacklife.appearance.rememberGlassLight
 import io.github.nakanomk.stacklife.graphs.GraphEditorRoute
 import io.github.nakanomk.stacklife.graphs.GraphsRoute
 import io.github.nakanomk.stacklife.planner.*
@@ -87,7 +90,8 @@ internal fun StackLifeApp(model: WorkspaceViewModel, assistantModel: AssistantMo
             LaunchedEffect(model) { model.notices.collect { messages.showSnackbar(it) } }
             Surface(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
                 Box {
-                    CompositionLocalProvider(LocalAssistant provides assistant) {
+                    CompositionLocalProvider(LocalAssistant provides assistant, LocalPlannerGlassAllowed provides true,
+                        LocalGlassLight provides rememberGlassLight()) {
                         PlannerNavigation(model, assistant, preferences, initialDetail, onDetailBack)
                     }
                     SnackbarHost(messages, Modifier.align(Alignment.BottomCenter).safeDrawingPadding().imePadding().padding(12.dp))
@@ -113,6 +117,8 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
     val back = { if (stack.size > 1) stack.removeAt(stack.lastIndex) else if (initialDetail != null) onDetailBack(); Unit }
     val navigate: (NavKey) -> Unit = { key -> if (stack.last() != key) stack.add(key) }
     val animate = LocalMotionEnabled.current
+    val privateScreens = remember { mutableIntStateOf(0) }
+    PlannerPopupHost(stack.last() != ModelConnection && stack.last() != ImportCourses && privateScreens.intValue == 0) {
     SharedTransitionLayout {
         val shared: SharedModifier = { key ->
             if (animate) Modifier.sharedBounds(rememberSharedContentState(key), LocalNavAnimatedContentScope.current)
@@ -204,34 +210,33 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 entry<PushTasks> { WorkspacePanel(model) { PushEditor(it.queue, model, back) } }
                 entry<CreateFrame> { TaskEditor(model, back, createFrame = true) }
                 entry<AddTask> { TaskEditor(model, back) }
-                entry<ImportCourses> { CourseImportScreen(model, back) { id ->
-                    selectedTerm = id; selectedWeek = 1; back()
+                entry<ImportCourses> { PrivateScreen(privateScreens) {
+                    CourseImportScreen(model, back) { id -> selectedTerm = id; selectedWeek = 1; back() }
                 } }
                 entry<RemoveTerm> { key -> RemoveTermReview(key.id, model, back) }
-                entry<GraphEditor> { key -> CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
-                    GraphEditorRoute(model, key.id, back) { navigate(FrameDetail(it)) }
-                } }
-                entry<TaskDetail> { key -> CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
-                    WorkspacePanel(model) { TaskScreen(key.id, it, model, back, shared) }
-                } }
-                entry<FrameDetail> { key -> CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
-                    WorkspacePanel(model) { FrameScreen(key.id, it, model, back, shared) }
-                } }
+                entry<GraphEditor> { key -> GraphEditorRoute(model, key.id, back) { navigate(FrameDetail(it)) } }
+                entry<TaskDetail> { key -> WorkspacePanel(model) { TaskScreen(key.id, it, model, back, shared) } }
+                entry<FrameDetail> { key -> WorkspacePanel(model) { FrameScreen(key.id, it, model, back, shared) } }
                 entry<Preferences> {
-                    CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
-                        SettingsScreen(preferences.policy, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) })
-                    }
+                    SettingsScreen(preferences.policy, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) })
                 }
-                entry<EditAppearance> { key ->
-                    CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
-                        AppearanceEditor(preferences.appearance, AppearanceGroup.entries.first { it.key == key.group }, model, back)
-                    }
-                }
-                entry<ModelConnection> { ConnectionScreen(assistant.connections, back) }
+                entry<EditAppearance> { key -> AppearanceEditor(preferences.appearance,
+                    AppearanceGroup.entries.first { it.key == key.group }, model, back) }
+                entry<ModelConnection> { PrivateScreen(privateScreens) { ConnectionScreen(assistant.connections, back) } }
             },
         )
     }
     AssistantSheet(assistant, onSettings = { navigate(ModelConnection) }, onImport = { navigate(ImportCourses) })
+    }
+}
+
+@Composable
+private fun PrivateScreen(count: MutableIntState, content: @Composable () -> Unit) {
+    DisposableEffect(count) {
+        count.intValue++
+        onDispose { count.intValue-- }
+    }
+    content()
 }
 
 private fun noMotion() = ContentTransform(EnterTransition.None, ExitTransition.None)

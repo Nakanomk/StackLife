@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.RootToolbar
-import io.github.nakanomk.stacklife.segmentHighlight
+import io.github.nakanomk.stacklife.SegmentTrack
 import io.github.nakanomk.stacklife.AddTaskFab
 import io.github.nakanomk.stacklife.taskFabClearance
 import io.github.nakanomk.stacklife.R
@@ -38,6 +38,7 @@ import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.planner.Workspace
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
+import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
 import io.github.nakanomk.stacklife.transitions.DetailCard
 import io.github.nakanomk.stacklife.transitions.detailListSource
 import kotlinx.coroutines.flow.collect
@@ -68,15 +69,16 @@ internal fun WorkspaceScreen(
 private fun WorkspaceSegments(stack: Boolean, change: (Boolean) -> Unit) {
     val position = animateFloatAsState(if (stack) 1f else 0f, if (LocalMotionEnabled.current) tween(200) else snap(), label = "workspace segment")
     val colors = MaterialTheme.colorScheme
-    Row(Modifier.widthIn(max = 168.dp).fillMaxWidth().selectableGroup()
-        .segmentHighlight(position, 2, colors.secondaryContainer)) {
-        for (index in 0..1) {
-            val frame = index == 1
-            val selected = stack == frame
-            Box(Modifier.weight(1f).clip(CircleShape).selectable(selected, role = Role.Tab) { change(frame) }
-                .heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
-                Text(if (frame) "栈" else "队列", style = MaterialTheme.typography.labelLarge,
-                    color = if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant)
+    SegmentTrack(position, 2, colors.secondaryContainer, Modifier.widthIn(max = 168.dp).fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().selectableGroup()) {
+            for (index in 0..1) {
+                val frame = index == 1
+                val selected = stack == frame
+                Box(Modifier.weight(1f).clip(CircleShape).selectable(selected, role = Role.Tab) { change(frame) }
+                    .heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
+                    Text(if (frame) "栈" else "队列", style = MaterialTheme.typography.labelLarge,
+                        color = if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant)
+                }
             }
         }
     }
@@ -164,7 +166,6 @@ private fun QueueList(
     }
 }
 
-internal fun dockListPadding(top: Dp, bottom: Dp) = PaddingValues(start = 16.dp, top = top + 4.dp, end = 16.dp, bottom = bottom + 8.dp)
 
 private fun <T> List<T>.moved(from: Int, to: Int): List<T> = toMutableList().apply { add(to, removeAt(from)) }
 
@@ -176,7 +177,7 @@ private fun MoveMenu(modifier: Modifier, title: String, index: Int, lastIndex: I
             modifier = modifier.size(48.dp).semantics { contentDescription = "移动$title，长按拖动或点按选择位置" }) {
             Icon(painterResource(R.drawable.ic_drag_handle), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        PlannerDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             for ((label, target) in listOf("移到队首" to 0, "上移一位" to index - 1, "下移一位" to index + 1, "移到队尾" to lastIndex)) {
                 DropdownMenuItem(text = { Text(label) }, enabled = target in 0..lastIndex && target != index,
                     onClick = { expanded = false; onMove(target) })

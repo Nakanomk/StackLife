@@ -27,6 +27,7 @@ data class Appearance(
     val reduceTransparency: Boolean = false,
     val highContrast: Boolean = false,
     val haptics: Boolean = true,
+    val courseTextOutline: Boolean = true,
 ) {
     init {
         require(seed.length == 7 && seed.first() == '#' && seed.drop(1).all { it in '0'..'9' || it in 'A'..'F' }) { "种子色须为 #RRGGBB。" }

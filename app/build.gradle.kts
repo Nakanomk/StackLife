@@ -25,8 +25,8 @@ android {
         applicationId = "io.github.nakanomk.stacklife"
         minSdk = 26
         targetSdk = 37
-        versionCode = 12
-        versionName = "0.7.2"
+        versionCode = 13
+        versionName = "0.8.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
@@ -82,8 +82,7 @@ dependencies {
     implementation(libs.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.materialkolor)
-    implementation(libs.haze)
-    implementation(libs.haze.glass)
+    implementation(libs.backdrop)
     if (kitAar != null) add("kitLabImplementation", files(kitAar))
     testImplementation(libs.okhttp.tls)
     testImplementation(libs.mockwebserver)

@@ -1,6 +1,5 @@
 package io.github.nakanomk.stacklife
 
-import android.content.res.Configuration
 import android.os.Build
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.core.snap
@@ -91,15 +90,8 @@ internal fun StackLifeTheme(appearance: Appearance = Appearance(), content: @Com
     val motion = platform.animators && !appearance.reduceMotion
     val systemHaptics = LocalSystemHaptics.current ?: LocalHapticFeedback.current
     val haptics = if (appearance.haptics && platform.haptics) systemHaptics else SilentHaptics
-    // Haze's regular style reads the Compose host's night qualifier, not ColorScheme.
-    val themeConfig = remember(config, dark) {
-        val night = if (dark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
-        if (config.uiMode and Configuration.UI_MODE_NIGHT_MASK == night) config else Configuration(config).apply {
-            uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or night
-        }
-    }
     CompositionLocalProvider(LocalSystemDark provides systemDark, LocalSystemHaptics provides systemHaptics, LocalBarPreviews provides barPreviews,
-        LocalConfiguration provides themeConfig, LocalAppearance provides appearance,
+        LocalAppearance provides appearance,
         LocalPlatformAppearance provides platform, LocalMotionEnabled provides motion, LocalHapticFeedback provides haptics) {
         MaterialTheme(colorScheme = colors, typography = plannerTypography,
             motionScheme = if (motion) MotionScheme.standard() else StillMotion, content = content)

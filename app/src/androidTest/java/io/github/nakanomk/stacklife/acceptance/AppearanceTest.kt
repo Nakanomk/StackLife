@@ -3,6 +3,7 @@ package io.github.nakanomk.stacklife.acceptance
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -32,8 +33,14 @@ class AppearanceTest {
     private fun editor(label: String) { visible(hasContentDescription("设置") and hasClickAction()).performClick(); visible(hasText(label) and hasClickAction()).performClick() }
     private fun field(label: String): SemanticsNodeInteraction {
         val node = hasText(label) and hasClickAction()
-        ui.onNodeWithTag("appearance-scroll").performScrollToNode(node)
-        return ui.onNode(node).performScrollTo()
+        val form = ui.onNodeWithTag("appearance-scroll").performScrollToNode(node)
+        val field = ui.onNode(node).performScrollTo()
+        val row = field.fetchSemanticsNode().boundsInRoot
+        val footer = ui.onNodeWithText("取消").fetchSemanticsNode().boundsInRoot
+        if (row.bottom >= footer.top - row.height / 2) {
+            form.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, row.bottom - footer.top + row.height) }
+        }
+        return field.assertIsDisplayed()
     }
 
     @Test fun previewCanBeCancelledAndReducedTransparencyAlwaysWins() {

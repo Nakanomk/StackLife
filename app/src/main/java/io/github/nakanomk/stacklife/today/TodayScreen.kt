@@ -28,6 +28,16 @@ import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.appearance.GlassBacking
+import io.github.nakanomk.stacklife.appearance.CapsuleScene
+import io.github.nakanomk.stacklife.appearance.LocalCapsuleBackdrop
+import io.github.nakanomk.stacklife.appearance.StackLifeSurface
+import io.github.nakanomk.stacklife.appearance.plannerBackdrop
+import io.github.nakanomk.stacklife.appearance.rememberPlannerBackdrop
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import io.github.nakanomk.stacklife.AddTaskFab
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.planner.NavStyle
@@ -127,20 +137,31 @@ private fun DayBody(
             QueueTray(plan.tray, plan.revision, drag, trayOpen, toggleTray,
                 !submission.busy, onEdit, send, it, overlay)
         }
-        if (sideBySide) {
-            Row(Modifier.fillMaxSize().padding(bottom = reserve)) {
-                tray(Modifier.weight(1f).fillMaxHeight().padding(top = top))
-                axis(Modifier.weight(1.6f).fillMaxHeight())
-            }
-        } else {
-            Column(Modifier.fillMaxSize().padding(bottom = reserve)) {
-                axis(Modifier.fillMaxWidth().weight(1f))
-                tray(Modifier.fillMaxWidth().heightIn(max = trayLimit))
+        val noticeSource = rememberPlannerBackdrop(drag.dropNotice != null)
+        Box(Modifier.fillMaxSize().plannerBackdrop(noticeSource)) {
+            if (sideBySide) {
+                Row(Modifier.fillMaxSize().padding(bottom = reserve)) {
+                    tray(Modifier.weight(1f).fillMaxHeight().padding(top = top))
+                    axis(Modifier.weight(1.6f).fillMaxHeight())
+                }
+            } else {
+                Column(Modifier.fillMaxSize().padding(bottom = reserve)) {
+                    axis(Modifier.fillMaxWidth().weight(1f))
+                    tray(Modifier.fillMaxWidth().heightIn(max = trayLimit))
+                }
             }
         }
         drag.dropNotice?.let { message ->
-            Snackbar(Modifier.align(Alignment.BottomCenter).padding(start = 4.dp, end = 4.dp, bottom = clearance),
-                dismissAction = { TextButton(onClick = { drag.dropNotice = null }) { Text("知道了") } }) { Text(message) }
+            CompositionLocalProvider(LocalCapsuleBackdrop provides noticeSource) {
+                StackLifeSurface(CapsuleScene.PANEL, Modifier.align(Alignment.BottomCenter)
+                    .padding(start = 12.dp, end = 12.dp, bottom = clearance + 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                    MaterialTheme.colorScheme.surfaceContainerHigh, elevation = 2.dp, shape = RoundedCornerShape(22.dp)) {
+                    Row(Modifier.padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        TextButton(onClick = { drag.dropNotice = null }) { Text("知道了") }
+                    }
+                }
+            }
         }
     }
 }
@@ -172,18 +193,15 @@ private fun QueueTray(
     enabled: Boolean, onEdit: (String) -> Unit, send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier, bottomClearance: Dp,
 ) {
     val appearance = LocalAppearance.current
-    Surface(modifier, color = MaterialTheme.colorScheme.surface) {
-        Column {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Row(Modifier.fillMaxWidth().clickable(onClickLabel = if (expanded) "收起待排队列" else "展开待排队列",
-                role = Role.Button, onClick = toggle).semantics { stateDescription = if (expanded) "已展开" else "已收起" }
-                .heightIn(min = 48.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("待排队列 · ${tasks.size}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                Icon(painterResource(if (expanded) R.drawable.ic_expand_less else R.drawable.ic_expand_more),
-                    if (expanded) "收起" else "展开", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+    val source = rememberPlannerBackdrop(expanded)
+    val density = LocalDensity.current
+    var headerPixels by remember { mutableIntStateOf(0) }
+    val header = with(density) { headerPixels.toDp() }.coerceAtLeast(56.dp)
+    Box(modifier.background(MaterialTheme.colorScheme.surface)) {
+        Box(Modifier.fillMaxWidth().plannerBackdrop(source)) {
             if (expanded) {
-                LazyColumn(Modifier.fillMaxWidth().testTag("day-tray"), contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = bottomClearance + 6.dp),
+                LazyColumn(Modifier.fillMaxWidth().testTag("day-tray"), contentPadding = PaddingValues(start = 8.dp, end = 8.dp,
+                    top = header, bottom = bottomClearance + 6.dp),
                     verticalArrangement = Arrangement.spacedBy(if (appearance.compact) 2.dp else 4.dp)) {
                     if (tasks.isEmpty()) item {
                         Text("队列中没有待排任务", Modifier.padding(8.dp), style = MaterialTheme.typography.bodyMedium)
@@ -206,8 +224,23 @@ private fun QueueTray(
                         }
                     }
                 }
-            } else if (bottomClearance > 0.dp) {
-                Spacer(Modifier.height(bottomClearance))
+            } else {
+                Spacer(Modifier.height(header + bottomClearance))
+            }
+        }
+        CompositionLocalProvider(LocalCapsuleBackdrop provides (source ?: LocalCapsuleBackdrop.current)) {
+            Box(Modifier.align(Alignment.TopCenter).onSizeChanged { headerPixels = it.height }
+                .padding(horizontal = 12.dp, vertical = 4.dp)) {
+                StackLifeSurface(CapsuleScene.CHROME, Modifier, MaterialTheme.colorScheme.surfaceContainerHigh, elevation = 1.dp) {
+                    Row(Modifier.clickable(onClickLabel = if (expanded) "收起待排队列" else "展开待排队列",
+                        role = Role.Button, onClick = toggle).semantics { stateDescription = if (expanded) "已展开" else "已收起" }
+                        .heightIn(min = 48.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("待排队列 · ${tasks.size}", style = MaterialTheme.typography.titleMedium)
+                        Icon(painterResource(if (expanded) R.drawable.ic_expand_less else R.drawable.ic_expand_more),
+                            if (expanded) "收起" else "展开", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
         }
     }

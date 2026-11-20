@@ -90,9 +90,19 @@ fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack:
         entries.mapNotNull { if (it.taskId in ids) it.taskId else null }
     }
     BackHandler(enabled = choosing) { if (!action.busy) leaveSelection() }
-    Page(AssistantPage.Frame(id)) {
-        LazyColumn(Modifier.weight(1f), contentPadding = pagePadding, verticalArrangement = listSpacing) {
-            item { PageTitle("栈帧详情", back = { if (!action.busy) { if (choosing) leaveSelection() else onBack() } }) }
+    EditorPage("栈帧详情", { if (choosing) leaveSelection() else onBack() }, AssistantPage.Frame(id), backEnabled = !action.busy,
+        footer = if (!choosing) null else ({
+            Column(Modifier.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("已选 ${selectionIds.size} 项 · 按清单原序恢复", style = MaterialTheme.typography.labelLarge)
+                Actions {
+                    Primary("恢复所选", enabled = !action.busy && selectionIds.isNotEmpty()) {
+                        action.send(PlannerCommand.FrameRestore(id, RestoreMode.SELECTED, selectionIds))
+                    }
+                    Secondary("取消选择", enabled = !action.busy, onClick = leaveSelection)
+                }
+            }
+        })) { top, bottom ->
+        LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
             item {
                 Surface(modifier = shared("frame:$id").fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
                     Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -135,17 +145,6 @@ fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack:
                             Hint("保存时的预约：${savedTime(item.scheduledStartMillis)} 至 ${savedTime(item.scheduledEndMillis)}")
                         }
                     }
-                }
-            }
-        }
-        if (choosing) Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("已选 ${selectionIds.size} 项 · 按清单原序恢复", style = MaterialTheme.typography.labelLarge)
-                Actions {
-                    Primary("恢复所选", enabled = !action.busy && selectionIds.isNotEmpty()) {
-                        action.send(PlannerCommand.FrameRestore(id, RestoreMode.SELECTED, selectionIds))
-                    }
-                    Secondary("取消选择", enabled = !action.busy, onClick = leaveSelection)
                 }
             }
         }

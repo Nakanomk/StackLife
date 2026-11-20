@@ -21,10 +21,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import io.github.nakanomk.stacklife.appearance.GlassBacking
+import io.github.nakanomk.stacklife.workspace.ActionPill
+import io.github.nakanomk.stacklife.workspace.ControlGroup
 import io.github.kotlinflow.components.KotlinFlow
 import io.github.kotlinflow.models.*
 import io.github.kotlinflow.types.BackgroundVariant
-import io.github.kotlinflow.types.FitViewOptions
 import io.github.kotlinflow.utils.KotlinFlowInstance
 import io.github.nakanomk.stacklife.planner.*
 
@@ -48,7 +51,7 @@ private fun LayoutCoordinates?.containsDrop(view: LayoutCoordinates, point: Offs
 @Composable
 internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (String) -> Unit,
     onLinkFrom: (String) -> Unit, onEdit: (GraphEdit, Long) -> Unit, onArrange: (List<GraphEdit.MoveNode>, Long) -> Boolean,
-    modifier: Modifier = Modifier) {
+    modifier: Modifier = Modifier, headerInset: Dp = 0.dp) {
     val scale = LocalDensity.current.density
     val latest by rememberUpdatedState(detail)
     val latestSelection by rememberUpdatedState(selected)
@@ -59,14 +62,16 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
     var canvas by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var moving by remember { mutableStateOf<Moving?>(null) }
     var wire by remember { mutableStateOf<Wire?>(null) }
-    val fixed = remember(detail.nodes, selected, scale) { detail.nodes.map { node ->
-        Node(node.id, XYPosition(node.x * scale, node.y * scale), node, selected = node.id == selected)
+    // Keep stored graph coordinates independent of the toolbar: only the presentation origin moves.
+    val originY = with(LocalDensity.current) { headerInset.toPx() }
+    val fixed = remember(detail.nodes, selected, scale, originY) { detail.nodes.map { node ->
+        Node(node.id, XYPosition(node.x * scale, node.y * scale + originY), node, selected = node.id == selected)
     } }
     val drag = moving
     val index = remember(fixed, drag?.id) { if (drag == null) -1 else fixed.indexOfFirst { it.id == drag.id } }
     val nodes = remember(fixed, drag, index) {
         if (drag == null || index < 0) fixed
-        else DragFrame(fixed, index, fixed[index].copy(position = XYPosition(drag.position.x * scale, drag.position.y * scale)))
+        else DragFrame(fixed, index, fixed[index].copy(position = XYPosition(drag.position.x * scale, drag.position.y * scale + originY)))
     }
     val edges = remember(detail.edges, scale) { detail.edges.map {
         Edge<Unit>(id = "${it.from}:${it.to}", source = it.from, target = it.to,
@@ -79,7 +84,18 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
         val sizes = boxes.filterValues { it.isAttached }.mapValues { (_, box) ->
             androidx.compose.ui.geometry.Size(box.size.width.toFloat(), box.size.height.toFloat())
         }
-        instance.fitView(nodes, sizes, FitViewOptions(padding = 16f * scale, maxZoom = 1f))
+        val view = canvas?.takeIf { it.isAttached } ?: return
+        val bounds = instance.getNodesBounds(nodes, sizes)
+        val margin = 12f * scale
+        val left = margin
+        val right = view.size.width - margin
+        val top = originY + margin
+        val bottom = view.size.height - 58f * scale - margin
+        if (bottom <= top || right <= left) return
+        val zoom = minOf((right - left) / bounds.width.coerceAtLeast(1f), (bottom - top) / bounds.height.coerceAtLeast(1f), 1f)
+            .coerceAtLeast(Viewport.MinZoom)
+        instance.setViewport(Viewport((left + right) / 2 - bounds.center.x * zoom,
+            (top + bottom) / 2 - bounds.center.y * zoom, zoom), false)
     }
     var arranged by remember { mutableStateOf<Pair<Long, List<GraphEdit.MoveNode>>?>(null) }
     LaunchedEffect(detail.revision) {
@@ -96,7 +112,7 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
         }
     }
 
-    Box(modifier.clip(MaterialTheme.shapes.large).onGloballyPositioned { canvas = it }.testTag("graph-canvas")) {
+    GlassBacking(modifier.clip(MaterialTheme.shapes.large).onGloballyPositioned { canvas = it }.testTag("graph-canvas"), background = {
         // 1.0.1 renders directed edges and handles pan/pinch. Its built-in node drag conflates
         // cancellation with release, and its onConnect isn't dispatched. Own just those gestures.
         KotlinFlow(nodes, edges, theme = theme, kotlinFlowInstance = instance, backgroundVariant = BackgroundVariant.DOTS,
@@ -171,14 +187,15 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
             }
         }
         if (nodes.isEmpty()) Text("添加第一个节点", Modifier.align(Alignment.Center), color = colors.onSurfaceVariant)
-        if (nodes.isNotEmpty()) Row(Modifier.align(Alignment.BottomEnd).padding(4.dp)) {
-            TextButton(onClick = {
+    }, foreground = {
+        if (nodes.isNotEmpty()) ControlGroup(Modifier.align(Alignment.BottomEnd).padding(4.dp)) {
+            ActionPill("一键整理", {
                 val height = boxes.values.maxOfOrNull { if (it.isAttached) it.size.height / scale else 0f } ?: 0f
                 val moves = arrangeGraph(detail, maxOf(56f, height) + 32f)
                 if (moves.isEmpty()) fit()
                 else if (onArrange(moves, detail.revision)) arranged = detail.revision to moves
-            }, modifier = Modifier.heightIn(min = 48.dp).testTag("graph-arrange")) { Text("一键整理") }
-            TextButton(onClick = ::fit, modifier = Modifier.heightIn(min = 48.dp)) { Text("全图") }
+            }, Modifier.testTag("graph-arrange"))
+            ActionPill("全图", ::fit)
         }
-    }
+    })
 }

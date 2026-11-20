@@ -81,14 +81,12 @@ internal fun SlotEditor(
     BackHandler(enabled = submission.busy) { /* Let the outstanding receipt finish once. */ }
     val editable = !submission.busy
     val validate by rememberUpdatedState(checkSlot)
-    Page(AssistantPage.Task(entry.taskId)) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(pagePadding),
+    EditorPage(if (original == null) "安排时间" else "调整时段", onBack, AssistantPage.Task(entry.taskId), editable) { top, bottom ->
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, bottom)),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            PageTitle(if (original == null) "安排时间" else "调整时段", back = { if (editable) onBack() })
             Text(entry.title, style = MaterialTheme.typography.titleMedium)
             Text("当地时区 · ${zone.id}", style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = { pickDate = true }, enabled = editable,
-                modifier = Modifier.heightIn(min = 48.dp).testTag("slot:date")) { Text("开始日期：$date") }
+            PreferenceRow("开始日期：$date", modifier = Modifier.testTag("slot:date"), enabled = editable) { pickDate = true }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 NumberField("开始小时（0–23）", hour, editable, Modifier.weight(1f).testTag("slot:hour")) { hour = it }
                 NumberField("分钟（0–59）", minute, editable, Modifier.weight(1f).testTag("slot:minute")) { minute = it }

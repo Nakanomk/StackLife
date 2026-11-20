@@ -17,6 +17,7 @@ import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.planner.*
+import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
 import io.github.nakanomk.stacklife.workspace.*
 
 @Composable
@@ -45,7 +46,7 @@ internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Uni
                                 var menu by remember { mutableStateOf(false) }
                                 Box {
                                     ToolbarIcon(io.github.nakanomk.stacklife.R.drawable.ic_more_vert, "管理") { menu = true }
-                                    DropdownMenu(menu, { menu = false }) {
+                                    PlannerDropdownMenu(menu, { menu = false }) {
                                         DropdownMenuItem({ Text("重命名") }, { menu = false; rename = graph.id })
                                         DropdownMenuItem({ Text("删除流程图") }, { menu = false; remove = graph.id })
                                     }

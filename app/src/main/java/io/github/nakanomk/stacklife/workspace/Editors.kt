@@ -22,6 +22,7 @@ import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.planner.TaskInput
 import io.github.nakanomk.stacklife.assistant.AssistantPage
+import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 
 private data class Draft(
     val key: Int,
@@ -56,11 +57,27 @@ internal fun TaskEditor(
     val scroll = rememberLazyListState()
     val close = { if (!action.busy) onClose() }
     BackHandler(onBack = close)
-    Page(original?.let { AssistantPage.Task(it.id) } ?: if (createFrame) AssistantPage.Frames else AssistantPage.Queue) {
-        LazyColumn(state = scroll, contentPadding = pagePadding, verticalArrangement = listSpacing) {
-            item {
-                PageTitle(if (createFrame) "新建栈帧" else if (original != null) "编辑任务" else "新增任务", back = close)
+    val heading = if (createFrame) "新建栈帧" else if (original != null) "编辑任务" else "新增任务"
+    EditorPage(heading, close, original?.let { AssistantPage.Task(it.id) } ?: if (createFrame) AssistantPage.Frames else AssistantPage.Queue,
+        backEnabled = !action.busy, footer = {
+            Actions {
+                if (createFrame) Secondary("继续添加任务", enabled = !action.busy) {
+                    drafts.add(Draft(nextKey++))
+                    scroll.requestScrollToItem(1 + drafts.lastIndex)
+                }
+                Primary(if (createFrame) "保存栈帧" else if (original != null) "保存修改" else "添加到队列",
+                    enabled = !action.busy && drafts.all { it.duration() != null }) {
+                    val inputs = drafts.map { TaskInput(it.title.text, it.notes.text, checkNotNull(it.duration())) }
+                    val command = when {
+                        createFrame -> PlannerCommand.FrameCreate(reason.text, inputs)
+                        original != null -> inputs.single().let { PlannerCommand.TaskEdit(original.id, it.title, it.notes, it.minutes) }
+                        else -> PlannerCommand.TaskAdd(inputs.single())
+                    }
+                    action.send(command)
+                }
             }
+        }) { top, bottom ->
+        LazyColumn(state = scroll, contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
             if (createFrame) item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Hint("按想要恢复的顺序添加任务。这份清单直接留在栈中，不改变当前队列。")
@@ -68,7 +85,7 @@ internal fun TaskEditor(
                 }
             }
             itemsIndexed(drafts, key = { _, draft -> draft.key }) { index, row ->
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                FormGroup {
                     if (createFrame) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Text("任务 ${index + 1}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                         if (drafts.size > 1) TextButton(enabled = !action.busy, onClick = { drafts.remove(row) }) { Text("删除此项") }
@@ -82,26 +99,6 @@ internal fun TaskEditor(
                     DurationRow(row.minutes, !action.busy) { drafts[index] = row.copy(minutes = it) }
                 }
             }
-            item {
-                Actions {
-                    if (createFrame) Secondary("继续添加任务", enabled = !action.busy) {
-                        drafts.add(Draft(nextKey++))
-                        // Two leading rows: page heading and frame reason.
-                        scroll.requestScrollToItem(2 + drafts.lastIndex)
-                    }
-                    Primary(if (createFrame) "保存栈帧" else if (original != null) "保存修改" else "添加到队列",
-                        enabled = !action.busy && drafts.all { it.duration() != null },
-                    ) {
-                        val inputs = drafts.map { TaskInput(it.title.text, it.notes.text, checkNotNull(it.duration())) }
-                        val command = when {
-                            createFrame -> PlannerCommand.FrameCreate(reason.text, inputs)
-                            original != null -> inputs.single().let { PlannerCommand.TaskEdit(original.id, it.title, it.notes, it.minutes) }
-                            else -> PlannerCommand.TaskAdd(inputs.single())
-                        }
-                        action.send(command)
-                    }
-                }
-            }
         }
     }
 }
@@ -113,7 +110,7 @@ private fun DurationRow(value: TextFieldValue, enabled: Boolean, update: (TextFi
     if (editing) {
         var draft by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(value) }
         val valid = draft.text.isBlank() || (draft.text.toIntOrNull() ?: 0) > 0
-        AlertDialog(onDismissRequest = { editing = false }, title = { Text("预计时长") },
+        PlannerAlertDialog(onDismissRequest = { editing = false }, title = { Text("预计时长") },
             text = { TextField(draft, { draft = it }, colors = lineFieldColors(), label = { Text("分钟") },
                 singleLine = true, isError = !valid, placeholder = { Text("30") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)) },
@@ -137,9 +134,12 @@ internal fun PushEditor(queue: List<QueueTask>, actions: WorkspaceActions, onClo
     var selected by rememberSaveable { mutableStateOf(ArrayList(queue.map { it.id })) }
     val close = { if (!action.busy) onClose() }
     BackHandler(onBack = close)
-    Page(AssistantPage.Queue) {
-        LazyColumn(Modifier.weight(1f), contentPadding = pagePadding, verticalArrangement = listSpacing) {
-            item { PageTitle("压栈", back = close) }
+    EditorPage("压栈", close, AssistantPage.Queue, backEnabled = !action.busy, footer = {
+        Primary("保存到栈", enabled = !action.busy && selected.isNotEmpty()) {
+            action.send(PlannerCommand.FramePush(reason.text, selected.toList()))
+        }
+    }) { top, bottom ->
+        LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
             item { ReasonField(reason) { reason = it } }
             item {
                 SectionTitle("保存哪些任务 · 已选 ${selected.size} 项")
@@ -147,11 +147,6 @@ internal fun PushEditor(queue: List<QueueTask>, actions: WorkspaceActions, onClo
             }
             items(queue, key = { it.id }) { task ->
                 CheckRow(task.title, task.id in selected) { selected = ArrayList(selected.toggle(task.id)) }
-            }
-        }
-        Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
-            Primary("保存到栈", enabled = !action.busy && selected.isNotEmpty()) {
-                action.send(PlannerCommand.FramePush(reason.text, selected.toList()))
             }
         }
     }

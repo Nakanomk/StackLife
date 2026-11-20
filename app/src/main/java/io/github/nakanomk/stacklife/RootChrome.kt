@@ -1,6 +1,7 @@
 package io.github.nakanomk.stacklife
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -13,8 +14,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.chrisbanes.haze.*
-import dev.chrisbanes.haze.glass.*
+import com.kyant.backdrop.drawPlainBackdrop
+import com.kyant.backdrop.effects.blur
 import io.github.nakanomk.stacklife.appearance.*
 
 internal val LocalRootBottom = compositionLocalOf { 0.dp }
@@ -35,31 +36,21 @@ internal fun RootPane(header: @Composable () -> Unit,
         val top = insets.calculateTopPadding()
         Box(Modifier.fillMaxSize()) {
             val plane = Modifier.fillMaxSize()
-            Box(if (source == null) plane else plane.hazeSource(source)) { content(top, bottom) }
+            Box(plane.plannerBackdrop(source)) { content(top, bottom) }
             CompositionLocalProvider(LocalCapsuleBackdrop provides source) { overlay(top, bottom) }
         }
     }
 }
 
 @Composable
-private fun ScrollEdge(source: HazeState, modifier: Modifier) {
+private fun ScrollEdge(source: PlannerBackdrop, modifier: Modifier) {
     val base = MaterialTheme.colorScheme.surface
-    val style = remember(base) { GlassStyle.regular.then {
-        shape(RoundedCornerShape(0.dp))
-        backgroundColor(base)
-        tint(base.copy(alpha = .46f))
-        optics { copy(depth = OpticalSizeValue.Fixed(1f), blurRadius = OpticalSizeValue.Fixed(14.dp),
-            refractionStrength = 0f, refractionDisplacement = 0.dp, refractionDetailIntensity = 0f) }
-        chromaticAberrationStrength(0f)
-        edgeShadow(Color.Transparent)
-        specularIntensity(0f)
-        whitePoint(0f)
-    } }
-    val input = remember(source) { HazeInput.Sources(source, retention = HazeSourceRetention.ClearWhenUnavailable) }
+    val rectangle = RoundedCornerShape(0.dp)
     Spacer(modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithCache {
         val edge = Brush.verticalGradient(0f to Color.Black, .58f to Color.Black.copy(alpha = .85f), 1f to Color.Transparent)
         onDrawWithContent { drawContent(); drawRect(edge, blendMode = BlendMode.DstIn) }
-    }.hazeGlass(input = input, style = style))
+    }.drawPlainBackdrop(source, shape = { rectangle }, effects = { blur(16.dp.toPx()) },
+        onDrawSurface = { drawRect(base.copy(alpha = .40f)) }))
 }
 
 @Composable
@@ -80,9 +71,11 @@ internal fun RootToolbar(onSettings: () -> Unit, leading: (@Composable () -> Uni
 
 @Composable
 internal fun GlassIcon(icon: Int, label: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
-    StackLifeSurface(CapsuleScene.CHROME, modifier.size(48.dp), MaterialTheme.colorScheme.surfaceContainer, elevation = 1.dp) {
-        IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxSize()) {
-            Icon(painterResource(icon), label, tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f))
+    val interaction = remember { MutableInteractionSource() }
+    StackLifeSurface(CapsuleScene.ACTION, modifier.size(48.dp), MaterialTheme.colorScheme.surfaceContainer,
+        elevation = 1.dp, interactionSource = interaction) {
+        IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxSize(), interactionSource = interaction) {
+            Icon(painterResource(icon), label)
         }
     }
 }
