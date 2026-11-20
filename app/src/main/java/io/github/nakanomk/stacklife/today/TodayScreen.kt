@@ -21,8 +21,11 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.DockOverlay
+import io.github.nakanomk.stacklife.AddTaskFab
+import io.github.nakanomk.stacklife.taskFabClearance
 import io.github.nakanomk.stacklife.planner.DayPlan
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
@@ -81,7 +84,7 @@ internal fun TodayScreen(
             val drag = remember(scale, scroll) { AxisDrag(scale, scroll) }
             val send: (PlannerCommand.SlotSet) -> Unit = { submission.send(it) }
             DragEffects(drag, checkSlot)
-            DockOverlay(navigationBar, onAdd) { clearance ->
+            DockOverlay(navigationBar) { clearance ->
                 BoxWithConstraints(Modifier.fillMaxSize().padding(bottom = clearance)) {
                     val sideBySide = maxWidth >= 480.dp && maxWidth > maxHeight && trayOpen
                     val trayLimit = maxHeight * 0.46f
@@ -90,16 +93,22 @@ internal fun TodayScreen(
                     }
                     val tray: @Composable (Modifier) -> Unit = {
                         QueueTray(plan.tray, plan.revision, drag, trayOpen, { trayOpen = !trayOpen },
-                            !submission.busy, onEdit, send, it.padding(horizontal = 6.dp))
+                            !submission.busy, onEdit, send, it.padding(horizontal = 6.dp), if (sideBySide) taskFabClearance else 0.dp)
                     }
                     if (sideBySide) {
                         Row(Modifier.fillMaxSize()) {
                             axis(Modifier.weight(1.6f).fillMaxHeight())
-                            tray(Modifier.weight(1f).fillMaxHeight())
+                            Box(Modifier.weight(1f).fillMaxHeight()) {
+                                tray(Modifier.fillMaxSize())
+                                AddTaskFab(onAdd)
+                            }
                         }
                     } else {
                         Column(Modifier.fillMaxSize()) {
-                            axis(Modifier.fillMaxWidth().weight(1f))
+                            Box(Modifier.fillMaxWidth().weight(1f)) {
+                                axis(Modifier.fillMaxSize())
+                                AddTaskFab(onAdd)
+                            }
                             tray(Modifier.fillMaxWidth().heightIn(max = trayLimit))
                         }
                     }
@@ -144,7 +153,7 @@ private fun DayHeader(
 @Composable
 private fun QueueTray(
     tasks: List<QueueTask>, revision: Long, drag: AxisDrag, expanded: Boolean, toggle: () -> Unit,
-    enabled: Boolean, onEdit: (String) -> Unit, send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier,
+    enabled: Boolean, onEdit: (String) -> Unit, send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier, bottomClearance: Dp,
 ) {
     Surface(modifier, shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer) {
         Column {
@@ -156,7 +165,7 @@ private fun QueueTray(
                     color = MaterialTheme.colorScheme.primary)
             }
             if (expanded) {
-                LazyColumn(Modifier.fillMaxWidth().testTag("day-tray"), contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 6.dp),
+                LazyColumn(Modifier.fillMaxWidth().testTag("day-tray"), contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = bottomClearance + 6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (tasks.isEmpty()) item {
                         Text("队列中没有待排任务", Modifier.padding(8.dp), style = MaterialTheme.typography.bodyMedium)

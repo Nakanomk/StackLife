@@ -88,9 +88,9 @@ interface PlannerApi {
 1. WebView 从固定的[校方 HTTPS 登录页](https://hubs.hust.edu.cn/login)进入；本人登录后打开 [HUB 总课表](https://hubs.hust.edu.cn/basicInformation/scheduleInformation/index)，选学期、点「提取」。未登录访问总课表时，校方实测重定向到 HTTP 登录页；不发送该明文请求，只对这个确切的主框架 GET 重定向重新打开固定 HTTPS 地址，不带原请求参数或正文。移植 `../WadwaitaUp/browser.py:37–62` 的 Vue 父链查找，桌面调用路径在 `:103–169`，不搬桌面浏览器。
 2. Android 系统文件选择器选本人导出的原始周数组 JSON；格式依据 `../WadwaitaUp/tools/hust_converter.py:6–16,84–100`。不架中转服务，不承诺兼容未核实格式。
 
-**网页边界。** 用 [`AndroidView` 承载 WebView](https://developer.android.com/develop/ui/compose/migrate/interoperability-apis/views-in-compose)，显示当前域名；登录与验证在校方页面内完成。导航只接受 `hust.edu.cn` 或按域标签区分的 HTTPS 校方子域（根域也须 HTTPS）；未知外链移出导入器。仅当用户点提取、当前主框架 origin **恰为** `https://hubs.hust.edu.cn` 且为核对过的总课表路由，才以 `evaluateJavascript` 执行 APK 内 `app/src/main/assets/importers/hust-hub.js`；脚本再查 origin。只返回 `ZC/KS/MONDAY…SUNDAY/KCMC/JC/JSMC` 投影。Kotlin 解两层 JSON，校验导航代次，离页或换学期作废旧结果。
+**网页边界。** 登录与验证在同一 [`WebView`](https://developer.android.com/develop/ui/compose/migrate/interoperability-apis/views-in-compose) 中完成。HTTPS 跳转和页面资源不限制域名，允许第三方身份服务再跳回 HUB；原生顶栏显示当前网站（含非默认端口），提醒用户核对。**能打开不等于能提取**：仅当用户点提取、主框架 origin 恰为 `https://hubs.hust.edu.cn` 且为总课表路由，才执行 APK 内 `app/src/main/assets/importers/hust-hub.js`；脚本再次核对 origin。只返回 `ZC/KS/MONDAY…SUNDAY/KCMC/JC/JSMC` 投影。Kotlin 解两层 JSON，校验导航代次，离页或换学期作废旧结果。
 
-只为校方页面开 JS/DOM 存储，不注册原生 JS bridge，不忽略 TLS，不允许混合内容或文件访问。新会话前及结束/取消时调用 [`CookieManager.removeAllCookies`](https://developer.android.com/reference/android/webkit/CookieManager) 清除含持久 Cookie 的登录并等回调，清 WebStorage、缓存/历史，离页销毁 WebView；不承诺服务端登出。遵循 [WebView 安全指引](https://developer.android.com/privacy-and-security/risks/insecure-webview-native-bridges)。不抓密码或 Cookie，登录页不显示会发送页面内容的 AI 控件。
+登录会话使用网站自己的 JavaScript、DOM 存储和第一方 Cookie，不启用第三方 Cookie，不注册原生 JS bridge，不忽略 TLS，也不放开明文、混合内容或文件访问。新会话前及结束/取消时调用 [`CookieManager.removeAllCookies`](https://developer.android.com/reference/android/webkit/CookieManager) 清除持久 Cookie 并等回调，清 WebStorage、缓存/历史，离页销毁 WebView；不承诺服务端登出。遵循 [WebView 安全指引](https://developer.android.com/privacy-and-security/risks/insecure-webview-native-bridges)。不抓密码或 Cookie，登录页不显示会发送页面内容的 AI 控件。
 
 API 37 设备已从 `hubs.hust.edu.cn` 进入 `pass.hust.edu.cn` 的「您正在登录 HUB 系统」表单，非课表页不能提取；未输入账号或验证码。给用户试用的包用 `./gradlew :app:assemblePreview` 构建，路径是 `app/build/outputs/apk/preview/app-preview.apk`：不可调试，与本机 M1/M2 调试包同签名，可覆盖安装。`debug` 包只用于开发；实测已授权的 ADB 仍可检查其 WebView，不用于真实登录。断网设备测试验证进入和退出时持久测试 Cookie 均被清除，不代表服务端登出。
 
@@ -149,7 +149,7 @@ API 37 设备已从 `hubs.hust.edu.cn` 进入 `pass.hust.edu.cn` 的「您正在
 |[Metrolist](https://github.com/MetrolistGroup/Metrolist) / [Mihon](https://github.com/mihonapp/mihon)|助理从收起到展开的层次；队列手柄及移动到顶/底。|
 |Flutter [PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus) / [LocalSend](https://github.com/localsend/localsend)|中文标签分组、多选排序；单一目的操作。只借信息结构，不搬旧视觉、播放器架构或插画。|
 
-**时间轴与底栏的具体取舍。** [Structured 的日视图](https://help.structured.app/en/articles/380546)在一根竖轴左边标时刻，右边读事件；右下角 `+` 不占列表位置。StackLife 保留按时间比例的空白，供五分钟拖放。参考 [BiliPai 的导航外壳与选中指示器](https://github.com/jay3-yy/BiliPai/blob/8392b7de4a21c37252858986dc7c96e17826e768/app/src/main/java/com/android/purebilibili/feature/home/components/FloatingBottomBar.kt)和 [Etar 的 bottom/end FAB](https://github.com/Etar-Group/Etar-Calendar/blob/6fb46d1606622aecc719b7e5dc15a48528768c94/app/src/main/res/layout/all_in_one_material.xml)：一个实色胶囊浮在内容之上，选中指示器在槽位间滑动，圆形加号独立；列表末项可以滚到胶囊上方。图标自行绘制，不复制上游代码或素材，折射仍属 M6。
+**时间轴与底栏的具体取舍。** [Structured 的日视图](https://help.structured.app/en/articles/380546)在一根竖轴左边标时刻，右边读事件；StackLife 保留按时间比例的空白，供五分钟拖放。参考 [BiliPai 的导航外壳与选中指示器](https://github.com/jay3-yy/BiliPai/blob/8392b7de4a21c37252858986dc7c96e17826e768/app/src/main/java/com/android/purebilibili/feature/home/components/FloatingBottomBar.kt)和 [Etar 的 bottom/end FAB](https://github.com/Etar-Group/Etar-Calendar/blob/6fb46d1606622aecc719b7e5dc15a48528768c94/app/src/main/res/layout/all_in_one_material.xml)：导航胶囊独自在底部居中，选中指示器在槽位间滑动。圆形 `+` 属于上方页面，不占导航槽位：竖屏今天页浮在时间轴右下、托盘上方；工作台队列浮在列表右下，末项能滚到按钮上方。栈和周课表不显示新增任务。图标自行绘制，折射仍属 M6。
 
 手机关键帧规格（示意，不是应用截图）：
 
@@ -231,6 +231,8 @@ M1 首验在 Android 17 / API 37 x86_64 专用 AVD 上通过 12 项仪器测试�
 **升级与无障碍实测：** 在 Android 17 x86_64 测试 AVD 保留 M1 安装数据，以 `adb install -r` 覆盖启动 v0.2.0；数据库版本 1→2。原四张业务表导出的 SQL 逐字节相同（5 个任务、3 个帧、7 条快照、修订 14），新占位表为空。在另一台 Google Play API 37 AVD 启用系统 TalkBack 17.0，实际触摸聚焦并双击「安排时间」，键盘输入 15:45；同一个队列 ID 经 16:00 改时、取消后仍在原位。会话附两条操作录屏；未评估语音播报质量或实体机性能。
 
 **M3 复现：** `./gradlew :app:testDebugUnitTest --tests '*HustImportTest'`（7 项）；专用 API 37 设备运行 `./gradlew :app:connectedDebugAndroidTest`（含 M1/M2 回归共 33 项）。`CourseConfirmationTest` 在 Room 写事务被占用时确认导入/移除并重建 Activity，两次操作分别只写一次；`CourseConflictBoundsTest` 检查密集冲突拒绝时不改库。设备上从系统选择器导入 [`hust-week-acceptance.json`](../app/src/androidTest/assets/hust-week-acceptance.json)，明确排除 `实践`，确认前学期/课次为 0/0，确认后为 1/3，再导入仍三次。冬令当天拖到 15:00 被拒，同一任务在 15:35 紧接课程成功。v0.2.0 → v0.3.0 原地升级，五张原业务表 SQL 导出逐字节一致，保留 5 个任务、3 个帧和修订 14。
+
+**v0.3.1 定向回归：** `HubLoginNavigationTest` 在真实 WebView 中用本地 HTTPS 响应复现「HUB → 第三方认证页（含另一域的脚本）→ HUB 总课表」，检查第三方不可提取、返回后可提取。`WorkspaceUiTest.addTaskFloatsAboveCenteredNavigationOnTodayAndInTheQueue` 检查圆形加号在胶囊上方且不挤偏导航，并从今天页实际创建一项队列任务。连同投影、Cookie 清理和拖放回归，API 37 设备定向 10 项通过；这些用例不替代本人认证后的在线验收。
 
 |阶段 / 用例|输入 → 可观察结果（M1–M3 为回归用例；M3 真实账号提取另验，M4–M6 待开发）|
 |---|---|

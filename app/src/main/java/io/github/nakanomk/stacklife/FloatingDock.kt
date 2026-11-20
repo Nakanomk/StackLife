@@ -23,8 +23,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -35,26 +33,16 @@ private val tabs = listOf("today" to "今天", "workspace" to "工作台", "cour
  * can bring their last item fully above its measured height, including at large font sizes. */
 @Composable
 internal fun DockOverlay(
-    navigationBar: @Composable () -> Unit, onAdd: (() -> Unit)? = null,
+    navigationBar: @Composable () -> Unit,
     content: @Composable (bottomClearance: Dp) -> Unit,
 ) {
     val density = LocalDensity.current
     var dockHeight by remember { mutableIntStateOf(0) }
     Box(Modifier.fillMaxSize()) {
         content(if (dockHeight == 0) 80.dp else with(density) { dockHeight.toDp() })
-        Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { dockHeight = it.height }
-            .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { navigationBar() }
-            if (onAdd != null) FloatingActionButton(onClick = onAdd, shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.size(56.dp).testTag("add-task").semantics { contentDescription = "新增任务" }) {
-                val ink = LocalContentColor.current
-                Canvas(Modifier.size(24.dp)) {
-                    drawLine(ink, Offset(3.dp.toPx(), center.y), Offset(size.width - 3.dp.toPx(), center.y), 2.5.dp.toPx(), StrokeCap.Round)
-                    drawLine(ink, Offset(center.x, 3.dp.toPx()), Offset(center.x, size.height - 3.dp.toPx()), 2.5.dp.toPx(), StrokeCap.Round)
-                }
-            }
+        Box(Modifier.align(Alignment.BottomCenter).onSizeChanged { dockHeight = it.height }
+            .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp)) {
+            navigationBar()
         }
     }
 }

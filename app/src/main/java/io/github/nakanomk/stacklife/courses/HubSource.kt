@@ -16,18 +16,21 @@ internal const val HUB_URL = "https://hubs.hust.edu.cn/basicInformation/schedule
 internal const val HUB_LOGIN_URL = "https://hubs.hust.edu.cn/login"
 private const val byteLimit = 2 * 1024 * 1024
 
-private fun schoolUri(url: String?): URI? {
+private fun httpsPage(url: String?): URI? {
     if (url == null) return null
     val uri = try { URI(url) } catch (_: java.net.URISyntaxException) { return null }
-    val host = uri.host?.lowercase() ?: return null
-    return uri.takeIf {
-        it.scheme.equals("https", ignoreCase = true) && it.rawUserInfo == null && (it.port == -1 || it.port == 443) &&
-            (host == "hust.edu.cn" || host.endsWith(".hust.edu.cn"))
-    }
+    return uri.takeIf { it.scheme.equals("https", ignoreCase = true) && it.host != null && it.rawUserInfo == null }
 }
-internal fun schoolHost(url: String?) = schoolUri(url)?.host
-internal fun isScheduleRoute(url: String?): Boolean = schoolUri(url)?.let {
-    it.host.equals("hubs.hust.edu.cn", ignoreCase = true) && it.rawPath == "/basicInformation/scheduleInformation/index" && it.rawFragment.isNullOrEmpty()
+private val authorityEnd = charArrayOf('/', '?', '#')
+internal fun loginAuthority(url: String?): String? {
+    if (url == null) return null
+    // Let Chromium interpret the SSO path and query; the native header only needs its origin.
+    val end = url.indexOfAny(authorityEnd, "https://".length)
+    return httpsPage(if (end < 0) url else url.substring(0, end))?.rawAuthority
+}
+internal fun isScheduleRoute(url: String?): Boolean = httpsPage(url)?.let {
+    it.host.equals("hubs.hust.edu.cn", ignoreCase = true) && (it.port == -1 || it.port == 443) &&
+        it.rawPath == "/basicInformation/scheduleInformation/index" && it.rawFragment.isNullOrEmpty()
 } == true
 
 internal class SourceProblem(message: String) : IOException(message)

@@ -23,6 +23,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import io.github.nakanomk.stacklife.DockOverlay
+import io.github.nakanomk.stacklife.AddTaskFab
+import io.github.nakanomk.stacklife.taskFabClearance
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
@@ -62,9 +64,12 @@ fun WorkspaceScreen(
                         modifier = Modifier.heightIn(min = 48.dp)) { Text("栈") }
                 }
             }
-            DockOverlay(navigationBar, if (stack) null else onAdd) { clearance ->
+            DockOverlay(navigationBar) { clearance ->
                 if (stack) FrameList(state.frames, stackScroll, onFrame, { editor = Editor.FRAME }, shared, clearance)
-                else QueueList(state.queue, queueScroll, actions, onTask, { editor = Editor.PUSH }, shared, clearance)
+                else Box(Modifier.fillMaxSize()) {
+                    QueueList(state.queue, queueScroll, actions, onTask, { editor = Editor.PUSH }, shared, clearance + taskFabClearance)
+                    AddTaskFab(onAdd, bottomInset = clearance)
+                }
             }
         }
     }

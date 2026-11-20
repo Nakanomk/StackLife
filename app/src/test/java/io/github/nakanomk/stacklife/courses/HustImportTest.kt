@@ -96,14 +96,17 @@ class HustImportTest {
     }
 
     @Test fun navigationAndExtractionHaveDifferentTrustBoundaries() {
-        assertEquals("hust.edu.cn", schoolHost("https://hust.edu.cn/"))
-        assertEquals("sso.hust.edu.cn", schoolHost("https://sso.hust.edu.cn/login"))
-        for (url in listOf("http://hubs.hust.edu.cn/", "https://nothust.edu.cn/", "https://hust.edu.cn.example.org/",
-            "https://hubs.hust.edu.cn@evil.test/", "https://evil.test@hubs.hust.edu.cn/", "file:///x", "https://hubs.hust.edu.cn:8443/"))
-            assertNull(url, schoolHost(url))
+        val provider = "https://identity.example:8443/basicInformation/scheduleInformation/index"
+        assertEquals("identity.example:8443", loginAuthority(provider))
+        assertEquals("identity.example:8443", loginAuthority("$provider?state={ticket|return}"))
+        assertEquals("hubs.hust.edu.cn.example.org", loginAuthority("https://hubs.hust.edu.cn.example.org/"))
+        for (url in listOf("http://hubs.hust.edu.cn/", "https://hubs.hust.edu.cn@other.test/", "file:///x", "intent://app"))
+            assertNull(url, loginAuthority(url))
         assertTrue(isScheduleRoute(HUB_URL))
         assertTrue(isScheduleRoute("$HUB_URL?term=chosen"))
-        for (url in listOf("$HUB_URL/else", "$HUB_URL#other", HUB_URL.replace("hubs.", "sso."), HUB_URL.replace("index", "%69ndex")))
+        assertTrue(isScheduleRoute(HUB_URL.replace(".cn/", ".cn:443/")))
+        for (url in listOf(provider, HUB_URL.replace(".cn/", ".cn:8443/"), HUB_URL.replace(".cn/", ".cn.example.org/"),
+            "$HUB_URL/else", "$HUB_URL#other", HUB_URL.replace("hubs.", "sso."), HUB_URL.replace("index", "%69ndex")))
             assertFalse(url, isScheduleRoute(url))
     }
 

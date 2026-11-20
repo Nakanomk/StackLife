@@ -156,7 +156,7 @@ private fun CourseImportContent(model: WorkspaceViewModel, onBack: () -> Unit, o
                 Button(onClick = ::chooseFile, enabled = !busy, modifier = Modifier.testTag("importCourseFile")) { Text("选择原始 JSON 文件") }
                 OutlinedButton(onClick = { message = null; hub = true }, enabled = !busy, modifier = Modifier.testTag("importCourseHub")) { Text("登录 HUB 总课表") }
                 Text("文件来源：在本人浏览器登录 HUB，进入总课表并选学期，将 getStudentScheduleByXqh 的响应周数组保存为 UTF-8 JSON（不超过 2 MiB）。")
-                Text("在线登录仅在校方网页中进行，离开后清理本机网页登录数据；不代表服务端登出。")
+                Text("登录可能经过第三方 HTTPS 网站，请核对网页上方的域名。退出会清理本机网页登录数据，不代表服务端登出。")
             }
             parsed == null -> Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("确认学期与校区作息", style = MaterialTheme.typography.titleLarge)

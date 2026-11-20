@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -51,6 +52,32 @@ class WorkspaceUiTest {
                 (result as Workspace).queue.map { it.title } == titles.toList()
             } as Workspace
         }
+    }
+
+    @Test fun addTaskFloatsAboveCenteredNavigationOnTodayAndInTheQueue() {
+        ui.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
+        fun checkPlacement() {
+            val fab = await(hasTestTag("add-task")).fetchSemanticsNode().boundsInRoot
+            val nav = ui.onNodeWithTag("navigation-capsule").fetchSemanticsNode().boundsInRoot
+            val page = ui.onRoot().fetchSemanticsNode().boundsInRoot
+            assertTrue("Add belongs above navigation, not alongside it", fab.bottom < nav.top)
+            assertTrue("Add belongs on the right of the page", fab.left > page.center.x)
+            assertEquals("A page action must not displace navigation", page.center.x, nav.center.x, 1f)
+        }
+        checkPlacement()
+        ui.onNodeWithTag("add-task").performTouchInput { click() }
+        await(hasTestTag("title:0")).performTextInput("从时间轴创建")
+        val save = hasText("添加到队列") and hasClickAction()
+        scrollTo(save)
+        ui.onNode(save).performClick()
+        val task = awaitQueue("从时间轴创建").queue.single()
+        await(hasTestTag("tray:${task.id}")).assertIsDisplayed()
+        ui.onNodeWithTag("nav:workspace").performClick()
+        await(hasTestTag("task:${task.id}")).assertIsDisplayed()
+        checkPlacement()
+        ui.onNodeWithTag("nav:courses").performClick()
+        await(hasTestTag("course-import")).assertIsDisplayed()
+        ui.onNodeWithTag("add-task").assertDoesNotExist()
     }
 
     @Test fun pushSelectBThenResumeAThroughTheWorkbench() {
