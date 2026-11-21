@@ -97,6 +97,21 @@ class SceneMotionTest {
             changed <= maxOf(8, edges / 12))
     }
 
+    /** Compare the row's ink *and* the paper between glyphs. A solid landing tile has
+     * the right bounds and background color but erases these edges until disposal. */
+    private fun assertLivePatch(before: PixelMap, now: PixelMap, region: Rect) {
+        val r = region.deflate(3f)
+        var edges = 0
+        var different = 0
+        for (y in r.top.toInt() until r.bottom.toInt() step 2) for (x in r.left.toInt() until r.right.toInt() step 2) {
+            if (delta(before[x, y], before[x + 2, y]) > .15f) edges++
+            if (delta(before[x, y], now[x, y]) > .16f) different++
+        }
+        assertTrue("Expected visible text/controls in $region", edges > 15)
+        assertTrue("Landing obscured or displaced the source at $region: $different changed / $edges edges",
+            different <= maxOf(8, edges / 10))
+    }
+
     private fun title(key: String) =
         ui.onNodeWithTag("detail-title/$key", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
     private fun backHit() = ui.onNode(hasContentDescription("返回") and hasClickAction()).fetchSemanticsNode().boundsInRoot
@@ -219,6 +234,45 @@ class SceneMotionTest {
         ui.onNodeWithTag("queue").performScrollToIndex(7)
         withClockAndBack { checkCardTrip("task:${queue[7].id}", it) }
         assertEquals(queue, runBlocking { store.state().queue })
+    }
+
+    @Test fun toolbarBackKeepsRealTaskAndNeighborsPlacedAndPaintedThroughDisposal() {
+        show(*(1..3).map { PlannerCommand.TaskAdd(TaskInput("交接步骤 $it", minutes = 21 + it)) }.toTypedArray())
+        val keys = runBlocking { store.state().queue.map { "task:${it.id}" } }
+        val original = keys.map(::bounds)
+        val before = pixels()
+        val key = keys[1]
+        val tag = "detail:$key"
+        ui.onNodeWithTag(key).performClick()
+        val full = bounds(tag)
+        withClockAndBack {
+            click(ui.onNode(hasContentDescription("返回") and hasClickAction()))
+            ui.mainClock.advanceTimeBy(192)
+            val lastFrames = ArrayDeque<PixelMap>(2)
+            var disposedFrames = 0
+            repeat(18) {
+                ui.mainClock.advanceTimeByFrame()
+                val moving = ui.onAllNodesWithTag(tag).fetchSemanticsNodes().singleOrNull()?.boundsInRoot
+                val shot = pixels()
+                for (i in keys.indices) assertEquals("The list must reserve the real row, not the moving detail", original[i], bounds(keys[i]))
+                if (moving == null || moving == full) {
+                    // A released shared node can report full layout bounds for one frame
+                    // before disposal. It must not actually paint any of that rectangle.
+                    assertUncoveredPixels(before, shot, Rect.Zero)
+                    for (row in original) assertLivePatch(before, shot, row)
+                    if (moving == null) disposedFrames++
+                } else {
+                    assertUncoveredPixels(before, shot, moving)
+                    if (abs(moving.height - original[1].height) < 3f) {
+                        if (lastFrames.size == 2) lastFrames.removeFirst()
+                        lastFrames.addLast(shot)
+                    }
+                }
+            }
+            assertEquals("Need the last two frames before the detail is removed", 2, lastFrames.size)
+            for (frame in lastFrames) for (row in original) assertLivePatch(before, frame, row)
+            assertTrue("Need frames on the other side of detail disposal", disposedFrames >= 2)
+        }
     }
 
     @Test fun chromeIsRevealedInItsOwnSlotNeverCarriedUnderTheRootToolbar() {
@@ -411,9 +465,11 @@ class SceneMotionTest {
             ui.mainClock.autoAdvance = false
             start(input); seek(input, .35f)
             val partial = bounds(route)
+            assertEquals("The underlying FAB must not ride the editor's IME", fab, bounds("add-task"))
             between(fab, partial, page)
             seek(input, .65f)
             val smaller = bounds(route)
+            assertEquals("More Back progress must keep the same stationary launcher", fab, bounds("add-task"))
             between(fab, smaller, page)
             assertTrue(smaller.width < partial.width && smaller.height < partial.height)
             ui.runOnUiThread { input.backCancelled() }; ui.mainClock.advanceTimeBy(600)
@@ -444,6 +500,47 @@ class SceneMotionTest {
             complete(input)
             assertEquals(parent, bounds("route:settings"))
             assertEquals(origin, row.fetchSemanticsNode().boundsInRoot)
+        }
+    }
+
+    @Test fun nestedPredictiveLandingRestoresLauncherInkBeforeCommitAndCanReverse() {
+        show()
+        ui.onNode(hasContentDescription("设置") and hasClickAction()).performClick()
+        val inSettings = hasAnyAncestor(hasTestTag("route:settings"))
+        val row = ui.onNode(inSettings and hasText("布局") and hasClickAction())
+        val adjacent = ui.onNode(inSettings and hasText("色彩") and hasClickAction())
+        val origin = row.fetchSemanticsNode().boundsInRoot
+        val neighbor = adjacent.fetchSemanticsNode().boundsInRoot
+        val parent = bounds("route:settings")
+        val before = pixels()
+        val tag = "route:appearance:layout"
+        row.performClick()
+        withClockAndBack { input ->
+            start(input)
+            for (fraction in listOf(.94f, .98f, .995f)) {
+                seek(input, fraction)
+                ui.onNodeWithTag(tag).assertExists()
+                assertEquals(parent, bounds("route:settings"))
+                assertEquals(origin, row.fetchSemanticsNode().boundsInRoot)
+                val frame = pixels()
+                assertLivePatch(before, frame, origin)
+                assertLivePatch(before, frame, neighbor)
+            }
+            seek(input, .45f)
+            between(origin, bounds(tag), parent)
+            ui.runOnUiThread { input.backCancelled() }
+            ui.mainClock.advanceTimeBy(600)
+            assertEquals(parent, bounds(tag))
+            start(input); seek(input, .995f)
+            ui.runOnUiThread { input.backCompleted() }
+            repeat(4) {
+                ui.mainClock.advanceTimeByFrame()
+                assertLivePatch(before, pixels(), origin)
+            }
+            ui.mainClock.advanceTimeBy(600)
+            ui.onNodeWithTag(tag).assertDoesNotExist()
+            assertEquals(parent, bounds("route:settings"))
+            assertLivePatch(before, pixels(), origin)
         }
     }
 

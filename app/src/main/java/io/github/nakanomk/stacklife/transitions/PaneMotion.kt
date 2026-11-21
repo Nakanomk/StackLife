@@ -4,6 +4,9 @@ import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.SeekableTransitionState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.rememberTransition
@@ -12,6 +15,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithCache
@@ -28,12 +32,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import kotlinx.coroutines.launch
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 
 /** Only geometry is registered; nothing records the pixels of a page, message, or WebView. */
 internal class PaneOrigins {
@@ -62,17 +68,33 @@ internal fun <T : Any> PaneMotion(
     val motion = LocalMotionEnabled.current
     val state = remember { SeekableTransitionState(page) }
     val transition = rememberTransition(state, label = "pane container")
-    LaunchedEffect(page, motion) { if (motion) state.animateTo(page) else state.snapTo(page) }
+    var rewind by remember { mutableStateOf<Job?>(null) }
+    LaunchedEffect(page, motion) {
+        rewind?.cancelAndJoin()
+        if (motion) state.animateTo(page) else state.snapTo(page)
+    }
     val recovery = rememberCoroutineScope()
     val endpoints = remember { mutableStateMapOf<String, LayoutCoordinates>() }
     PredictiveBackHandler(enabled = parent != null && onBack != null) { events ->
         val previous = parent ?: return@PredictiveBackHandler
+        rewind?.cancelAndJoin()
         try {
             events.collect { if (motion) state.seekTo(it.progress, previous) }
             onBack?.invoke()
         } catch (cancel: CancellationException) {
-            // Reverse the seek, without running the pop or changing a draft/proposal.
-            if (state.targetState != page) recovery.launch { state.animateTo(page) }
+            // Retargeting animateTo(page) makes the original page both endpoints and
+            // removes the clips in mid-gesture. Retrace the same two panes instead.
+            if (state.targetState == previous) rewind = recovery.launch {
+                val cursor = Animatable(state.fraction)
+                val sampling = launch { snapshotFlow { cursor.value }.collect { state.seekTo(it, previous) } }
+                try {
+                    cursor.animateTo(0f, tween((300 * cursor.value).toInt(), easing = LinearEasing))
+                } finally {
+                    sampling.cancelAndJoin()
+                }
+                state.seekTo(0f, previous)
+                state.snapTo(page)
+            }
             throw cancel
         }
     }
@@ -82,8 +104,11 @@ internal fun <T : Any> PaneMotion(
     val deep = if (depth(from) > depth(to)) from else to
     val lo = minOf(depth(from), depth(to))
     val distance = depth(deep) - lo
-    transition.AnimatedContent(modifier = modifier, contentKey = originKey, transitionSpec = {
-        (EnterTransition.None togetherWith ExitTransition.KeepUntilTransitionsFinished).using(null)
+    transition.AnimatedContent(modifier = modifier, contentKey = originKey, contentAlignment = Alignment.BottomStart, transitionSpec = {
+        // Sheet panes can have different heights. Keep their bottom edge pinned and
+        // finish sizing with the same seek, not when the taller outgoing pane is disposed.
+        (EnterTransition.None togetherWith ExitTransition.KeepUntilTransitionsFinished).using(
+            if (motion) SizeTransform(clip = false) { _, _ -> tween(300) } else null)
     }) { shown ->
         var layout by remember { mutableStateOf<LayoutCoordinates?>(null) }
         val moving = motion && distance > 0
@@ -107,8 +132,12 @@ internal fun <T : Any> PaneMotion(
                     val destination = if (end != null && end.isAttached) end.boundsInRoot().translate(-at)
                         else Rect(0f, 0f, size.width, size.height)
                     val bounds = lerp(source, destination, progress)
-                    val radius = minOf(16.dp.toPx(), source.minDimension / 2) * (1f - progress)
-                    path.reset(); path.addRoundRect(RoundRect(bounds, CornerRadius(radius)))
+                    // Complementary clips, including the landing itself. As the moving
+                    // pane reaches its control the real parent takes back the last pixels.
+                    val coverage = landingAlpha(progress)
+                    val reveal = if (coverage == 1f) bounds else lerp(Rect(bounds.center, bounds.center), bounds, coverage)
+                    val radius = minOf(16.dp.toPx(), reveal.minDimension / 2) * (1f - progress)
+                    path.reset(); path.addRoundRect(RoundRect(reveal, CornerRadius(radius)))
                     clipPath(path, if (child) ClipOp.Intersect else ClipOp.Difference) {
                         if (child) translate(bounds.left - destination.left, bounds.top - destination.top) { this@onDrawWithContent.drawContent() }
                         else this@onDrawWithContent.drawContent()

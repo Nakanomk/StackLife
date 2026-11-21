@@ -6,21 +6,24 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.SharedTransitionScope.SharedContentConfig
+import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.AlignmentLine
 import androidx.compose.ui.layout.HorizontalAlignmentLine
@@ -35,7 +38,15 @@ import androidx.compose.ui.util.lerp
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import io.github.nakanomk.stacklife.workspace.SharedModifier
 
-private val cardBounds = BoundsTransform { _, _ -> tween(320) }
+// Finish the return geometry before yielding the detail paper. The two titles then
+// occupy the same slot instead of cross-fading two different positions and sizes.
+private val landCard = Easing { t ->
+    val landing = ((t - .70f) / (.84f - .70f)).coerceIn(0f, 1f)
+    FastOutSlowInEasing.transform((t + .16f * landing * landing).coerceAtMost(1f))
+}
+private val cardBounds = BoundsTransform { from, to ->
+    tween(320, easing = if (to.height < from.height) landCard else FastOutSlowInEasing)
+}
 internal val noCardBounds: SharedModifier = { Modifier }
 internal val LocalCardList = compositionLocalOf<LazyListState?> { null }
 internal val LocalDetailChrome = staticCompositionLocalOf<@Composable () -> Modifier> { { Modifier } }
@@ -49,22 +60,24 @@ private const val TitlePart = "title/"
 @Composable
 internal fun SharedModifier.title(entityKey: String) = this("$TitlePart$entityKey")
 
-private class RowAnchor {
+private class RowAnchor(private val inViewport: () -> Boolean) {
+    fun visible() = inViewport()
     var x by mutableIntStateOf(AlignmentLine.Unspecified)
     var y by mutableIntStateOf(AlignmentLine.Unspecified)
     var height by mutableIntStateOf(0)
 }
 
 private val LocalAnchors = staticCompositionLocalOf<MutableMap<String, RowAnchor>?> { null }
+private val LocalCardScope = staticCompositionLocalOf<SharedTransitionScope?> { null }
 
 @Composable
-internal fun EntityMotionScope(content: @Composable () -> Unit) {
+internal fun SharedTransitionScope.EntityMotionScope(enabled: Boolean, content: @Composable () -> Unit) {
     val rows = remember { mutableStateMapOf<String, RowAnchor>() }
-    CompositionLocalProvider(LocalAnchors provides rows, content = content)
+    CompositionLocalProvider(LocalAnchors provides rows, LocalCardScope provides this.takeIf { enabled }, content = content)
 }
 
 @Composable
-internal fun SharedTransitionScope.cardBoundsModifier(key: String): Modifier {
+internal fun cardBoundsModifier(key: String): Modifier {
     val list = LocalCardList.current
     if (key.startsWith(TitlePart)) {
         val owner = if (list == null) "detail" else "row"
@@ -74,41 +87,49 @@ internal fun SharedTransitionScope.cardBoundsModifier(key: String): Modifier {
         }
     }
     if (list == null) return Modifier
-    val config = remember(list, key) {
+    val anchor = remember(list, key) {
         val id = key.substringAfter(':')
-        object : SharedContentConfig {
-            override val SharedTransitionScope.SharedContentState.isEnabled: Boolean
-                get() {
-                    val viewport = list.layoutInfo
-                    val row = viewport.visibleItemsInfo.firstOrNull { it.key == id } ?: return false
-                    return row.offset >= viewport.viewportStartOffset + viewport.beforeContentPadding &&
-                        row.offset + row.size <= viewport.viewportEndOffset - viewport.afterContentPadding
-                }
+        RowAnchor {
+            val viewport = list.layoutInfo
+            val item = viewport.visibleItemsInfo.firstOrNull { it.key == id }
+            item != null && item.offset >= viewport.viewportStartOffset + viewport.beforeContentPadding &&
+                item.offset + item.size <= viewport.viewportEndOffset - viewport.afterContentPadding
         }
     }
-    val state = rememberSharedContentState(key, config)
     val rows = LocalAnchors.current
-    val anchor = remember(key) { RowAnchor() }
     DisposableEffect(key, rows) {
         rows?.put(key, anchor)
         onDispose { rows?.remove(key, anchor) }
     }
-    return Modifier.sharedBounds(state, LocalNavAnimatedContentScope.current, boundsTransform = cardBounds,
-        enter = EnterTransition.None, exit = ExitTransition.None, renderInOverlayDuringTransition = false)
-        .layout { measurable, constraints ->
-            val row = measurable.measure(constraints)
-            val lookahead = isLookingAhead
-            if (lookahead) {
-                anchor.x = row[TitleX]
-                anchor.y = row[TitleY]
-                anchor.height = row.height
-            }
-            layout(row.width, row.height) {
-                // The detail owns the one painted plane in either direction. Keep the
-                // item's lazy-list space, not its now-invisible title, menu or hit targets.
-                if (lookahead || !state.isMatchFound || !isTransitionActive) row.place(0, 0)
+    return Modifier.layout { measurable, constraints ->
+        val row = measurable.measure(constraints)
+        if (isLookingAhead) {
+            anchor.x = row[TitleX]
+            anchor.y = row[TitleY]
+            anchor.height = row.height
+        }
+        layout(row.width, row.height) { row.place(0, 0) }
+    }
+}
+
+/** An unpainted sibling, measured *after* the real card. Shared bounds can never resize,
+ * move or suppress the row whose pixels and list position receive the returning detail. */
+@Composable
+internal fun CardBoundsAnchor(entityKey: String, modifier: Modifier) {
+    val scope = LocalCardScope.current ?: return
+    if (!LocalRouteOriginsEnabled.current) return
+    val rows = LocalAnchors.current ?: return
+    with(scope) {
+        val config = remember(rows, entityKey) {
+            object : SharedContentConfig {
+                override val SharedTransitionScope.SharedContentState.isEnabled get() = rows[entityKey]?.visible() == true
+                override val shouldKeepEnabledForOngoingAnimation get() = false
             }
         }
+        val state = rememberSharedContentState(entityKey, config)
+        Spacer(modifier.sharedBounds(state, LocalNavAnimatedContentScope.current, boundsTransform = cardBounds,
+            enter = EnterTransition.None, exit = ExitTransition.None, renderInOverlayDuringTransition = false))
+    }
 }
 
 @Composable
@@ -125,10 +146,15 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
         typography.bodyLarge.fontSize.toPx() / typography.titleLarge.fontSize.toPx()
     }
     val visibility = LocalNavAnimatedContentScope.current
-    // Enlist the real title zoom on Nav3's transition immediately. If both scenes have
-    // no animation yet when a push starts, a lazy row can be disposed before the match.
-    val titleZoom = visibility.transition.animateFloat({ tween(320) }, label = "entity title scale") {
-        if (it == EnterExitState.Visible) 1f else compactScale
+    // Enlist the landing on Nav3's timeline immediately. Otherwise a lazy origin can
+    // be disposed on the first push frame, before the shared match has been established.
+    val openness = visibility.transition.animateFloat({ tween(320) }, label = "entity expansion") {
+        if (it == EnterExitState.Visible) 1f else 0f
+    }
+    val paperAlpha = {
+        val open = openness.value
+        if (open < .025f && visibility.transition.currentState != EnterExitState.PreEnter &&
+            (state.isMatchFound || rows?.get(key)?.visible() == true)) landingAlpha(open, .025f) else 1f
     }
     val expanded = remember(key) { mutableFloatStateOf(1f) }
     val appliedScale = remember(key) { mutableFloatStateOf(1f) }
@@ -157,7 +183,7 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
                 }
             }
         }.renderInSharedTransitionScopeOverlay(zIndexInOverlay = 1f) { state.isMatchFound && isTransitionActive }
-            .drawWithContent {
+            .graphicsLayer { alpha = paperAlpha() }.drawWithContent {
                 if (!state.isMatchFound || !isTransitionActive) drawContent()
                 else {
                     // Escape the moving page's safe-area clip, but not the card's own reveal.
@@ -172,7 +198,7 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
         enter = EnterTransition.None, exit = ExitTransition.None,
         resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds,
         clipInOverlayDuringTransition = OverlayClip(RectangleShape))
-        .fillMaxSize().then(tag).clipToBounds().background(MaterialTheme.colorScheme.surface)
+        .fillMaxSize().then(tag).graphicsLayer { alpha = paperAlpha(); clip = true }.background(MaterialTheme.colorScheme.surface)
         .drawWithContent {
             drawContent()
             if (state.isMatchFound && isTransitionActive) {
@@ -205,7 +231,7 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
                     page.place(0, 0)
                 } else {
                     val t = ((h - row.height).toFloat() / (page.height - row.height)).coerceIn(0f, 1f)
-                    val scale = titleZoom.value
+                    val scale = lerp(compactScale, 1f, t)
                     expanded.floatValue = t
                     appliedScale.floatValue = scale
                     // Pan the fully laid-out page. No nested Scaffold, LazyColumn or

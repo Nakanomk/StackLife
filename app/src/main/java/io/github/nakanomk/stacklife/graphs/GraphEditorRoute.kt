@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -91,9 +92,9 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
                 Text(stringResource(R.string.ui_choose_successor, source.title), Modifier.padding(horizontal = 8.dp), style = MaterialTheme.typography.labelLarge)
             } else {
                 val review = rememberPanelLaunch("goal-review")
-                ActionPill(stringResource(R.string.ui_topological_order), { review.open { onGoal(selected?.id) } },
-                    review.modifier.routeOrigin("generated-frame").testTag("graph-goal"),
-                    enabled = detail.nodes.isNotEmpty() && !submission.busy, prominent = true)
+                GoalReviewAction(stringResource(R.string.ui_topological_order), { review.open { onGoal(selected?.id) } },
+                    Modifier.testTag("graph-goal"), enabled = detail.nodes.isNotEmpty() && !submission.busy, prominent = true,
+                    anchor = review.modifier.routeOrigin("generated-frame", CircleShape).testTag("graph-goal-pill"))
                 if (selected != null) {
                     var menu by remember { mutableStateOf(false) }
                     Box {

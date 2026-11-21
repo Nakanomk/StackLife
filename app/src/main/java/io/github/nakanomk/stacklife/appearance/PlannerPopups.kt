@@ -2,6 +2,7 @@ package io.github.nakanomk.stacklife.appearance
 
 import androidx.compose.ui.res.stringResource
 import io.github.nakanomk.stacklife.R
+import io.github.nakanomk.stacklife.transitions.landingAlpha
 
 import android.view.View
 import android.view.ViewTreeObserver
@@ -24,6 +25,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.lerp
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -133,7 +135,8 @@ internal fun PlannerAlertDialog(onDismissRequest: () -> Unit, confirmButton: @Co
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun PlannerModalBottomSheet(onDismissRequest: () -> Unit, sheetState: SheetState, nested: Boolean = false,
-    onNestedBack: (() -> Unit)? = null, windowKey: String? = null, canDismiss: Boolean = true, content: @Composable ColumnScope.() -> Unit) {
+    onNestedBack: (() -> Unit)? = null, windowKey: String? = null, canDismiss: Boolean = true,
+    dragHandle: (@Composable (close: () -> Unit) -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
     val scope = rememberCoroutineScope()
     val launches = LocalPanelLaunches.current
     val launch = remember(windowKey) { windowKey?.let { launches?.remove(it) } }
@@ -146,13 +149,22 @@ internal fun PlannerModalBottomSheet(onDismissRequest: () -> Unit, sheetState: S
     suspend fun shrink() {
         if (!canDismiss) return
         closing = true
-        if (motion && launch?.liveBounds() != null) progress.animateTo(0f, tween(220))
+        if (launch?.liveBounds() == null) {
+            sheetState.hide()
+            if (sheetState.isVisible) return
+        } else {
+            progress.animateTo(0f, tween(220))
+            // Let the cleared shell and scrim reach the display before releasing the dialog window.
+            withFrameNanos { }
+        }
         onDismissRequest()
     }
     val shell = if (!motion) Modifier else Modifier.onGloballyPositioned { outer = it }.drawWithCache {
         val path = Path()
+        val landing = Paint()
         onDrawWithContent {
             val p = progress.value
+            if (p <= 0f) return@onDrawWithContent
             if (p >= 1f) { drawContent(); return@onDrawWithContent }
             val host = outer
             val sheet = inner
@@ -166,7 +178,13 @@ internal fun PlannerModalBottomSheet(onDismissRequest: () -> Unit, sheetState: S
             val bounds = lerp(start, target, p)
             path.reset(); path.addRoundRect(RoundRect(bounds, CornerRadius(lerpRadius(start, p, 28.dp.toPx()))))
             clipPath(path) {
+                val opacity = landingAlpha(p)
+                if (opacity < 1f) {
+                    landing.alpha = opacity
+                    drawContext.canvas.saveLayer(bounds, landing)
+                }
                 translate(bounds.left - target.left, bounds.top - target.top) { this@onDrawWithContent.drawContent() }
+                if (opacity < 1f) drawContext.canvas.restore()
             }
         }
     }
@@ -176,7 +194,9 @@ internal fun PlannerModalBottomSheet(onDismissRequest: () -> Unit, sheetState: S
         else scope.launch { sheetState.hide(); if (!sheetState.isVisible) onDismissRequest() }
         Unit
     }
+    val scrim = BottomSheetDefaults.ScrimColor
     ModalBottomSheet(onDismissRequest, modifier = shell, sheetState = sheetState, shape = sheetShape, containerColor = Color.Transparent,
+        scrimColor = if (motion) scrim.copy(alpha = scrim.alpha * progress.value) else scrim,
         // Back within a nested level belongs to its live pane transition, not the sheet's hide animation.
         properties = ModalBottomSheetProperties(shouldDismissOnBackPress = !nested && !motion, shouldDismissOnClickOutside = !nested && canDismiss),
         sheetGesturesEnabled = !nested, contentColor = MaterialTheme.colorScheme.onSurface, dragHandle = null, contentWindowInsets = { WindowInsets(0) }) {
@@ -193,8 +213,11 @@ internal fun PlannerModalBottomSheet(onDismissRequest: () -> Unit, sheetState: S
         }
         PopupPanel(sheetShape, Modifier.fillMaxWidth().onGloballyPositioned { inner = it }) {
             Column(Modifier.fillMaxWidth().windowInsetsPadding(BottomSheetDefaults.modalWindowInsets)) {
-                Box(Modifier.align(Alignment.CenterHorizontally).heightIn(min = 48.dp).clickable(onClickLabel = stringResource(R.string.ui_close_panel), onClick = close)
-                    .semantics { dismiss { close(); true } }, contentAlignment = Alignment.Center) { BottomSheetDefaults.DragHandle() }
+                Box(Modifier.align(Alignment.CenterHorizontally)) {
+                    if (dragHandle != null) dragHandle(close)
+                    else Box(Modifier.heightIn(min = 48.dp).clickable(onClickLabel = stringResource(R.string.ui_close_panel), onClick = close)
+                        .semantics { dismiss { close(); true } }, contentAlignment = Alignment.Center) { BottomSheetDefaults.DragHandle() }
+                }
                 CompositionLocalProvider(LocalPanelBack provides close) { content() }
             }
         }

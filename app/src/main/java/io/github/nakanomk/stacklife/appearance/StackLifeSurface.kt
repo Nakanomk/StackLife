@@ -55,7 +55,7 @@ import top.yukonga.miuix.kmp.material.drawEdgeStroke
 internal val LocalPlannerGlassAllowed = staticCompositionLocalOf { false }
 internal val LocalCapsuleBackdrop = compositionLocalOf<Backdrop?> { null }
 private val LocalParentShell = compositionLocalOf { false }
-internal enum class CapsuleScene { NAVIGATION, ASSISTANT, CHROME, ACTION, COURSE, PANEL, TRAY, FROST }
+internal enum class CapsuleScene { NAVIGATION, ASSISTANT, CHROME, ACTION, COURSE, PANEL, TRAY, FROST, INSET }
 
 private val dockEdge = EdgeStroke(width = 1.dp, bevel = 2.dp, color = Color.White.copy(alpha = .12f),
     primary = EdgeLightSource(.5f, -.3f, -.05f), secondary = EdgeLightSource(.5f, .8f, -.5f, intensity = .4f), peak = EdgePeak.Dual)
@@ -175,9 +175,12 @@ private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Back
     val course = scene == CapsuleScene.COURSE
     val input = scene == CapsuleScene.ASSISTANT
     val frost = scene == CapsuleScene.FROST
-    val inline = LocalParentShell.current && !course
+    // An inset control reads the parent shell's already-rendered material, never its own labels.
+    val inset = scene == CapsuleScene.INSET
+    val inline = LocalParentShell.current && !course && !inset
     val hasLens = !inline && !frost
     val wash = when {
+        inset && tint.isSpecified -> tint
         course -> tint.copy(alpha = .88f)
         panel -> base.copy(alpha = if (dark) .63f else .70f)
         input -> (if (dark) MaterialTheme.colorScheme.surfaceContainerHigh else base).copy(alpha = .54f)
@@ -187,30 +190,32 @@ private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Back
     }
     val blend = if (!course) BlendMode.SrcOver else if (dark) BlendMode.Screen else BlendMode.Multiply
     val blurDp = when (scene) {
+        CapsuleScene.INSET -> 0.dp
         CapsuleScene.COURSE -> 4.dp
         CapsuleScene.ASSISTANT, CapsuleScene.FROST -> 10.dp
         CapsuleScene.PANEL, CapsuleScene.TRAY -> 24.dp
         else -> 4.dp
     }
     val specular = if (input || (hasLens && scene != CapsuleScene.PANEL)) rememberGlassEdge(-45) else null
-    val shadow = if (inline || frost) Modifier else Modifier.dropShadow(shape,
+    val shadow = if (inline || frost || inset) Modifier else Modifier.dropShadow(shape,
         remember(dark, course) { Shadow(radius = if (course) 4.dp else 10.dp, color = Color.Black, alpha = if (dark) .20f else .10f) })
     val material = Modifier.drawBackdrop(source, shape = { shape }, layerBlock = transform, effects = {
         if (!inline || frost) {
             if (!inline) colorControls(saturation = 1.5f)
             if (hasLens) {
                 val depth = when {
+                    inset -> minOf(8.dp.toPx(), size.minDimension * .35f)
                     course -> 24.dp.toPx()
                     panel -> 12.dp.toPx()
                     else -> 24.dp.toPx() * dockGeometryScale(size.height)
                 }
                 padding = maxOf(padding, depth)
-                blur(blurDp.toPx())
+                if (blurDp > 0.dp) blur(blurDp.toPx())
                 dockLens(depth, depth, depth = course, dispersion = 0f)
             } else blur(blurDp.toPx())
         }
     }, onDrawSurface = {
-        if (tint.isSpecified && !course && !frost) {
+        if (tint.isSpecified && !course && !frost && !inset) {
             drawRect(tint, blendMode = BlendMode.Hue)
             drawRect(tint.copy(alpha = .75f))
         }

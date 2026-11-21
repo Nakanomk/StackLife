@@ -175,12 +175,14 @@ interface PlannerApi {
 
 **时间轴与底栏。** [Structured 日视图](https://help.structured.app/en/articles/380546)在同一竖轴左侧标时刻、右侧读事件；StackLife 保留比例空白供五分钟拖放。参考 [Etar 的当前时刻线](https://github.com/Etar-Group/Etar-Calendar/blob/6fb46d1606622aecc719b7e5dc15a48528768c94/app/src/main/java/com/android/calendar/DayView.java#L2425-L2440)，分钟线从轴起画，不用标签覆盖整点；刻度列按系统字号实测文本宽度。[Etar 的 FAB](https://github.com/Etar-Group/Etar-Calendar/blob/6fb46d1606622aecc719b7e5dc15a48528768c94/app/src/main/res/layout/all_in_one_material.xml) 对应今天和工作台的页面级加号；队列、加号、助理和导航覆盖的区域不是时间轴落点，末项可滚到控件上方。导航和工具栏矢量取自 [Google Material Design Icons](https://github.com/google/material-design-icons)，Apache-2.0 许可随 APK 分发。
 
-工作台「队列／栈」采用 [BiliPai 的紧凑顶部指示器](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/TopTabStylePolicy.kt#L357-L374)：普通字号下选中胶囊高 30 dp；字号变大时为文字留空间。玻璃和不透明样式共用轮廓，每个标签的点击与拖动区域仍至少高 48 dp。
+工作台「队列／栈」沿用 [BiliPai 首页浮动分段的内边距](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/HomeTopTabFloatingDock.kt#L295-L309)：48 dp 的槽位内，选中胶囊四周各收进 4 dp，普通字号下高 40 dp。字号变大时轨道随文字撑高；玻璃和实色档的轮廓、点击与横拖区域相同。底部导航尺寸独立。
 
 
 ## 动效与材质
 
 **应用内连续性。** 四个根页、队列／栈和相邻日／周保留分页器，根页的助理输入框不参与翻页。层级导航不推走前一页：设置齿轮、加号、列表项和操作按钮按实际屏幕位置展开为目的页，参照 [Material Container Transform](https://github.com/material-components/material-components-android/blob/master/docs/theming/Motion.md#container-transform)。工作台按实体 ID 和标题位置配对[共享容器](https://developer.android.com/develop/ui/compose/animation/shared-elements/customize)：标题和正文随卡片展开，详情工具栏和底部输入框留在最终屏幕位置，由同一张卡片逐步揭开。源卡不可见或已删除时不缩回替代项。[Nav3 预测返回](https://developer.android.com/guide/navigation/navigation-3/animate-destinations)可反向拖动和取消，不改草稿或业务数据。助理历史与消息、添加课程的选周与预览都在原弹层内切换，不重开窗口。系统选择器和 Chrome 保留平台动效；系统动画比例为零或勾选「减弱」时，应用内直接切换。
+
+返回时，工作台真实列表行及相邻项一直留在原位；共享边界只使用等大的空锚点，不拿列表行本身重新测量。详情落到标题位置后才把像素交回真实行，参照 [BiliPai 返回时间线的内容交接](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/core/ui/transition/VideoCardReturnTimeline.kt#L112-L149)。普通层级和有来源按钮的弹层也在落点交还画面；不以整页淡出代替容器移动。
 
 **联盟系统能力（M6 单列验收）。** 依据 [ITGSA SharedViewDemo](https://gitee.com/itgsa_sharedviewkit/SharedViewDemo)。`gsai.sdk:sharedview-kit` 运行时调用 `ViewAnimationManager.isViewAnimationSupported()`，不按品牌猜。仅在协议支持、动效允许、源卡片完整可见时，对队列事件/栈帧卡片用非导出 `EntityDetailActivity`，复用同一详情 Composable，Intent 只传实体类型和 ID。用 `PixelCopy` 取被点卡片的 window 矩形，不把整屏 `LocalView` 当卡片。按 Kit 能力约定区分屏幕/窗口坐标、转换 bounds，圆角转 px，交给 `makeViewAnimationOptions(bitmap, bounds, radius, …)`；成功只让系统播一次。返回按实体 key 刷新落点，在详情 Activity 的 `finish()` **之前** `overrideViewAnimationTransition`；源丢失跟随系统。能力为 0、options 为空或取图失败，走同一应用内详情路径，不叠动画、不阻断导航。
 
@@ -192,7 +194,9 @@ interface PlannerApi {
 
 浮动导航、队列／栈和作息分段都可横拖水滴，松手选定、取消保留原项；点按、键盘和 TalkBack 仍使用原来的选项。玻璃档采样真实页面和壳体，按住时向四周有弹性，释放后回到分页器的位置；实色档不建立透镜。玻璃课格恢复有深度的透镜：透过有色材质能看到实际节次线在两侧弯折，按住时透镜和内容一起轻微放大；不在课格里另画装饰弧线，白字也不参与背景折射。材质页与周视图共用 `PeriodGrid` / `CourseTile`；关闭玻璃时课程变为不透明实色，色相、位置与点击区域不变。外观编辑沿用 [Apple Sheets](https://developer.apple.com/design/human-interface-guidelines/sheets)：顶栏取消／保存，居中重置只影响当前分组草稿。
 
-课格先对真实节次线做 [Miuix 高斯模糊](https://github.com/compose-miuix-ui/miuix/blob/v0.9.5-beta02/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/internal/BlurEffect.kt)，再折射；白字最后绘制。周表沿用 [BiliPai 的渐变模糊](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/OfficialProgressiveTopBlur.kt)：顶栏与星期／日期共用一个取自滚动网格的 [ProgressiveBlur](https://github.com/compose-miuix-ui/miuix/blob/v0.9.5-beta02/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/ProgressiveBlur.kt)，模糊半径逐渐降为零，到日期下方 24dp 恢复清晰。不叠独立磨砂带，不挪动课程或扩大日期点击区；周次与日期文字绘在效果上方。添加课程的顶栏、表单组、选周和核对页沿用当前材质。关闭玻璃、减少透明度或增强对比时，表头使用同样大小的不透明表面。
+流程图「生成拓扑排序」沿用工作台的紧凑胶囊；操作单按 [BiliPai 的抽屉握柄](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/design-system/src/main/java/com/android/purebilibili/core/ui/AppSheetComponents.kt#L682-L695)将 36×5 dp 的可见握柄与 56×48 dp 的可点区域分开。目标选择参照 [BiliPai 的弹出选项行](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/core/ui/popup/AppGlassPopupHost.kt#L1474-L1534)：选中行用材质底和 20 dp 尾部勾选，不另放 MD3 单选圆点。看清顺序后可直接加入队列或存为栈帧，两者不是互斥模式。
+
+课格先对真实节次线做 [Miuix 高斯模糊](https://github.com/compose-miuix-ui/miuix/blob/v0.9.5-beta02/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/internal/BlurEffect.kt)，再折射；白字最后绘制。周表沿用 [BiliPai 的渐变模糊](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/OfficialProgressiveTopBlur.kt)：顶栏与星期／日期共用一个取自滚动网格的 [ProgressiveBlur](https://github.com/compose-miuix-ui/miuix/blob/v0.9.5-beta02/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/ProgressiveBlur.kt)。渐变从日期行底边上方 24 dp 开始，到底边下方 `max(0, round(24 dp × 密度) − 15)` 个物理像素结束。不叠独立磨砂带或时间条滤镜，不挪动课程或扩大日期点击区；周次与日期文字绘在效果上方。添加课程的顶栏、表单组、选周和核对页沿用当前材质。关闭玻璃、减少透明度或增强对比时，表头使用同样大小的不透明表面。
 
 玻璃仅在 API 33+、硬件加速、非低内存/省电、无减少透明度/高对比要求时可用。否则提示「当前使用实色」及原因，不把模糊称为折射；关玻璃完全卸下光学层。按 [Google 无障碍标准](https://developer.android.com/guide/topics/ui/accessibility/apps)，触控目标至少 48×48 dp，普通文字对比 4.5:1、大字 3:1；TalkBack 读状态并有等价非拖拽操作。系统字体缩放、edge-to-edge 安全区、输入法和旋转都不能遮操作。减少动态与减少透明度分开处理。
 
@@ -295,6 +299,8 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 **v0.10.4 复审。** API 37、440 dpi：收起的队列球与加号均为 154 × 154 px。队列展开和收起时，时间轴下沿与助理输入栏上沿均为 `y=1955 px`；末端三个像素采样位置仍有轴线。第 11 周向第 12 周拖动，手指尚未松开、11/16–11/22 的日期仍在画面内时，标题已是「第 12 周」。事件视图把 09:30–11:00 显示为一行「空闲 · 1 小时 30 分钟」。用 0.10.3 写入的对话覆盖升级后可以续聊，消息仍在同一条记录；另用本地 HTTPS 服务验证上下文只取本对话最近 12 条文字。
 
 **v0.10.5–0.10.6 复审。** 按 OnePlus 上的参考画面对照：API 37、1080×2340、440 dpi，时间视图滚至次日 00:00；队列展开和收起时，日末标签下沿、轴线末端、助理输入框上沿均为 `y=1955 px`，间隔 `0 px`。像素回归检查最后 1、4、8 px 仍有线；23:30–00:00 的任务在收起队列后可直接点开，拖进助理不排程。事件视图仍贯穿短列表。Android 8 和 17 均实际切换中英文，选择中文后强停冷启仍为中文；API 37 系统改法语、应用选跟随系统时为英文，用系统应用语言改选中文立即生效。OnePlus USB 覆盖安装后回读 `0.10.6 (21)`。
+
+**v0.10.8 复审。** 仅用 API 37 模拟器。440 dpi 同一工作台截图中，队列选中底的中心段从 83 px 增到 110 px，点击区仍高 132 px；玻璃／实色两档点上边缘均能选栈，沿轨横拖可回队列。课表下沿在 440／320 dpi 分别保留 51／33 px 渐变；越过新边界 1 px，网格分隔线已与未模糊处逐像素相同。深色任务详情返回时，原行与邻项不换位；逐帧覆盖落位、销毁、预测返回反拖，以及编辑器打开键盘后取消返回仍保留草稿。流程图针对真实背景变色验证握柄和选中行：玻璃透色、减少透明度不透色；换目标、加入队列、存栈和滑动关闭均通过。
 
 |阶段 / 用例|输入 → 可观察结果（校方登录、真实模型、联盟真机和性能有各自的验收条件）|
 |---|---|

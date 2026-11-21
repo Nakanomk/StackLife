@@ -1,16 +1,32 @@
 package io.github.nakanomk.stacklife.acceptance
 
+import android.graphics.Bitmap
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.room.withTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.StackLifeApp
+import io.github.nakanomk.stacklife.StackLifeTheme
 import io.github.nakanomk.stacklife.WorkspaceViewModel
+import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
+import io.github.nakanomk.stacklife.appearance.PlannerPopupHost
+import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
+import io.github.nakanomk.stacklife.graphs.GoalReview
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.planner.PlannerCommand.*
 import kotlinx.coroutines.CompletableDeferred
@@ -20,6 +36,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -52,7 +69,7 @@ class GraphEditorTest {
     private fun attach() = ui.activityRule.scenario.onActivity { activity ->
         activity.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
     }
-    private fun open() {
+    private fun seed() {
         runBlocking {
             val ready = store.proposal(TaskAdd(TaskInput("眼前的工作")), GraphCreate("期末交付", ref = "g"), GraphPatch("@g", listOf(
                 GraphEdit.AddNode("A", "原备注", 10, 10f, 20f, "a"), GraphEdit.AddNode("B", x = 176f, y = 20f, ref = "b"),
@@ -61,6 +78,9 @@ class GraphEditorTest {
             ids = ready.refs
             assertTrue(store.api.commit(ready.proposalId) is CommitResult.Applied)
         }
+    }
+    private fun open() {
+        seed()
         attach()
         tag("nav:graphs").performClick(); tag("open-graph:${id("g")}").performClick()
         canvas("a").assertIsDisplayed()
@@ -139,6 +159,86 @@ class GraphEditorTest {
     }
 
     private fun goalBack() = await(hasContentDescription("返回") and hasAnyAncestor(isDialog())).assertIsDisplayed()
+
+    @Test fun compactGoalControlsKeepTheirTouchTargetsAndDismissWithoutWriting() {
+        open()
+        val before = runBlocking { store.state() }
+        val launcher = tag("graph-goal").assertHeightIsAtLeast(48.dp)
+        ui.onNodeWithTag("graph-goal-pill", useUnmergedTree = true).assertHeightIsEqualTo(40.dp)
+        launcher.performClick()
+        val handle = tag("goal-sheet-handle").assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+        ui.onNodeWithTag("goal-grip", useUnmergedTree = true).assertWidthIsEqualTo(36.dp).assertHeightIsEqualTo(5.dp)
+        val x = hasTestTag("goal-choice:${id("x")}")
+        bringIntoReview(x).assertIsNotSelected().assertHeightIsAtLeast(48.dp).performClick()
+        tag("goal-change").performClick()
+        bringIntoReview(x).assertIsSelected()
+        ui.onNodeWithTag("goal-check:${id("x")}", useUnmergedTree = true).assertWidthIsEqualTo(20.dp).assertHeightIsEqualTo(20.dp)
+        val other = bringIntoReview(hasTestTag("goal-choice:${id("d")}"))
+        other.performTouchInput { down(center) }
+        other.assertIsNotSelected()
+        other.performTouchInput { cancel() }
+        bringIntoReview(x).assertIsSelected()
+        other.performClick()
+        bringIntoReview(hasText("3. D")).assertIsDisplayed()
+        bringIntoReview(hasTestTag("goal-change")).performClick()
+        bringIntoReview(hasTestTag("goal-choice:${id("d")}")).assertIsSelected()
+        bringIntoReview(x).assertIsNotSelected()
+        handle.performSemanticsAction(SemanticsActions.Dismiss)
+        fun awaitClosed() = ui.waitUntil(10_000) { ui.onAllNodesWithTag("goal-sheet-handle").fetchSemanticsNodes().isEmpty() }
+        awaitClosed()
+        launcher.performClick()
+        tag("goal-sheet-handle").performTouchInput { swipe(center, center + Offset(0f, height * 5f), durationMillis = 180) }
+        awaitClosed()
+        assertEquals(before, runBlocking { store.state() })
+    }
+
+    @Test fun goalGripAndSelectedRowSampleTheDonorWindow() = checkGoalMaterial(glass = true)
+    @Test fun reducedTransparencyKeepsTheSameGoalControlsOpaque() = checkGoalMaterial(glass = false)
+
+    private fun checkGoalMaterial(glass: Boolean) {
+        seed()
+        val state = ReadState.Loaded(graph())
+        val donor = mutableStateOf(Color.Red)
+        val appearance = Appearance(theme = ThemeMode.LIGHT, palette = PaletteMode.SEED, glass = true,
+            reduceTransparency = !glass, reduceMotion = true)
+        var available = false
+        ui.setContent {
+            StackLifeTheme(appearance) {
+                available = glassUnavailableReason(appearance) == null
+                CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
+                    PlannerPopupHost {
+                        Spacer(Modifier.fillMaxSize().background(donor.value))
+                        var goal by remember { mutableStateOf(id("d")) }
+                        GoalReview(viewModel { WorkspaceViewModel(store.api) }, id("g"), state, goal, { goal = it }, {}, {})
+                    }
+                }
+            }
+        }
+        if (glass) ui.runOnIdle { assumeTrue("Requires hardware-backed glass", available) }
+        tag("goal-change").performClick()
+        val row = bringIntoReview(hasTestTag("goal-choice:${id("d")}")).assertIsSelected()
+        val grip = ui.onNodeWithTag("goal-grip", useUnmergedTree = true)
+        fun probe(node: SemanticsNodeInteraction, x: Float): IntOffset {
+            val n = node.assertIsDisplayed().fetchSemanticsNode()
+            return ui.runOnIdle { IntOffset((n.positionOnScreen.x + n.size.width * x).toInt(),
+                (n.positionOnScreen.y + n.size.height / 2f).toInt()) }
+        }
+        // Capture the composed display (including the dialog window), away from the text and check.
+        val probes = listOf(probe(grip, .5f), probe(row, .72f))
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        fun sample(): List<Int> {
+            val shot = checkNotNull(automation.takeScreenshot())
+            val image = if (shot.config == Bitmap.Config.HARDWARE) shot.copy(Bitmap.Config.ARGB_8888, false).also { shot.recycle() } else shot
+            return try { probes.map { image.getPixel(it.x, it.y) } } finally { image.recycle() }
+        }
+        val red = sample()
+        ui.runOnIdle { donor.value = Color.Blue }
+        ui.waitForIdle()
+        fun blueMinusRed(pixel: Int) = (pixel and 255) - ((pixel ushr 16) and 255)
+        if (glass) ui.waitUntil(10_000) {
+            sample().zip(red).all { (blue, old) -> blueMinusRed(blue) - blueMinusRed(old) > 6 }
+        } else assertEquals("The opaque goal controls transmitted the changed graph window", red, sample())
+    }
 
     @Test fun chooseTargetInlineOrUseSoleSinkAndAppendOneReviewedBatchEvenWithSwap() = runBlocking {
         open()

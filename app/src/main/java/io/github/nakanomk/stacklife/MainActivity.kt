@@ -249,7 +249,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     AppearanceGroup.entries.first { it.key == key.group }, model, back) }
                 entry<ModelConnection> { PrivateScreen(privateScreens) { ConnectionScreen(assistant.connections, back) } }
         }
-        EntityMotionScope {
+        EntityMotionScope(animate && initialDetail == null) {
             NavDisplay(backStack = stack, onBack = back, sharedTransitionScope = this,
                 modifier = Modifier.onGloballyPositioned { origins.window = it.localToScreen(Offset.Zero) },
                 transitionSpec = { sceneMotion(animate) }, popTransitionSpec = { sceneMotion(animate) },

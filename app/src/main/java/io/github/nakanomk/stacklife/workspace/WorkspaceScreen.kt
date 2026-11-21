@@ -125,9 +125,7 @@ internal fun WorkspaceScreen(
 private fun WorkspaceSegments(stack: Boolean, change: (Boolean) -> Unit, position: State<Float>) {
     val colors = MaterialTheme.colorScheme
     val label = MaterialTheme.typography.labelLarge
-    val hitHeight = 48.dp
-    val lensHeight = with(LocalDensity.current) { maxOf(30.dp, label.lineHeight.toDp() + 8.dp) }
-    val inset = ((hitHeight - lensHeight) / 2).coerceAtLeast(0.dp)
+    val inset = 4.dp
     SegmentTrack(position, 2, colors.secondaryContainer, { change(it == 1) },
         Modifier.widthIn(max = 168.dp).fillMaxWidth(), indicatorInset = inset) { highlighted ->
         Row(Modifier.fillMaxWidth().selectableGroup()) {
@@ -135,7 +133,7 @@ private fun WorkspaceSegments(stack: Boolean, change: (Boolean) -> Unit, positio
                 val frame = index == 1
                 val selected = stack == frame
                 Box(Modifier.weight(1f).clip(CircleShape).selectable(selected, role = Role.Tab) { change(frame) }
-                    .heightIn(min = hitHeight), contentAlignment = Alignment.Center) {
+                    .heightIn(min = 48.dp).padding(vertical = inset), contentAlignment = Alignment.Center) {
                     Text(if (frame) stringResource(R.string.ui_stack) else stringResource(R.string.ui_queue),
                         style = label, color = if (highlighted == index) colors.primary else colors.onSurfaceVariant)
                 }

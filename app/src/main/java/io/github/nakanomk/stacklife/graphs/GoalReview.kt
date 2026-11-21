@@ -7,15 +7,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.ReadState
@@ -81,7 +79,9 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
         confirmValueChange = { it != SheetValue.Hidden || ticket == null })
     val body: @Composable (Dp) -> Unit = { top ->
         val close = LocalPanelBack.current ?: onClose
-        LazyColumn(Modifier.fillMaxWidth().imePadding().testTag("goal-order"), state = list, contentPadding = dockListPadding(top, 0.dp),
+        val pickingGoal = receipt == null && detail?.nodes?.isNotEmpty() == true && (choosing || goal == null)
+        LazyColumn(Modifier.fillMaxWidth().imePadding().testTag("goal-order").then(if (pickingGoal) Modifier.selectableGroup() else Modifier),
+            state = list, contentPadding = dockListPadding(top, 0.dp),
             verticalArrangement = listSpacing) {
             when {
                 receipt != null -> item { SectionTitle(checkNotNull(receipt)); Secondary(stringResource(R.string.ui_done), onClick = close) }
@@ -91,17 +91,14 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
                 choosing || goal == null -> {
                     item { SectionTitle(stringResource(R.string.ui_choose_goal)); Hint(stringResource(R.string.ui_goal_prereqs)) }
                     items(detail.nodes, key = { it.id }) { node ->
-                        Row(Modifier.fillMaxWidth().testTag("goal-choice:${node.id}")
-                            .selectable(node.id == goalId, enabled = !busy, role = Role.RadioButton) {
-                                choosing = false; onGoal(node.id); list.requestScrollToItem(0)
-                            }.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(node.id == goalId, onClick = null)
-                            Text(node.title, Modifier.padding(start = 12.dp))
+                        GoalChoice(node.id, node.title, selected = node.id == goalId, enabled = !busy) {
+                            choosing = false; onGoal(node.id); list.requestScrollToItem(0)
                         }
                     }
                 }
                 else -> {
-                    item { PreferenceRow(stringResource(R.string.ui_goal_value, goal.title), stringResource(R.string.ui_change), enabled = !busy, onClick = { choosing = true }) }
+                    item { PreferenceRow(stringResource(R.string.ui_goal_value, goal.title), stringResource(R.string.ui_change),
+                        Modifier.testTag("goal-change"), enabled = !busy, onClick = { choosing = true }) }
                     when {
                         read == ReadState.Loading -> item { CircularProgressIndicator() }
                         order == null || order.error != null -> item { Text(order?.error ?: stringResource(R.string.ui_order_read_failed)) }
@@ -130,9 +127,10 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
                                     Hint(stringResource(R.string.ui_generation_hint))
                                     val enabled = !busy && reviewedRevision == order.revision && detail.revision == order.revision
                                     Actions {
-                                        ActionPill(stringResource(R.string.ui_add_to_queue), { save(order, false) }, Modifier.testTag("graph-append"), enabled, prominent = true)
-                                        ActionPill(stringResource(R.string.ui_save_as_frame), { save(order, true) },
-                                            frameLaunch.modifier.testTag("graph-generate"), enabled && reason.isNotBlank())
+                                        GoalReviewAction(stringResource(R.string.ui_add_to_queue), { save(order, false) },
+                                            Modifier.testTag("graph-append"), enabled, prominent = true)
+                                        GoalReviewAction(stringResource(R.string.ui_save_as_frame), { save(order, true) },
+                                            Modifier.testTag("graph-generate"), enabled && reason.isNotBlank(), anchor = frameLaunch.modifier)
                                     }
                                     if (busy) Text(stringResource(R.string.ui_saving))
                                 }
@@ -144,7 +142,7 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
         }
     }
     PlannerModalBottomSheet(onDismissRequest = { if (ticket == null) onClose() }, sheetState = sheet,
-        windowKey = "goal-review", canDismiss = !busy) {
+        windowKey = "goal-review", canDismiss = !busy, dragHandle = { close -> GoalSheetHandle(!busy, close) }) {
         Box(Modifier.fillMaxWidth().fillMaxHeight(.88f)) {
             val close = LocalPanelBack.current ?: onClose
             RootPane(header = { PageTitle(stringResource(R.string.ui_topological_order), back = close, backEnabled = !busy) }) { top, _ -> body(top) }
