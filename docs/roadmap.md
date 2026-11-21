@@ -196,7 +196,7 @@ interface PlannerApi {
 
 流程图「生成拓扑排序」沿用工作台的紧凑胶囊；操作单按 [BiliPai 的抽屉握柄](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/design-system/src/main/java/com/android/purebilibili/core/ui/AppSheetComponents.kt#L682-L695)将 36×5 dp 的可见握柄与 56×48 dp 的可点区域分开。目标选择参照 [BiliPai 的弹出选项行](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/core/ui/popup/AppGlassPopupHost.kt#L1474-L1534)：选中行用材质底和 20 dp 尾部勾选，不另放 MD3 单选圆点。看清顺序后可直接加入队列或存为栈帧，两者不是互斥模式。
 
-课格先对真实节次线做 [Miuix 高斯模糊](https://github.com/compose-miuix-ui/miuix/blob/v0.9.5-beta02/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/internal/BlurEffect.kt)，再折射；白字最后绘制。周表沿用 [BiliPai 的渐变模糊](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/OfficialProgressiveTopBlur.kt)：顶栏与星期／日期共用一个取自滚动网格的 [ProgressiveBlur](https://github.com/compose-miuix-ui/miuix/blob/v0.9.5-beta02/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/ProgressiveBlur.kt)。渐变从日期行底边上方 24 dp 开始，到底边下方 `max(0, round(24 dp × 密度) − 15)` 个物理像素结束。不叠独立磨砂带或时间条滤镜，不挪动课程或扩大日期点击区；周次与日期文字绘在效果上方。添加课程的顶栏、表单组、选周和核对页沿用当前材质。关闭玻璃、减少透明度或增强对比时，表头使用同样大小的不透明表面。
+课格先对真实节次线做 [Miuix 高斯模糊](https://github.com/compose-miuix-ui/miuix/blob/v0.9.5-beta02/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/internal/BlurEffect.kt)，再折射；白字最后绘制。周表沿用 [BiliPai 的渐变模糊](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/OfficialProgressiveTopBlur.kt)：顶栏与星期／日期共用一个取自滚动网格的 [ProgressiveBlur](https://github.com/compose-miuix-ui/miuix/blob/v0.9.5-beta02/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/ProgressiveBlur.kt)。渐变从时间条下沿上方 24 dp 开始，恰好止于星期／日期行的实际下沿；下方第一行课表像素不再叠加顶部模糊。不单独模糊时间条，不挪动课程或扩大日期点击区；周次与日期文字绘在效果上方。添加课程的顶栏、表单组、选周和核对页沿用当前材质。关闭玻璃、减少透明度或增强对比时，表头使用同样大小的不透明表面。
 
 玻璃仅在 API 33+、硬件加速、非低内存/省电、无减少透明度/高对比要求时可用。否则提示「当前使用实色」及原因，不把模糊称为折射；关玻璃完全卸下光学层。按 [Google 无障碍标准](https://developer.android.com/guide/topics/ui/accessibility/apps)，触控目标至少 48×48 dp，普通文字对比 4.5:1、大字 3:1；TalkBack 读状态并有等价非拖拽操作。系统字体缩放、edge-to-edge 安全区、输入法和旋转都不能遮操作。减少动态与减少透明度分开处理。
 
@@ -300,7 +300,7 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 
 **v0.10.5–0.10.6 复审。** 按 OnePlus 上的参考画面对照：API 37、1080×2340、440 dpi，时间视图滚至次日 00:00；队列展开和收起时，日末标签下沿、轴线末端、助理输入框上沿均为 `y=1955 px`，间隔 `0 px`。像素回归检查最后 1、4、8 px 仍有线；23:30–00:00 的任务在收起队列后可直接点开，拖进助理不排程。事件视图仍贯穿短列表。Android 8 和 17 均实际切换中英文，选择中文后强停冷启仍为中文；API 37 系统改法语、应用选跟随系统时为英文，用系统应用语言改选中文立即生效。OnePlus USB 覆盖安装后回读 `0.10.6 (21)`。
 
-**v0.10.8 复审。** 仅用 API 37 模拟器。440 dpi 同一工作台截图中，队列选中底的中心段从 83 px 增到 110 px，点击区仍高 132 px；玻璃／实色两档点上边缘均能选栈，沿轨横拖可回队列。课表下沿在 440／320 dpi 分别保留 51／33 px 渐变；越过新边界 1 px，网格分隔线已与未模糊处逐像素相同。深色任务详情返回时，原行与邻项不换位；逐帧覆盖落位、销毁、预测返回反拖，以及编辑器打开键盘后取消返回仍保留草稿。流程图针对真实背景变色验证握柄和选中行：玻璃透色、减少透明度不透色；换目标、加入队列、存栈和滑动关闭均通过。
+**v0.10.8 复审。** 画面验收使用 API 37 模拟器。440 dpi 同一工作台截图中，队列选中底的中心段从 83 px 增到 110 px，点击区仍高 132 px；玻璃／实色两档点上边缘均能选栈，沿轨横拖可回队列。课表在 320、440、560 dpi 下滚动时，日期行内仍有磨砂，下沿外第一个像素起的网格分隔线与清晰处相同，日期仍可点开。深色任务详情返回时，原行与邻项不换位；逐帧覆盖落位、销毁、预测返回反拖，以及编辑器打开键盘后取消返回仍保留草稿。流程图针对真实背景变色验证握柄和选中行：玻璃透色、减少透明度不透色；换目标、加入队列、存栈和滑动关闭均通过。
 
 |阶段 / 用例|输入 → 可观察结果（校方登录、真实模型、联盟真机和性能有各自的验收条件）|
 |---|---|

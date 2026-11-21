@@ -134,11 +134,7 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, ope
         val scrollingPlane = rememberPlannerBackdrop()
         Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), topBar = {
             Box(Modifier.fillMaxWidth().then(if (scrollingPlane == null) Modifier.background(colors.surface) else Modifier)) {
-                if (scrollingPlane != null) {
-                    val fade = 24.dp
-                    val tail = with(density) { (fade.roundToPx() - 15).coerceAtLeast(0).toDp() }
-                    ScrollEdge(scrollingPlane, Modifier.matchParentSize(), fadeAbove = fade, fadeBelow = tail)
-                }
+                if (scrollingPlane != null) ScrollEdge(scrollingPlane, Modifier.matchParentSize(), fadeAbove = 24.dp)
                 Row(Modifier.padding(top = top).fillMaxWidth().testTag("week-dates"), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.width(rail), contentAlignment = Alignment.Center) {
                             Text(monday.month.getDisplayName(DateTextStyle.SHORT, locale), style = typography.labelSmall, maxLines = 1, color = colors.onSurfaceVariant)

@@ -66,15 +66,14 @@ internal fun RootPane(header: @Composable () -> Unit,
 }
 
 @Composable
-internal fun ScrollEdge(source: PlannerBackdrop, modifier: Modifier, fadeAbove: Dp = 0.dp, fadeBelow: Dp = 0.dp) {
+internal fun ScrollEdge(source: PlannerBackdrop, modifier: Modifier, fadeAbove: Dp = 0.dp) {
     val tint = MaterialTheme.colorScheme.surface.copy(alpha = .40f)
     BoxWithConstraints(modifier) {
-        val extent = maxHeight + fadeBelow
-        val gradient = remember(maxHeight, fadeAbove, fadeBelow) {
-            if ((fadeAbove == 0.dp && fadeBelow == 0.dp) || extent == 0.dp) ProgressiveBlur.Top else
-                ProgressiveBlur.Top.copy(startFraction = ((maxHeight - fadeAbove) / extent).coerceIn(0f, .99f))
+        val gradient = remember(maxHeight, fadeAbove) {
+            if (fadeAbove == 0.dp || maxHeight == 0.dp) ProgressiveBlur.Top else
+                ProgressiveBlur.Top.copy(startFraction = ((maxHeight - fadeAbove) / maxHeight).coerceIn(0f, .99f))
         }
-        Spacer(Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true).height(extent)
+        Spacer(Modifier.fillMaxSize()
             .drawWithCache {
                 val wash = Brush.verticalGradient(listOf(tint, Color.Transparent),
                     startY = size.height * gradient.startFraction, endY = size.height)

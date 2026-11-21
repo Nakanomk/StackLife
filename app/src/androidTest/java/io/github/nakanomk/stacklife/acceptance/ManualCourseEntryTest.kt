@@ -133,13 +133,10 @@ class ManualCourseEntryTest {
         val (top, bottom) = ui.runOnIdle { header.positionOnScreen.y to header.positionOnScreen.y + header.size.height }
         val dp = ui.density.density
         val ruleX = point(adjacentDate, 1f, .5f).x
-        val tailHeight = ((24 * dp).roundToInt() - 15).coerceAtLeast(0)
-        val cutoff = bottom.roundToInt() + tailHeight
-        val ruleRows = listOf(cutoff - (8 * dp).roundToInt(), cutoff + 1, cutoff + (5 * dp).roundToInt())
+        val edge = bottom.roundToInt()
+        val ruleRows = listOf(edge - (12 * dp).roundToInt(), edge, edge + 1, edge + (8 * dp).roundToInt())
             .flatMap { y -> (-3..3).map { dx -> Point(ruleX + dx, y) } }
-        val points = listOf(dateRow, dateRow.map { Point(it.x, (top - 8 * dp).roundToInt()) },
-            dateRow.map { Point(it.x, (bottom + .1f * tailHeight).roundToInt()) },
-            dateRow.map { Point(it.x, (bottom + 34 * dp).roundToInt()) }).flatten()
+        val points = dateRow + dateRow.map { Point(it.x, (top - 8 * dp).roundToInt()) }
         val initial = colorsAt(points, "dates-$live-rest")
         val grid = ui.onNode(hasScrollAction() and hasAnyAncestor(hasTestTag("week-grid")))
         val tile = ui.onNodeWithTag("grid-course:0")
@@ -162,15 +159,15 @@ class ManualCourseEntryTest {
                 return (r * (near.red - empty.red) + g * (near.green - empty.green) + b * (near.blue - empty.blue)) /
                     (r * r + g * g + b * b).coerceAtLeast(.0001f)
             }
-            val (dateSpread, toolbarSpread, tail, clear) = after.take(points.size).chunked(3).map(::edgeSpread)
+            val (dateSpread, toolbarSpread) = after.take(points.size).chunked(3).map(::edgeSpread)
             assertTrue("No sharp hole between toolbar and dates: $toolbarSpread, $dateSpread",
                 dateSpread > .06f && toolbarSpread > .06f)
-            assertTrue("Blur must continue below dates, then clear: $tail vs $clear", tail > clear + .015f)
-            val (inside, pastEnd, sharp) = after.drop(points.size).chunked(7)
+            val (inside, firstGridPixel, nextGridPixel, sharp) = after.drop(points.size).chunked(7)
             assertTrue("Reference must cross a real timetable divider", sharp.distinct().size > 1)
             assertNotEquals("Divider must still be softened in the fade", sharp, inside)
-            assertEquals("The fade must end 15 physical pixels earlier, without blurring the time rail separately", sharp, pastEnd)
-        } else assertEquals("Solid toolbar and weekday leaked a moving course", initial.take(6), after.take(6))
+            assertEquals("The grid must be sharp at the date bar's lower edge", sharp, firstGridPixel)
+            assertEquals("No blur may extend below the date bar", sharp, nextGridPixel)
+        } else assertEquals("Solid toolbar and weekday leaked a moving course", initial, after.take(points.size))
         date.performTouchInput { click() }
         ui.onNode(hasText(spokenDate) and hasAnyAncestor(isDialog())).assertIsDisplayed()
         ui.onNode(hasText("测试课") and hasAnyAncestor(isDialog())).assertIsDisplayed()
