@@ -127,9 +127,15 @@ internal fun EditorPage(title: String, back: () -> Unit, assistantPage: Assistan
 }
 
 @Composable
-internal fun FormGroup(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+internal fun FormGroup(modifier: Modifier = Modifier, frosted: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    val fields: @Composable () -> Unit = {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp), content = content)
+    }
+    val fill = MaterialTheme.colorScheme.surfaceContainerLow
+    if (frosted) {
+        StackLifeSurface(CapsuleScene.FROST, modifier.fillMaxWidth(), solid = fill, shape = RoundedCornerShape(16.dp), content = fields)
+    } else {
+        Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = fill, content = fields)
     }
 }
 
@@ -187,8 +193,9 @@ internal fun Actions(content: @Composable () -> Unit) {
 private val LocalActionGroup = compositionLocalOf { false }
 
 @Composable
-internal fun ControlGroup(modifier: Modifier = Modifier, content: @Composable RowScope.() -> Unit) {
-    StackLifeSurface(CapsuleScene.CHROME, modifier, MaterialTheme.colorScheme.surfaceContainerHigh, elevation = 1.dp) {
+internal fun ControlGroup(modifier: Modifier = Modifier, frosted: Boolean = false, content: @Composable RowScope.() -> Unit) {
+    StackLifeSurface(if (frosted) CapsuleScene.FROST else CapsuleScene.CHROME, modifier, MaterialTheme.colorScheme.surfaceContainerHigh,
+        elevation = if (frosted) 0.dp else 1.dp) {
         CompositionLocalProvider(LocalActionGroup provides true) {
             Row(Modifier.padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, content = content)
         }

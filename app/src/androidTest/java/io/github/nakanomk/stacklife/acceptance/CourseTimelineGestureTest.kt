@@ -75,7 +75,7 @@ class CourseTimelineGestureTest {
         }
     }
 
-    @Test fun glassTransmitsTheActualThirdPeriodRuleThroughACourseButSolidDoesNot() {
+    @Test fun courseFrostSpreadsTheRealPeriodLineWhileSolidCourseHidesIt() {
         val term = TermSpec("Studio-7", LocalDate.of(2026, 11, 16), 1, BellSchedule.SUMMER)
         val meeting = term.meeting(1, 1, "物理", "A", 1, 4)
         val week = CourseWeek(term, 1, listOf(ScheduledCourse(term.id, HUST_SOURCE, meeting)), mapOf(meeting.title to 0))
@@ -114,6 +114,20 @@ class CourseTimelineGestureTest {
                     }
                     val interior = line(bodyY)
                     result = (y - height / 40..y + height / 40).maxOf { kotlin.math.abs(line(it) - interior) }
+                    if (!solid) {
+                        fun halfPeakWidth(x: Int): Int {
+                            fun l(row: Int) = Color(pixels.getPixel(x, row)).luminance()
+                            val baseline = l(bodyY)
+                            val window = y - height / 32..y + height / 32
+                            val peak = window.maxOf { baseline - l(it) }
+                            return window.count { baseline - l(it) > peak * .5f }
+                        }
+                        val center = topLeft.x.toInt() + width / 2
+                        val frosted = halfPeakWidth(center)
+                        val uncovered = halfPeakWidth(center + width + with(ui.density) { 2.dp.roundToPx() })
+                        assertTrue("Gaussian frost should spread the same period line inside the lens: $frosted vs $uncovered px",
+                            frosted - uncovered >= with(ui.density) { 1.5.dp.roundToPx() })
+                    }
                     true
                 } finally { pixels.recycle() }
             }

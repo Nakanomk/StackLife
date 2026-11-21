@@ -31,6 +31,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.courses.CourseDetails
 import io.github.nakanomk.stacklife.courses.ScheduledCourse
@@ -42,7 +43,7 @@ import kotlin.math.roundToInt
 @Composable
 internal fun DayAxis(
     drag: AxisDrag, revision: Long, enabled: Boolean, onEdit: (String) -> Unit,
-    send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier, topInset: Dp,
+    send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier, topInset: Dp, scrollTail: Dp, dockInset: Dp,
 ) {
     val density = LocalDensity.current
     val scale = drag.scale
@@ -57,9 +58,9 @@ internal fun DayAxis(
     val gutter = spine + railWidth / 2
     var selectedEnd by remember(drag, revision) { mutableStateOf<String?>(null) }
     Box(modifier.fillMaxWidth().clipToBounds()) {
-        Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll).padding(top = topInset)) {
+        Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll).padding(top = topInset, bottom = scrollTail)) {
             Box(Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() }).drawBehind {
-                val x = spine.toPx()
+                val x = if (layoutDirection == LayoutDirection.Ltr) spine.toPx() else size.width - spine.toPx()
                 drawLine(colors.outlineVariant, Offset(x, 0f), Offset(x, size.height), 2.dp.toPx())
             }) {
                 for (band in scale.bands) for (tick in band.ticks) {
@@ -98,10 +99,11 @@ internal fun DayAxis(
                 }
             }
         }
-        // Paint through the toolbar, but never allow a hidden slot to receive a drop.
-        Box(Modifier.fillMaxSize().padding(top = topInset)) {
-            Box(Modifier.fillMaxSize().onGloballyPositioned { drag.viewport = it.boundsInRoot() }) {
-                CurrentLine(drag, spine)
+        Box(Modifier.fillMaxSize().padding(top = topInset).clipToBounds()) { CurrentLine(drag, spine) }
+        // The scroll plane continues behind the dock. Only the uncovered viewport accepts input.
+        Box(Modifier.fillMaxSize().padding(top = topInset, bottom = dockInset)) {
+            Box(Modifier.fillMaxSize().testTag("day-drop-area").clipToBounds()
+                .onGloballyPositioned { drag.viewport = it.boundsInRoot() }) {
                 DropPreview(drag, gutter)
             }
         }
@@ -228,7 +230,7 @@ private fun CurrentLine(drag: AxisDrag, spine: Dp) {
     }
     if (millis !in drag.scale.day.startMillis until drag.scale.day.endMillis) return
     val top = drag.scale.yAt(millis) - drag.scroll.value
-    if (top < 0 || top >= drag.viewport.height) return
+    if (top < 0) return
     val color = MaterialTheme.colorScheme.primary
     HorizontalDivider(Modifier.offset { IntOffset(0, top) }.padding(start = spine).testTag("now-line")
         .semantics { contentDescription = "现在 ${clockLabel(millis, drag.scale.day)}" }, color = color, thickness = 2.dp)

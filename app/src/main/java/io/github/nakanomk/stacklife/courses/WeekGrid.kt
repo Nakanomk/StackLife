@@ -41,6 +41,9 @@ import io.github.nakanomk.stacklife.appearance.CapsuleScene
 import io.github.nakanomk.stacklife.appearance.GlassBacking
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.StackLifeSurface
+import io.github.nakanomk.stacklife.appearance.LocalCapsuleBackdrop
+import io.github.nakanomk.stacklife.appearance.plannerBackdrop
+import io.github.nakanomk.stacklife.appearance.rememberPlannerBackdrop
 import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 import io.github.nakanomk.stacklife.planner.CourseWeek
 import java.time.LocalDate
@@ -128,26 +131,32 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, ope
     }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("week-grid")) {
         val dayWidth = ((maxWidth - rail) / 7).coerceAtLeast(0.dp)
+        val scrollingPlane = rememberPlannerBackdrop()
         Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), topBar = {
-            Row(Modifier.fillMaxWidth().padding(top = top).background(colors.surface), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.width(rail), contentAlignment = Alignment.Center) {
-                    Text("${monday.monthValue}月", style = typography.labelSmall, maxLines = 1, color = colors.onSurfaceVariant)
-                }
-                for (i in 0..6) {
-                    val date = monday.plusDays(i.toLong())
-                    Column(Modifier.width(dayWidth).heightIn(min = 48.dp).clickable(onClickLabel = "查看当天课程", role = Role.Button) { selectedDay = i + 1 }
-                        .semantics { contentDescription = "${date.year}年${date.monthValue}月${date.dayOfMonth}日，周${weekdays[i]}" },
-                        verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                        val ink = if (date == today) colors.primary else colors.onSurface
-                        Text(if (density.fontScale >= 1.35f) weekdays[i].toString() else "周${weekdays[i]}",
-                            color = ink, style = typography.labelMedium, maxLines = 1)
-                        Text(if (density.fontScale >= 1.35f) "${date.dayOfMonth}" else "${date.monthValue}/${date.dayOfMonth}",
-                            color = if (date == today) ink else colors.onSurfaceVariant, style = typography.labelSmall, maxLines = 1)
+            CompositionLocalProvider(LocalCapsuleBackdrop provides scrollingPlane) {
+                StackLifeSurface(CapsuleScene.FROST, Modifier.padding(top = top).fillMaxWidth().testTag("week-dates"),
+                    solid = colors.surface, shape = RoundedCornerShape(0.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.width(rail), contentAlignment = Alignment.Center) {
+                            Text("${monday.monthValue}月", style = typography.labelSmall, maxLines = 1, color = colors.onSurfaceVariant)
+                        }
+                        for (i in 0..6) {
+                            val date = monday.plusDays(i.toLong())
+                            Column(Modifier.width(dayWidth).heightIn(min = 48.dp).clickable(onClickLabel = "查看当天课程", role = Role.Button) { selectedDay = i + 1 }
+                                .semantics { contentDescription = "${date.year}年${date.monthValue}月${date.dayOfMonth}日，周${weekdays[i]}" },
+                                verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                                val ink = if (date == today) colors.primary else colors.onSurface
+                                Text(if (density.fontScale >= 1.35f) weekdays[i].toString() else "周${weekdays[i]}",
+                                    color = ink, style = typography.labelMedium, maxLines = 1)
+                                Text(if (density.fontScale >= 1.35f) "${date.dayOfMonth}" else "${date.monthValue}/${date.dayOfMonth}",
+                                    color = if (date == today) ink else colors.onSurfaceVariant, style = typography.labelSmall, maxLines = 1)
+                            }
+                        }
                     }
                 }
             }
         }) { insets ->
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = insets.calculateTopPadding())) {
+            Column(Modifier.fillMaxSize().plannerBackdrop(scrollingPlane).verticalScroll(rememberScrollState()).padding(top = insets.calculateTopPadding())) {
                 if (week.classes.isEmpty()) Text("本周没有课程", Modifier.padding(start = rail, top = 4.dp, bottom = 4.dp),
                     style = typography.bodySmall, color = colors.onSurfaceVariant)
                 if (changeover != null) Text("${changeover.monthValue}月${changeover.dayOfMonth}日起切换作息，点课程查看实际时间。",

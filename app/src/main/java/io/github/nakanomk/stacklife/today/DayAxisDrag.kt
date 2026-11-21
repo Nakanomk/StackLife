@@ -31,7 +31,11 @@ private sealed class Pickup(val source: SlotSource, val revision: Long) {
 internal data class CheckedSlot(val slot: PlannerCommand.SlotSet, val error: String?)
 
 internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
-    var viewport by mutableStateOf(Rect.Zero)
+    // Placement observations are input hit regions, not layout state. Following an animating
+    // tray must not invalidate the layout that just positioned it.
+    var viewport = Rect.Zero
+    var trayBounds = Rect.Zero
+    var addBounds = Rect.Zero
     private var pickup by mutableStateOf<Pickup?>(null)
     var pointer by mutableStateOf(Offset.Zero)
         private set
@@ -42,11 +46,31 @@ internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
     private fun contentY(point: Offset) = point.y - viewport.top + scroll.value
     private fun hit(point: Offset) = scale.instantAt(contentY(point))
 
+    private fun accepts(at: Offset) = viewport.contains(at) && !trayBounds.contains(at) && !addBounds.contains(at)
+
+    private fun Rect.edgeBelow(at: Offset) =
+        if (at.x >= left && at.x < right && at.y < top) top else viewport.bottom
+    private fun Rect.edgeAbove(at: Offset) =
+        if (at.x >= left && at.x < right && at.y >= bottom) bottom else viewport.top
+
+    fun edgeVelocity(edgePixels: Float, maxSpeed: Float): Float {
+        if (!active || !accepts(pointer)) return 0f
+        val top = maxOf(viewport.top, trayBounds.edgeAbove(pointer), addBounds.edgeAbove(pointer))
+        val bottom = minOf(viewport.bottom, trayBounds.edgeBelow(pointer), addBounds.edgeBelow(pointer))
+        val edge = min(edgePixels, (bottom - top) / 4f)
+        return when {
+            edge <= 0f -> 0f
+            pointer.y < top + edge -> -maxSpeed * (1f - (pointer.y - top) / edge)
+            pointer.y > bottom - edge -> maxSpeed * (1f - (bottom - pointer.y) / edge)
+            else -> 0f
+        }
+    }
+
     // Restrict invalidation (and domain previews) to distinct snapped instants, not pointer pixels.
     private val snapped by derivedStateOf {
         val session = pickup ?: return@derivedStateOf null
         val y = contentY(pointer)
-        if (!viewport.contains(pointer) || y < 0 || y >= scale.height) null
+        if (!accepts(pointer) || y < 0 || y >= scale.height) null
         else {
             val step = 5 * MINUTE_MS
             when (session) {
@@ -101,6 +125,7 @@ internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
 
     fun release(at: Offset, revision: Long, send: (PlannerCommand.SlotSet) -> Unit) {
         move(at)
+        if (!accepts(at)) return
         val command = candidate ?: return
         val session = pickup ?: return
         val original = session.source.originalStart
@@ -195,16 +220,7 @@ internal fun DragEffects(drag: AxisDrag, checkSlot: suspend (PlannerCommand.Slot
     val edgePixels = with(density) { 40.dp.toPx() }
     val maxSpeed = with(density) { 480.dp.toPx() }
     val velocity by remember(drag, edgePixels, maxSpeed) {
-        derivedStateOf {
-            val box = drag.viewport
-            val at = drag.pointer
-            val edge = min(edgePixels, box.height / 4f)
-            if (!drag.active || edge <= 0f || !box.contains(at)) 0f else when {
-                at.y < box.top + edge -> -maxSpeed * (1f - (at.y - box.top) / edge)
-                at.y > box.bottom - edge -> maxSpeed * (1f - (box.bottom - at.y) / edge)
-                else -> 0f
-            }
-        }
+        derivedStateOf { drag.edgeVelocity(edgePixels, maxSpeed) }
     }
     val direction = velocity.compareTo(0f)
     LaunchedEffect(drag, direction) {

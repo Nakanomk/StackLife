@@ -169,7 +169,7 @@ class AssistantProposalTest {
         assertEquals(0, server.requestCount)
     }
 
-    @Test fun darkComposerBoundaryStaysVisibleOnThePageAndInTheConversation() {
+    @Test fun darkComposerUsesOnlyTheOpticalRimInGlassAndKeepsTheSolidInputOutline() {
         val dark = Appearance(theme = ThemeMode.DARK, palette = PaletteMode.SEED)
         val optical = tag("navigation-capsule").fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "折射胶囊"
         for (scene in listOf("page", "chat")) {
@@ -182,16 +182,31 @@ class AssistantProposalTest {
                 runBlocking { store.apply(PlannerCommand.EditAppearance(AppearancePatch.Replace(dark.copy(assistantGlass = glass)))) }
                 val material = if (glass && optical) "折射胶囊" else "实色胶囊"
                 val shell = await(hasStateDescription(material) and hasAnyDescendant(hasTestTag("assistant-input")))
-                val pixels = shell.captureToImage().toPixelMap()
-                for (column in 1..3) for (top in listOf(true, false)) {
-                    val x = pixels.width * column / 4
-                    fun luminance(inset: Int) = pixels[x, if (top) inset else pixels.height - 1 - inset].luminance()
-                    val fill = luminance(pixels.height / 8)
-                    val edge = (0..pixels.height / 20).maxOf { luminance(it) }
-                    val contrast = (edge + .05f) / (fill + .05f)
-                    assertTrue("$scene $material: boundary against dark fill at x=$x, top=$top was $contrast:1", contrast >= 3f)
+                fun checkRim() {
+                    val pixels = shell.captureToImage().toPixelMap()
+                    val contrast = buildList {
+                        for (column in 1..3) for (top in listOf(true, false)) {
+                            val x = pixels.width * column / 4
+                            fun luminance(inset: Int) = pixels[x, if (top) inset else pixels.height - 1 - inset].luminance()
+                            val fill = luminance(pixels.height / 8)
+                            val edge = (0..pixels.height / 20).maxOf { luminance(it) }
+                            add((edge + .05f) / (fill + .05f))
+                        }
+                    }
+                    if (glass && optical) {
+                        assertTrue("$scene: a hard outline covers the quiet side of the lens: $contrast", contrast.min() < 3f)
+                    } else {
+                        assertTrue("$scene: missing dark solid-field outline: $contrast", contrast.min() >= 3f)
+                    }
                 }
+                checkRim()
                 capture("assistant-dark-$scene-${if (glass) "glass" else "solid"}.png")
+                tag("assistant-input").performClick().assertIsFocused()
+                checkRim()
+                ui.activityRule.scenario.onActivity { activity ->
+                    activity.getSystemService(InputMethodManager::class.java)
+                        .hideSoftInputFromWindow(activity.window.decorView.windowToken, 0)
+                }
             }
         }
     }

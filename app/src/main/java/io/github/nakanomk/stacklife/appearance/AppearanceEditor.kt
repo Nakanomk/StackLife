@@ -130,6 +130,7 @@ private fun LayoutFields(d: Appearance, update: (Appearance) -> Unit) {
     Column {
         Choice("界面留白", listOf(false, true), d.compact, { if (it) "紧凑" else "标准" }) { update(d.copy(compact = it)) }
         Choice("导航样式", NavStyle.entries, d.navStyle, { if (it == NavStyle.FLOATING) "浮动胶囊" else "贴底导航" }) { update(d.copy(navStyle = it)) }
+        Choice("待排队列", listOf(true, false), d.floatingDayTray, { if (it) "悬浮小球" else "常驻托盘" }) { update(d.copy(floatingDayTray = it)) }
         Choice("启动页", d.order, d.start, { it.label }) { update(d.copy(start = it)) }
         SectionTitle("导航次序")
         for ((i, dest) in d.order.withIndex()) {

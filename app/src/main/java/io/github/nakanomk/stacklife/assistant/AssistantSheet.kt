@@ -1,6 +1,6 @@
 package io.github.nakanomk.stacklife.assistant
 
-import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -71,26 +71,24 @@ private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: As
     val ui by model.state.collectAsStateWithLifecycle()
     val active = ui.page == null
     val surface = if (active) Modifier else Modifier.clearAndSetSemantics {}
-    StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth().then(surface), MaterialTheme.colorScheme.surfaceContainerHigh) {
-        val origin = ui.draftPage.takeIf { active && ui.composerId == id }
-        MessageEditor(if (active && ui.composerId == id) ui.draft else "", origin?.scopeName() ?: scope,
-            { model.editLocal(id, it, page) }, { model.submitLocal(id, target) },
-            origin?.takeIf { page != null && privateScope == null }?.let { "草稿范围：${it.scopeName()}" }, active)
-    }
+    val origin = ui.draftPage.takeIf { active && ui.composerId == id }
+    MessageEditor(if (active && ui.composerId == id) ui.draft else "", origin?.scopeName() ?: scope,
+        { model.editLocal(id, it, page) }, { model.submitLocal(id, target) },
+        origin?.takeIf { page != null && privateScope == null }?.let { "草稿范围：${it.scopeName()}" }, active, surface)
 }
 
 @Composable
 private fun MessageEditor(text: String, scope: String, onChange: (String) -> Unit, onSend: () -> Unit, originHint: String? = null,
-    active: Boolean = true) {
+    active: Boolean = true, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val haptics = LocalHapticFeedback.current
     var editing by remember { mutableStateOf(false) }
-    val edge = when {
-        editing -> Modifier.border(1.5.dp, colors.primary, CircleShape)
-        colors.surface.luminance() < .5f -> Modifier.border(1.dp, colors.outline, CircleShape)
-        else -> Modifier
+    val solidBorder = when {
+        editing -> BorderStroke(1.5.dp, colors.primary)
+        colors.surface.luminance() < .5f -> BorderStroke(1.dp, colors.outline)
+        else -> null
     }
     val enabled = active && text.isSendable()
     fun submit() {
@@ -100,32 +98,34 @@ private fun MessageEditor(text: String, scope: String, onChange: (String) -> Uni
         haptics.performHapticFeedback(HapticFeedbackType.VirtualKey)
         onSend()
     }
-    Row(Modifier.fillMaxWidth().then(edge).padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
-            BasicTextField(value = text, onValueChange = onChange, singleLine = true, enabled = active,
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("assistant-input")
-                    .semantics { contentDescription = "$scope · 助理消息" }
-                    .onFocusChanged { editing = it.isFocused }
-                    .onPreviewKeyEvent {
-                        if (it.key != Key.Enter && it.key != Key.NumPadEnter) false
-                        else { if (it.type == KeyEventType.KeyUp) submit(); true }
-                    },
-                textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurface),
-                cursorBrush = SolidColor(colors.primary),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { submit() }),
-                decorationBox = { field -> Column(verticalArrangement = Arrangement.Center) {
-                    if (originHint != null) Text(originHint, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Box(contentAlignment = Alignment.CenterStart) {
-                        if (text.isEmpty()) Text("给日程助理发消息", style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
-                        field()
-                    }
-                } })
-        }
-        IconButton(onClick = ::submit, enabled = enabled, modifier = Modifier.size(48.dp).testTag("assistant-send"),
-            colors = IconButtonDefaults.iconButtonColors(contentColor = colors.primary)) {
-            Icon(painterResource(R.drawable.ic_assistant_send), contentDescription = "发送消息")
+    StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth().then(modifier), colors.surfaceContainerHigh, solidBorder = solidBorder) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
+                BasicTextField(value = text, onValueChange = onChange, singleLine = true, enabled = active,
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("assistant-input")
+                        .semantics { contentDescription = "$scope · 助理消息" }
+                        .onFocusChanged { editing = it.isFocused }
+                        .onPreviewKeyEvent {
+                            if (it.key != Key.Enter && it.key != Key.NumPadEnter) false
+                            else { if (it.type == KeyEventType.KeyUp) submit(); true }
+                        },
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurface),
+                    cursorBrush = SolidColor(colors.primary),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { submit() }),
+                    decorationBox = { field -> Column(verticalArrangement = Arrangement.Center) {
+                        if (originHint != null) Text(originHint, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (text.isEmpty()) Text("给日程助理发消息", style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
+                            field()
+                        }
+                    } })
+            }
+            IconButton(onClick = ::submit, enabled = enabled, modifier = Modifier.size(48.dp).testTag("assistant-send"),
+                colors = IconButtonDefaults.iconButtonColors(contentColor = colors.primary)) {
+                Icon(painterResource(R.drawable.ic_assistant_send), contentDescription = "发送消息")
+            }
         }
     }
 }
@@ -290,9 +290,7 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
                 }
                 ui.reviewAgain -> Row { ActionPill("放弃提案", model::cancel); ActionPill("重新预览", model::refreshProposal, prominent = true) }
                 ui.importRequested -> Row { ActionPill("取消", model::cancel); ActionPill("打开本地课表导入器", { model.close(); onImport() }, prominent = true) }
-                else -> StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth(), MaterialTheme.colorScheme.surfaceContainerHigh) {
-                    MessageEditor(ui.draft, page.scopeName(), model::editMessage, model::send)
-                }
+                else -> MessageEditor(ui.draft, page.scopeName(), model::editMessage, model::send)
             }
         }
     }

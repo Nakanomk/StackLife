@@ -8,13 +8,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppearancePersistenceTest {
-    @Test fun untouchedProfileGetsGlassButCustomizedLegacySolidAndExplicitOptOutStaySolid() {
+    @Test fun missingGlassPreferenceEnablesGlassAndAnExplicitOptOutSurvivesUpgrade() {
         assertTrue(decodeAppearance("{}").glass)
         val legacy = decodeAppearance("""{"compact":true}""")
         assertTrue(legacy.compact)
-        assertFalse(legacy.glass)
+        assertTrue(legacy.glass)
         val optedOut = Appearance(glass = false)
         assertEquals(optedOut, decodeAppearance(encodeAppearance(optedOut)))
+    }
+
+    @Test fun resettingQueuePresentationRestoresTheFloatingTrayAndKeepsMaterialChoices() {
+        val pinned = AppearanceFields(AppearanceGroup.LAYOUT, buildJsonObject { put("floatingDayTray", JsonPrimitive(false)) })
+            .applyTo(decodeAppearance("""{"glass":false}"""))
+        assertFalse(decodeAppearance(encodeAppearance(pinned)).floatingDayTray)
+        assertEquals(Appearance(glass = false), AppearanceFields(AppearanceGroup.LAYOUT, null).applyTo(pinned))
     }
 
     @Test fun courseTextOutlineDefaultsOnForOldProfilesAndExplicitOffRoundTrips() {

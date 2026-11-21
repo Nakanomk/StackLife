@@ -51,8 +51,8 @@ class FixedCourseDragTest {
             StackLifeTheme { TodayRoute(vm, date, campusZone, {}, {}, {}, null, {}, {}) }
         }
         val axis = await(hasTestTag("day-axis"))
-        fun time(t: String) = ui.onNodeWithTag("hour:$t", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.top
-        val middle = "hour:15:30"; ui.onNodeWithTag(middle, useUnmergedTree = true).performScrollTo()
+        fun time(t: String) = ui.dayTick(t).fetchSemanticsNode().boundsInRoot.top
+        ui.dayTick("15:30").performScrollTo()
         val shift = time("15:30") - axis.fetchSemanticsNode().boundsInRoot.center.y
         axis.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, shift) }; ui.waitForIdle()
         val root = ui.onRoot()

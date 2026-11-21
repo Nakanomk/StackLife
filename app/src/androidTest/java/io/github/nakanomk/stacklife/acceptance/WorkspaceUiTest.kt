@@ -71,12 +71,17 @@ class WorkspaceUiTest {
             assertEquals("A page action must not displace navigation", page.center.x, nav.center.x, 1f)
         }
         checkPlacement()
+        val ball = await(hasTestTag("day-tray-toggle") and hasStateDescription("已收起")).fetchSemanticsNode().boundsInRoot
+        val add = ui.onNodeWithTag("add-task").fetchSemanticsNode().boundsInRoot
+        assertEquals(add.center.x, ball.center.x, 1f)
+        assertTrue(ball.top > add.bottom && ball.bottom < ui.onNodeWithTag("assistant-input").fetchSemanticsNode().boundsInRoot.top)
         ui.onNodeWithTag("add-task").performTouchInput { click() }
         await(hasTestTag("title:0")).performTextInput("从时间轴创建")
         val save = hasText("添加到队列") and hasClickAction()
         ui.onNode(save).assertIsDisplayed()
         ui.onNode(save).performClick()
         val task = awaitQueue("从时间轴创建").queue.single()
+        await(hasTestTag("day-tray-toggle") and hasStateDescription("已收起")).performClick()
         await(hasTestTag("tray:${task.id}")).assertIsDisplayed()
         ui.onNodeWithTag("nav:workspace").performClick()
         await(hasTestTag("task:${task.id}")).assertIsDisplayed()

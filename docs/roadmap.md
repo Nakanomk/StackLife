@@ -73,7 +73,7 @@ interface PlannerApi {
 
 ## M2 今天
 
-完整导航为「今天 / 工作台 / 流程图 / 课表」，设置从顶栏进；只展示已交付目的地。今天默认设备所在日期，顶部切换日期并显示当前时刻线。底部可收起的**非模态**待排队列托盘与单日轴同时可见；待排指无时段的在队任务。参考 [Structured](https://structured.app/visual-planning) 的任务/日历同轴和 [Planner Hours](https://github.com/baslawson/Planner#features) 的移动、调整时长；不移植 GPL 应用代码。无须跨目的地拖动或引入月历框架。
+完整导航为「今天 / 工作台 / 流程图 / 课表」，设置从顶栏进；今天默认设备所在日期。时间轴一直铺到悬浮导航后面。右下加号下的小球向上展开为**非模态**待排队列，同一个表面反向收回；不打开时列表不占位。收起时箭头向上，展开时向下，队列上缘渐变磨砂。「布局 → 待排队列」可改回常驻托盘。待排指无时段的在队任务。轴和拖动参考 [Structured](https://structured.app/visual-planning) 与 [Planner Hours](https://github.com/baslawson/Planner#features)，小球变列表参考 [Material Container Transform](https://github.com/material-components/material-components-android/blob/master/docs/theming/Motion.md#container-transform)。
 
 - Compose 可滚动刻度接[原生拖动手势](https://developer.android.com/develop/ui/compose/touch-input/pointer-input/drag-swipe-fling)。长按拖动，边缘滚动；指针换算为含滚动偏移的轴内容坐标，按 5 分钟就近吸附。预览半透明落点、起止与冲突。松手才落库；轴外、取消、目标失效不改原数据。「安排时间」打开同一日期/时间/时长编辑器，无需拖动也可完成全部安排。
 - `TimeBlock(taskId UNIQUE, startInstant, endInstant)` 引用原任务。长按标题拖动整段；长按任务旁竖条，松开后直接拖下端点，只改结束时间，起点不动。交互参考 [Google 日历的底部圆形时长手柄](https://support.google.com/calendar/answer/72143?co=GENIE.Platform%3DAndroid)和 [FullCalendar 的触摸选择](https://fullcalendar.io/docs/touch)。课程、完成项和没有真实结束点的续段不提供手柄。取消只释放时段；移出任务释放占位，完成任务保留历史块。
@@ -144,7 +144,7 @@ interface PlannerApi {
 
 - 四个根页面在同一横向分页容器中，导航与助理位于容器外。默认浮动导航，支持改为贴底；键盘出现时收起主导航。根页不重复页名，顶栏中间胶囊放日期、队列/栈、流程图创建或教学周；独立动作用圆形按钮。右下加号属于页面。手动操作不依赖模型。
 - 设置首页按外观、日程助理和工作台恢复策略分组。「色彩」「布局」「材质与动态」各有独立目的地，只显示、保存或恢复本页字段。色彩支持随系统/浅/深、Android 12+ 动态色或种子（默认 `#435D92`）；使用 [MaterialKolor 6.0.0](https://github.com/jordond/MaterialKolor/releases/tag/6.0.0) 生成 `SPEC_2025` 颜色角色。
-- 支持标准/紧凑留白、主导航次序/启动页、任务时长/备注、贴底/浮动、材质总开关和导航/助理分项、减弱动效、减少透明度、增强对比及系统触感。默认舒适、今天、动态色、玻璃开启。旧版自定义配置中省略的 `glass=false` 保持实色；未配置的 `{}` 采用新默认。所有新写入显式保留关闭选择。三种恢复策略不受任何外观重置影响。
+- 支持标准/紧凑留白、主导航次序/启动页、任务时长/备注、贴底/浮动、常驻/悬浮队列、材质总开关和导航/助理分项、减弱动效、减少透明度、增强对比及系统触感。默认舒适、今天、动态色、悬浮队列、玻璃开启。首次启动和升级时没有 `glass` 字段的配置均用开启；显式 `false` 不因升级改变，减少透明度和增强对比仍优先。三种恢复策略不受外观重置影响。
 - 首发图标为原创 fumo 颜文字 **`ᗜˬᗜ`**：两只对称方眼和低位短弧嘴，用独立矢量笔画，不依赖字库、商业布偶照片，不强画天子肖像。按 [Android Adaptive Icon](https://developer.android.com/develop/ui/views/launch/icon_design_adaptive) 做 108×108 dp 分层，识别区在中心 66×66 dp，彩色前景/背景及 monochrome 层共用轮廓，不预烘启动器圆角/阴影。空队列小标沿用同一张脸，不用颜文字代替操作标签。
 
 设置草稿只存在于编辑页；退出不写库，保存使用 `PlannerApi` 的同一预览/提交事务。持久化契约是 `planner/Appearance.kt`，Room 4→5 为原设置行加入缺省 `{}` 的外观字段，不迁移队列、快照、时段或模型凭据。主题/平台能力、局部绘制和设置编辑分别在 `StackLifeTheme.kt`、`appearance/`；业务页只读取对应偏好。以后替换导航及页面布局不需要更改排程或恢复规则。
@@ -166,7 +166,7 @@ interface PlannerApi {
 |[Metrolist](https://github.com/MetrolistGroup/Metrolist) / [Mihon](https://github.com/mihonapp/mihon)|助理从收起到展开的层次；队列手柄及移动到顶/底。|
 |Flutter [PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus) / [LocalSend](https://github.com/localsend/localsend)|中文标签分组、多选排序；单一目的操作。只借信息结构，不搬旧视觉、播放器架构或插画。|
 
-**时间轴与底栏。** [Structured 日视图](https://help.structured.app/en/articles/380546)在同一竖轴左侧标时刻、右侧读事件；StackLife 保留比例空白供五分钟拖放。参考 [Etar 的当前时刻线](https://github.com/Etar-Group/Etar-Calendar/blob/6fb46d1606622aecc719b7e5dc15a48528768c94/app/src/main/java/com/android/calendar/DayView.java#L2425-L2440)，分钟线从轴起画，不用标签覆盖整点；刻度列按系统字号实测文本宽度。[Etar 的 FAB](https://github.com/Etar-Group/Etar-Calendar/blob/6fb46d1606622aecc719b7e5dc15a48528768c94/app/src/main/res/layout/all_in_one_material.xml) 对应今天页轴右下、托盘上方的加号；工作台加号在任务列表右下，末项可滚到按钮上方。导航和工具栏矢量取自 [Google Material Design Icons](https://github.com/google/material-design-icons)，Apache-2.0 许可随 APK 分发。
+**时间轴与底栏。** [Structured 日视图](https://help.structured.app/en/articles/380546)在同一竖轴左侧标时刻、右侧读事件；StackLife 保留比例空白供五分钟拖放。参考 [Etar 的当前时刻线](https://github.com/Etar-Group/Etar-Calendar/blob/6fb46d1606622aecc719b7e5dc15a48528768c94/app/src/main/java/com/android/calendar/DayView.java#L2425-L2440)，分钟线从轴起画，不用标签覆盖整点；刻度列按系统字号实测文本宽度。[Etar 的 FAB](https://github.com/Etar-Group/Etar-Calendar/blob/6fb46d1606622aecc719b7e5dc15a48528768c94/app/src/main/res/layout/all_in_one_material.xml) 对应今天和工作台的页面级加号；队列、加号、助理和导航覆盖的区域不是时间轴落点，末项可滚到控件上方。导航和工具栏矢量取自 [Google Material Design Icons](https://github.com/google/material-design-icons)，Apache-2.0 许可随 APK 分发。
 
 
 ## 动效与材质
@@ -179,9 +179,11 @@ interface PlannerApi {
 
 本地实验变体只接受 `-PstacklifeKitAar=/绝对路径/sharedview-kit-1.0.0.5.aar`，SHA-256 必须为 `7c0937ecde545a262619e5fa19d56a21b0ad3fd8013cbc4fe058c497808702bd`。`./gradlew -PstacklifeKitAar=… :app:assembleKitLab` 生成独立 `.kitlab`，只在获准设备本地测试，不交付；`StackLifeKit` 日志仅记协议值。普通 `:app:assemblePreview` 不需要 AAR，也不会打入适配器或详情 Activity。
 
-**可选光学层。** 壳体沿用 [BiliPai FloatingDockChrome](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/FloatingDockChrome.kt)：Miuix `drawBackdrop` 采样 → 调色与模糊 → 透镜 → `drawEdgeStroke`。随手机倾斜转动主光源，次光源固定；矮壳体按相对高度减弱折射与边光，不加整圈实线。透镜的普通／色散着色器直接取自 [BiliPai LiquidLens.kt](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/design-system/src/main/java/com/android/purebilibili/core/ui/effect/LiquidLens.kt)（该文件独立标明 Apache-2.0）；[Miuix 边缘着色器](https://github.com/compose-miuix-ui/miuix/blob/d27cbb0b375912cdf42670553fdb564d8ff7fc23/miuix-material/src/commonMain/kotlin/top/yukonga/miuix/kmp/material/EdgeStrokeDrawing.kt)通过固定版本 `0.9.5-beta02` 调用。嵌套控件采样父级材质而非其文字。助理输入条不叠镜面高光：深色静置时用主题 `outline` 细线区分输入区，编辑时沿用 [BiliPai 输入框](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/search/SearchTopBar.kt)的主色焦点线。页面、对话内以及实色降级使用同一编辑器。不采样登录网页、模型密钥或地址输入区。
+**可选光学层。** 壳体沿用 [BiliPai FloatingDockChrome](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/FloatingDockChrome.kt)：Miuix `drawBackdrop` 采样 → 调色与模糊 → 透镜 → `drawEdgeStroke`。随手机倾斜转动主光源，次光源固定；矮壳体按相对高度减弱折射与边光，不加整圈实线。透镜的普通／色散着色器直接取自 [BiliPai LiquidLens.kt](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/design-system/src/main/java/com/android/purebilibili/core/ui/effect/LiquidLens.kt)（该文件独立标明 Apache-2.0）；[Miuix 边缘着色器](https://github.com/compose-miuix-ui/miuix/blob/d27cbb0b375912cdf42670553fdb564d8ff7fc23/miuix-material/src/commonMain/kotlin/top/yukonga/miuix/kmp/material/EdgeStrokeDrawing.kt)通过固定版本 `0.9.5-beta02` 调用。页面和对话里的助理共用一个编辑器：玻璃无论是否聚焦都只画材质边光，不叠输入框描边；实色在深色静置时保留可辨边界，编辑时用主色边界。不采样登录网页、模型密钥或地址输入区。
 
 浮动导航、队列／栈和作息分段都可横拖水滴，松手选定、取消保留原项；点按、键盘和 TalkBack 仍使用原来的选项。玻璃档采样真实页面和壳体，按住时向四周有弹性，释放后回到分页器的位置；实色档不建立透镜。玻璃课格恢复有深度的透镜：透过有色材质能看到实际节次线在两侧弯折，按住时透镜和内容一起轻微放大；不在课格里另画装饰弧线，白字也不参与背景折射。材质页与周视图共用 `PeriodGrid` / `CourseTile`；关闭玻璃时课程变为不透明实色，色相、位置与点击区域不变。外观编辑沿用 [Apple Sheets](https://developer.apple.com/design/human-interface-guidelines/sheets)：顶栏取消／保存，居中重置只影响当前分组草稿。
+
+课格先对真实节次线做 [Miuix 高斯模糊](https://github.com/compose-miuix-ui/miuix/blob/v0.9.5-beta02/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/internal/BlurEffect.kt)，再折射；白字最后绘制。月份、星期和日期固定在网格上方，课块能从下方滚过。添加课程的顶栏、表单组、选周和核对页都使用同一材质，弹出选项采样自己所在的窗口。磨砂过渡参考 [BiliPai 渐变模糊](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/OfficialProgressiveTopBlur.kt)。关闭玻璃、减少透明度或增强对比时，同一布局改为不透明表面。
 
 玻璃仅在 API 33+、硬件加速、非低内存/省电、无减少透明度/高对比要求时可用。否则提示「当前使用实色」及原因，不把模糊称为折射；关玻璃完全卸下光学层。按 [Google 无障碍标准](https://developer.android.com/guide/topics/ui/accessibility/apps)，触控目标至少 48×48 dp，普通文字对比 4.5:1、大字 3:1；TalkBack 读状态并有等价非拖拽操作。系统字体缩放、edge-to-edge 安全区、输入法和旋转都不能遮操作。减少动态与减少透明度分开处理。
 
@@ -276,6 +278,8 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 任务／栈帧卡片伸展成详情正文，顶栏独立横移；实录中侧滑一半、反向取消、再返回都保留同一任务。200% 字号下检查了五个手势进度，标题不穿过返回按钮。13 项定向设备用例通过。签名普通包从 0.9.0 覆盖安装到 Android 16 真机，系统回读 0.10.0（15）；真机只验安装，不据此声称系统 Kit 支持或帧率。
 
 **v0.10.1 复审。** 在同一台 OnePlus PLR110 的深色模式下查看了 BiliPai 首页悬浮栏、展开的搜索输入与 StackLife。StackLife 助理空输入框上下边缘中点与框内底色的真机截图取样，从旧版 1.0:1 提高到约 5.0:1；只截取控件，不保存个人日程。API 37 用例在页面和对话面板分别检查玻璃与实色输入边界至少 3:1。课表另在 4／6／12 节课格核对横线折射、按压与滚动；关闭玻璃则横线不透出。常规／200% 字号、导航松手换页及 RTL、同课跨周配色均有定向设备验证。
+
+**v0.10.2 复审。** API 37 模拟器上用同一份课表、同一窗口比较：在同一长课中心，三条真实节次线的半峰宽均从 4 px 增到 10 px，白色课名未被滤镜处理。滚动课表时能在固定的星期文字背后看见模糊课色；实色档日期仍可点，不透出课色。今天页在展开与收起的录屏中都有小球和完整列表之间的几何中间帧，不是两页交叉淡化。
 
 |阶段 / 用例|输入 → 可观察结果（校方登录、真实模型、联盟真机和性能有各自的验收条件）|
 |---|---|

@@ -1,11 +1,18 @@
 package io.github.nakanomk.stacklife.acceptance
 
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.InputModeManager
+import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -25,6 +32,14 @@ import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 
+// An adjacent civil day is precomposed for paging. The merged accessibility tree exposes
+// only the selected axis; scope its unmerged scale marks to that same live node.
+internal fun SemanticsNodeInteractionsProvider.dayTick(label: String): SemanticsNodeInteraction {
+    val axis = onNodeWithTag("day-axis").fetchSemanticsNode().id
+    return onNode(hasTestTag("hour:$label") and hasAnyAncestor(SemanticsMatcher("selected day axis") { it.id == axis }),
+        useUnmergedTree = true)
+}
+
 @RunWith(AndroidJUnit4::class)
 class DayTimelineTest {
     private val store = WorkspaceFixture()
@@ -43,11 +58,18 @@ class DayTimelineTest {
         ui.waitUntil(10_000) { ui.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
         return ui.onNode(matcher)
     }
+    private fun openTray() {
+        await(hasTestTag("day-tray-toggle") and hasStateDescription("已收起")).performClick()
+        ui.waitForIdle()
+    }
     private fun centerTick(label: String): Offset {
-        val tick = ui.onNodeWithTag("hour:$label", useUnmergedTree = true)
+        val tick = ui.dayTick(label)
         tick.performScrollTo()
         val axis = ui.onNodeWithTag("day-axis")
-        val center = axis.fetchSemanticsNode().boundsInRoot.center
+        val area = ui.onNodeWithTag("day-drop-area").fetchSemanticsNode().boundsInRoot
+        val tray = ui.onNodeWithTag("day-tray-container").fetchSemanticsNode().boundsInRoot
+        val floor = if (area.center.x >= tray.left && area.center.x < tray.right) minOf(area.bottom, tray.top) else area.bottom
+        val center = Offset(area.center.x, (area.top + floor) / 2)
         val shift = tick.fetchSemanticsNode().boundsInRoot.top - center.y
         axis.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, shift) }
         ui.waitForIdle()
@@ -68,10 +90,10 @@ class DayTimelineTest {
 
     private fun dragEndTo(id: String, time: String, slightlyToward: String? = null) {
         val handle = await(hasTestTag("resize-end:$id")).fetchSemanticsNode().boundsInRoot
-        val y = ui.onNodeWithTag("hour:$time", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.top
+        val y = ui.dayTick(time).fetchSemanticsNode().boundsInRoot.top
         val start = handle.center
         val extra = slightlyToward?.let {
-            (ui.onNodeWithTag("hour:$it", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.top - y) / 5
+            (ui.dayTick(it).fetchSemanticsNode().boundsInRoot.top - y) / 5
         } ?: 0f
         val distance = y + extra - handle.bottom
         ui.onRoot().performTouchInput {
@@ -120,7 +142,7 @@ class DayTimelineTest {
         ui.onNodeWithTag("drop-preview").assertDoesNotExist()
         assertEquals(before, readDay())
         dragEndTo(task.taskId, "16:30")
-        val outside = ui.onNodeWithTag("day-axis").fetchSemanticsNode().boundsInRoot.bottom + 2f
+        val outside = ui.onNodeWithTag("day-drop-area").fetchSemanticsNode().boundsInRoot.bottom + 2f
         ui.onRoot().performTouchInput { moveTo(Offset(center.x, outside)); up() }
         assertEquals(before, readDay())
         dragEndTo(task.taskId, "16:30")
@@ -164,9 +186,9 @@ class DayTimelineTest {
         val handle = await(hasTestTag("resize-end:$id"))
         handle.assertIsDisplayed().assertContentDescriptionContains("19:00", substring = true)
         val box = handle.fetchSemanticsNode().boundsInRoot
-        val endTick = ui.onNodeWithTag("hour:19:00", useUnmergedTree = true)
+        val endTick = ui.dayTick("19:00")
         assertEquals(endTick.fetchSemanticsNode().boundsInRoot.top, box.bottom, 2f)
-        val edge = Offset(box.center.x, axis.fetchSemanticsNode().boundsInRoot.bottom - 4f)
+        val edge = Offset(box.center.x, ui.onNodeWithTag("day-drop-area").fetchSemanticsNode().boundsInRoot.bottom - 4f)
         ui.mainClock.autoAdvance = false
         try {
             ui.onRoot().performTouchInput { down(box.center); moveTo(edge) }
@@ -208,10 +230,110 @@ class DayTimelineTest {
         assertEquals(0L, readDay().revision)
     }
 
+    @Test fun sameQueueSurfaceGrowsFromTheBallAndReversesBeforeEitherEndpoint() {
+        runBlocking { store.apply(*(1..12).map { TaskAdd(TaskInput("待办 $it")) }.toTypedArray()) }
+        show()
+        val toggle = ui.onNodeWithTag("day-tray-toggle")
+        val panel = ui.onNodeWithTag("day-tray-container")
+        fun bounds() = panel.fetchSemanticsNode().boundsInRoot
+        val closed = bounds()
+        val identity = panel.fetchSemanticsNode().id
+        val axis = ui.onNodeWithTag("day-axis").fetchSemanticsNode().boundsInRoot
+        val dock = ui.onNodeWithTag("navigation-capsule").fetchSemanticsNode().boundsInRoot
+        assertTrue("The actual timeline must extend below the navigation", axis.bottom >= dock.bottom)
+        toggle.assertWidthIsEqualTo(48.dp).assertHeightIsEqualTo(48.dp).assert(hasStateDescription("已收起"))
+        assertEquals("展开待排队列", toggle.fetchSemanticsNode().config[SemanticsActions.OnClick].label)
+        ui.onNodeWithTag("day-tray").assertDoesNotExist()
+        ui.mainClock.autoAdvance = false
+        try {
+            toggle.performTouchInput { click() }; ui.mainClock.advanceTimeBy(112)
+            val opening = bounds()
+            assertTrue(opening.center.x != closed.center.x && opening.top < closed.top)
+            assertTrue(opening.width > closed.width && opening.height > closed.height)
+            toggle.performTouchInput { click() }; ui.mainClock.advanceTimeBy(96)
+            val reversing = bounds()
+            assertTrue(reversing.width < opening.width && reversing.width > closed.width)
+            assertTrue(reversing.height < opening.height && reversing.height > closed.height)
+            toggle.performTouchInput { click() }; ui.mainClock.advanceTimeBy(96)
+            val growingAgain = bounds()
+            assertTrue(growingAgain.width > reversing.width && growingAgain.height > reversing.height)
+            ui.mainClock.advanceTimeBy(400)
+            val open = bounds()
+            assertTrue(open.width > opening.width && open.height > opening.height)
+            assertTrue(open.width > growingAgain.width && open.height > growingAgain.height)
+            assertEquals(identity, panel.fetchSemanticsNode().id)
+            toggle.assert(hasStateDescription("已展开"))
+            assertEquals("收起待排队列", toggle.fetchSemanticsNode().config[SemanticsActions.OnClick].label)
+        } finally { ui.mainClock.autoAdvance = true }
+        ui.onNodeWithTag("day-tray").performScrollToNode(hasText("待办 12"))
+        val last = ui.onNodeWithText("待办 12")
+        last.assertIsDisplayed().performTouchInput { click() }
+        await(hasTestTag("slot:hour")).assertExists()
+        assertTrue(readDay().blocks.isEmpty())
+    }
+
+    @Test fun pinnedQueueStillResizesTheTimelineInBothDirections() {
+        runBlocking { store.apply(EditAppearance(AppearancePatch.Replace(Appearance(floatingDayTray = false)))) }
+        show()
+        val toggle = ui.onNodeWithTag("day-tray-toggle").assert(hasStateDescription("已展开"))
+        val wide = ui.onNodeWithTag("day-axis").fetchSemanticsNode().boundsInRoot.width < ui.onRoot().fetchSemanticsNode().boundsInRoot.width - 1f
+        fun axis() = ui.onNodeWithTag("day-axis").fetchSemanticsNode().boundsInRoot.let { if (wide) it.width else it.height }
+        val short = axis()
+        ui.onNodeWithText("队列中没有待排任务").assertIsDisplayed()
+        ui.mainClock.autoAdvance = false
+        try {
+            toggle.performClick(); ui.mainClock.advanceTimeBy(144)
+            val closing = axis()
+            ui.mainClock.advanceTimeBy(400)
+            val tall = axis()
+            assertTrue(closing > short && closing < tall)
+            toggle.assert(hasStateDescription("已收起")); ui.onNodeWithTag("day-tray").assertDoesNotExist()
+            toggle.performClick(); ui.mainClock.advanceTimeBy(144)
+            val opening = axis()
+            assertTrue(opening < tall && opening > short)
+            ui.mainClock.advanceTimeBy(400)
+            assertEquals(short, axis(), 1f)
+        } finally { ui.mainClock.autoAdvance = true }
+        ui.onNodeWithText("队列中没有待排任务").assertIsDisplayed()
+    }
+
+    @Test fun reducedMotionKeepsRtlKeyboardFocusAndTheLastDaySlotCanClearTheControls() {
+        runBlocking { store.apply(EditAppearance(AppearancePatch.Replace(Appearance(reduceMotion = true)))) }
+        lateinit var inputMode: InputModeManager
+        ui.setContent {
+            inputMode = LocalInputModeManager.current
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
+            }
+        }
+        val toggle = await(hasTestTag("day-tray-toggle"))
+        fun box(tag: String) = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        val ball = box("day-tray-container"); val fab = box("add-task")
+        assertTrue(ball.center.x < box("day-axis").center.x && ball.top > fab.bottom)
+        assertEquals(fab.center.x, ball.center.x, 1f)
+        ui.runOnIdle { assertTrue(inputMode.requestInputMode(InputMode.Keyboard)) }
+        toggle.performSemanticsAction(SemanticsActions.RequestFocus)
+        toggle.assertIsFocused()
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.onRoot().performKeyInput { pressKey(Key.Enter) }; ui.mainClock.advanceTimeByFrame()
+            val open = box("day-tray-container")
+            assertTrue(open.width > ball.width && open.height > ball.height)
+            toggle.assertIsFocused().assert(hasStateDescription("已展开"))
+            ui.mainClock.advanceTimeBy(144); assertEquals(open, box("day-tray-container"))
+            ui.onRoot().performKeyInput { pressKey(Key.Enter) }; ui.mainClock.advanceTimeByFrame()
+            assertEquals(ball, box("day-tray-container"))
+        } finally { ui.mainClock.autoAdvance = true }
+        toggle.assertIsFocused()
+        ui.onNodeWithTag("day-axis").performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
+        val tick = ui.dayTick("23:45").fetchSemanticsNode().boundsInRoot
+        assertTrue(tick.height > 0f && tick.bottom < fab.top)
+    }
+
     @Test fun dragFromTrayThenMoveSameBlockAndCancelInEditor() {
         runBlocking { store.apply(TaskAdd(TaskInput("报告提纲"))) }
         val task = readDay().tray.single()
-        show()
+        show(); openTray()
         val target = centerTick("15:45")
         val tray = await(hasTestTag("tray:${task.id}"))
         pickup(tray.fetchSemanticsNode().boundsInRoot.center, target)
@@ -239,10 +361,15 @@ class DayTimelineTest {
     @Test fun conflictingGestureOutsideDropAndPointerCancelDoNotWrite() {
         runBlocking { store.apply(TaskAdd(TaskInput("已约", ref = "busy")), SlotSet("@busy", at(15, 45), 30), TaskAdd(TaskInput("待排"))) }
         val before = readDay(); val task = before.tray.single()
-        show()
+        show(); openTray()
         val inside = centerTick("16:00")
         val source = await(hasTestTag("tray:${task.id}"))
         val start = source.fetchSemanticsNode().boundsInRoot.center
+        // The translucent list has real times underneath. Holding and releasing on the row
+        // itself (not just returning after an excursion) must not schedule one of them.
+        ui.onRoot().performTouchInput { down(start); advanceEventTime(700); moveBy(Offset(0f, 1f)); up() }
+        ui.onNodeWithTag("drop-preview").assertDoesNotExist()
+        assertEquals(before, readDay())
         pickup(start, inside)
         await(hasText("时段冲突：", substring = true) and hasText("已约", substring = true)).assertIsDisplayed()
         ui.onRoot().performTouchInput { up() }
@@ -253,6 +380,14 @@ class DayTimelineTest {
         await(hasText("17:00–17:30 · 松手安排"))
         ui.onRoot().performTouchInput { moveTo(start); up() }
         assertEquals(before, readDay())
+        for (chrome in listOf("add-task", "assistant-input", "navigation-capsule")) {
+            pickup(start, free); await(hasTestTag("drop-preview"))
+            val covered = ui.onNodeWithTag(chrome).fetchSemanticsNode().boundsInRoot.center
+            ui.onRoot().performTouchInput { moveTo(covered) }
+            ui.onNodeWithTag("drop-preview").assertDoesNotExist()
+            ui.onRoot().performTouchInput { up() }
+            assertEquals(before, readDay())
+        }
         pickup(start, free)
         await(hasTestTag("drop-preview"))
         ui.onRoot().performTouchInput { cancel() }
@@ -265,7 +400,7 @@ class DayTimelineTest {
         runBlocking { store.apply(TaskAdd(TaskInput("跨午夜", ref = "n")), SlotSet("@n", previous, 45)) }
         val original = readDay().blocks.single(); show()
         val grab = centerTick("00:15")
-        val target = ui.onNodeWithTag("hour:01:15", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.top
+        val target = ui.dayTick("01:15").fetchSemanticsNode().boundsInRoot.top
         pickup(grab, grab.copy(y = target))
         await(hasText("00:45–01:30 · 松手安排")).assertIsDisplayed()
         assertEquals(original, readDay().blocks.single()); ui.onRoot().performTouchInput { up() }
@@ -277,11 +412,12 @@ class DayTimelineTest {
 
     @Test fun stationaryEdgeScrollAdvancesTheGhostAndStaleReleaseCannotWrite() {
         runBlocking { store.apply(TaskAdd(TaskInput("报告提纲"))) }
-        val task = readDay().tray.single(); show(); centerTick("13:00")
+        val task = readDay().tray.single(); show(); openTray(); centerTick("13:00")
         val axis = ui.onNodeWithTag("day-axis")
-        val bounds = axis.fetchSemanticsNode().boundsInRoot
+        val bounds = ui.onNodeWithTag("day-drop-area").fetchSemanticsNode().boundsInRoot
         val start = ui.onNodeWithTag("tray:${task.id}").fetchSemanticsNode().boundsInRoot.center
-        val edge = Offset(bounds.center.x, bounds.bottom - 4f)
+        val tray = ui.onNodeWithTag("day-tray-container").fetchSemanticsNode().boundsInRoot
+        val edge = Offset(tray.center.x, minOf(tray.top, bounds.bottom) - 4f)
         fun scroll() = axis.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
         val root = ui.onRoot()
         ui.mainClock.autoAdvance = false
@@ -309,7 +445,7 @@ class DayTimelineTest {
 
     @Test fun accessibleEditorReusesTaskAndFrameOccupancy() {
         runBlocking { store.apply(TaskAdd(TaskInput("报告提纲"))) }
-        val task = readDay().tray.single(); show()
+        val task = readDay().tray.single(); show(); openTray()
         val tray = await(hasTestTag("tray:${task.id}"))
         assertEquals("安排时间", tray.fetchSemanticsNode().config[SemanticsActions.OnClick].label)
         tray.performSemanticsAction(SemanticsActions.OnClick)

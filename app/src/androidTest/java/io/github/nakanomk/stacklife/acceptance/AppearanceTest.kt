@@ -77,9 +77,15 @@ class AppearanceTest {
                 StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
             }
         }
+        val toggle = visible(hasTestTag("day-tray-toggle")).assert(hasStateDescription("已收起"))
+        toggle.assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).performTouchInput { click() }
         val tray = visible(hasTestTag("tray:$id"))
         val fab = ui.onNodeWithTag("add-task").fetchSemanticsNode().boundsInRoot
         assertFalse("新增任务遮住了待排任务的时间操作", fab.overlaps(tray.fetchSemanticsNode().boundsInRoot))
+        val panel = ui.onNodeWithTag("day-tray-container").fetchSemanticsNode().boundsInRoot
+        assertFalse(panel.overlaps(fab))
+        assertFalse(panel.overlaps(ui.onNodeWithTag("assistant-input").fetchSemanticsNode().boundsInRoot))
+        assertFalse(panel.overlaps(ui.onNodeWithTag("navigation-capsule").fetchSemanticsNode().boundsInRoot))
         tray.performTouchInput { click() }
         visible(hasTestTag("slot:hour")).assertExists()
     }

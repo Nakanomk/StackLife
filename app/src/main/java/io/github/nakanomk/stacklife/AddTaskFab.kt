@@ -19,19 +19,23 @@ import io.github.nakanomk.stacklife.appearance.StackLifeSurface
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-private val fabSize = 56.dp
-private val fabMargin = 16.dp
-internal val taskFabClearance = fabSize + fabMargin
+internal val taskFabSize = 56.dp
+internal val taskFabMargin = 16.dp
+internal val taskFabClearance = taskFabSize + taskFabMargin
 
 @Composable
 internal fun BoxScope.AddTaskFab(onAdd: () -> Unit, bottomInset: Dp = 0.dp) {
+    TaskAddButton(onAdd, Modifier.align(Alignment.BottomEnd).padding(end = taskFabMargin, bottom = bottomInset + taskFabMargin))
+}
+
+@Composable
+internal fun TaskAddButton(onAdd: () -> Unit, modifier: Modifier) {
     val colors = MaterialTheme.colorScheme
     val interaction = remember { MutableInteractionSource() }
     val ink = if (LocalCapsuleBackdrop.current == null) colors.onPrimaryContainer else colors.primary
-    StackLifeSurface(CapsuleScene.ACTION,
-        Modifier.align(Alignment.BottomEnd).padding(end = fabMargin, bottom = bottomInset + fabMargin).size(fabSize),
+    StackLifeSurface(CapsuleScene.ACTION, modifier.size(taskFabSize),
         solid = colors.primaryContainer, elevation = 3.dp, interactionSource = interaction) {
-        IconButton(onClick = onAdd, modifier = Modifier.size(fabSize).testTag("add-task"), interactionSource = interaction) {
+        IconButton(onClick = onAdd, modifier = Modifier.size(taskFabSize).testTag("add-task"), interactionSource = interaction) {
             Icon(painterResource(R.drawable.ic_add), "新增任务", tint = ink)
         }
     }

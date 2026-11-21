@@ -5,6 +5,7 @@ import androidx.annotation.RequiresApi
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -51,7 +52,7 @@ import top.yukonga.miuix.kmp.material.drawEdgeStroke
 internal val LocalPlannerGlassAllowed = staticCompositionLocalOf { false }
 internal val LocalCapsuleBackdrop = compositionLocalOf<Backdrop?> { null }
 private val LocalParentShell = compositionLocalOf { false }
-internal enum class CapsuleScene { NAVIGATION, ASSISTANT, CHROME, ACTION, COURSE, PANEL }
+internal enum class CapsuleScene { NAVIGATION, ASSISTANT, CHROME, ACTION, COURSE, PANEL, TRAY, FROST }
 
 private val dockEdge = EdgeStroke(width = 1.dp, bevel = 2.dp, color = Color.White.copy(alpha = .12f),
     primary = EdgeLightSource(.5f, -.3f, -.05f), secondary = EdgeLightSource(.5f, .8f, -.5f, intensity = .4f), peak = EdgePeak.Dual)
@@ -68,11 +69,13 @@ internal fun rememberGlassEdge(rotation: Int): State<EdgeStroke> {
 }
 
 @Stable
-internal class PlannerBackdrop(val layer: GraphicsLayer, private val base: Color, private val below: Backdrop?) : Backdrop {
+internal class PlannerBackdrop(val layer: GraphicsLayer, private val base: Color, private val below: Backdrop?,
+    val windowFrame: MutableIntState?) : Backdrop {
     override val isCoordinatesDependent = true
     var origin: Offset by mutableStateOf(Offset.Unspecified)
 
     override fun DrawScope.drawBackdrop(density: Density, coordinates: LayoutCoordinates?, layerBlock: (GraphicsLayerScope.() -> Unit)?, downscaleFactor: Float) {
+        windowFrame?.intValue // Subscribe this draw, including nested filters, to the donor window's frame.
         if (below == null) drawRect(base) else with(below) { drawBackdrop(density, coordinates, layerBlock, downscaleFactor) }
         if (coordinates == null || !coordinates.isAttached || !origin.isSpecified) return
         val target = coordinates.localToScreen(Offset.Zero)
@@ -86,13 +89,15 @@ internal class PlannerBackdrop(val layer: GraphicsLayer, private val base: Color
 }
 
 @Composable
-internal fun rememberPlannerBackdrop(enabled: Boolean = true): PlannerBackdrop? {
+internal fun rememberPlannerBackdrop(enabled: Boolean = true, acrossWindows: Boolean = false): PlannerBackdrop? {
     val a = LocalAppearance.current
     if (!enabled || !LocalPlannerGlassAllowed.current || !a.glass || glassUnavailableReason(a) != null) return null
     val base = MaterialTheme.colorScheme.surface
     val layer = rememberGraphicsLayer()
     val below = LocalCapsuleBackdrop.current
-    return remember(layer, base, below) { PlannerBackdrop(layer, base, below) }
+    return remember(layer, base, below, acrossWindows) {
+        PlannerBackdrop(layer, base, below, if (acrossWindows) mutableIntStateOf(0) else null)
+    }
 }
 
 internal fun Modifier.plannerBackdrop(source: PlannerBackdrop?): Modifier {
@@ -118,19 +123,20 @@ internal fun GlassBacking(modifier: Modifier = Modifier, background: @Composable
 @Composable
 internal fun StackLifeSurface(scene: CapsuleScene, modifier: Modifier, solid: Color, elevation: Dp = 0.dp,
     shape: RoundedCornerShape = CircleShape, tint: Color = Color.Unspecified,
-    interactionSource: InteractionSource? = null, content: @Composable () -> Unit) {
+    interactionSource: InteractionSource? = null, solidBorder: BorderStroke? = null, content: @Composable () -> Unit) {
     val a = LocalAppearance.current
     val source = LocalCapsuleBackdrop.current?.takeIf { LocalPlannerGlassAllowed.current && a.glass && glassUnavailableReason(a) == null && when (scene) {
         CapsuleScene.NAVIGATION -> a.navGlass
         CapsuleScene.ASSISTANT -> a.assistantGlass
         else -> true
     } }
-    val nestedShell = scene == CapsuleScene.PANEL || scene == CapsuleScene.CHROME || scene == CapsuleScene.NAVIGATION
+    val nestedShell = scene == CapsuleScene.PANEL || scene == CapsuleScene.TRAY || scene == CapsuleScene.CHROME || scene == CapsuleScene.NAVIGATION
     val semantics = if (scene == CapsuleScene.NAVIGATION || scene == CapsuleScene.ASSISTANT) Modifier.semantics {
         stateDescription = if (source == null) "实色胶囊" else "折射胶囊"
     } else Modifier
     if (Build.VERSION.SDK_INT < 33 || source == null) {
-        Surface(modifier.then(semantics), shape = shape, color = solid, contentColor = LocalContentColor.current, shadowElevation = elevation) {
+        Surface(modifier.then(semantics), shape = shape, color = solid, contentColor = LocalContentColor.current,
+            shadowElevation = elevation, border = solidBorder) {
             if (nestedShell) CompositionLocalProvider(LocalCapsuleBackdrop provides null, LocalParentShell provides false, content = content) else content()
         }
         return
@@ -157,33 +163,37 @@ private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Back
     shape: RoundedCornerShape, tint: Color, floating: Boolean, elastic: Boolean, content: @Composable () -> Unit) {
     val touch = if (elastic) remember { GlassTouch() } else null
     val transform = touch?.let { rememberGlassTouchLayer(it) }
-    val export = if (nestedShell) rememberLayerBackdrop() else null
+    val panel = scene == CapsuleScene.PANEL || scene == CapsuleScene.TRAY
+    val panelPlane = if (panel) rememberPlannerBackdrop() else null
+    val export = if (nestedShell && !panel) rememberLayerBackdrop() else null
     val base = MaterialTheme.colorScheme.surface
     val dark = base.luminance() < .5f
     val course = scene == CapsuleScene.COURSE
-    val panel = scene == CapsuleScene.PANEL
     val input = scene == CapsuleScene.ASSISTANT
+    val frost = scene == CapsuleScene.FROST
     val inline = LocalParentShell.current && !course
-    val hasLens = !inline && !input
+    val hasLens = !inline && !frost
     val wash = when {
         course -> tint.copy(alpha = .88f)
         panel -> base.copy(alpha = if (dark) .63f else .70f)
         input -> (if (dark) MaterialTheme.colorScheme.surfaceContainerHigh else base).copy(alpha = .54f)
+        frost -> if (tint.isSpecified) tint.copy(alpha = .36f)
+            else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .42f)
         else -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .40f)
     }
     val blend = if (!course) BlendMode.SrcOver else if (dark) BlendMode.Screen else BlendMode.Multiply
     val blurDp = when (scene) {
-        CapsuleScene.COURSE -> 1.dp
-        CapsuleScene.ASSISTANT -> 10.dp
-        CapsuleScene.PANEL -> 24.dp
+        CapsuleScene.COURSE -> 4.dp
+        CapsuleScene.ASSISTANT, CapsuleScene.FROST -> 10.dp
+        CapsuleScene.PANEL, CapsuleScene.TRAY -> 24.dp
         else -> 4.dp
     }
-    val specular = if (hasLens && !panel) rememberGlassEdge(-45) else null
-    val shadow = if (inline) Modifier else Modifier.dropShadow(shape,
+    val specular = if (input || (hasLens && scene != CapsuleScene.PANEL)) rememberGlassEdge(-45) else null
+    val shadow = if (inline || frost) Modifier else Modifier.dropShadow(shape,
         remember(dark, course) { Shadow(radius = if (course) 4.dp else 10.dp, color = Color.Black, alpha = if (dark) .20f else .10f) })
     val material = Modifier.drawBackdrop(source, shape = { shape }, layerBlock = transform, effects = {
-        if (!inline) {
-            colorControls(saturation = 1.5f)
+        if (!inline || frost) {
+            if (!inline) colorControls(saturation = 1.5f)
             if (hasLens) {
                 val depth = when {
                     course -> 24.dp.toPx()
@@ -196,7 +206,7 @@ private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Back
             } else blur(blurDp.toPx())
         }
     }, onDrawSurface = {
-        if (tint.isSpecified && !course) {
+        if (tint.isSpecified && !course && !frost) {
             drawRect(tint, blendMode = BlendMode.Hue)
             drawRect(tint.copy(alpha = .75f))
         }
@@ -206,14 +216,14 @@ private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Back
     })
     val receiver = if (touch == null) modifier else modifier.observeGlassTouch(touch, ownsScrub = floating)
     Box(receiver, propagateMinConstraints = true) {
-        Spacer(Modifier.matchParentSize().then(if (export == null) Modifier else Modifier.layerBackdrop(export))
+        Spacer(Modifier.matchParentSize().then(if (export == null) Modifier.plannerBackdrop(panelPlane) else Modifier.layerBackdrop(export))
             .then(shadow).then(material))
         val body = if (transform == null) Modifier else Modifier.graphicsLayer(block = transform)
         Box(if (floating) body else body.clip(shape), propagateMinConstraints = true) {
-            if (export == null && touch == null) content()
+            if (export == null && panelPlane == null && touch == null) content()
             else CompositionLocalProvider(
-                LocalCapsuleBackdrop provides if (floating && export != null) rememberCombinedBackdrop(source, export) else export ?: source,
-                LocalParentShell provides (export != null || LocalParentShell.current),
+                LocalCapsuleBackdrop provides if (floating && export != null) rememberCombinedBackdrop(source, export) else export ?: panelPlane ?: source,
+                LocalParentShell provides (nestedShell || LocalParentShell.current),
                 LocalRippleConfiguration provides if (touch != null && LocalInputModeManager.current.inputMode == InputMode.Touch) null else LocalRippleConfiguration.current,
                 content = content)
         }

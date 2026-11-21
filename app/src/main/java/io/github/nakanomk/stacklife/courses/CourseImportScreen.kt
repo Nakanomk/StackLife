@@ -315,15 +315,15 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
 }
 
 @Composable
-internal fun TermFields(form: TermForm, enabled: Boolean, change: (TermForm) -> Unit) {
-    FormGroup {
+internal fun TermFields(form: TermForm, enabled: Boolean, frosted: Boolean = false, change: (TermForm) -> Unit) {
+    FormGroup(frosted = frosted) {
         ImportField("学期标识", form.id, "termId", enabled) { change(form.copy(id = it)) }
         ImportField("首周周一 YYYY-MM-DD", form.monday, "termMonday", enabled) { change(form.copy(monday = it)) }
         ImportField("总周数", form.weeks, "termWeeks", enabled) { change(form.copy(weeks = it)) }
     }
     Text("首周作息")
     val initial = rememberUpdatedState(form.initial.ordinal.toFloat())
-    ControlGroup {
+    ControlGroup(frosted = frosted) {
         SegmentTrack(initial, BellSchedule.entries.size, MaterialTheme.colorScheme.secondaryContainer,
             { change(form.copy(initial = BellSchedule.entries[it])) }, enabled = enabled) { highlighted ->
             Row(Modifier.selectableGroup()) {
@@ -337,8 +337,11 @@ internal fun TermFields(form: TermForm, enabled: Boolean, change: (TermForm) -> 
             }
         }
     }
-    ImportField("切换为另一作息的生效日（选填）", form.switchDate, "termSwitchDate", enabled) { change(form.copy(switchDate = it)) }
-    Text("填写后从该日开始切换；留空则整个学期不变。")
+    val switchFields: @Composable () -> Unit = {
+        ImportField("切换为另一作息的生效日（选填）", form.switchDate, "termSwitchDate", enabled) { change(form.copy(switchDate = it)) }
+        Text("填写后从该日开始切换；留空则整个学期不变。")
+    }
+    if (frosted) FormGroup(frosted = true) { switchFields() } else switchFields()
 }
 
 @Composable

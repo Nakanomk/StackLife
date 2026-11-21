@@ -58,7 +58,7 @@ internal fun RootPane(header: @Composable () -> Unit,
 }
 
 @Composable
-private fun ScrollEdge(source: PlannerBackdrop, modifier: Modifier) {
+internal fun ScrollEdge(source: PlannerBackdrop, modifier: Modifier) {
     val base = MaterialTheme.colorScheme.surface
     val rectangle = RoundedCornerShape(0.dp)
     Spacer(modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithCache {

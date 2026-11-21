@@ -1,28 +1,54 @@
 package io.github.nakanomk.stacklife.acceptance
 
+import android.graphics.Bitmap
+import android.graphics.Point
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.StackLifeApp
+import io.github.nakanomk.stacklife.StackLifeTheme
 import io.github.nakanomk.stacklife.WorkspaceViewModel
+import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
+import io.github.nakanomk.stacklife.appearance.PlannerPopupHost
+import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
 import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.assistant.Disclosure
 import io.github.nakanomk.stacklife.assistant.PlannerTools
 import io.github.nakanomk.stacklife.assistant.ToolPlan
+import java.io.File
 import java.time.DayOfWeek
 import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 import java.time.LocalDate
 import kotlinx.coroutines.flow.first
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -57,6 +83,146 @@ class ManualCourseEntryTest {
     }
     private suspend fun week(n: Int) = store.api.observe(PlannerQuery.Week("手动学期", n)).first() as CourseWeek
 
+    private fun point(node: SemanticsNodeInteraction, x: Float, y: Float): Point {
+        val target = node.assertIsDisplayed().fetchSemanticsNode()
+        return ui.runOnIdle {
+            val origin = target.positionOnScreen
+            Point((origin.x + target.size.width * x).roundToInt(), (origin.y + target.size.height * y).roundToInt())
+        }
+    }
+
+    // Sample the composed display, including separate popup windows, rather than the sampled layer itself.
+    private fun colorsAt(points: List<Point>, name: String? = null): List<Int> {
+        val inst = InstrumentationRegistry.getInstrumentation()
+        val shot = checkNotNull(inst.uiAutomation.takeScreenshot())
+        val bitmap = if (shot.config == Bitmap.Config.HARDWARE) shot.copy(Bitmap.Config.ARGB_8888, false).also { shot.recycle() } else shot
+        try {
+            val label = InstrumentationRegistry.getArguments().getString("courseChromeCapture")
+            if (name != null && label in listOf("before", "after")) {
+                File(inst.targetContext.getExternalFilesDir(null), "course-chrome-$label-$name.png").outputStream().use {
+                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+                }
+            }
+            return points.map { bitmap.getPixel(it.x, it.y) }
+        } finally { bitmap.recycle() }
+    }
+
+    @Test fun movingCourseReachesPinnedFrostedWeekday() = pinnedWeekday(live = true)
+    @Test fun reducedTransparencyKeepsDateSolidAndTappableWhileTheCourseScrolls() = pinnedWeekday(live = false)
+
+    private fun pinnedWeekday(live: Boolean) {
+        val term = TermSpec("Studio-7", LocalDate.of(2026, 9, 7), 1, BellSchedule.SUMMER)
+        val m = term.meeting(1, 1, "测试课", "", 1, 12)
+        val week = CourseWeek(term, 1, listOf(ScheduledCourse(term.id, MANUAL_SOURCE, m)), mapOf(m.title to 0))
+        val appearance = Appearance(theme = ThemeMode.LIGHT, glass = true, reduceTransparency = !live)
+        var available = false
+        ui.setContent { StackLifeTheme(appearance) {
+            available = glassUnavailableReason(appearance) == null
+            CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
+                Box(Modifier.wrapContentHeight(Alignment.Top).height(360.dp)) { WeekGrid(term, week, 0.dp, 0.dp) {} }
+            }
+        } }
+        if (live) ui.runOnIdle { assumeTrue("Requires accelerated backdrop rendering", available) }
+        val date = ui.onNodeWithContentDescription("2026年9月7日，周一")
+        val adjacentDate = ui.onNodeWithContentDescription("2026年9月8日，周二")
+        // Empty Tuesday: probe just outside Monday’s tile and well inside the unoccupied column.
+        // A transparent scrim can transmit the course, but cannot spread its pigment into Tuesday.
+        val points = listOf(point(date, .48f, .10f), point(adjacentDate, .07f, .10f), point(adjacentDate, .58f, .10f))
+        val initial = colorsAt(points, "dates-$live-rest")
+        val grid = ui.onNode(hasScrollAction() and hasAnyAncestor(hasTestTag("week-grid")))
+        val tile = ui.onNodeWithTag("grid-course:0")
+        fun tileTop(): Float = tile.fetchSemanticsNode().let { ui.runOnIdle { it.positionOnScreen.y } }
+        val before = tileTop()
+        val dp = ui.density.density
+        grid.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 130f * dp) }
+        ui.waitForIdle()
+        assertTrue("Course must actually travel behind the date", before - tileTop() > 80f * dp)
+        assertEquals(points.first(), point(date, .48f, .10f))
+        if (live) ui.waitUntil(10_000) {
+            val color = Color(colorsAt(points).first())
+            val old = Color(initial.first())
+            maxOf(abs(color.red - old.red), abs(color.green - old.green), abs(color.blue - old.blue)) > .025f
+        }
+        val after = colorsAt(points, "dates-$live-scrolled")
+        if (live) {
+            val (course, near, empty) = after.map { Color(it) }
+            val r = course.red - empty.red; val g = course.green - empty.green; val b = course.blue - empty.blue
+            val spread = r * (near.red - empty.red) + g * (near.green - empty.green) + b * (near.blue - empty.blue)
+            assertTrue("Blur must spread course pigment across the edge; samples=$after",
+                spread > .06f * (r * r + g * g + b * b))
+        } else assertEquals("Solid weekday leaked a moving course", initial, after)
+        date.performTouchInput { click() }
+        ui.onNodeWithText("9月7日 · 周一").assertIsDisplayed()
+        ui.onNodeWithText("关闭").performClick()
+    }
+
+    @Test fun editorWeeksAndReviewTransmitChangesFromTheActualWindow() = sheetMaterial(live = true)
+    @Test fun highContrastEditorWeeksAndReviewStayOpaqueAndUsable() = sheetMaterial(live = false)
+
+    private fun sheetMaterial(live: Boolean) {
+        val host = mutableStateOf(Color.Red)
+        val appearance = Appearance(theme = ThemeMode.LIGHT, glass = true, highContrast = !live)
+        var available = false
+        ui.setContent { StackLifeTheme(appearance) {
+            available = glassUnavailableReason(appearance) == null
+            CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
+                PlannerPopupHost {
+                    Spacer(Modifier.fillMaxSize().background(host.value).testTag("chrome-source"))
+                    val form = remember { ManualCourseForm(null, 1).apply {
+                        newTerm = TermForm(id = "手动学期", monday = "2026-09-07", weeks = "4")
+                        pattern = pattern.copy(title = "测试课")
+                    } }
+                    ManualCourseSheet(viewModel { WorkspaceViewModel(store.api) }, form, emptyList(), {}, { _, _ -> })
+                }
+            }
+        } }
+        if (live) ui.runOnIdle { assumeTrue("Requires accelerated backdrop rendering", available) }
+        val toolbar = await("manual-toolbar")
+        val toolbarTop = point(toolbar, .25f, 0f)
+        val hostTop = point(ui.onNodeWithTag("chrome-source"), .25f, 0f)
+        val handleHeight = with(ui.density) { 48.dp.roundToPx() }
+        val panel = Point(toolbarTop.x, toolbarTop.y - handleHeight / 2) // Bare shell beside the centered drag handle.
+        val exposedHost = Point(hostTop.x, (hostTop.y + toolbarTop.y - handleHeight) / 2)
+        fun checkPlane(stage: String, field: Point) {
+            val points = listOf(exposedHost, panel, point(toolbar, .26f, .25f), field)
+            val names = listOf("exposed-host", "sheet-shell", "toolbar", "content")
+            fun describe(values: List<Int>) = points.indices.joinToString { i ->
+                "${names[i]}(${points[i].x},${points[i].y})=#${Integer.toHexString(values[i])}"
+            }
+            fun blueMinusRed(pixel: Int) = ((pixel and 255) - ((pixel ushr 16) and 255))
+            fun sample(phase: String, before: List<Int>?, ready: (List<Int>) -> Boolean): List<Int> {
+                if (live) try {
+                    ui.waitUntil(10_000) { ready(colorsAt(points)) }
+                } catch (e: ComposeTimeoutException) {
+                    val actual = colorsAt(points, "$stage-$live-$phase-timeout")
+                    throw AssertionError("No live transmission at $stage/$phase. Before: ${before?.let(::describe)}; actual: ${describe(actual)}", e)
+                }
+                return colorsAt(points, "$stage-$live-$phase")
+            }
+            ui.runOnIdle { host.value = Color.Red }; ui.waitForIdle()
+            val red = sample("red", null) { values -> (2..3).all { blueMinusRed(values[it]) < -5 } }
+            ui.runOnIdle { host.value = Color.Blue }; ui.waitForIdle()
+            val blue = sample("blue", red) { values -> (2..3).all { blueMinusRed(values[it]) - blueMinusRed(red[it]) > 10 } }
+            if (!live) assertEquals("Opaque controls changed at $stage: before ${describe(red)}, after ${describe(blue)}",
+                red.drop(1), blue.drop(1))
+        }
+        checkPlane("editor", point(await("termId"), .85f, .50f))
+        await("manual-weeks").performScrollTo().performClick()
+        val first = await("manual-week:1")
+        checkPlane("weeks", point(first, .74f, .53f))
+        first.assertIsSelected().performClick()
+        ui.onNodeWithTag("manual-weeks-done").assertIsNotEnabled()
+        await("manual-week:2").assertIsNotSelected().performClick()
+        await("manual-weeks-done").performClick()
+        await("manual-preview").performClick()
+        await("manual-review").assertIsDisplayed()
+        val change = ui.onAllNodesWithTag("manual-change")[0]
+        checkPlane("review", point(change, .97f, .5f))
+        assertNull(runBlocking { week(1).term })
+        await("manual-cancel").performClick()
+        await("manual-weeks").assertTextContains("第 2 周")
+    }
+
     @Test fun authorizedAssistantSeriesAppearsOnTodaysAxisAfterLocalConfirmationAndReopen(): Unit = runBlocking {
         val zone = ZoneId.systemDefault()
         val today = LocalDate.now(zone)
@@ -78,7 +244,15 @@ class ManualCourseEntryTest {
         ui.activityRule.scenario.onActivity { activity -> activity.setContent {
             StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
         } }
-        await("day-course").performScrollTo().performClick()
+        val course = await("day-course").performScrollTo()
+        // performScrollTo reveals the card to its scroll container, which also extends under the dock.
+        val viewport = await("day-drop-area").fetchSemanticsNode().boundsInRoot
+        val shift = course.fetchSemanticsNode().boundsInRoot.center.y - viewport.center.y
+        await("day-axis").performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, shift) }
+        ui.waitForIdle()
+        assertTrue("Course tap must land in the uncovered axis", viewport.contains(course.fetchSemanticsNode().boundsInRoot.center))
+        course.performTouchInput { click() }
+        await("course-detail").assertIsDisplayed()
         ui.onNode(hasText("现场课程") and hasAnyAncestor(hasTestTag("course-detail"))).assertIsDisplayed()
     }
 
@@ -89,13 +263,15 @@ class ManualCourseEntryTest {
         await("nav:courses").performClick()
         await("course-add").assertIsDisplayed().performClick()
         field("termId", "手动学期"); field("termMonday", "2026-09-07"); field("termWeeks", "3")
+        ui.onNodeWithText("冬令").performScrollTo().performClick().assertIsSelected()
         field("manual-title", "线性代数"); field("manual-room", "东101")
         await("manual-weeks").performScrollTo().assertIsDisplayed().performClick()
         await("manual-week:3").performScrollTo().assertIsDisplayed().performClick()
         await("manual-weeks-done").assertIsDisplayed().performClick()
         await("manual-weeks").assertTextContains("第 1、3 周")
         await("manual-day").performScrollTo().performClick()
-        await("manual-day:2").performClick()
+        await("manual-day:1").assertIsSelected()
+        await("manual-day:2").assertIsNotSelected().performClick()
         period("manual-first", 5); period("manual-last", 6)
         await("manual-preview").performClick(); await("manual-review").assertExists()
         assertNull(week(1).term)
