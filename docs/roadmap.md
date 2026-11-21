@@ -73,7 +73,7 @@ interface PlannerApi {
 
 ## M2 今天
 
-完整导航为「今天 / 工作台 / 流程图 / 课表」，设置从顶栏进；今天默认设备所在日期。时间轴一直铺到悬浮导航后面。右下加号下的小球向上展开为**非模态**待排队列，同一个表面反向收回；不打开时列表不占位。收起时箭头向上，展开时向下，队列上缘渐变磨砂。「布局 → 待排队列」可改回常驻托盘。待排指无时段的在队任务。轴和拖动参考 [Structured](https://structured.app/visual-planning) 与 [Planner Hours](https://github.com/baslawson/Planner#features)，小球变列表参考 [Material Container Transform](https://github.com/material-components/material-components-android/blob/master/docs/theming/Motion.md#container-transform)。
+完整导航为「今天 / 工作台 / 流程图 / 课表」，设置从顶栏进；今天默认设备所在日期。时间轴延伸至日程助理输入栏的上沿，不藏在输入栏或导航下面。右下加号下的**非模态**待排队列默认展开；点标题可收成小球，再点原地展开，收起后时间轴仍用满输入栏上方的空间。切日、切页和旋转不重置用户刚选的开合状态。收起时箭头向上，展开时向下，队列上缘渐变磨砂。「布局 → 待排队列」可改回常驻托盘。待排指无时段的在队任务。轴和拖动参考 [Structured](https://structured.app/visual-planning) 与 [Planner Hours](https://github.com/baslawson/Planner#features)，小球变列表参考 [Material Container Transform](https://github.com/material-components/material-components-android/blob/master/docs/theming/Motion.md#container-transform)。
 
 - Compose 可滚动刻度接[原生拖动手势](https://developer.android.com/develop/ui/compose/touch-input/pointer-input/drag-swipe-fling)。长按拖动，边缘滚动；指针换算为含滚动偏移的轴内容坐标，按 5 分钟就近吸附。预览半透明落点、起止与冲突。松手才落库；轴外、取消、目标失效不改原数据。「安排时间」打开同一日期/时间/时长编辑器，无需拖动也可完成全部安排。
 - `TimeBlock(taskId UNIQUE, startInstant, endInstant)` 引用原任务。长按标题拖动整段；长按任务旁竖条，松开后直接拖下端点，只改结束时间，起点不动。交互参考 [Google 日历的底部圆形时长手柄](https://support.google.com/calendar/answer/72143?co=GENIE.Platform%3DAndroid)和 [FullCalendar 的触摸选择](https://fullcalendar.io/docs/touch)。课程、完成项和没有真实结束点的续段不提供手柄。取消只释放时段；移出任务释放占位，完成任务保留历史块。
@@ -117,7 +117,7 @@ interface PlannerApi {
 
 ## M5 对话
 
-每个业务页底部直接输入并用纸飞机发送。四个根页共用一个输入框：切目的地、自然日或教学周不会销毁正在编辑的草稿；非空草稿保留最初的发送范围，换页时有范围标记。键入或切页不联网，点发送才打开本机授权页；用户允许后才发送。左右气泡区分本人/助理，圆形 `!` 按钮收起蓝色提示、黄色警告、红色错误说明；服务地址、授权和待应用差异无需展开即可核对。原始课表、HUB 登录与密钥页无助理。
+四个业务根页共用底部输入框：切页、切日或切周不会丢草稿；换页时非空草稿仍标记并使用最初的范围。已配置服务时，点纸飞机或键盘发送键直接发消息，不再弹出「发送前核对」。未配置时保留草稿，保存服务不会代发。参考 [Telegram Android 输入栏](https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java)与[消息气泡](https://github.com/TelegramMessenger/Telegram-Android/blob/21f7d109da6ab3506c9e9577f98c6a38771ab335/TMessagesProj/src/main/java/org/telegram/ui/Cells/ChatMessageCell.java#L19055-L19067)；圆形 `!` 收起提示、警告、错误及可选的数据范围。原始课表、HUB 登录与密钥页无助理。
 
 **连接。** 用 OkHttp `5.5.1` + `kotlinx.serialization`。用户提供含 API 前缀的 HTTPS base URL、模型、Key；在 base URL 后追加 `chat/completions`。使用 [OpenAI 兼容 function tools](https://platform.openai.com/docs/guides/function-calling) 和 `tool_calls`，不从散文猜命令；模型必须支持这套协议，只支持 Responses 的不冒充兼容。用 [Android Keystore](https://developer.android.com/privacy-and-security/keystore) 中不可导出的 AES-GCM 密钥加密 BYOK，每次写用新 IV，密文放私有 `noBackupFilesDir`。换服务域需重新授权/填 key，不跨域转发鉴权。无账号、无托管中转、无后台自动操作。
 
@@ -132,11 +132,11 @@ interface PlannerApi {
 |日程 / 课表|`slot_set(taskId, start, durationMinutes)` 新排、移动或调整结束，开始须带 offset；`slot_clear(taskId)`。`manual_course_add` 按学期、周集合与节次提议手动课程；`course_import(draftId)` 必须使用用户核对的本地草稿；`term_remove(termId)` 仅移除 HUB 来源。|
 |外观 / 偏好|`prefs_set`、`prefs_reset` 只接受已公开的外观/交互字段与合法值；重设只动所选组。配置凭据或扩大披露范围不能走模型授权捷径。|
 
-**数据披露。** 首次联网及扩大范围前展示要发往哪个域、哪些字段。默认只有当前范围的任务标题、顺序、时段和必要 ID；课表默认只给忙碌时段。备注、压栈原因、课程名/地点须用户明确纳入才出设备。整库、原始课表、Cookie 永不发送；BYOK 仅作绑定服务的鉴权头，不进提示词/工具结果。课程名、备注和模型输出都是不可信文本，不是权限指令。对话限会话内，日志不落原文；关闭/取消终止在途请求。
+**数据披露。** 配置时显示接收服务与默认范围。默认仅读当前页的任务标题、顺序、时段和必要 ID；课表默认只给忙碌时段。跨页、备注、压栈原因、课程名/地点须显式选取。改范围只影响下一次主动发送，不沿用旧对话上下文。整库、原始课表、Cookie 不发送；BYOK 仅作鉴权头，不进提示词或工具结果。课程名、备注和模型输出都是不可信文本。关闭对话取消在途请求。发送过的文字、回复和变更摘要留在本机；历史不保存草稿、密钥、原始工具调用或可执行提案，浏览不会把历史发给模型。
 
 **谁能提交。** 纯查询直接答。每轮所有写操作合为**一张差异卡**，列项目名、顺序、旧 → 新时间、实际生成的节点/边/帧或受影响设置。模型没有 `commit` 工具；只有用户点一次「应用这些更改」，手机才消费对应本地提案，收到事务回执才说「已应用」。校验失败、重名歧义、空结果、协议不兼容、401、限流、超时、取消均给具体反馈，不写业务项。每条消息最多四次只读往返，写提案返回即停；不运行自主后台 Agent。
 
-**使用。** 「设置 → 模型服务配置」可选 [DeepSeek](https://api-docs.deepseek.com/guides/tool_calls/)、[Claude](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk)、[GPT](https://developers.openai.com/api/docs/models/gpt-5.4-mini) 或自定义。预设填入官方 API 地址和可编辑的模型，用户填写 API Key，不是登录聊天软件账号。选择和保存均不联网，切换服务不携带未保存的密钥。每次最多接受一个工具调用；跨页查询须扩权。课程来源页只能问已保存数据；仅核对完成的差异页可在发送时生成本地草稿 ID。失效提案须重新预览并确认。
+**使用。** 「设置 → 模型服务配置」可选 [DeepSeek](https://api-docs.deepseek.com/guides/tool_calls/)、[Claude](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk)、[GPT](https://developers.openai.com/api/docs/models/gpt-5.4-mini) 或自定义。预设填入官方 API 地址和可编辑的模型，用户填写 API Key，不是登录聊天软件账号。选择和保存均不联网，切换服务不携带未保存的密钥。点输入栏左侧的「历史对话」按最近消息浏览，未配置服务或重启后也可读；详情可删除整段，不能重放提案。每次最多接受一个工具调用；课程来源页只能问已保存数据，核对完成的差异页才可生成本地草稿 ID。模型要写日程仍须逐次确认差异，失效提案须重新预览。
 
 ## 设计与外观
 
@@ -280,6 +280,8 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 **v0.10.1 复审。** 在同一台 OnePlus PLR110 的深色模式下查看了 BiliPai 首页悬浮栏、展开的搜索输入与 StackLife。StackLife 助理空输入框上下边缘中点与框内底色的真机截图取样，从旧版 1.0:1 提高到约 5.0:1；只截取控件，不保存个人日程。API 37 用例在页面和对话面板分别检查玻璃与实色输入边界至少 3:1。课表另在 4／6／12 节课格核对横线折射、按压与滚动；关闭玻璃则横线不透出。常规／200% 字号、导航松手换页及 RTL、同课跨周配色均有定向设备验证。
 
 **v0.10.2 复审。** API 37 模拟器上用同一份课表、同一窗口比较：在同一长课中心，三条真实节次线的半峰宽均从 4 px 增到 10 px，白色课名未被滤镜处理。滚动课表时能在固定的星期文字背后看见模糊课色；实色档日期仍可点，不透出课色。今天页在展开与收起的录屏中都有小球和完整列表之间的几何中间帧，不是两页交叉淡化。
+
+**v0.10.3 复审。** 带三项待排任务从 0.10.2 覆盖安装后，首次打开今天即展开队列；同一模拟器上，展开和收起时轴下沿均为 `y=1944 px`，助理输入区始于 `y=1955 px`。纸飞机与键盘发送均不先弹核对页；本地 HTTPS 验收中，改数据范围、看历史、删除对话均未触发模型请求。另在飞行模式下强停冷启，仍能打开历史原文。USB 覆盖安装后 OnePlus PLR110 的包管理器回读 0.10.3（18）。
 
 |阶段 / 用例|输入 → 可观察结果（校方登录、真实模型、联盟真机和性能有各自的验收条件）|
 |---|---|

@@ -22,6 +22,20 @@ internal sealed class AssistantPage(val label: String) {
     data object Settings : AssistantPage("设置")
 }
 
+internal fun AssistantPage.scopeName() = when (this) {
+    is AssistantPage.Day -> "$date · ${zone.id}"
+    is AssistantPage.Frame -> "当前栈帧 · ${id.take(8)}"
+    is AssistantPage.Task -> "当前任务 · ${id.take(8)}"
+    is AssistantPage.Graph -> "当前流程图 · ${id.take(8)}" + (nodeId?.let { " / 节点 ${it.take(8)}" } ?: "")
+    is AssistantPage.Week -> "$termId · 第 $week 周"
+    is AssistantPage.CourseDraft -> "$termId · 本地已核对草稿"
+    AssistantPage.Queue -> "当前队列"
+    AssistantPage.Frames -> "栈帧列表"
+    AssistantPage.Graphs -> "流程图列表"
+    AssistantPage.Terms -> "学期列表"
+    AssistantPage.Settings -> "外观与工作台恢复设置"
+}
+
 internal data class Disclosure(val extra: Set<ReadArea> = emptySet(), val notes: Boolean = false,
     val reasons: Boolean = false, val courseDetails: Boolean = false)
 

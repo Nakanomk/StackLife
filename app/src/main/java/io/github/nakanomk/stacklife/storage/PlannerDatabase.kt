@@ -14,6 +14,9 @@ import androidx.room.Query
 import androidx.room.RoomDatabase
 import androidx.room.Update
 import androidx.room.Upsert
+import io.github.nakanomk.stacklife.assistant.ConversationHistory
+import io.github.nakanomk.stacklife.assistant.ConversationMessageRow
+import io.github.nakanomk.stacklife.assistant.ConversationRow
 import io.github.nakanomk.stacklife.planner.DayBlock
 import io.github.nakanomk.stacklife.planner.FrameSummary
 import io.github.nakanomk.stacklife.planner.FrameSource
@@ -22,16 +25,18 @@ import io.github.nakanomk.stacklife.planner.RestorePolicy
 
 @Database(
     entities = [TaskRow::class, FrameRow::class, FrameItemRow::class, SettingsRow::class, TimeBlockRow::class,
-        TermRow::class, CourseRow::class, GraphRow::class, GraphNodeRow::class, GraphEdgeRow::class],
-    version = 5,
+        TermRow::class, CourseRow::class, GraphRow::class, GraphNodeRow::class, GraphEdgeRow::class,
+        ConversationRow::class, ConversationMessageRow::class],
+    version = 6,
     autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4),
-        AutoMigration(from = 4, to = 5)],
+        AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6)],
     exportSchema = true,
 )
 abstract class PlannerDatabase : RoomDatabase() {
     internal abstract fun plannerDao(): PlannerDao
     internal abstract fun courseDao(): CourseDao
     internal abstract fun graphDao(): GraphDao
+    internal abstract fun conversationHistory(): ConversationHistory
 }
 
 internal enum class Owner { QUEUE, FRAME, DONE, REMOVED }

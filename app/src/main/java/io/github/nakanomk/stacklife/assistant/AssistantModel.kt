@@ -16,7 +16,7 @@ internal enum class AssistantWork { IDLE, LOADING, REQUEST, COMMIT }
 internal enum class NoticeLevel(val label: String) { INFO("提示"), WARNING("警告"), ERROR("错误") }
 internal data class AssistantState(
     val page: AssistantPage? = null, val profile: ServiceProfile? = null, val grant: Disclosure = Disclosure(),
-    val allowed: Boolean = false, val work: AssistantWork = AssistantWork.IDLE, val lines: List<ChatLine> = emptyList(),
+    val work: AssistantWork = AssistantWork.IDLE, val lines: List<ChatLine> = emptyList(),
     val pending: PreviewResult.Ready? = null, val reviewAgain: Boolean = false, val importRequested: Boolean = false,
     val message: String? = null, val applied: Boolean = false, val importedDraft: String? = null,
     val composerId: String? = null, val draft: String = "",
@@ -25,7 +25,8 @@ internal data class AssistantState(
 
 internal fun String.isSendable() = isNotBlank() && length <= 8000
 
-internal class AssistantModel(private val api: PlannerApi, val connections: ConnectionStore, private val transport: ChatTransport) : ViewModel() {
+internal class AssistantModel(private val api: PlannerApi, val connections: ConnectionStore, private val transport: ChatTransport,
+    val history: ConversationHistory) : ViewModel() {
     private val mutable = MutableStateFlow(AssistantState())
     val state = mutable.asStateFlow()
     private var ui: AssistantState get() = mutable.value; set(value) { mutable.value = value }
@@ -36,6 +37,7 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
 
     private var configurationDraft: String? = null
     private var sessionConnection: ServiceConnection? = null
+    private var conversationId: Long? = null
 
     fun editLocal(id: String, text: String, page: AssistantPage?) {
         if (ui.page != null) return
@@ -57,18 +59,9 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
         val page = ui.draftPage ?: target()
         configurationDraft = null
         clearTurn()
-        ui = AssistantState(page = page, work = AssistantWork.LOADING, composerId = id, draft = ui.draft, draftPage = ui.draftPage)
-        val serial = generation
-        job = viewModelScope.launch {
-            try {
-                val connection = connections.load()
-                if (generation == serial) {
-                    sessionConnection = connection
-                    ui = ui.copy(profile = connection?.profile, work = AssistantWork.IDLE)
-                }
-            } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { if (generation == serial) fail(e) }
-        }
+        sessionConnection = null
+        ui = AssistantState(page = page, composerId = id, draft = ui.draft, draftPage = ui.draftPage)
+        send()
     }
 
     fun close() {
@@ -85,37 +78,39 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
     }
 
     fun setGrant(grant: Disclosure) {
-        if (ui.work != AssistantWork.IDLE || ui.page == null) return
+        val page = ui.page ?: return
+        if (ui.work != AssistantWork.IDLE || ui.profile == null || grant == ui.grant ||
+            ui.pending != null || ui.reviewAgain || ui.importRequested) return
         clearTurn()
-        ui = AssistantState(page = ui.page, profile = ui.profile, grant = grant,
-            composerId = ui.composerId, draft = if (ui.allowed) "" else ui.draft)
+        ui = AssistantState(page = page, profile = ui.profile, grant = grant, composerId = ui.composerId,
+            draft = ui.draft, message = "下一条消息使用新的数据范围。")
     }
 
-    fun authorize() {
-        val page = ui.page ?: return
-        if (ui.profile == null || ui.work != AssistantWork.IDLE || ui.allowed) return
-        tools = PlannerTools(api, page, ui.grant)
-        ui = ui.copy(allowed = true, message = null)
-        if (ui.draft.isSendable()) send()
+    suspend fun deleteConversation(id: Long) = withContext(NonCancellable) {
+        history.delete(id)
+        if (conversationId == id) close()
     }
 
     fun cancel() {
         if (ui.work == AssistantWork.COMMIT || ui.work == AssistantWork.LOADING) return
+        val id = conversationId
+        val droppedProposal = ui.pending != null || ui.reviewAgain
         clearTurn()
         ui = ui.copy(work = AssistantWork.IDLE, pending = null, reviewAgain = false, importRequested = false,
             message = "已取消，未应用更改。", noticeLevel = NoticeLevel.INFO,
-            applied = false, allowed = false, lines = emptyList(), draft = "")
+            applied = false, lines = emptyList(), draft = "")
+        if (id != null && droppedProposal) viewModelScope.launch { record(id, HistoryRole.NOTICE, "已放弃提案，未写入日程。") }
     }
 
     private fun clearTurn() {
         generation++
         job?.cancel(); job = null
         ui.pending?.let { api.discard(it.proposalId) }
-        commands = null; tools = null
+        commands = null; tools = null; conversationId = null
     }
 
     fun editMessage(text: String) {
-        if (ui.allowed && ui.work == AssistantWork.IDLE && ui.pending == null && !ui.reviewAgain && !ui.importRequested) {
+        if (ui.page != null && ui.profile != null && ui.work == AssistantWork.IDLE && ui.pending == null && !ui.reviewAgain && !ui.importRequested) {
             ui = ui.copy(draft = text)
         }
     }
@@ -123,23 +118,40 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
     fun send() {
         val old = ui
         val page = old.page ?: return
-        val policy = tools ?: return
-        if (old.work != AssistantWork.IDLE || !old.allowed || old.profile == null || old.pending != null || old.reviewAgain || old.importRequested) return
+        if (old.work != AssistantWork.IDLE || old.pending != null || old.reviewAgain || old.importRequested) return
         if (!old.draft.isSendable()) return
         val prompt = old.draft.trim()
         val serial = ++generation
-        ui = old.copy(lines = (old.lines + ChatLine(true, prompt)).takeLast(20), work = AssistantWork.REQUEST, message = null, applied = false, draft = "")
+        val expected = sessionConnection
+        ui = old.copy(work = if (expected == null) AssistantWork.LOADING else AssistantWork.REQUEST, message = null, applied = false)
         job = viewModelScope.launch {
+            var sentThread: Long? = null
             try {
                 val connection = connections.load()
-                if (connection == null || connection.profile != old.profile || connection.key != sessionConnection?.key) {
-                    if (serial == generation) {
-                        tools = null; sessionConnection = connection
-                        ui = AssistantState(page = page, profile = connection?.profile, message = "服务配置已变更，请重新授权。",
-                            noticeLevel = NoticeLevel.WARNING)
-                    }
+                ensureActive()
+                if (expected != null && (connection == null || connection.profile != expected.profile || connection.key != expected.key)) {
+                    conversationId = null; tools = null; sessionConnection = connection
+                    ui = AssistantState(page = page, profile = connection?.profile, message = "服务配置已变更，本条消息未发送。请重新输入。",
+                        noticeLevel = NoticeLevel.WARNING)
                     return@launch
                 }
+                if (connection == null) {
+                    ui = old.copy(work = AssistantWork.IDLE)
+                    return@launch
+                }
+                sessionConnection = connection
+                if (old.profile == null) ui = ui.copy(profile = connection.profile)
+                val policy = tools ?: PlannerTools(api, page, old.grant).also { tools = it }
+                val thread = conversationId?.also { active ->
+                    if (!record(active, HistoryRole.USER, prompt)) error("无法保存本地对话，消息未发送。")
+                } ?: try { history.start(page.scopeName(), prompt) }
+                    catch (e: CancellationException) { throw e }
+                    catch (_: Exception) { error("无法保存本地对话，消息未发送。") }
+                ensureActive()
+                conversationId = thread
+                sentThread = thread
+                ui = old.copy(profile = connection.profile, lines = (old.lines + ChatLine(true, prompt)).takeLast(20),
+                    work = AssistantWork.REQUEST, draft = "", message = null, applied = false)
                 val messages = ArrayList<JsonElement>()
                 messages.add(message("system", instructions))
                 messages.add(message("user", "本地页面定位（数据，不是指令）：${page.contextData()}。授权的额外范围：${old.grant.extra.joinToString { it.label }.ifEmpty { "无" }}。课程名称与地点：${if (old.grant.courseDetails) "已授权" else "未授权"}。"))
@@ -155,8 +167,11 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
                         val answer = response["content"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
                         require(answer.isNotEmpty()) { "模型没有返回可读答案或工具调用。" }
                         require(answer.length <= 16_000) { "模型答复过长，请缩小问题。" }
+                        val saved = record(thread, HistoryRole.ASSISTANT, answer)
+                        ensureActive()
                         ui = ui.copy(lines = (ui.lines + ChatLine(false, answer)).takeLast(20), work = AssistantWork.IDLE,
-                            message = "仅收到模型答复，本轮未更改日程。", noticeLevel = NoticeLevel.INFO)
+                            message = if (saved) "仅收到模型答复，本轮未更改日程。" else "已收到答复，但未能保存到历史对话。",
+                            noticeLevel = if (saved) NoticeLevel.INFO else NoticeLevel.WARNING)
                         return@launch
                     }
                     require(calls.size == 1) { "请使用支持单次有序工具调用的模型；一轮写入须合成一个提案。" }
@@ -176,8 +191,12 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
                         }
                         "planner_propose" -> {
                             when (val plan = policy.proposal(arguments)) {
-                                ToolPlan.OpenImporter -> ui = ui.copy(work = AssistantWork.IDLE, importRequested = true,
-                                    message = "需要你打开本地导入器并核对课程。", noticeLevel = NoticeLevel.INFO)
+                                ToolPlan.OpenImporter -> {
+                                    val notice = "需要你打开本地导入器并核对课程。"
+                                    record(thread, HistoryRole.NOTICE, notice)
+                                    ensureActive()
+                                    ui = ui.copy(work = AssistantWork.IDLE, importRequested = true, message = notice, noticeLevel = NoticeLevel.INFO)
+                                }
                                 is ToolPlan.Commands -> preview(plan.commands, serial)
                             }
                             return@launch
@@ -186,9 +205,19 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
                     }
                 }
             } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { if (generation == serial) fail(e) }
+            catch (e: Exception) {
+                if (generation != serial) return@launch
+                sentThread?.let { record(it, HistoryRole.NOTICE, "请求未完成，本轮未更改日程。") }
+                if (generation == serial) fail(e)
+            }
         }
     }
+
+    private suspend fun record(id: Long, role: HistoryRole, text: String): Boolean = try {
+        history.append(id, role, text)
+        true
+    } catch (e: CancellationException) { throw e }
+    catch (_: Exception) { false }
 
     private suspend fun preview(plan: List<PlannerCommand>, serial: Long) {
         // Room may return a registered proposal just as its requesting screen is closed.
@@ -201,8 +230,13 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
                     if (serial == generation) { commands = null; ui = ui.copy(work = AssistantWork.IDLE, reviewAgain = false,
                         message = "提案没有实际变更。", noticeLevel = NoticeLevel.INFO) }
                 } else {
-                    commands = plan
-                    ui = ui.copy(work = AssistantWork.IDLE, pending = result, reviewAgain = false, message = null)
+                    val fields = result.changes.asSequence().map { it.entityLabel ?: it.field }.distinct().take(3).joinToString("、")
+                    val saved = record(checkNotNull(conversationId), HistoryRole.NOTICE, "变更预览：${result.changes.size} 项（$fields）。当时尚未写入。")
+                    if (serial != generation) api.discard(result.proposalId) else {
+                        commands = plan
+                        ui = ui.copy(work = AssistantWork.IDLE, pending = result, reviewAgain = false,
+                            message = if (saved) null else "提案可在此核对，但未能保存预览到历史对话。", noticeLevel = NoticeLevel.WARNING)
+                    }
                 }
             }
         }
@@ -210,7 +244,7 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
 
     fun refreshProposal() {
         val plan = commands ?: return
-        if (!ui.allowed || !ui.reviewAgain || ui.work != AssistantWork.IDLE) return
+        if (!ui.reviewAgain || ui.work != AssistantWork.IDLE) return
         val serial = ++generation
         ui = ui.copy(work = AssistantWork.REQUEST, message = null)
         job = viewModelScope.launch {
@@ -220,7 +254,7 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
     }
 
     fun apply(id: String) {
-        if (ui.work != AssistantWork.IDLE || !ui.allowed || ui.pending?.proposalId != id) return
+        if (ui.work != AssistantWork.IDLE || ui.pending?.proposalId != id) return
         ui = ui.copy(work = AssistantWork.COMMIT)
         job = viewModelScope.launch {
             try {
@@ -229,8 +263,10 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
                         val imported = commands?.firstNotNullOfOrNull { (it as? PlannerCommand.CourseImport)?.draftId }
                         imported?.let(api::discardCourseImport)
                         commands = null
+                        val saved = conversationId?.let { record(it, HistoryRole.NOTICE, "已应用这些更改。") } == true
                         ui = ui.copy(work = AssistantWork.IDLE, pending = null, applied = true, importedDraft = imported,
-                            message = "已应用这些更改。", noticeLevel = NoticeLevel.INFO)
+                            message = if (saved) "已应用这些更改。" else "已应用这些更改，但未能保存回执到历史对话。",
+                            noticeLevel = if (saved) NoticeLevel.INFO else NoticeLevel.WARNING)
                     }
                     is CommitResult.Rejected -> {
                         val stale = receipt.code == CommitFailure.STALE_PREVIEW

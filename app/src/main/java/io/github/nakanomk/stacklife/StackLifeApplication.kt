@@ -11,7 +11,7 @@ import io.github.nakanomk.stacklife.storage.RoomPlannerApi
 open class StackLifeApplication : Application() {
     internal val connections by lazy { ConnectionStore(this) }
     internal val chat by lazy { OpenAiTransport() }
-    internal val planner: PlannerApi by lazy {
-        RoomPlannerApi(Room.databaseBuilder(this, PlannerDatabase::class.java, "stacklife.db").build())
-    }
+    private val database by lazy { Room.databaseBuilder(this, PlannerDatabase::class.java, "stacklife.db").build() }
+    internal val history by lazy { database.conversationHistory() }
+    internal val planner: PlannerApi by lazy { RoomPlannerApi(database) }
 }

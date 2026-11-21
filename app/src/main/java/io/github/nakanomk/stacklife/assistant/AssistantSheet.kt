@@ -49,6 +49,7 @@ import io.github.nakanomk.stacklife.workspace.Hint
 import java.util.UUID
 
 internal val LocalAssistant = staticCompositionLocalOf<AssistantModel?> { null }
+internal val LocalOpenChatHistory = staticCompositionLocalOf<() -> Unit> { error("Missing conversation history host") }
 
 @Composable
 internal fun AssistantComposer(page: AssistantPage, persistentRoot: Boolean = false) {
@@ -84,6 +85,7 @@ private fun MessageEditor(text: String, scope: String, onChange: (String) -> Uni
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val haptics = LocalHapticFeedback.current
+    val openHistory = LocalOpenChatHistory.current
     var editing by remember { mutableStateOf(false) }
     val solidBorder = when {
         editing -> BorderStroke(1.5.dp, colors.primary)
@@ -99,7 +101,11 @@ private fun MessageEditor(text: String, scope: String, onChange: (String) -> Uni
         onSend()
     }
     StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth().then(modifier), colors.surfaceContainerHigh, solidBorder = solidBorder) {
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { keyboard?.hide(); openHistory() }, enabled = active,
+                modifier = Modifier.size(48.dp).testTag("assistant-history")) {
+                Icon(painterResource(R.drawable.ic_history), "历史对话", tint = colors.onSurfaceVariant)
+            }
             CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
                 BasicTextField(value = text, onValueChange = onChange, singleLine = true, enabled = active,
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("assistant-input")
@@ -130,19 +136,6 @@ private fun MessageEditor(text: String, scope: String, onChange: (String) -> Uni
     }
 }
 
-private fun AssistantPage.scopeName() = when (this) {
-    is AssistantPage.Day -> "$date · ${zone.id}"
-    is AssistantPage.Frame -> "当前栈帧 · ${id.take(8)}"
-    is AssistantPage.Task -> "当前任务 · ${id.take(8)}"
-    is AssistantPage.Graph -> "当前流程图 · ${id.take(8)}" + (nodeId?.let { " / 节点 ${it.take(8)}" } ?: "")
-    is AssistantPage.Week -> "$termId · 第 $week 周"
-    is AssistantPage.CourseDraft -> "$termId · 本地已核对草稿"
-    AssistantPage.Queue -> "当前队列"
-    AssistantPage.Frames -> "栈帧列表"
-    AssistantPage.Graphs -> "流程图列表"
-    AssistantPage.Terms -> "学期列表"
-    AssistantPage.Settings -> "外观与工作台恢复设置"
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -164,10 +157,10 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
         ui.work == AssistantWork.LOADING -> "正在读取本机服务配置，尚未联网。"
         service == null -> "手动日程可离线使用。配置模型服务后再发送，草稿留在本机。"
         ready != null -> "以下差异由本机计算；应用只提交这一份提案，放弃不会写入。"
-        !ui.allowed -> "授权只在此次对话有效。不会发送密钥正文、Cookie 或原始课表。"
-        else -> "关闭会清空对话并取消请求。模型只能提案，不能直接保存。"
+        else -> "点发送即发往当前服务。默认只开放当前页面；课程只披露忙碌时段。对话保存在本机，查看历史不会联网。"
     }
-    var noticeOpen by remember(page, help, severity) { mutableStateOf(false) }
+    var noticeOpen by remember(page) { mutableStateOf(false) }
+    val canChangeGrant = service != null && ready == null && !ui.reviewAgain && !ui.importRequested && ui.work == AssistantWork.IDLE
     val dark = MaterialTheme.colorScheme.surface.luminance() < .5f
     val tint = when (severity) {
         NoticeLevel.INFO -> if (dark) Color(0xFF0C2D6B) else Color(0xFFDDF4FF)
@@ -182,8 +175,8 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
     val list = rememberLazyListState()
     val groups = remember(ui.pending) { ui.pending?.changes?.groupBy { it.entityId }.orEmpty() }
     LaunchedEffect(ui.pending?.proposalId) { if (ui.pending != null) expanded = true }
-    LaunchedEffect(ui.lines.lastOrNull(), ui.pending, ui.allowed, noticeOpen) {
-        if (noticeOpen || ui.pending != null || !ui.allowed) list.scrollToItem(0)
+    LaunchedEffect(ui.lines.lastOrNull(), ui.pending, noticeOpen) {
+        if (noticeOpen || ui.pending != null) list.scrollToItem(0)
         else if (ui.lines.isNotEmpty()) list.scrollToItem(ui.lines.lastIndex)
     }
     val compact = ui.profile == null
@@ -227,31 +220,25 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
                         Column(Modifier.padding(12.dp)) {
                             Text(severity.label, style = MaterialTheme.typography.labelLarge)
                             Text(help, style = MaterialTheme.typography.bodyMedium)
-                            if (ui.allowed) {
+                            if (service != null) {
                                 Text(grantSummary(ui.grant), style = MaterialTheme.typography.bodyMedium)
-                                if (ready == null && !ui.reviewAgain && !ui.importRequested) TextButton(enabled = ui.work == AssistantWork.IDLE,
-                                    onClick = { options = true; model.setGrant(ui.grant) }) { Text("重新选择授权范围") }
+                                if (canChangeGrant) TextButton(onClick = { options = !options }) {
+                                    Text(if (options) "收起数据范围" else "调整数据范围")
+                                }
                             }
                         }
                     }
                 }
+                if (noticeOpen && options && canChangeGrant) {
+                    items(ReadArea.entries) { area -> CheckRow(area.label, area in ui.grant.extra) { model.setGrant(ui.grant.copy(extra =
+                        if (area in ui.grant.extra) ui.grant.extra - area else ui.grant.extra + area)) } }
+                    item { CheckRow("发送任务及节点备注", ui.grant.notes) { model.setGrant(ui.grant.copy(notes = !ui.grant.notes)) }
+                        CheckRow("发送栈帧原因", ui.grant.reasons) { model.setGrant(ui.grant.copy(reasons = !ui.grant.reasons)) }
+                        CheckRow("发送课程名与地点", ui.grant.courseDetails) { model.setGrant(ui.grant.copy(courseDetails = !ui.grant.courseDetails)) } }
+                }
                 when {
                     ui.work == AssistantWork.LOADING -> item { LinearProgressIndicator() }
                     service == null -> item { Text("尚未连接模型服务", style = MaterialTheme.typography.titleMedium) }
-                    !ui.allowed -> {
-                        item { Text("发送前核对", style = MaterialTheme.typography.titleMedium)
-                            Text("将发往 ${service.origin}。范围：${page.scopeName()}的标题、顺序、时段及必要 ID；课程默认只披露忙碌时段。")
-                            Hint(grantSummary(ui.grant)) }
-                        if (ui.draft.isNotEmpty()) item { ChatBubble(ChatLine(true, ui.draft), "待发送消息") }
-                        item { TextButton(onClick = { options = !options }) { Text(if (options) "收起授权选项" else "调整范围与字段") } }
-                        if (options) {
-                            items(ReadArea.entries) { area -> CheckRow(area.label, area in ui.grant.extra) { model.setGrant(ui.grant.copy(extra =
-                                if (area in ui.grant.extra) ui.grant.extra - area else ui.grant.extra + area)) } }
-                            item { CheckRow("发送任务及节点备注", ui.grant.notes) { model.setGrant(ui.grant.copy(notes = !ui.grant.notes)) }
-                                CheckRow("发送栈帧原因", ui.grant.reasons) { model.setGrant(ui.grant.copy(reasons = !ui.grant.reasons)) }
-                                CheckRow("发送课程名与地点", ui.grant.courseDetails) { model.setGrant(ui.grant.copy(courseDetails = !ui.grant.courseDetails)) } }
-                        }
-                    }
                     ready != null -> {
                         item { Text("变更预览 · 尚未写入", style = MaterialTheme.typography.titleMedium) }
                         groups.forEach { (id, changes) ->
@@ -265,7 +252,7 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
                     }
                 }
             }
-            ui.message?.takeIf { !noticeOpen && (severity != NoticeLevel.INFO || ui.applied || !ui.allowed || ui.importRequested) }?.let {
+            ui.message?.takeIf { !noticeOpen && (severity != NoticeLevel.INFO || ui.applied || ui.importRequested) }?.let {
                 Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }
                     .testTag("assistant-status"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(severity.label, color = ink, style = MaterialTheme.typography.labelLarge)
@@ -275,8 +262,6 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
             when {
                 ui.work == AssistantWork.LOADING -> Unit
                 service == null -> ActionPill("配置模型服务", { model.leaveForConfiguration(); onSettings() }, prominent = true)
-                !ui.allowed -> ActionPill(if (ui.draft.isNotEmpty()) "允许并发送" else "允许本次范围",
-                    { model.authorize(); options = false }, Modifier.testTag("assistant-consent"), prominent = true)
                 ui.work == AssistantWork.COMMIT -> Text("正在保存已确认的更改…")
                 ui.work == AssistantWork.REQUEST -> Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -297,7 +282,7 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
 }
 
 @Composable
-private fun ChatBubble(line: ChatLine, author: String = if (line.user) "你" else "模型答复") {
+internal fun ChatBubble(line: ChatLine, author: String = if (line.user) "你" else "模型答复") {
     val colors = MaterialTheme.colorScheme
     Row(Modifier.fillMaxWidth().padding(start = if (line.user) 40.dp else 0.dp, end = if (line.user) 0.dp else 40.dp),
         horizontalArrangement = if (line.user) Arrangement.End else Arrangement.Start) {

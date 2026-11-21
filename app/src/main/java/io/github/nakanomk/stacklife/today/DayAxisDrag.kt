@@ -31,11 +31,11 @@ private sealed class Pickup(val source: SlotSource, val revision: Long) {
 internal data class CheckedSlot(val slot: PlannerCommand.SlotSet, val error: String?)
 
 internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
-    // Placement observations are input hit regions, not layout state. Following an animating
-    // tray must not invalidate the layout that just positioned it.
-    var viewport = Rect.Zero
-    var trayBounds = Rect.Zero
-    var addBounds = Rect.Zero
+    // A held pointer need not move when the IME or tray moves across it. Recheck
+    // the snap and edge-scroll regions on placement changes during a drag.
+    var viewport by mutableStateOf(Rect.Zero)
+    var trayBounds by mutableStateOf(Rect.Zero)
+    var addBounds by mutableStateOf(Rect.Zero)
     private var pickup by mutableStateOf<Pickup?>(null)
     var pointer by mutableStateOf(Offset.Zero)
         private set
@@ -53,10 +53,12 @@ internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
     private fun Rect.edgeAbove(at: Offset) =
         if (at.x >= left && at.x < right && at.y >= bottom) bottom else viewport.top
 
+    fun uncoveredBottom(at: Offset) = minOf(viewport.bottom, trayBounds.edgeBelow(at), addBounds.edgeBelow(at))
+
     fun edgeVelocity(edgePixels: Float, maxSpeed: Float): Float {
         if (!active || !accepts(pointer)) return 0f
         val top = maxOf(viewport.top, trayBounds.edgeAbove(pointer), addBounds.edgeAbove(pointer))
-        val bottom = minOf(viewport.bottom, trayBounds.edgeBelow(pointer), addBounds.edgeBelow(pointer))
+        val bottom = uncoveredBottom(pointer)
         val edge = min(edgePixels, (bottom - top) / 4f)
         return when {
             edge <= 0f -> 0f
@@ -125,9 +127,12 @@ internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
 
     fun release(at: Offset, revision: Long, send: (PlannerCommand.SlotSet) -> Unit) {
         move(at)
-        if (!accepts(at)) return
-        val command = candidate ?: return
         val session = pickup ?: return
+        if (session.revision != revision) {
+            dropNotice = "日程已更新，请重新拖动。"
+            return
+        }
+        val command = candidate ?: return
         val original = session.source.originalStart
         when (session) {
             is Pickup.End -> if (command.durationMinutes == session.source.minutes) return
@@ -135,13 +140,9 @@ internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
                 (hit(at) - session.grabMillis == original || command.start.toInstant().toEpochMilli() == original)) return
         }
         val error = checked?.takeIf { it.slot == command }?.error
-        when {
-            command.expectedRevision != revision -> dropNotice = "日程已更新，请重新拖动。"
-            error != null -> dropNotice = error
-            // If the finger lifted before the hover preview finished, submission still goes
-            // through the exact same domain preview + revision-checked commit, never a blind write.
-            else -> send(command)
-        }
+        // If the finger lifted before the hover preview finished, submission still goes
+        // through the exact same domain preview + revision-checked commit, never a blind write.
+        if (error != null) dropNotice = error else send(command)
     }
 }
 

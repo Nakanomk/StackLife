@@ -54,7 +54,7 @@ internal fun TodayRoute(
 ) {
     var choosingDate by rememberSaveable { mutableStateOf(false) }
     val floatingTray = LocalAppearance.current.floatingDayTray
-    var trayOpen by rememberSaveable(floatingTray) { mutableStateOf(!floatingTray) }
+    var trayOpen by rememberSaveable(floatingTray) { mutableStateOf(true) }
     if (choosingDate) DateChooser(date, { choosingDate = false; onDate(it) }, { choosingDate = false })
     RootPane(header = {
         DayHeader(date, { choosingDate = true }, onDate, { onDate(LocalDate.now(zone)) }, onSettings)

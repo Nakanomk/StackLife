@@ -53,7 +53,10 @@ class FixedCourseDragTest {
         val axis = await(hasTestTag("day-axis"))
         fun time(t: String) = ui.dayTick(t).fetchSemanticsNode().boundsInRoot.top
         ui.dayTick("15:30").performScrollTo()
-        val shift = time("15:30") - axis.fetchSemanticsNode().boundsInRoot.center.y
+        val area = ui.onNodeWithTag("day-drop-area").fetchSemanticsNode().boundsInRoot
+        val tray = ui.onNodeWithTag("day-tray-container").fetchSemanticsNode().boundsInRoot
+        val floor = if (area.center.x in tray.left..tray.right) minOf(area.bottom, tray.top) else area.bottom
+        val shift = time("15:30") - (area.top + floor) / 2
         axis.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, shift) }; ui.waitForIdle()
         val root = ui.onRoot()
         fun drag(y: Float) {

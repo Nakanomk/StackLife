@@ -245,9 +245,12 @@ class ManualCourseEntryTest {
             StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
         } }
         val course = await("day-course").performScrollTo()
-        // performScrollTo reveals the card to its scroll container, which also extends under the dock.
+        // Center the actual touch above the floating queue, not just inside the scroller.
         val viewport = await("day-drop-area").fetchSemanticsNode().boundsInRoot
-        val shift = course.fetchSemanticsNode().boundsInRoot.center.y - viewport.center.y
+        val tray = await("day-tray-container").fetchSemanticsNode().boundsInRoot
+        val center = course.fetchSemanticsNode().boundsInRoot.center
+        val floor = if (center.x in tray.left..tray.right) minOf(tray.top, viewport.bottom) else viewport.bottom
+        val shift = center.y - (viewport.top + floor) / 2
         await("day-axis").performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, shift) }
         ui.waitForIdle()
         assertTrue("Course tap must land in the uncovered axis", viewport.contains(course.fetchSemanticsNode().boundsInRoot.center))

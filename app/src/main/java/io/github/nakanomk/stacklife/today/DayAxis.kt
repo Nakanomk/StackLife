@@ -43,7 +43,7 @@ import kotlin.math.roundToInt
 @Composable
 internal fun DayAxis(
     drag: AxisDrag, revision: Long, enabled: Boolean, onEdit: (String) -> Unit,
-    send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier, topInset: Dp, scrollTail: Dp, dockInset: Dp,
+    send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier, topInset: Dp, scrollTail: Dp,
 ) {
     val density = LocalDensity.current
     val scale = drag.scale
@@ -99,13 +99,10 @@ internal fun DayAxis(
                 }
             }
         }
-        Box(Modifier.fillMaxSize().padding(top = topInset).clipToBounds()) { CurrentLine(drag, spine) }
-        // The scroll plane continues behind the dock. Only the uncovered viewport accepts input.
-        Box(Modifier.fillMaxSize().padding(top = topInset, bottom = dockInset)) {
-            Box(Modifier.fillMaxSize().testTag("day-drop-area").clipToBounds()
-                .onGloballyPositioned { drag.viewport = it.boundsInRoot() }) {
-                DropPreview(drag, gutter)
-            }
+        Box(Modifier.fillMaxSize().padding(top = topInset).clipToBounds().testTag("day-drop-area")
+            .onGloballyPositioned { drag.viewport = it.boundsInRoot() }) {
+            CurrentLine(drag, spine)
+            DropPreview(drag, gutter)
         }
     }
 }
@@ -147,17 +144,21 @@ private fun EventRail(
         if (selected && resizable != null) {
             val source = SlotSource(resizable.taskId, ((resizable.endMillis - resizable.startMillis) / MINUTE_MS).toInt(), resizable.startMillis)
             val endLabel = clockLabel(resizable.endMillis, drag.scale.day)
-            LaunchedEffect(drag, resizable.taskId) {
+            var railX by remember { mutableFloatStateOf(Float.NaN) }
+            LaunchedEffect(drag, resizable.taskId, railX) {
+                if (railX.isNaN()) return@LaunchedEffect
                 // A long task may continue below the screen. Reveal the real end, never put
                 // a substitute handle at the viewport edge or on a clipped midnight boundary.
                 val endY = drag.scale.yAt(resizable.endMillis)
-                val visibleHeight = drag.viewport.height.roundToInt()
+                val top = drag.viewport.top
+                val visibleHeight = (drag.uncoveredBottom(Offset(railX, top)) - top).roundToInt()
                 if (visibleHeight > 0 && endY > drag.scroll.value + visibleHeight) {
                     val margin = visibleHeight / 4
                     drag.scroll.scrollTo((endY - visibleHeight + margin).coerceAtLeast(0))
                 }
             }
             Spacer(Modifier.align(Alignment.BottomCenter).size(48.dp).testTag("resize-end:${resizable.taskId}")
+                .onGloballyPositioned { railX = it.localToRoot(Offset(it.size.width / 2f, 0f)).x }
                 .endDrag(source, drag, revision, enabled, send)
                 .clickable(enabled, onClickLabel = "精确编辑时间", role = Role.Button) { onEdit(resizable.taskId) }
                 .semantics { contentDescription = "${resizable.title}，结束手柄，$endLabel，上下拖动调整结束时间" }

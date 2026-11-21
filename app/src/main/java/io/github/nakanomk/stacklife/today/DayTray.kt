@@ -91,7 +91,7 @@ internal fun DayWithTray(
         val closedHeight = if (floating) 48.dp else header + footer
         val height = lerp(closedHeight, openHeight, progress)
         val axisBottom = when {
-            floating -> 0.dp
+            floating -> clearance
             wide -> lerp(bottom + closedHeight, clearance, progress)
             else -> bottom + height
         }
@@ -110,7 +110,7 @@ internal fun DayWithTray(
         val axisSource = rememberPlannerBackdrop()
         Box(Modifier.fillMaxSize().plannerBackdrop(axisSource)) {
             DayAxis(drag, plan.revision, enabled, onEdit, send, Modifier.fillMaxSize().padding(start = axisStart, bottom = axisBottom),
-                top, (fabBottom + taskFabSize + 8.dp - axisBottom).coerceAtLeast(0.dp), (clearance - axisBottom).coerceAtLeast(0.dp))
+                top, (fabBottom + taskFabSize + 8.dp - axisBottom).coerceAtLeast(0.dp))
         }
         CompositionLocalProvider(LocalCapsuleBackdrop provides axisSource) {
             TaskAddButton(onAdd, Modifier.align(Alignment.BottomEnd).padding(end = fabEnd, bottom = fabBottom)

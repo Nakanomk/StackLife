@@ -123,7 +123,7 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
                 label = { Text(if (keepKey) "API Key（留空保留原密钥）" else "API Key") },
                 visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
             if (preset == ServicePreset.Claude) Hint("使用绑定工作区的 Anthropic API Key。")
-            Hint("密钥仅在本机加密保存。选择和保存服务不会联网。")
+            Hint("保存配置不会联网。点发送时，消息将直接发往${profile?.origin?.let { " $it" } ?: "所选服务"}；默认只开放当前页面，不含备注、栈帧原因或课程详情。密钥仅在本机加密保存。")
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             ActionPill("保存服务配置", enabled = !busy && profile != null && (key.isNotBlank() || keepKey), prominent = true, onClick = {
                 run { store.save(base, model, key.takeIf { it.isNotBlank() }); key = ""; back() }

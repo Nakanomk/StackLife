@@ -74,7 +74,7 @@ class MainActivity : ComponentActivity() {
 internal fun StackLifeApp(model: WorkspaceViewModel, assistantModel: AssistantModel? = null,
     initialDetail: DetailTarget? = null, onDetailBack: () -> Unit = {}) {
     val app = LocalContext.current.applicationContext as StackLifeApplication
-    val assistant = assistantModel ?: viewModel { AssistantModel(model.planner, app.connections, app.chat) }
+    val assistant = assistantModel ?: viewModel { AssistantModel(model.planner, app.connections, app.chat, app.history) }
     val settings by model.settings.collectAsStateWithLifecycle()
     ReadPanel(settings) { preferences ->
         StackLifeTheme(preferences.appearance) {
@@ -111,6 +111,8 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
     val animate = LocalMotionEnabled.current
     val direction = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
     val privateScreens = remember { mutableIntStateOf(0) }
+    var historyOpen by rememberSaveable { mutableStateOf(false) }
+    CompositionLocalProvider(LocalOpenChatHistory provides { historyOpen = true }) {
     PlannerPopupHost(stack.last() != ModelConnection && stack.last() != ImportCourses && privateScreens.intValue == 0) {
     SharedTransitionLayout {
         val shared: SharedModifier = { key ->
@@ -229,7 +231,9 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
             },
         )
     }
-    AssistantSheet(assistant, onSettings = { navigate(ModelConnection) }, onImport = { navigate(ImportCourses) })
+    if (historyOpen) ConversationHistorySheet(assistant.history, assistant::deleteConversation, onClose = { historyOpen = false })
+    else AssistantSheet(assistant, onSettings = { navigate(ModelConnection) }, onImport = { navigate(ImportCourses) })
+    }
     }
 }
 

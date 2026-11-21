@@ -71,6 +71,7 @@ class WorkspaceUiTest {
             assertEquals("A page action must not displace navigation", page.center.x, nav.center.x, 1f)
         }
         checkPlacement()
+        await(hasTestTag("day-tray-toggle") and hasStateDescription("已展开")).performTouchInput { click() }
         val ball = await(hasTestTag("day-tray-toggle") and hasStateDescription("已收起")).fetchSemanticsNode().boundsInRoot
         val add = ui.onNodeWithTag("add-task").fetchSemanticsNode().boundsInRoot
         assertEquals(add.center.x, ball.center.x, 1f)
