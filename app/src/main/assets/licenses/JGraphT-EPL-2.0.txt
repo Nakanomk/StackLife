@@ -1,6 +1,7 @@
 JGraphT Core 1.5.3 (unmodified)
 Source: https://github.com/jgrapht/jgrapht/tree/jgrapht-1.5.3
-Distributed under the Eclipse Public License 2.0.
+Upstream offers LGPL-2.1-or-later OR EPL-2.0. StackLife uses the LGPL
+option (see JGraphT-LGPL-2.1.txt). The alternative EPL text is retained below.
 
 Eclipse Public License - v 2.0
 

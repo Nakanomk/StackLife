@@ -118,7 +118,7 @@ interface PlannerApi {
 节点是计划模板，不是已有队列任务。存图、节点（标题、备注、预计时长、创建顺序、画布位置）和有向边（前置 → 后继）。画布可新建、改名、拖动、连线、删边/节点、平移缩放；手机另有点选两节点连线和可朗读依赖列表。删节点一起删关联边，不反向改写已生成任务与帧。
 
 - 画布使用 [KotlinFlow 1.0.1 / MIT](https://repo.maven.apache.org/maven2/io/github/joaonart/kotlinflow/1.0.1/) 绘制有向边并处理平移、双指缩放与全图适配；不引示例皮肤、不当数据库。该版本内建节点拖动把取消和松手交给同一回调，`onConnect` 不派发；节点移动、箭头拖到后继的命中及取消由应用适配。库用物理像素，节点位置按 dp 保存。领域层拒绝自环、重复边、缺失/跨图端点、会成环的边；说明具体冲突，不留半条边或部分生成物。
-- 选一个目标，取其**传递前驱和自身**的诱导子图，稳定拓扑排序；并列就绪节点按创建顺序，再按 ID，不用坐标或画布排版决定优先级。用 [JGraphT Core](https://jgrapht.org/) `org.jgrapht:jgrapht-core:1.5.3`（上游双许可，按 EPL-2.0 保留许可与来源）：`DirectedAcyclicGraph.addEdge/getAncestors`、包含目标的子图、带显式比较器的 [`TopologicalOrderIterator`](https://jgrapht.org/javadoc/org.jgrapht.core/org/jgrapht/traverse/TopologicalOrderIterator.html)。拖节点只保存布局。
+- 选一个目标，取其**传递前驱和自身**的诱导子图，稳定拓扑排序；并列就绪节点按创建顺序，再按 ID，不用坐标或画布排版决定优先级。用 [JGraphT Core](https://jgrapht.org/) `org.jgrapht:jgrapht-core:1.5.3`（[上游双许可](https://github.com/jgrapht/jgrapht/blob/jgrapht-1.5.3/README.md)，StackLife 选用 LGPL 2.1，同时保留 EPL 2.0 原文）：`DirectedAcyclicGraph.addEdge/getAncestors`、包含目标的子图、带显式比较器的 [`TopologicalOrderIterator`](https://jgrapht.org/javadoc/org.jgrapht.core/org/jgrapht/traverse/TopologicalOrderIterator.html)。拖节点只保存布局。
 - 「生成拓扑排序」打开同一张操作单：使用已选节点，或自动选择唯一终点；多个终点可手选。选目标即展示依次要做的事，不写库。点「加入队列」一次按序追加新任务，不动现有队列和帧；「存为栈帧」一次生成有序快照，不动当前队列。帧原因默认「为目标〈标题〉生成」，可修改。两者均校验用户看到的修订，数据变了才要求重新核对；重复点击不重复写入。
 - 画布右下角「一键整理」按最长前置链从左到右分层，同层保持原序，未连线节点另排。沿每条边前置都在后继左侧；按节点实际高度留白。一次只提交坐标并适配全图，不动依赖、目标生成顺序、队列或历史帧。重复整理同一布局不增加修订。
 
