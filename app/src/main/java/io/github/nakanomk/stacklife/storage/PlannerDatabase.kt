@@ -100,7 +100,11 @@ internal data class SettingsRow(
     @ColumnInfo(defaultValue = "'{}'") val appearance: String = "{}",
 )
 
-internal data class ItemState(@Embedded val item: FrameItemRow, val restorable: Boolean)
+internal data class ItemState(@Embedded val item: FrameItemRow, @Embedded(prefix = "live_") val current: QueueTask?)
+private const val FRAME_ITEMS = """SELECT i.*, t.id AS live_id, t.title AS live_title, t.notes AS live_notes,
+    t.minutes AS live_minutes, b.startMillis AS live_scheduledStartMillis, b.endMillis AS live_scheduledEndMillis
+    FROM frame_items i LEFT JOIN tasks t ON t.id=i.taskId AND t.frameId=i.frameId AND t.owner='FRAME'
+    LEFT JOIN time_blocks b ON b.taskId=t.id """
 internal data class PositionUpdate(val id: String, val queuePosition: Int)
 internal data class QueuePositionLabel(val id: String, val queuePosition: Int, val title: String)
 
@@ -145,13 +149,10 @@ internal interface PlannerDao {
     fun frameIndex(): List<FrameSummary>
 
     @Query("SELECT * FROM frames WHERE id=:id") fun frame(id: String): FrameRow?
-    @Query("""SELECT i.*, CASE WHEN t.frameId=i.frameId AND t.owner='FRAME' THEN 1 ELSE 0 END AS restorable
-        FROM frame_items i JOIN tasks t ON t.id=i.taskId WHERE i.frameId=:id ORDER BY i.originalPosition""")
+    @Query(FRAME_ITEMS + "WHERE i.frameId=:id ORDER BY i.originalPosition")
     fun frameEntries(id: String): List<ItemState>
 
-    @Query("""SELECT i.*, CASE WHEN t.frameId = i.frameId AND t.owner = 'FRAME' THEN 1 ELSE 0 END AS restorable
-        FROM frame_items AS i JOIN tasks AS t ON t.id = i.taskId
-        ORDER BY i.frameId, i.originalPosition""")
+    @Query(FRAME_ITEMS + "ORDER BY i.frameId, i.originalPosition")
     fun itemStates(): List<ItemState>
 
     @Query("SELECT COUNT(*) FROM tasks WHERE owner = 'QUEUE'")

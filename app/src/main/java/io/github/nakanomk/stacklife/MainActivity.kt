@@ -29,6 +29,8 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import io.github.nakanomk.stacklife.about.AppDiagnostics
+import io.github.nakanomk.stacklife.about.HelpAboutScreen
 import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.assistant.*
 import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
@@ -54,6 +56,7 @@ class MainActivity : LocalizedActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        AppDiagnostics.bind(this)
         val planner = (application as StackLifeApplication).planner
         setContent { StackLifeApp(viewModel { WorkspaceViewModel(planner) }) }
     }
@@ -61,9 +64,10 @@ class MainActivity : LocalizedActivity() {
 
 @Serializable @SerialName("io.github.nakanomk.stacklife.Workbench") private data object Home : NavKey
 @Serializable private data class TaskDetail(val id: String) : NavKey
-@Serializable private data class EditTask(val id: String) : NavKey
+@Serializable private data class EditTask(val id: String, val frameId: String? = null) : NavKey
 @Serializable private data class FrameDetail(val id: String, val generated: Boolean = false) : NavKey
 @Serializable private data object Preferences : NavKey
+@Serializable private data object HelpAbout : NavKey
 @Serializable private data class EditAppearance(val group: String) : NavKey
 @Serializable private data object ModelConnection : NavKey
 @Serializable private data object AddTask : NavKey
@@ -82,6 +86,7 @@ private fun NavKey.motionKey(): String = when (this) {
     is EditAppearance -> "appearance:$group"
     is RemoveTerm -> "remove-term:$id"
     Preferences -> "settings"
+    HelpAbout -> "about"
     ModelConnection -> "model"
     AddTask -> "add-task"
     CreateFrame -> "create-frame"
@@ -233,18 +238,21 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     }
                 }
                 entry<EditTask> { key -> WorkspacePanel(model) { workspace ->
-                    val task = workspace.queue.find { it.id == key.id }
-                    if (task == null) MissingDetail(stringResource(R.string.ui_edit_task), stringResource(R.string.ui_task_not_queued), back)
-                    else TaskEditor(model, back, original = task)
+                    val task = if (key.frameId == null) workspace.queue.find { it.id == key.id }
+                        else workspace.frames.find { it.id == key.frameId }?.items?.find { it.taskId == key.id }?.current
+                    if (task == null) MissingDetail(stringResource(R.string.ui_edit_task),
+                        stringResource(if (key.frameId == null) R.string.ui_task_not_queued else R.string.ui_task_not_in_frame), back)
+                    else TaskEditor(model, back, original = task, frameId = key.frameId)
                 } }
                 entry<FrameDetail> { key ->
                     DetailRoute("frame:${key.id}", animate && initialDetail == null && !key.generated) {
-                        WorkspacePanel(model) { FrameScreen(key.id, it, model, back, shared) }
+                        WorkspacePanel(model) { FrameScreen(key.id, it, model, back, shared) { task -> navigate(EditTask(task, key.id)) } }
                     }
                 }
                 entry<Preferences> {
-                    SettingsScreen(preferences.policy, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) })
+                    SettingsScreen(preferences.policy, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) }, { navigate(HelpAbout) })
                 }
+                entry<HelpAbout> { HelpAboutScreen(back) }
                 entry<EditAppearance> { key -> AppearanceEditor(preferences.appearance,
                     AppearanceGroup.entries.first { it.key == key.group }, model, back) }
                 entry<ModelConnection> { PrivateScreen(privateScreens) { ConnectionScreen(assistant.connections, back) } }

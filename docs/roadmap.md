@@ -62,6 +62,7 @@ interface PlannerApi {
 
 - **压栈：**点「压栈」立即按原序保存整个未完成队列；「多选 → 压入所选」只移动勾选项。原因可空，不弹预填对话框。事务成功后才在底部显示「已压栈 · 补充原因」；保存原因只更新本次回执指定的帧，关闭提示不影响栈帧。无原因时显示「暂存的队列」，不写假原因。空集合、失效选项及事务失败均不建帧。反馈参考 BiliPai 的[底部宿主](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/HomeScreen.kt#L2576-L2582)和[下载成功后的附加动作](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/HomeBatchDownload.kt#L170-L181)，未移植 GPL 代码。
 - **恢复：**手动「全部恢复」一次执行；「选择恢复」按帧内源序而非勾选顺序。已取走/完成/移出的项不复活、不重复。操作与预览均说明实际策略。空帧即使连点也不触发切换。
+- **帧内编辑：**点帧内尚未取走的任务旁的「编辑任务」，可改标题、备注和时长，无需先恢复。恢复移动修改后的原任务；已取走的条目只读。历史帧保存时的文字和时长不回写。事务会核对帧归属，不把过期编辑应用到另一帧。
 
 |本机偏好|全部恢复帧 `[A,B]` 到当前 `[X]`|选择恢复|
 |---|---|---|
@@ -100,11 +101,13 @@ interface PlannerApi {
 
 **写入边界。** 展示差异、有效/待修正数、同名不同地点和冲突；有问题的条目须修正或明确排除。无课或无有效数据不得覆盖已有课表。确认后仅替换所选学期 `hust-hub` 来源的课程集合；相同内容重复导入无新增，不动用户任务、其他来源或学期。**不移植** `../WadwaitaUp/window.py:3155–3188` 的 `_apply_imported_courses` 按课名跳过/覆盖；同名不是身份。移除某学期课表也须预览，不删除工作台内容。
 
+核对清单的上端和末尾都可预览差异，差异页两端都可确认，同一份提案只消费一次。校历、预约时刻、任务时长及导入纠错的周次／起止节次使用 [Android NumberPicker](https://developer.android.com/reference/android/widget/NumberPicker)，列的编排参考 [BiliPai 的时间滚轮](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/screen/ThemeTimeWheelPicker.kt)。关闭滚轮不写入默认值；作息切换日可清除，无效原文在明确修正前保留。内嵌 HUB 右下角的信息按钮提供「登录 → 总课表 → 切换到总课表 → 导入」说明，不读取登录页内容。
+
 **离线录课。** 入口和字段分组参考 [WakeUp 官方录课说明](https://wakeup.fun/doc/add_course.html)。选择已有学期或填写新校历，填写课名、可选地点、上课周、星期和起止节次。预览列出实际课次，保存后同步显示在周表与当天时间轴；点手动课格可编辑或移除这一组课次。来源 `manual` 独立于 `hust-hub`，同名同地点也不相互覆盖。助理 `manual_course_add` 须先获得课程详情授权，跨周／学期还需相应范围；本机核对提案后才能写入。
 
 单次导入预览先计数，再生成冲突明细。超过 256 对受影响的重叠时，提示检查源文件，不截断课次后提交；课名和教室各限 256 个 UTF-16 单元，超长进入可修正条目。日/周视图中一门课超过 8 个冲突对象时显示确切总数，避免把大量课程两两展开。
 
-**阅读与失败路径。** 周视图按 [WakeUp](https://www.wakeup.fun/images/mobile3.png) 的「七日列 × 实际节次」排列。课块用已有的 [MaterialKolor](https://github.com/jordond/MaterialKolor/releases/tag/6.0.0) 生成 [HCT](https://github.com/material-foundation/material-color-utilities/blob/main/concepts/color_spaces.md#hct) 底色：按学期确定起始色相，再按课程序号错开色相；目标色度 39、明度 71–83，取自 WakeUp 白字周表的明亮色域，不跟随壁纸或深色主题调暗。课名、地点和冲突标记统一白字，可单独关闭文字描边。同课跨周或换教室不变色。冲突并列，点课看教室、节次、实际起止及冲突；点日期或「课表选项 → 课程列表」提供等价入口。横向切相邻周，纵向滚节次，周次胶囊可直接跳周。切学期、导入和移除集中在课表选项。无课表时胶囊直接提供导入。当天实例仍是时间轴的锁定块。登录、加载或校园网失败不覆盖原课表，文件通过不代表在线登录通过。
+**阅读与失败路径。** 周视图按 [WakeUp](https://www.wakeup.fun/images/mobile3.png) 的「七日列 × 实际节次」排列。课块用已有的 [MaterialKolor](https://github.com/jordond/MaterialKolor/releases/tag/6.0.0) 生成 [HCT](https://github.com/material-foundation/material-color-utilities/blob/main/concepts/color_spaces.md#hct) 底色：按学期确定起始色相，再按课程序号错开色相；目标色度 39、明度 71–83，取自 WakeUp 白字周表的明亮色域，不跟随壁纸或深色主题调暗。课名、地点和冲突标记统一白字，描边默认关闭；「材质与动态」可预览并开启。同课跨周或换教室不变色。冲突并列，点课看教室、节次、实际起止及冲突；点日期或「课表选项 → 课程列表」提供等价入口。横向切相邻周，纵向滚节次，周次胶囊可直接跳周。切学期、导入和移除集中在课表选项。无课表时胶囊直接提供导入。当天实例仍是时间轴的锁定块。登录、加载或校园网失败不覆盖原课表，文件通过不代表在线登录通过。
 
 周数读取 [Compose Pager](https://developer.android.com/develop/ui/compose/layouts/pager#page-state) 的手势方向与目标页：箭头、选周和横向拖动一开始就更新标题，回拉取消恢复原周；业务查询与助理范围不因为一次未完成的触摸而提前提交。
 
@@ -151,6 +154,7 @@ interface PlannerApi {
 - 四个根页面在同一横向分页容器中，导航与助理位于容器外。默认浮动导航，支持改为贴底；键盘出现时收起主导航。根页不重复页名，顶栏中间胶囊放日期、队列/栈、流程图创建或教学周；独立动作用圆形按钮。右下加号属于页面。手动操作不依赖模型。
 - 设置首页按外观、通用、日程助理和工作台恢复策略分组。「色彩」「布局」「材质与动态」各有独立目的地，只显示、保存或恢复本页字段。色彩支持随系统/浅/深、Android 12+ 动态色或种子（默认 `#435D92`）；使用 [MaterialKolor 6.0.0](https://github.com/jordond/MaterialKolor/releases/tag/6.0.0) 生成 `SPEC_2025` 颜色角色。
 - 「通用 → 语言」使用和外观相同的[单选项设置](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/SettingsSelectionComponents.kt#L14-L45)：**跟随系统**（默认）、**English**、**中文**。跟随系统按语言顺序选择中／英文，均不匹配或列表为空时用英文。Android 13 起与[系统的应用语言设置](https://developer.android.com/guide/topics/resources/app-languages#app-language-settings)双向同步，旧系统在本机保存。语言选择不改任务、课程、栈帧快照和历史对话原文。
+- 「通用 → 帮助与关于」参照 [BiliPai 关于页](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/ui/MaterialAboutContent.kt)，列出开发者、仓库、实装版本、基础 APK 和签名证书各自的 SHA-256，并可离线阅读包内许可。项目自身未声明许可证。诊断仅在主动开始后监听主窗口的 [FrameMetrics](https://developer.android.com/reference/android/view/FrameMetrics)，退到后台即结束；帧超时和丢失采样分别计数。事件日志只含固定代码，不含账号、密钥、任务或消息正文；只有手动选择[系统文件位置](https://developer.android.com/training/data-storage/shared/documents-files#create-file)才会导出。
 - 支持标准/紧凑留白、主导航次序/启动页、任务时长/备注、贴底/浮动、常驻/悬浮队列、材质总开关和导航/助理分项、减弱动效、减少透明度、增强对比及系统触感。默认舒适、今天、动态色、悬浮队列、玻璃开启。首次启动和升级时没有 `glass` 字段的配置均用开启；显式 `false` 不因升级改变，减少透明度和增强对比仍优先。三种恢复策略不受外观重置影响。
 - 首发图标为原创 fumo 颜文字 **`ᗜˬᗜ`**：两只对称方眼和低位短弧嘴，用独立矢量笔画，不依赖字库、商业布偶照片，不强画天子肖像。按 [Android Adaptive Icon](https://developer.android.com/develop/ui/views/launch/icon_design_adaptive) 做 108×108 dp 分层，识别区在中心 66×66 dp，彩色前景/背景及 monochrome 层共用轮廓，不预烘启动器圆角/阴影。空队列小标沿用同一张脸，不用颜文字代替操作标签。
 
@@ -182,7 +186,7 @@ interface PlannerApi {
 
 **应用内连续性。** 四个根页、队列／栈和相邻日／周保留分页器，根页的助理输入框不参与翻页。层级导航不推走前一页：设置齿轮、加号、列表项和操作按钮按实际屏幕位置展开为目的页，参照 [Material Container Transform](https://github.com/material-components/material-components-android/blob/master/docs/theming/Motion.md#container-transform)。工作台按实体 ID 和标题位置配对[共享容器](https://developer.android.com/develop/ui/compose/animation/shared-elements/customize)：标题和正文随卡片展开，详情工具栏和底部输入框留在最终屏幕位置，由同一张卡片逐步揭开。源卡不可见或已删除时不缩回替代项。[Nav3 预测返回](https://developer.android.com/guide/navigation/navigation-3/animate-destinations)可反向拖动和取消，不改草稿或业务数据。助理历史与消息、添加课程的选周与预览都在原弹层内切换，不重开窗口。系统选择器和 Chrome 保留平台动效；系统动画比例为零或勾选「减弱」时，应用内直接切换。
 
-返回时，工作台真实列表行及相邻项一直留在原位；共享边界只使用等大的空锚点，不拿列表行本身重新测量。详情落到标题位置后才把像素交回真实行，参照 [BiliPai 返回时间线的内容交接](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/core/ui/transition/VideoCardReturnTimeline.kt#L112-L149)。普通层级和有来源按钮的弹层也在落点交还画面；不以整页淡出代替容器移动。
+返回时，工作台真实列表行及相邻项一直留在原位；共享边界只使用等大的空锚点，不拿列表行本身重新测量。详情落到标题位置后才把像素交回真实行，参照 [BiliPai 返回时间线的内容交接](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/core/ui/transition/VideoCardReturnTimeline.kt#L112-L149)。**抽屉例外**：点课程、历史、添加课程或拓扑排序时用 [Android `ModalBottomSheet`](https://developer.android.com/develop/ui/compose/components/bottom-sheets) 从底部抽出，返回或下拉则滑回底部，不把源按钮放大；抽屉内选择条目不重开窗口。
 
 **联盟系统能力（M6 单列验收）。** 依据 [ITGSA SharedViewDemo](https://gitee.com/itgsa_sharedviewkit/SharedViewDemo)。`gsai.sdk:sharedview-kit` 运行时调用 `ViewAnimationManager.isViewAnimationSupported()`，不按品牌猜。仅在协议支持、动效允许、源卡片完整可见时，对队列事件/栈帧卡片用非导出 `EntityDetailActivity`，复用同一详情 Composable，Intent 只传实体类型和 ID。用 `PixelCopy` 取被点卡片的 window 矩形，不把整屏 `LocalView` 当卡片。按 Kit 能力约定区分屏幕/窗口坐标、转换 bounds，圆角转 px，交给 `makeViewAnimationOptions(bitmap, bounds, radius, …)`；成功只让系统播一次。返回按实体 key 刷新落点，在详情 Activity 的 `finish()` **之前** `overrideViewAnimationTransition`；源丢失跟随系统。能力为 0、options 为空或取图失败，走同一应用内详情路径，不叠动画、不阻断导航。
 
@@ -194,7 +198,7 @@ interface PlannerApi {
 
 浮动导航、队列／栈和作息分段都可横拖水滴，松手选定、取消保留原项；点按、键盘和 TalkBack 仍使用原来的选项。玻璃档采样真实页面和壳体，按住时向四周有弹性，释放后回到分页器的位置；实色档不建立透镜。玻璃课格恢复有深度的透镜：透过有色材质能看到实际节次线在两侧弯折，按住时透镜和内容一起轻微放大；不在课格里另画装饰弧线，白字也不参与背景折射。材质页与周视图共用 `PeriodGrid` / `CourseTile`；关闭玻璃时课程变为不透明实色，色相、位置与点击区域不变。外观编辑沿用 [Apple Sheets](https://developer.apple.com/design/human-interface-guidelines/sheets)：顶栏取消／保存，居中重置只影响当前分组草稿。
 
-流程图「生成拓扑排序」沿用工作台的紧凑胶囊；操作单按 [BiliPai 的抽屉握柄](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/design-system/src/main/java/com/android/purebilibili/core/ui/AppSheetComponents.kt#L682-L695)将 36×5 dp 的可见握柄与 56×48 dp 的可点区域分开。目标选择参照 [BiliPai 的弹出选项行](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/core/ui/popup/AppGlassPopupHost.kt#L1474-L1534)：选中行用材质底和 20 dp 尾部勾选，不另放 MD3 单选圆点。看清顺序后可直接加入队列或存为栈帧，两者不是互斥模式。
+流程图「生成拓扑排序」与「添加节点」是两个独立的胶囊，中间留 8 dp 空隙，没有共用底板。操作单按 [BiliPai 的抽屉握柄](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/design-system/src/main/java/com/android/purebilibili/core/ui/AppSheetComponents.kt#L682-L695)将 36×5 dp 的可见握柄与 56×48 dp 的可点区域分开。目标选择参照 [BiliPai 的弹出选项行](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/core/ui/popup/AppGlassPopupHost.kt#L1474-L1534)：选中行用材质底和 20 dp 尾部勾选，不另放 MD3 单选圆点。看清顺序后可直接加入队列或存为栈帧，两者不是互斥模式。
 
 课格先对真实节次线做 [Miuix 高斯模糊](https://github.com/compose-miuix-ui/miuix/blob/v0.9.5-beta02/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/internal/BlurEffect.kt)，再折射；白字最后绘制。周表沿用 [BiliPai 的渐变模糊](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/OfficialProgressiveTopBlur.kt)：顶栏与星期／日期共用一个取自滚动网格的 [ProgressiveBlur](https://github.com/compose-miuix-ui/miuix/blob/v0.9.5-beta02/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/ProgressiveBlur.kt)。渐变从时间条下沿上方 24 dp 开始，恰好止于星期／日期行的实际下沿；下方第一行课表像素不再叠加顶部模糊。不单独模糊时间条，不挪动课程或扩大日期点击区；周次与日期文字绘在效果上方。添加课程的顶栏、表单组、选周和核对页沿用当前材质。关闭玻璃、减少透明度或增强对比时，表头使用同样大小的不透明表面。
 
@@ -301,6 +305,8 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 **v0.10.5–0.10.6 复审。** 按 OnePlus 上的参考画面对照：API 37、1080×2340、440 dpi，时间视图滚至次日 00:00；队列展开和收起时，日末标签下沿、轴线末端、助理输入框上沿均为 `y=1955 px`，间隔 `0 px`。像素回归检查最后 1、4、8 px 仍有线；23:30–00:00 的任务在收起队列后可直接点开，拖进助理不排程。事件视图仍贯穿短列表。Android 8 和 17 均实际切换中英文，选择中文后强停冷启仍为中文；API 37 系统改法语、应用选跟随系统时为英文，用系统应用语言改选中文立即生效。OnePlus USB 覆盖安装后回读 `0.10.6 (21)`。
 
 **v0.10.8 复审。** 画面验收使用 API 37 模拟器。440 dpi 同一工作台截图中，队列选中底的中心段从 83 px 增到 110 px，点击区仍高 132 px；玻璃／实色两档点上边缘均能选栈，沿轨横拖可回队列。课表在 320、440、560 dpi 下滚动时，日期行内仍有磨砂，下沿外第一个像素起的网格分隔线与清晰处相同，日期仍可点开。深色任务详情返回时，原行与邻项不换位；逐帧覆盖落位、销毁、预测返回反拖，以及编辑器打开键盘后取消返回仍保留草稿。流程图针对真实背景变色验证握柄和选中行：玻璃透色、减少透明度不透色；换目标、加入队列、存栈和滑动关闭均通过。
+
+**v0.10.9 复审。** API 37、1080×2340、440 dpi 上，以 24 个合成课次从差异页顶部确认导入；底部确认仍覆盖事务进行中旋转的场景。课格和历史的开合录屏显示抽屉从屏幕下沿进出，背景不横移。实测栈帧中编辑后恢复的是修改过的原任务，历史快照没有变化。系统文件选择器成功导出事件日志及含 78 行原始帧计时的报告（模拟器，不作为真机帧率）。OnePlus USB 覆盖安装 `0.10.9 (24)`，设备上基础 APK 的 SHA-256 与关于页和构建产物一致。HUB 说明和合成数据的提取流程已验证，未代登录个人账号。
 
 |阶段 / 用例|输入 → 可观察结果（校方登录、真实模型、联盟真机和性能有各自的验收条件）|
 |---|---|

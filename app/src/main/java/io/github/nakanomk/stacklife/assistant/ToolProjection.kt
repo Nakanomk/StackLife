@@ -71,9 +71,12 @@ internal class ToolProjection(private val grant: Disclosure, private val seen: T
                 section(f.items) { item -> buildJsonObject {
                     // History is not a capability to modify a task that has since left this frame.
                     if (item.restorable) id("taskId", item.taskId, seen.tasks)
-                    field("title", item.title); put("minutes", item.minutes); put("position", item.originalPosition)
-                    put("restorable", item.restorable); interval(item.scheduledStartMillis, item.scheduledEndMillis, zone)
-                    if (grant.notes) field("notes", item.notes)
+                    val live = item.current
+                    field("title", live?.title ?: item.title); put("minutes", live?.minutes ?: item.minutes); put("position", item.originalPosition)
+                    put("restorable", item.restorable)
+                    if (live == null) interval(item.scheduledStartMillis, item.scheduledEndMillis, zone)
+                    else interval(live.scheduledStartMillis, live.scheduledEndMillis, zone)
+                    if (grant.notes) field("notes", live?.notes ?: item.notes)
                 } }
             }
             is PlannerQuery.Day -> {

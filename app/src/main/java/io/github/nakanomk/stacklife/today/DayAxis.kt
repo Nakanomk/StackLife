@@ -41,7 +41,6 @@ import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.PlannerQuery
 import io.github.nakanomk.stacklife.planner.ScheduledState
 import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch
-import io.github.nakanomk.stacklife.appearance.rememberPanelLaunch
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -237,10 +236,9 @@ internal fun CourseCard(course: ScheduledCourse, day: PlannerQuery.Day, modifier
     val scheme = MaterialTheme.colorScheme
     val lines = if (wrap) Int.MAX_VALUE else 1
     var open by rememberSaveable { mutableStateOf(false) }
-    val launch = rememberPanelLaunch("course-detail")
     if (open) CourseDetails(course) { open = false }
-    Column(modifier.testTag("day-course").then(launch.modifier).clip(MaterialTheme.shapes.medium)
-        .clickable(onClickLabel = stringResource(R.string.today_view_class), role = Role.Button) { launch.open { open = true } }.padding(horizontal = 4.dp)) {
+    Column(modifier.testTag("day-course").clip(MaterialTheme.shapes.medium)
+        .clickable(onClickLabel = stringResource(R.string.today_view_class), role = Role.Button) { open = true }.padding(horizontal = 4.dp)) {
         Text("${clockLabel(meeting.startMillis, day)}–${clockLabel(meeting.endMillis, day)}",
             style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = lines, overflow = TextOverflow.Ellipsis)
         Text(meeting.title, style = MaterialTheme.typography.titleSmall, maxLines = lines, overflow = TextOverflow.Ellipsis)

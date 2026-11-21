@@ -1,6 +1,5 @@
 package io.github.nakanomk.stacklife.today
 
-import android.app.DatePickerDialog
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -33,18 +32,4 @@ internal fun deviceDay(): DeviceDay {
         onDispose { context.unregisterReceiver(clock) }
     }
     return day
-}
-
-@Composable
-internal fun DateChooser(initial: LocalDate, onSelect: (LocalDate) -> Unit, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val select by rememberUpdatedState(onSelect)
-    val dismiss by rememberUpdatedState(onDismiss)
-    DisposableEffect(context) {
-        val picker = DatePickerDialog(context, { _, year, month, day -> select(LocalDate.of(year, month + 1, day)) },
-            initial.year, initial.monthValue - 1, initial.dayOfMonth)
-        picker.setOnDismissListener { dismiss() }
-        picker.show()
-        onDispose { picker.setOnDismissListener(null); picker.dismiss() }
-    }
 }

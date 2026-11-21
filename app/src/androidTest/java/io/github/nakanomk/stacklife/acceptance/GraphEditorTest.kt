@@ -164,7 +164,11 @@ class GraphEditorTest {
         open()
         val before = runBlocking { store.state() }
         val launcher = tag("graph-goal").assertHeightIsAtLeast(48.dp)
-        ui.onNodeWithTag("graph-goal-pill", useUnmergedTree = true).assertHeightIsEqualTo(40.dp)
+        val first = ui.onNodeWithTag("graph-goal-pill", useUnmergedTree = true).assertHeightIsEqualTo(40.dp).getUnclippedBoundsInRoot()
+        tag("graph-add").assertHeightIsAtLeast(48.dp)
+        val next = ui.onNodeWithTag("graph-add-pill", useUnmergedTree = true).assertHeightIsEqualTo(40.dp).getUnclippedBoundsInRoot()
+        assertEquals(first.top, next.top)
+        assertTrue("Independent actions need visible space between the lenses", next.left - first.right >= 8.dp)
         launcher.performClick()
         val handle = tag("goal-sheet-handle").assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
         ui.onNodeWithTag("goal-grip", useUnmergedTree = true).assertWidthIsEqualTo(36.dp).assertHeightIsEqualTo(5.dp)

@@ -1,0 +1,13 @@
+<resources>
+    <string name="wheel_choose_date">Choose date</string>
+    <string name="wheel_year">Year</string>
+    <string name="wheel_month">Month</string>
+    <string name="wheel_day">Day</string>
+    <string name="wheel_hour">Hour</string>
+    <string name="wheel_hours">Hours</string>
+    <string name="wheel_period">AM/PM</string>
+    <string name="wheel_unset">Not set</string>
+    <string name="wheel_clear_date">Clear date</string>
+    <string name="hub_import_help">How to import HUST courses:</string>
+    <string name="hub_import_steps">1. Sign in to HUB on this page as usual.\n2. On the HUB home page, tap “Timetable” at the top right to open the timetable page.\n3. Tap “总课表” (Full Timetable) within the page.\n4. Once the full timetable is shown, tap Import.</string>
+</resources>

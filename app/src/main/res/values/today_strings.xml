@@ -24,7 +24,6 @@
     <string name="today_end_boundary">%1$s · End of day</string>
     <string name="today_end_handle">%1$s, end handle, %2$s. Drag up or down to adjust the end time.</string>
     <string name="today_end_time">Ends: %1$s</string>
-    <string name="today_enter_valid_time">Enter a valid hour and minute.</string>
     <string name="today_events">Events</string>
     <string name="today_expand_queue">Expand unscheduled queue</string>
     <string name="today_expanded">Expanded</string>
@@ -52,10 +51,8 @@
     <string name="today_skipped_time">This local time does not exist. Choose another time.</string>
     <string name="today_stacked_occupied">Stacked · time still reserved</string>
     <string name="today_stale_gap">The schedule changed. Close this dialog and select a free time again.</string>
-    <string name="today_start_clock">Start time (HH:mm)</string>
+    <string name="today_start_clock">Start time</string>
     <string name="today_start_date">Start date: %1$s</string>
-    <string name="today_start_hour">Start hour (0–23)</string>
-    <string name="today_start_minute">Minute (0–59)</string>
     <string name="today_switch_view">Switch day view</string>
     <string name="today_tap_to_schedule">Tap to schedule</string>
     <string name="today_task_bar">%1$s, time block</string>
@@ -66,7 +63,6 @@
     <string name="today_tray_empty">No tasks to schedule</string>
     <string name="today_tray_title">Unscheduled · %1$d</string>
     <string name="today_unschedule">Unschedule</string>
-    <string name="today_valid_clock">Enter a 24-hour time, such as 09:30.</string>
     <string name="today_view_class">View fixed class</string>
     <string name="today_zone">Local time zone · %1$s</string>
 </resources>

@@ -50,7 +50,6 @@ import io.github.nakanomk.stacklife.appearance.StackLifeSurface
 import io.github.nakanomk.stacklife.ScrollEdge
 import io.github.nakanomk.stacklife.appearance.plannerBackdrop
 import io.github.nakanomk.stacklife.appearance.rememberPlannerBackdrop
-import io.github.nakanomk.stacklife.appearance.rememberPanelLaunch
 import io.github.nakanomk.stacklife.planner.CourseWeek
 import java.time.LocalDate
 
@@ -142,10 +141,9 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, ope
                         for (i in 0..6) {
                             val date = monday.plusDays(i.toLong())
                             val dateDescription = date.format(dateFormat)
-                            val launch = rememberPanelLaunch("course-detail")
-                            Column(Modifier.width(dayWidth).heightIn(min = 48.dp).then(launch.modifier)
+                            Column(Modifier.width(dayWidth).heightIn(min = 48.dp)
                                 .clickable(onClickLabel = stringResource(R.string.courses_open_day), role = Role.Button) {
-                                    launch.open { if (openDay != null) openDay(i + 1) else selectedDay = i + 1 }
+                                    if (openDay != null) openDay(i + 1) else selectedDay = i + 1
                                 }
                                 .semantics { contentDescription = dateDescription },
                                 verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -234,9 +232,8 @@ private fun CourseTile(tile: Tile, swatch: Color, outline: Stroke?, open: ((Sche
         if (tile.course.conflicts.isEmpty()) "" else stringResource(R.string.courses_tile_conflict, tile.course.conflicts.joinToString(stringResource(R.string.courses_list_separator)))
     val interaction = if (open == null) null else remember { MutableInteractionSource() }
     StackLifeSurface(CapsuleScene.COURSE, modifier, solid = swatch, shape = courseShape, tint = swatch, interactionSource = interaction) {
-        val launch = if (open == null) null else rememberPanelLaunch("course-detail")
-        val action = if (open == null || launch == null) Modifier else launch.modifier.clickable(interactionSource = interaction, role = Role.Button, onClickLabel = stringResource(R.string.courses_view_fixed_class)) {
-            launch.open { open(tile.course) }
+        val action = if (open == null) Modifier else Modifier.clickable(interactionSource = interaction, role = Role.Button, onClickLabel = stringResource(R.string.courses_view_fixed_class)) {
+            open(tile.course)
         }
         Column(Modifier.fillMaxSize().clipToBounds().testTag("grid-course:${tile.index}").then(action)
             .semantics { contentDescription = description }.padding(horizontal = 3.dp, vertical = 4.dp)) {

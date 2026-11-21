@@ -80,7 +80,7 @@ internal fun MissingDetail(title: String, message: String, onBack: () -> Unit) {
 
 @Composable
 internal fun SettingsScreen(restorePolicy: RestorePolicy, actions: WorkspaceActions, onBack: () -> Unit,
-    onConnection: () -> Unit, onAppearance: (AppearanceGroup) -> Unit) {
+    onConnection: () -> Unit, onAppearance: (AppearanceGroup) -> Unit, onAbout: () -> Unit) {
     val action = rememberSubmission(actions)
     EditorPage(stringResource(R.string.ui_settings), onBack, AssistantPage.Settings) { top, bottom ->
             LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -94,7 +94,12 @@ internal fun SettingsScreen(restorePolicy: RestorePolicy, actions: WorkspaceActi
                     PreferenceRow(stringResource(R.string.ui_material_motion), modifier = Modifier.routeOrigin("appearance:${AppearanceGroup.MATERIAL.key}"),
                         leadingIcon = R.drawable.ic_blur_on) { onAppearance(AppearanceGroup.MATERIAL) }
                 } }
-                item { SettingsGroup(stringResource(R.string.pref_general)) { LanguagePreference() } }
+                item { SettingsGroup(stringResource(R.string.pref_general)) {
+                    LanguagePreference()
+                    HorizontalDivider(Modifier.padding(start = 32.dp))
+                    PreferenceRow(stringResource(R.string.about_title), modifier = Modifier.routeOrigin("about").testTag("settings-about"),
+                        leadingIcon = R.drawable.ic_info, onClick = onAbout)
+                } }
                 item { SettingsGroup(stringResource(R.string.ui_assistant)) {
                     PreferenceRow(stringResource(R.string.ui_model_connection), modifier = Modifier.routeOrigin("model"),
                         leadingIcon = R.drawable.ic_chat, onClick = onConnection)

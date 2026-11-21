@@ -1,6 +1,7 @@
 package io.github.nakanomk.stacklife.storage
 
 import io.github.nakanomk.stacklife.i18n.uiText
+import io.github.nakanomk.stacklife.about.AppDiagnostics
 import androidx.room.withTransaction
 import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.graphs.goalOrder
@@ -94,7 +95,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
     override fun discardCourseImport(draftId: String) { reviewed.remove(draftId) }
 
     private fun ItemState.entry() = FrameEntry(item.taskId, item.originalPosition, item.title, item.notes, item.minutes,
-        item.scheduledStartMillis, item.scheduledEndMillis, restorable)
+        item.scheduledStartMillis, item.scheduledEndMillis, current)
 
     private fun workspace(settings: SettingsRow): Workspace {
         val entries = HashMap<String, MutableList<FrameEntry>>()
@@ -126,6 +127,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
     override suspend fun commit(proposalId: String): CommitResult {
         val proposal = pending.remove(proposalId)
             ?: return CommitResult.Rejected(CommitFailure.UNKNOWN_PROPOSAL, uiText("This preview expired or was already used. Preview again.", "预览已失效或已使用，请重新预览。"))
+                .also(AppDiagnostics::recordCommit)
         return try {
             db.withTransaction {
                 val revision = dao.settings()?.revision ?: 0L
@@ -140,7 +142,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
             throw e
         } catch (e: Exception) {
             CommitResult.Rejected(CommitFailure.STORAGE, uiText({ "Could not save changes: ${e.localizedMessage ?: e.javaClass.simpleName}" }, { "未能保存更改：${e.localizedMessage ?: e.javaClass.simpleName}" }))
-        }
+        }.also(AppDiagnostics::recordCommit)
     }
 }
 

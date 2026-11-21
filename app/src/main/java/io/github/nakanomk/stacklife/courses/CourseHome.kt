@@ -32,7 +32,6 @@ import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.RootToolbar
 import io.github.nakanomk.stacklife.appearance.PlannerModalBottomSheet
 import io.github.nakanomk.stacklife.appearance.LocalPanelBack
-import io.github.nakanomk.stacklife.appearance.rememberPanelLaunch
 import androidx.compose.foundation.clickable
 import io.github.nakanomk.stacklife.transitions.PaneMotion
 import io.github.nakanomk.stacklife.transitions.PaneOrigins
@@ -124,8 +123,7 @@ internal fun CourseHome(
                         .then(if (imported) Modifier.routeOrigin("remove-term:${term.id}", CircleShape) else Modifier)
                     GlassIcon(R.drawable.ic_more_vert, stringResource(R.string.courses_options), { menu = true }, owner.testTag("course-options"))
                     PlannerDropdownMenu(menu, { menu = false }) {
-                        val manual = rememberPanelLaunch("manual-course")
-                        DropdownMenuItem({ Text(stringResource(R.string.courses_add)) }, { manual.open { menu = false; add() } }, modifier = manual.modifier.testTag("course-add"),
+                        DropdownMenuItem({ Text(stringResource(R.string.courses_add)) }, { menu = false; add() }, modifier = Modifier.testTag("course-add"),
                             leadingIcon = { Icon(painterResource(R.drawable.ic_add), null) })
                         DropdownMenuItem({ Text(if (listMode) stringResource(R.string.courses_week_grid) else stringResource(R.string.courses_list)) },
                             { menu = false; listMode = !listMode }, modifier = Modifier.testTag("course-view-toggle"))
@@ -155,8 +153,7 @@ internal fun CourseHome(
             Column(Modifier.fillMaxSize().padding(top = top, bottom = bottom).verticalScroll(rememberScrollState())
                 .padding(16.dp)) {
                 Text(stringResource(R.string.courses_no_timetable), style = MaterialTheme.typography.titleMedium)
-                val manual = rememberPanelLaunch("manual-course")
-                ActionPill(stringResource(R.string.courses_add), { manual.open(add) }, Modifier.padding(top = 12.dp).then(manual.modifier).testTag("course-add"), prominent = true)
+                ActionPill(stringResource(R.string.courses_add), add, Modifier.padding(top = 12.dp).testTag("course-add"), prominent = true)
                 Text(stringResource(R.string.courses_empty_timetable_hint),
                     Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
                 Text(stringResource(R.string.courses_assistant_hint), Modifier.padding(top = 8.dp),
@@ -201,8 +198,7 @@ private fun CourseWeekPage(term: TermSpec, week: CourseWeek, listMode: Boolean, 
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (week.classes.isEmpty()) item { Text(stringResource(R.string.courses_no_classes_week)) }
         itemsIndexed(week.classes, key = { _, c -> c.occurrenceKey() }) { i, course ->
-            val launch = rememberPanelLaunch("course-detail")
-            Surface(onClick = { launch.open { open(course) } }, modifier = Modifier.fillMaxWidth().then(launch.modifier).testTag("week-course:$i"),
+            Surface(onClick = { open(course) }, modifier = Modifier.fillMaxWidth().testTag("week-course:$i"),
                 color = MaterialTheme.colorScheme.surface) {
                 Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     val color = rememberCourseColor(term.id, week.colorIndices.getValue(course.meeting.title))
@@ -243,10 +239,9 @@ internal fun CourseDetails(course: ScheduledCourse, close: () -> Unit) {
 internal fun CourseReadPanel(course: ScheduledCourse?, dayLabel: String?, dayCourses: List<ScheduledCourse>,
     open: ((ScheduledCourse) -> Unit)? = null, edit: ((ScheduledCourse) -> Unit)? = null, close: () -> Unit) {
     val origins = remember { PaneOrigins() }
-    val sheet = rememberBottomSheetState(initialValue = SheetValue.Expanded, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))
     val nested = course != null && dayLabel != null
     val dayList = androidx.compose.foundation.lazy.rememberLazyListState()
-    PlannerModalBottomSheet(close, sheet, nested = nested, onNestedBack = close, windowKey = "course-detail") {
+    PlannerModalBottomSheet(close, nested = nested, onNestedBack = close) {
         val back = LocalPanelBack.current ?: close
         PaneMotion<CourseReading>(course?.let { CourseReading.Detail(it) } ?: CourseReading.Day, origins,
             depth = { if (it == CourseReading.Day) 0 else 1 }, originKey = { if (it is CourseReading.Detail) it.course.occurrenceKey() else "day" },
@@ -265,8 +260,7 @@ internal fun CourseReadPanel(course: ScheduledCourse?, dayLabel: String?, dayCou
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         if (edit != null && detail.source == MANUAL_SOURCE) {
-                            val manual = rememberPanelLaunch("manual-course")
-                            TextButton(onClick = { manual.open { edit(detail) } }, modifier = manual.modifier.heightIn(min = 48.dp).testTag("manual-edit")) { Text(stringResource(R.string.courses_edit)) }
+                            TextButton(onClick = { edit(detail) }, modifier = Modifier.heightIn(min = 48.dp).testTag("manual-edit")) { Text(stringResource(R.string.courses_edit)) }
                         }
                         TextButton(onClick = back) { Text(stringResource(if (nested) R.string.courses_back else R.string.courses_close)) }
                     }

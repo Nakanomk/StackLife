@@ -18,6 +18,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.room.withTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.StackLifeApp
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.courses.*
@@ -91,6 +92,57 @@ class CourseConfirmationTest {
 
     private suspend fun week(id: String) = store.api.observe(PlannerQuery.Week(id, 1)).first() as CourseWeek
 
+    @Test fun invalidSourceWeekAndPracticeRequireExplicitWheelConfirmations() = runBlocking {
+        val before = store.state().revision
+        val file = File.createTempFile("course-correction", ".json", ui.activity.cacheDir)
+        try {
+            file.writeText("""[{"ZC":1,"KS":"2026-09-07","MONDAY":[]},{"ZC":"99","MONDAY":[{"KCMC":"实验","JC":"实践","JSMC":"A"}]}]""")
+            attach(file)
+            await(hasTestTag("nav:courses")).performClick()
+            await(hasTestTag("course-import")).performClick()
+            await(hasTestTag("importCourseFile")).performClick()
+            await(hasTestTag("termId")).performScrollTo().performTextInput(term.id)
+            ui.chooseNumber("termWeeks", term.weeks)
+            ui.onNodeWithTag("reviewCourseRows").performScrollTo().performClick()
+            await(hasTestTag("previewCourseImportTop")).assertIsNotEnabled()
+            ui.onNodeWithTag("courseIssues").performScrollToNode(hasTestTag("correctIssue-0"))
+            ui.onNodeWithTag("correctIssue-0").performClick()
+
+            val unset = ui.activity.getString(R.string.wheel_unset)
+            val save = ui.onNodeWithText(ui.activity.getString(R.string.courses_save_correction))
+            await(hasTestTag("fixOriginal")).assertTextContains("99", substring = true).assertTextContains("实践", substring = true)
+            ui.onNodeWithTag("fixWeek").assertTextContains(unset).performScrollTo().performClick()
+            ui.adjustWheel("wheel-number", 2)
+            ui.onNodeWithTag("wheel-cancel").performClick()
+            ui.onNodeWithTag("fixWeek").assertTextContains(unset)
+            save.assertIsNotEnabled()
+            ui.chooseNumber("fixWeek", 2)
+            ui.onNodeWithTag("fixPeriod").assertTextContains(unset).performScrollTo().performClick()
+            ui.adjustWheel("wheel-first", 12)
+            ui.onNodeWithTag("wheel-last").assert(hasStateDescription("12"))
+            ui.onNodeWithTag("wheel-cancel").performClick()
+            ui.onNodeWithTag("fixPeriod").assertTextContains(unset)
+            save.assertIsNotEnabled()
+            ui.onNodeWithTag("fixPeriod").performScrollTo().performClick()
+            ui.adjustWheel("wheel-first", 5)
+            ui.adjustWheel("wheel-last", 6)
+            ui.onNodeWithTag("wheel-confirm").performClick()
+            ui.onNodeWithTag("fixOriginal").assertTextContains("实践", substring = true)
+            save.performScrollTo().performClick()
+
+            await(hasTestTag("courseIssues")).performScrollToNode(hasTestTag("previewCourseImportTop"))
+            await(hasTestTag("previewCourseImportTop") and isEnabled()).performClick()
+            await(hasTestTag("confirmCourseImportTop"))
+            assertEquals(before, store.state().revision)
+            ui.onNodeWithTag("confirmCourseImportTop").performClick()
+            await(hasTestTag("course-week") and hasText(term.id))
+            assertTrue(week(term.id).classes.isEmpty())
+            val second = store.api.observe(PlannerQuery.Week(term.id, 2)).first() as CourseWeek
+            assertEquals(listOf(term.meeting(2, 1, "实验", "A", 5, 6)), second.classes.map { it.meeting })
+            assertEquals(before + 1, store.state().revision)
+        } finally { file.delete() }
+    }
+
     @Test fun recreatingDuringConfirmedImportOpensTheReviewedTermExactlyOnce() = runBlocking {
         // Without the receipt's target, CourseHome would default to this other term.
         val other = term.copy(id = "A-other")
@@ -106,7 +158,7 @@ class CourseConfirmationTest {
             ui.onNodeWithTag("course-import").performClick()
             await(hasTestTag("importCourseFile")).performClick()
             await(hasTestTag("termId")).performScrollTo().performTextInput(term.id)
-            ui.onNodeWithTag("termWeeks").performScrollTo().performTextInput(term.weeks.toString())
+            ui.chooseNumber("termWeeks", term.weeks)
             ui.onNodeWithTag("reviewCourseRows").performScrollTo().performClick()
             await(hasTestTag("courseIssues")).performScrollToNode(hasTestTag("previewCourseImport"))
             ui.onNodeWithTag("previewCourseImport").performClick()
@@ -115,6 +167,8 @@ class CourseConfirmationTest {
             withWriterHeld {
                 ui.onNode(confirm).performClick()
                 ui.onNodeWithTag("cancelCourseImport").assertIsNotEnabled()
+                ui.onNodeWithTag("courseImportDiff").performScrollToNode(hasTestTag("confirmCourseImportTop"))
+                ui.onNodeWithTag("confirmCourseImportTop").assertIsNotEnabled()
                 ui.activityRule.scenario.recreate()
                 attach(file)
                 await(hasTestTag("cancelCourseImport")).assertIsNotEnabled()

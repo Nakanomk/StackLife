@@ -3,6 +3,7 @@
     <string name="ui_bottom_nav">贴底导航</string>
     <string name="ui_edit_task">编辑任务</string>
     <string name="ui_task_not_queued">这项任务已不在队列中。</string>
+    <string name="ui_task_not_in_frame">这项任务已不在此栈帧中。</string>
     <string name="ui_read_failed">无法读取设备上的日程。数据未被清除。</string>
     <string name="ui_settings">设置</string>
     <string name="ui_colors">色彩</string>
@@ -115,7 +116,6 @@
     <string name="ui_save_node">保存节点</string>
     <string name="ui_node_title">节点标题</string>
     <string name="ui_optional_notes">备注（选填）</string>
-    <string name="ui_estimated_minutes">预计分钟</string>
     <string name="ui_move_named">移动「%1$s」</string>
     <string name="ui_save_position">保存位置</string>
     <string name="ui_position_x">横坐标（dp）</string>
@@ -186,7 +186,9 @@
     <string name="ui_restore_all">全部恢复</string>
     <string name="ui_saved_list">保存时的清单</string>
     <string name="ui_empty_frame_hint">这份栈帧已取空。下方保留保存时的内容。</string>
-    <string name="ui_frame_history_hint">按当时的顺序显示；之后的修改不会改写这里。</string>
+    <string name="ui_frame_tasks">帧内任务</string>
+    <string name="ui_frame_history_hint">可直接编辑未取走的任务；已取走的条目仅供回看。</string>
+    <string name="ui_frame_original">保存时：%1$s · %2$d 分钟</string>
     <string name="ui_entry_status">第 %1$s 项 · %2$s</string>
     <string name="ui_saved_slot">保存时的预约：%1$s 至 %2$s</string>
     <string name="ui_prepend_detail">插入队首：按帧内原顺序恢复，当前队列排在其后。</string>

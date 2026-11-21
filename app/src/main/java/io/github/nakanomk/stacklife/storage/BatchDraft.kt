@@ -57,6 +57,8 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             is PlannerCommand.TaskEdit -> {
                 if (cmd.title == null && cmd.notes == null && cmd.minutes == null) invalid(uiText("Select a task field to edit.", "请选择需要修改的任务字段。"))
                 val row = activeTask(cmd.taskId)
+                if (cmd.expectedFrameId != null && row.frameId != cmd.expectedFrameId)
+                    invalid(uiText("This task is no longer in this frame.", "这项任务已不在此栈帧中。"))
                 val minutes = cmd.minutes ?: row.minutes
                 edited[row.id] = row.copy(title = title(cmd.title ?: row.title, minutes), notes = cmd.notes ?: row.notes, minutes = minutes)
             }

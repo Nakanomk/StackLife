@@ -91,7 +91,7 @@ class AppearanceTest {
         assertFalse(panel.overlaps(ui.onNodeWithTag("assistant-input").fetchSemanticsNode().boundsInRoot))
         assertFalse(panel.overlaps(ui.onNodeWithTag("navigation-capsule").fetchSemanticsNode().boundsInRoot))
         tray.performTouchInput { click() }
-        visible(hasTestTag("slot:hour")).assertExists()
+        visible(hasTestTag("slot:time")).assertExists()
     }
 
     @Test fun groupedResetKeepsOtherGroupsAndConcurrentEditCannotOverwriteThem() = runBlocking {

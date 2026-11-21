@@ -5,7 +5,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
@@ -18,7 +17,6 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavKey
@@ -28,6 +26,9 @@ import java.time.*
 import java.time.format.DateTimeFormatter
 import kotlinx.serialization.Serializable
 import io.github.nakanomk.stacklife.assistant.AssistantPage
+import io.github.nakanomk.stacklife.appearance.ClockWheelField
+import io.github.nakanomk.stacklife.appearance.DateWheelDialog
+import io.github.nakanomk.stacklife.appearance.DurationWheelField
 
 /** A restored editor targets exactly the task and revision the user opened, never a replacement. */
 @Serializable
@@ -57,22 +58,19 @@ internal fun SlotEditor(
         original?.toLocalDateTime() ?: LocalDate.ofEpochDay(entry.dateEpochDay).atTime(9, 0)
     }
     var epochDay by rememberSaveable { mutableLongStateOf(initial.toLocalDate().toEpochDay()) }
-    var hour by rememberSaveable { mutableStateOf(initial.hour.toString().padStart(2, '0')) }
-    var minute by rememberSaveable { mutableStateOf(initial.minute.toString().padStart(2, '0')) }
-    var duration by rememberSaveable { mutableStateOf(entry.minutes.toString()) }
+    var minuteOfDay by rememberSaveable { mutableIntStateOf(initial.hour * 60 + initial.minute) }
+    var minutes by rememberSaveable { mutableIntStateOf(entry.minutes) }
     var offsetChoice by rememberSaveable { mutableStateOf(original?.offset?.id) }
     var pickDate by rememberSaveable { mutableStateOf(false) }
     var clearing by rememberSaveable { mutableStateOf(false) }
     val date = LocalDate.ofEpochDay(epochDay)
-    val h = hour.toIntOrNull()?.takeIf { it in 0..23 }
-    val m = minute.toIntOrNull()?.takeIf { it in 0..59 }
-    val minutes = duration.toIntOrNull()?.takeIf { it > 0 }
-    val local = if (h == null || m == null) null else if (date == initial.toLocalDate() && h == initial.hour && m == initial.minute)
-        initial else date.atTime(h, m)
-    val offsets = remember(local, zone) { local?.let(zone.rules::getValidOffsets).orEmpty() }
+    val time = LocalTime.of(minuteOfDay / 60, minuteOfDay % 60)
+    // Preserve sub-minute precision if the user leaves the original wall time intact.
+    val local = if (date == initial.toLocalDate() && time.hour == initial.hour && time.minute == initial.minute)
+        initial else date.atTime(time)
+    val offsets = remember(local, zone) { zone.rules.getValidOffsets(local) }
     val offset = offsets.find { it.id == offsetChoice } ?: offsets.firstOrNull()
-    val command = if (local != null && offset != null && minutes != null)
-        PlannerCommand.SlotSet(entry.taskId, local.atOffset(offset), minutes, entry.revision) else null
+    val command = offset?.let { PlannerCommand.SlotSet(entry.taskId, local.atOffset(it), minutes, entry.revision) }
     val submission = rememberSubmission(actions) { outcome ->
         when (outcome) {
             SaveOutcome.APPLIED -> onSaved(if (clearing) null else command?.start?.toInstant())
@@ -89,10 +87,7 @@ internal fun SlotEditor(
             Text(entry.title, style = MaterialTheme.typography.titleMedium)
             Text(stringResource(R.string.today_zone, zone.id), style = MaterialTheme.typography.bodySmall)
             PreferenceRow(stringResource(R.string.today_start_date, date), modifier = Modifier.testTag("slot:date"), enabled = editable) { pickDate = true }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                NumberField(stringResource(R.string.today_start_hour), hour, editable, Modifier.weight(1f).testTag("slot:hour")) { hour = it }
-                NumberField(stringResource(R.string.today_start_minute), minute, editable, Modifier.weight(1f).testTag("slot:minute")) { minute = it }
-            }
+            ClockWheelField(time, editable, Modifier.testTag("slot:time")) { minuteOfDay = it.hour * 60 + it.minute }
             if (offsets.size > 1) {
                 SectionTitle(stringResource(R.string.today_choose_repeated_offset))
                 Column(Modifier.selectableGroup()) {
@@ -106,15 +101,13 @@ internal fun SlotEditor(
                     }
                 }
             }
-            NumberField(stringResource(R.string.today_duration_minutes), duration, editable, Modifier.fillMaxWidth().testTag("slot:duration")) { duration = it }
+            DurationWheelField(stringResource(R.string.today_duration_minutes), minutes, editable, Modifier.testTag("slot:duration")) { minutes = it }
             val latestCheck = key(command) {
                 var result by remember { mutableStateOf<String?>(null) }
                 var checked by remember { mutableStateOf(false) }
                 LaunchedEffect(command) { if (command != null) { result = validate(command); checked = true } }
                 when {
-                    h == null || m == null -> stringResource(R.string.today_enter_valid_time)
                     offsets.isEmpty() -> stringResource(R.string.today_skipped_time)
-                    minutes == null -> stringResource(R.string.today_positive_minutes)
                     !checked -> stringResource(R.string.today_checking_slot)
                     else -> result
                 }
@@ -135,11 +128,5 @@ internal fun SlotEditor(
             }
         }
     }
-    if (pickDate) DateChooser(date, { epochDay = it.toEpochDay(); pickDate = false }, { pickDate = false })
-}
-
-@Composable
-private fun NumberField(label: String, value: String, enabled: Boolean, modifier: Modifier, change: (String) -> Unit) {
-    TextField(colors = lineFieldColors(), value = value, onValueChange = change, label = { Text(label) }, enabled = enabled,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = modifier)
+    if (pickDate) DateWheelDialog(date, { epochDay = it.toEpochDay(); pickDate = false }, { pickDate = false })
 }

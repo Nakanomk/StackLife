@@ -75,8 +75,6 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
         ticket = model.startReviewed(commands, value.revision)
     }
     val list = rememberLazyListState()
-    val sheet = rememberBottomSheetState(initialValue = SheetValue.Expanded, enabledValues = setOf(SheetValue.Expanded, SheetValue.Hidden),
-        confirmValueChange = { it != SheetValue.Hidden || ticket == null })
     val body: @Composable (Dp) -> Unit = { top ->
         val close = LocalPanelBack.current ?: onClose
         val pickingGoal = receipt == null && detail?.nodes?.isNotEmpty() == true && (choosing || goal == null)
@@ -141,8 +139,7 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
             }
         }
     }
-    PlannerModalBottomSheet(onDismissRequest = { if (ticket == null) onClose() }, sheetState = sheet,
-        windowKey = "goal-review", canDismiss = !busy, dragHandle = { close -> GoalSheetHandle(!busy, close) }) {
+    PlannerModalBottomSheet(onDismissRequest = onClose, canDismiss = !busy, dragHandle = { close -> GoalSheetHandle(!busy, close) }) {
         Box(Modifier.fillMaxWidth().fillMaxHeight(.88f)) {
             val close = LocalPanelBack.current ?: onClose
             RootPane(header = { PageTitle(stringResource(R.string.ui_topological_order), back = close, backEnabled = !busy) }) { top, _ -> body(top) }

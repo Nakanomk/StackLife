@@ -45,7 +45,10 @@ internal fun firstWeekHints(rows: JsonArray): List<String> = rows.asSequence().f
     .map { it["KS"].text().trim() }.filter(String::isNotEmpty).distinct().toList()
 
 data class CourseFields(val week: String, val day: Int, val title: String, val room: String, val period: String) {
-    private fun bounds(): IntRange? {
+    internal fun weekNumber(term: TermSpec): Int? =
+        week.trim().takeIf(weekPattern::matches)?.toInt()?.takeIf { it in 1..term.weeks }
+
+    internal fun periodRange(): IntRange? {
         val m = periodPattern.matchEntire(period.trim()) ?: return null
         val start = m.groupValues[1].toInt()
         val end = m.groups[2]?.value?.toInt() ?: start
@@ -53,14 +56,14 @@ data class CourseFields(val week: String, val day: Int, val title: String, val r
     }
 
     fun problem(term: TermSpec): String? = when {
-        !weekPattern.matches(week.trim()) || week.trim().toInt() !in 1..term.weeks -> uiText({ "ZC week number must be between 1 and ${term.weeks}." }, { "ZC 周次须在 1–${term.weeks} 之间" })
+        weekNumber(term) == null -> uiText({ "ZC week number must be between 1 and ${term.weeks}." }, { "ZC 周次须在 1–${term.weeks} 之间" })
         day !in 1..7 -> uiText("Day of week must be between 1 and 7.", "星期须在 1–7 之间")
-        bounds() == null -> uiText("JC must be a single period or an ascending range within 1–12.", "JC 节次须为 1–12 中的单节或正序区间")
+        periodRange() == null -> uiText("JC must be a single period or an ascending range within 1–12.", "JC 节次须为 1–12 中的单节或正序区间")
         else -> courseFieldProblem(title, room)
     }
 
     internal fun occurrence(): Occurrence {
-        val range = requireNotNull(bounds())
+        val range = requireNotNull(periodRange())
         return Occurrence(week.trim().toInt(), day, title, room, range.first, range.last)
     }
 }

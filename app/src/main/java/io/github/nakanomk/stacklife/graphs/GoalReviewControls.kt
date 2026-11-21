@@ -13,6 +13,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -40,7 +41,8 @@ internal fun GoalReviewAction(label: String, onClick: () -> Unit, modifier: Modi
     val color = if (active) ink.copy(alpha = .12f).compositeOver(fill) else fill
     Box(modifier.clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
         .sizeIn(minWidth = 48.dp, minHeight = 48.dp).padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
-        StackLifeSurface(CapsuleScene.INSET, anchor, color, tint = color.copy(alpha = if (active) .78f else if (prominent) .58f else .36f)) {
+        StackLifeSurface(CapsuleScene.ACTION, anchor, color, tint = if (prominent || active) color else Color.Unspecified,
+            interactionSource = source.takeIf { enabled }) {
             Box(Modifier.heightIn(min = 40.dp).padding(horizontal = 16.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
                 Text(label, color = ink, style = MaterialTheme.typography.labelLarge)
             }

@@ -310,7 +310,7 @@ class DayTimelineTest {
         ui.onNodeWithTag("day-tray").performScrollToNode(hasText("待办 12"))
         val last = ui.onNodeWithText("待办 12")
         last.assertIsDisplayed().performTouchInput { click() }
-        await(hasTestTag("slot:hour")).assertExists()
+        await(hasTestTag("slot:time")).assertExists()
         assertTrue(readDay().blocks.isEmpty())
     }
 
@@ -444,7 +444,7 @@ class DayTimelineTest {
         assertEquals(rail, bounds("day-rail"))
         ui.onNodeWithTag("day-tray-toggle").performClick()
         ui.onNodeWithTag("block:${before.blocks.single().taskId}").performTouchInput { click() }
-        await(hasTestTag("slot:hour")).assertIsDisplayed()
+        await(hasTestTag("slot:time")).assertIsDisplayed()
     }
 
     @Test fun eventViewCompressesFreeTimeAndAddsOnlyOneScheduledTaskOnConfirmation() {
@@ -464,11 +464,11 @@ class DayTimelineTest {
             await(gap).fetchSemanticsNode().size.height)
         await(gap).assert(hasText("空闲 · 1 小时 30 分钟")).performClick()
         await(hasTestTag("gap-title")).performTextInput("在空档读论文")
-        ui.onNodeWithTag("gap-time").performTextReplacement("10:15")
-        ui.onNodeWithTag("gap-duration").performTextReplacement("46")
+        ui.chooseClock("gap-time", 10, 15)
+        ui.chooseDuration("gap-duration", 46)
         ui.onNodeWithTag("gap-save").assertIsNotEnabled()
         assertEquals(before, readDay())
-        ui.onNodeWithTag("gap-duration").performTextReplacement("15")
+        ui.chooseDuration("gap-duration", 15)
         ui.onNodeWithTag("gap-save").assertIsEnabled().performClick()
         val after = readDay { it.revision > before.revision }
         assertEquals(before.revision + 1, after.revision)
@@ -687,16 +687,17 @@ class DayTimelineTest {
         val tray = await(hasTestTag("tray:${task.id}"))
         assertEquals("安排时间", tray.fetchSemanticsNode().config[SemanticsActions.OnClick].label)
         tray.performSemanticsAction(SemanticsActions.OnClick)
-        await(hasTestTag("slot:hour")).performTextReplacement("15")
-        ui.onNodeWithTag("slot:minute").performTextReplacement("45")
+        await(hasTestTag("slot:time"))
+        ui.chooseClock("slot:time", 15, 45)
         val save = hasText("保存时段") and hasClickAction() and isEnabled()
         await(save).performScrollTo().performClick()
         val scheduled = readDay { it.blocks.isNotEmpty() }.blocks.single()
         assertEquals(task.id, scheduled.taskId); assertEquals(at(15, 45).toInstant().toEpochMilli(), scheduled.startMillis)
         val block = hasTestTag("block:${task.id}")
         await(block).assertIsDisplayed().performSemanticsAction(SemanticsActions.OnClick)
-        await(hasTestTag("slot:hour")).performTextReplacement("16"); ui.onNodeWithTag("slot:minute").performTextReplacement("00")
-        ui.onNodeWithTag("slot:duration").performTextReplacement("40")
+        await(hasTestTag("slot:time"))
+        ui.chooseClock("slot:time", 16, 0)
+        ui.chooseDuration("slot:duration", 40)
         await(save).performScrollTo().performClick()
         val changed = readDay { it.blocks.singleOrNull()?.endMillis == at(16, 40).toInstant().toEpochMilli() }.blocks.single()
         // Change ownership through the real workbench; assert the same block is live on returning to Today.

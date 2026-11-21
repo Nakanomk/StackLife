@@ -44,7 +44,6 @@ import io.github.nakanomk.stacklife.appearance.CapsuleScene
 import io.github.nakanomk.stacklife.appearance.StackLifeSurface
 import io.github.nakanomk.stacklife.appearance.PlannerModalBottomSheet
 import io.github.nakanomk.stacklife.workspace.ActionPill
-import io.github.nakanomk.stacklife.appearance.rememberPanelLaunch
 import io.github.nakanomk.stacklife.appearance.LocalPanelBack
 import io.github.nakanomk.stacklife.transitions.PaneMotion
 import io.github.nakanomk.stacklife.transitions.PaneOrigins
@@ -84,13 +83,13 @@ private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: As
     MessageEditor(if (active && ui.composerId == id) ui.draft else "", origin?.scopeName() ?: scope,
         { model.editLocal(id, it, page) }, { model.submitLocal(id, target) },
         origin?.takeIf { page != null && privateScope == null }?.let { stringResource(R.string.assistant_draft_scope, it.scopeName()) }, active, surface,
-        openHistory = { openHistory(page ?: AssistantPage.Terms) }, opensPanel = true)
+        openHistory = { openHistory(page ?: AssistantPage.Terms) })
 }
 
 @Composable
 internal fun MessageEditor(text: String, scope: String, onChange: (String) -> Unit, onSend: () -> Unit, originHint: String? = null,
     active: Boolean = true, modifier: Modifier = Modifier, openHistory: (() -> Unit)? = null, tagPrefix: String = "assistant",
-    historyOrigin: Modifier = Modifier, opensPanel: Boolean = false) {
+    historyOrigin: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -103,17 +102,16 @@ internal fun MessageEditor(text: String, scope: String, onChange: (String) -> Un
     }
     val fieldDescription = stringResource(R.string.assistant_message_field, scope)
     val enabled = active && text.isSendable()
-    val launch = if (opensPanel) rememberPanelLaunch("assistant") else null
     fun submit() {
         if (!enabled) return
         keyboard?.hide()
         focus.clearFocus()
         haptics.performHapticFeedback(HapticFeedbackType.VirtualKey)
-        if (launch != null) launch.open(onSend) else onSend()
+        onSend()
     }
-    StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth().then(modifier).then(launch?.modifier ?: Modifier), colors.surfaceContainerHigh, solidBorder = solidBorder) {
+    StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth().then(modifier), colors.surfaceContainerHigh, solidBorder = solidBorder) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            if (openHistory != null) IconButton(onClick = { keyboard?.hide(); if (launch != null) launch.open(openHistory) else openHistory() }, enabled = active,
+            if (openHistory != null) IconButton(onClick = { keyboard?.hide(); openHistory() }, enabled = active,
                 modifier = historyOrigin.size(48.dp).testTag("assistant-history")) {
                 Icon(painterResource(R.drawable.ic_history), stringResource(R.string.assistant_history), tint = colors.onSurfaceVariant)
             } else Spacer(Modifier.width(16.dp))
@@ -185,9 +183,7 @@ internal fun AssistantPanels(model: AssistantModel, history: AssistantPage?, con
             AssistantPanel.Chat -> model.close()
         }
     }
-    val sheet = rememberBottomSheetState(initialValue = SheetValue.Expanded, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
-        confirmValueChange = { it != SheetValue.Hidden || model.state.value.work != AssistantWork.COMMIT })
-    PlannerModalBottomSheet(::back, sheet, nested = previous != null, onNestedBack = ::back, windowKey = "assistant",
+    PlannerModalBottomSheet(::back, nested = previous != null, onNestedBack = ::back,
         canDismiss = ui.work != AssistantWork.COMMIT) {
         PaneMotion(panel, origins, depth = { when (it) {
             AssistantPanel.Chat -> 0; is AssistantPanel.History -> 1; is AssistantPanel.Thread -> 2

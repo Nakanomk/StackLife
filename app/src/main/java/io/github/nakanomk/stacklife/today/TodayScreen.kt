@@ -44,6 +44,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import io.github.nakanomk.stacklife.i18n.AppLanguage
+import io.github.nakanomk.stacklife.appearance.DateWheelDialog
 import kotlinx.coroutines.flow.first
 
 private val firstDay = LocalDate.of(1, 1, 1)
@@ -58,7 +59,7 @@ internal fun TodayRoute(
     val floatingTray = LocalAppearance.current.floatingDayTray
     var trayOpen by rememberSaveable(floatingTray) { mutableStateOf(true) }
     var eventView by rememberSaveable { mutableStateOf(false) }
-    if (choosingDate) DateChooser(date, { choosingDate = false; onDate(it) }, { choosingDate = false })
+    if (choosingDate) DateWheelDialog(date, { choosingDate = false; onDate(it) }, { choosingDate = false })
     RootPane(header = {
         DayHeader(date, { choosingDate = true }, onDate, { onDate(LocalDate.now(zone)) }, onSettings, eventView, { eventView = it })
     }) { top, bottom ->

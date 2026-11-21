@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -38,6 +39,8 @@ import io.github.nakanomk.stacklife.PagerPane
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.RootToolbar
 import io.github.nakanomk.stacklife.appearance.SegmentTrack
+import io.github.nakanomk.stacklife.appearance.CapsuleScene
+import io.github.nakanomk.stacklife.appearance.StackLifeSurface
 import io.github.nakanomk.stacklife.AddTaskFab
 import io.github.nakanomk.stacklife.taskFabClearance
 import io.github.nakanomk.stacklife.R
@@ -96,13 +99,18 @@ internal fun WorkspaceScreen(
         overlay = { _, bottom ->
             if (!stack) AddTaskFab(onAdd, bottomInset = bottom + feedbackInset)
             if (hasFeedback) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = bottom)
-                .onSizeChanged { feedbackHeight = it.height }) {
+                .onSizeChanged { feedbackHeight = it.height }.padding(horizontal = 12.dp, vertical = 6.dp)) {
                 val frameId = editingId
                 if (frameId == null) SnackbarHost(snackbar) { data ->
-                    Snackbar(data, modifier = Modifier.testTag("push-feedback"))
-                } else Surface(Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shadowElevation = 3.dp) {
+                    PushFeedbackPanel(Modifier.testTag("push-feedback")) {
+                        Row(Modifier.padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(data.visuals.message, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyMedium)
+                            data.visuals.actionLabel?.let { label -> TextButton(onClick = data::performAction) { Text(label) } }
+                            IconButton(onClick = data::dismiss) { Icon(painterResource(R.drawable.ic_close), stringResource(R.string.ui_close_panel)) }
+                        }
+                    }
+                } else PushFeedbackPanel(Modifier) {
                     key(frameId) { PushReasonEditor(frameId, actions) { editingId = null } }
                 }
             }
@@ -118,6 +126,14 @@ internal fun WorkspaceScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PushFeedbackPanel(modifier: Modifier, content: @Composable () -> Unit) {
+    StackLifeSurface(CapsuleScene.ACTION, modifier, MaterialTheme.colorScheme.surfaceContainerHigh,
+        elevation = 3.dp, shape = RoundedCornerShape(24.dp)) {
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface, content = content)
     }
 }
 

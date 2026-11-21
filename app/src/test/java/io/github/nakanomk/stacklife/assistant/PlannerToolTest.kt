@@ -65,8 +65,8 @@ class PlannerToolTest {
 
     @Test fun frameListAndHistoryDoNotExposeCurrentTasksOutsideFrame() = runBlocking {
         val frame = FrameView("f", "private-reason", 0, FrameSource.PUSH, listOf(
-            FrameEntry("active", 0, "A", "private-notes", 15, null, null, true),
-            FrameEntry("departed", 1, "B", "private-notes", 30, null, null, false)))
+            FrameEntry("active", 0, "A", "private-notes", 15, null, null, QueueTask("active", "Edited A", "private-live", 20)),
+            FrameEntry("departed", 1, "B", "private-notes", 30, null, null, null)))
         val index = FrameIndex(listOf(FrameSummary("f", frame.reason, 0, frame.source, 2, 1)))
         val source = Reads(PlannerQuery.Frames to index, PlannerQuery.Frame("f") to FrameDetailResult(frame))
         val list = PlannerTools(source, AssistantPage.Frames, Disclosure())
@@ -74,7 +74,8 @@ class PlannerToolTest {
         assertFalse("private" in summary || "active" in summary); denied { list.query(obj("""{"kind":"frame","frameId":"f"}""")) }
         val detail = PlannerTools(source, AssistantPage.Frame("f"), Disclosure(reasons = true))
         val visible = detail.query(current).toString()
-        assertTrue("private-reason" in visible); assertFalse("departed" in visible || "private-notes" in visible)
+        assertTrue("private-reason" in visible && "Edited A" in visible)
+        assertFalse("departed" in visible || "private-notes" in visible || "private-live" in visible)
         detail.proposal(remove("active")); denied { detail.proposal(remove("departed")) }
     }
 

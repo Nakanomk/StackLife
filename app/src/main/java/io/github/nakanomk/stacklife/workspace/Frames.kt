@@ -73,7 +73,7 @@ private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: Share
                 maxLines = 3, overflow = TextOverflow.Ellipsis)
             Text(stringResource(R.string.ui_frame_summary, savedTime(frame.savedAtMillis), frame.items.size, frame.remaining),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(frame.items.joinToString("、", limit = 3, truncated = "…") { it.title }, style = MaterialTheme.typography.bodyMedium,
+            Text(frame.items.joinToString("、", limit = 3, truncated = "…") { it.current?.title ?: it.title }, style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
@@ -81,7 +81,7 @@ private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: Share
 }
 
 @Composable
-internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: () -> Unit, shared: SharedModifier) {
+internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: () -> Unit, shared: SharedModifier, onEdit: (String) -> Unit) {
     val frame = state.frames.find { it.id == id }
     if (frame == null) {
         MissingDetail(stringResource(R.string.ui_frame_details), stringResource(R.string.ui_frame_missing), onBack)
@@ -95,7 +95,7 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
     val action = rememberSubmission(actions) { if (it != SaveOutcome.REJECTED) leaveSelection() }
     val selectionIds = remember(entries, selected) {
         val ids = selected.toHashSet()
-        entries.mapNotNull { if (it.taskId in ids) it.taskId else null }
+        entries.mapNotNull { if (it.restorable && it.taskId in ids) it.taskId else null }
     }
     BackHandler(enabled = choosing || action.busy) { if (!action.busy) leaveSelection() }
     EditorPage(stringResource(R.string.ui_frame_details), { if (choosing) leaveSelection() else onBack() }, AssistantPage.Frame(id), backEnabled = !action.busy,
@@ -138,18 +138,31 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
                 }
             }
             item {
-                SectionTitle(stringResource(R.string.ui_saved_list))
+                SectionTitle(stringResource(if (frame.remaining == 0) R.string.ui_saved_list else R.string.ui_frame_tasks))
                 Hint(if (frame.remaining == 0) stringResource(R.string.ui_empty_frame_hint) else stringResource(R.string.ui_frame_history_hint))
             }
             itemsIndexed(entries, key = { _, item -> item.taskId }) { index, item ->
+                val current = item.current
+                val title = current?.title ?: item.title
+                val notes = current?.notes ?: item.notes
+                val minutes = current?.minutes ?: item.minutes
                 Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large) {
                     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(R.string.ui_entry_status, index + 1, stringResource(if (item.restorable) R.string.ui_restorable else R.string.ui_taken)), style = MaterialTheme.typography.labelMedium)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(R.string.ui_entry_status, index + 1, stringResource(if (current != null) R.string.ui_restorable else R.string.ui_taken)),
+                                Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                            if (!choosing && current != null) ActionPill(stringResource(R.string.ui_edit_task), { onEdit(item.taskId) },
+                                Modifier.routeOrigin("edit:${item.taskId}", CircleShape).testTag("frame-edit:${item.taskId}"), enabled = !action.busy)
+                        }
                         if (choosing && item.restorable) {
-                            CheckRow(item.title, item.taskId in selected) { selected = ArrayList(selected.toggle(item.taskId)) }
-                        } else Text(item.title, style = MaterialTheme.typography.titleMedium)
-                        Hint(stringResource(R.string.ui_minutes_value, item.minutes))
-                        if (item.notes.isNotBlank()) Text(item.notes, style = MaterialTheme.typography.bodyMedium)
+                            CheckRow(title, item.taskId in selected) { selected = ArrayList(selected.toggle(item.taskId)) }
+                        } else Text(title, style = MaterialTheme.typography.titleMedium)
+                        Hint(stringResource(R.string.ui_minutes_value, minutes))
+                        if (notes.isNotBlank()) Text(notes, style = MaterialTheme.typography.bodyMedium)
+                        if (current != null && (title != item.title || minutes != item.minutes || notes != item.notes)) {
+                            Hint(stringResource(R.string.ui_frame_original, item.title, item.minutes))
+                            if (item.notes.isNotBlank()) Hint(item.notes)
+                        }
                         if (item.scheduledStartMillis != null && item.scheduledEndMillis != null) {
                             Hint(stringResource(R.string.ui_saved_slot, savedTime(item.scheduledStartMillis), savedTime(item.scheduledEndMillis)))
                         }

@@ -7,7 +7,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.listSaver
@@ -16,7 +15,6 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.runtime.saveable.SaverScope
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -25,7 +23,7 @@ import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.planner.TaskInput
 import io.github.nakanomk.stacklife.assistant.AssistantPage
-import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
+import io.github.nakanomk.stacklife.appearance.DurationWheelField
 
 private data class Draft(
     val key: Int,
@@ -50,6 +48,7 @@ internal fun TaskEditor(
     onClose: () -> Unit,
     original: QueueTask? = null,
     createFrame: Boolean = false,
+    frameId: String? = null,
 ) {
     val action = rememberSubmission(actions) { if (it != SaveOutcome.REJECTED) onClose() }
     val drafts = rememberSaveable(saver = draftSaver) {
@@ -61,7 +60,7 @@ internal fun TaskEditor(
     val close = { if (!action.busy) onClose() }
     BackHandler(enabled = action.busy) { /* The receipt closes the editor once. */ }
     val heading = if (createFrame) stringResource(R.string.ui_new_frame) else if (original != null) stringResource(R.string.ui_edit_task) else stringResource(R.string.ui_add_task)
-    EditorPage(heading, close, original?.let { AssistantPage.Task(it.id) } ?: if (createFrame) AssistantPage.Frames else AssistantPage.Queue,
+    EditorPage(heading, close, frameId?.let { AssistantPage.Frame(it) } ?: original?.let { AssistantPage.Task(it.id) } ?: if (createFrame) AssistantPage.Frames else AssistantPage.Queue,
         backEnabled = !action.busy, footer = {
             Actions {
                 if (createFrame) Secondary(stringResource(R.string.ui_add_another), enabled = !action.busy) {
@@ -73,7 +72,7 @@ internal fun TaskEditor(
                     val inputs = drafts.map { TaskInput(it.title.text, it.notes.text, checkNotNull(it.duration())) }
                     val command = when {
                         createFrame -> PlannerCommand.FrameCreate(reason.text, inputs)
-                        original != null -> inputs.single().let { PlannerCommand.TaskEdit(original.id, it.title, it.notes, it.minutes) }
+                        original != null -> inputs.single().let { PlannerCommand.TaskEdit(original.id, it.title, it.notes, it.minutes, expectedFrameId = frameId) }
                         else -> PlannerCommand.TaskAdd(inputs.single())
                     }
                     action.send(command)
@@ -99,26 +98,11 @@ internal fun TaskEditor(
                     TextField(row.notes, { drafts[index] = row.copy(notes = it) }, enabled = !action.busy,
                         modifier = Modifier.fillMaxWidth().testTag("notes:$index"), colors = lineFieldColors(),
                         label = { Text(stringResource(R.string.ui_optional_notes)) }, maxLines = 5)
-                    DurationRow(row.minutes, !action.busy) { drafts[index] = row.copy(minutes = it) }
+                    DurationWheelField(stringResource(R.string.ui_estimated_duration), row.duration() ?: 30, !action.busy,
+                        Modifier.testTag("duration:$index")) { drafts[index] = row.copy(minutes = TextFieldValue(it.toString())) }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun DurationRow(value: TextFieldValue, enabled: Boolean, update: (TextFieldValue) -> Unit) {
-    var editing by rememberSaveable { mutableStateOf(false) }
-    PreferenceRow(stringResource(R.string.ui_estimated_duration), stringResource(R.string.ui_minutes_value, value.text.ifBlank { "30" }), enabled = enabled) { editing = true }
-    if (editing) {
-        var draft by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(value) }
-        val valid = draft.text.isBlank() || (draft.text.toIntOrNull() ?: 0) > 0
-        PlannerAlertDialog(onDismissRequest = { editing = false }, title = { Text(stringResource(R.string.ui_estimated_duration)) },
-            text = { TextField(draft, { draft = it }, colors = lineFieldColors(), label = { Text(stringResource(R.string.ui_minutes)) },
-                singleLine = true, isError = !valid, placeholder = { Text("30") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)) },
-            confirmButton = { TextButton(enabled = valid, onClick = { update(draft); editing = false }) { Text(stringResource(R.string.ui_ok)) } },
-            dismissButton = { TextButton(onClick = { editing = false }) { Text(stringResource(R.string.ui_cancel)) } })
     }
 }
 

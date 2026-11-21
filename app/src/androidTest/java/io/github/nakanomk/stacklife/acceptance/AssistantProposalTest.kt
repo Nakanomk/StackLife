@@ -369,7 +369,7 @@ class AssistantProposalTest {
             file.writeText("""[{"ZC":1,"KS":"2026-09-07","MONDAY":[{"KCMC":"本地课程","JSMC":"仅本机地点","JC":"5-6"}]}]""")
             attach(file)
             tag("nav:courses").performClick(); tag("course-import").performClick(); tag("importCourseFile").performClick()
-            tag("termId").performScrollTo().performTextInput("秋季"); tag("termWeeks").performScrollTo().performTextInput("2")
+            tag("termId").performScrollTo().performTextInput("秋季"); ui.chooseNumber("termWeeks", 2)
             ui.onNodeWithTag("assistant-input").assertDoesNotExist()
             tag("reviewCourseRows").performScrollTo().performClick()
             tag("courseIssues").performScrollToNode(hasTestTag("previewCourseImport")); tag("previewCourseImport").performClick()

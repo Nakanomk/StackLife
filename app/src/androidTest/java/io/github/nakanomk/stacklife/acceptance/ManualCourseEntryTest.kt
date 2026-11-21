@@ -187,7 +187,7 @@ class ManualCourseEntryTest {
                 PlannerPopupHost {
                     Spacer(Modifier.fillMaxSize().background(host.value).testTag("chrome-source"))
                     val form = remember { ManualCourseForm(null, 1).apply {
-                        newTerm = TermForm(id = "手动学期", monday = "2026-09-07", weeks = "4")
+                        newTerm = TermForm(id = "手动学期", monday = LocalDate.of(2026, 9, 7), weeks = 4)
                         pattern = pattern.copy(title = "测试课")
                     } }
                     ManualCourseSheet(viewModel { WorkspaceViewModel(store.api) }, form, emptyList(), {}, { _, _ -> })
@@ -283,7 +283,7 @@ class ManualCourseEntryTest {
         } }
         await("nav:courses").performClick()
         await("course-add").assertIsDisplayed().performClick()
-        field("termId", "手动学期"); field("termMonday", "2026-09-07"); field("termWeeks", "3")
+        field("termId", "手动学期"); ui.chooseDate("termMonday", LocalDate.of(2026, 9, 7)); ui.chooseNumber("termWeeks", 3)
         ui.onNodeWithText("冬令").performScrollTo().performClick().assertIsSelected()
         field("manual-title", "线性代数"); field("manual-room", "东101")
         await("manual-weeks").performScrollTo().assertIsDisplayed().performClick()

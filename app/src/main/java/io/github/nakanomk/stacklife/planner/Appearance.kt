@@ -30,7 +30,7 @@ data class Appearance(
     val reduceTransparency: Boolean = false,
     val highContrast: Boolean = false,
     val haptics: Boolean = true,
-    val courseTextOutline: Boolean = true,
+    val courseTextOutline: Boolean = false,
     val floatingDayTray: Boolean = true,
 ) {
     init {

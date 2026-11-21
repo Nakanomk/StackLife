@@ -3,6 +3,7 @@
     <string name="ui_bottom_nav">Bottom bar</string>
     <string name="ui_edit_task">Edit task</string>
     <string name="ui_task_not_queued">This task is no longer in the queue.</string>
+    <string name="ui_task_not_in_frame">This task is no longer in this frame.</string>
     <string name="ui_read_failed">Could not read your schedule. Your data has not been cleared.</string>
     <string name="ui_settings">Settings</string>
     <string name="ui_colors">Colors</string>
@@ -115,7 +116,6 @@
     <string name="ui_save_node">Save node</string>
     <string name="ui_node_title">Node title</string>
     <string name="ui_optional_notes">Notes (optional)</string>
-    <string name="ui_estimated_minutes">Estimated minutes</string>
     <string name="ui_move_named">Move “%1$s”</string>
     <string name="ui_save_position">Save position</string>
     <string name="ui_position_x">X coordinate (dp)</string>
@@ -186,7 +186,9 @@
     <string name="ui_restore_all">Restore all</string>
     <string name="ui_saved_list">List when saved</string>
     <string name="ui_empty_frame_hint">This frame is empty. Its original contents are shown below.</string>
-    <string name="ui_frame_history_hint">Shown in the original order. Later edits do not change this record.</string>
+    <string name="ui_frame_tasks">Tasks in this frame</string>
+    <string name="ui_frame_history_hint">Edit tasks without restoring them. Tasks that have left the frame are read-only.</string>
+    <string name="ui_frame_original">When saved: %1$s · %2$d min</string>
     <string name="ui_entry_status">Item %1$s · %2$s</string>
     <string name="ui_saved_slot">Scheduled when saved: %1$s to %2$s</string>
     <string name="ui_prepend_detail">Restore in the original order ahead of the current queue.</string>

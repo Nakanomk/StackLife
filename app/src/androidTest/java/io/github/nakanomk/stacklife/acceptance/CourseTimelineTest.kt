@@ -48,9 +48,9 @@ class CourseTimelineTest {
         assertEquals(setOf("实验", "物理"), second.keys)
         assertEquals(first.getValue("实验"), second.getValue("实验"))
         assertEquals(3, (first + second).values.map { courseColor(term.id, it) }.distinct().size)
-        store.apply(EditAppearance(AppearancePatch.Replace(Appearance(courseTextOutline = false))))
+        store.apply(EditAppearance(AppearancePatch.Replace(Appearance(courseTextOutline = true))))
         store.reopen()
-        assertFalse((store.api.observe(PlannerQuery.Settings).first() as PolicyView).appearance.courseTextOutline)
+        assertTrue((store.api.observe(PlannerQuery.Settings).first() as PolicyView).appearance.courseTextOutline)
         assertEquals(first, week(1).colorIndices)
         assertEquals(second, week(2).colorIndices)
     }

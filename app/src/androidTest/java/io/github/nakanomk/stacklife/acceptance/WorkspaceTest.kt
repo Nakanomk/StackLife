@@ -76,6 +76,9 @@ class WorkspaceTest {
         assertEquals("原备注", history.items.last().notes)
         assertEquals(45, history.items.last().minutes)
         assertEquals("新标题", expected.frames.single { it.id != frame.id }.items.single().title)
+        val staleEdit = TaskEdit(b.id, title = "旧编辑器", expectedFrameId = frame.id)
+        assertTrue(store.api.preview(listOf(staleEdit)) is PreviewResult.Rejected)
+        assertEquals(expected, store.state())
     }
 
     @Test fun optionalPushReasonAmendsOnlyTheCommittedFrameAcrossReopen() = runBlocking {

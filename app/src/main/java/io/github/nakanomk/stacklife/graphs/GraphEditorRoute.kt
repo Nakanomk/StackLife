@@ -27,7 +27,6 @@ import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
 import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
-import io.github.nakanomk.stacklife.appearance.rememberPanelLaunch
 import io.github.nakanomk.stacklife.transitions.routeOrigin
 import androidx.compose.ui.unit.Dp
 import io.github.nakanomk.stacklife.assistant.*
@@ -86,15 +85,17 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
     BackHandler(enabled = source != null) { sourceId = null }
 
     val tools: @Composable () -> Unit = {
-        ControlGroup(Modifier.horizontalScroll(rememberScrollState())) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (source != null) {
                 Secondary(stringResource(R.string.ui_cancel_link)) { sourceId = null }
                 Text(stringResource(R.string.ui_choose_successor, source.title), Modifier.padding(horizontal = 8.dp), style = MaterialTheme.typography.labelLarge)
             } else {
-                val review = rememberPanelLaunch("goal-review")
-                GoalReviewAction(stringResource(R.string.ui_topological_order), { review.open { onGoal(selected?.id) } },
+                GoalReviewAction(stringResource(R.string.ui_topological_order), { onGoal(selected?.id) },
                     Modifier.testTag("graph-goal"), enabled = detail.nodes.isNotEmpty() && !submission.busy, prominent = true,
-                    anchor = review.modifier.routeOrigin("generated-frame", CircleShape).testTag("graph-goal-pill"))
+                    anchor = Modifier.routeOrigin("generated-frame", CircleShape).testTag("graph-goal-pill"))
+                GoalReviewAction(stringResource(R.string.ui_add_node), { form("add") }, Modifier.testTag("graph-add"),
+                    enabled = !submission.busy, anchor = Modifier.testTag("graph-add-pill"))
                 if (selected != null) {
                     var menu by remember { mutableStateOf(false) }
                     Box {
@@ -109,7 +110,6 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
                         }
                     }
                 }
-                ActionPill(stringResource(R.string.ui_add_node), { form("add") }, Modifier.testTag("graph-add"))
             }
         }
     }

@@ -79,7 +79,7 @@ internal fun swapReason(): String = uiText("Queue saved before switching frames"
 internal fun frameLabel(reason: String, source: FrameSource): String =
     if (source == FrameSource.SWAP) swapReason() else reason.ifBlank { uiText("Saved queue", "暂存的队列") }
 
-/** Items are immutable snapshots in their original order. */
+/** Saved values stay in their original order; only items still in this frame expose a live task. */
 data class FrameView(
     val id: String,
     val reason: String,
@@ -98,15 +98,18 @@ data class FrameEntry(
     val minutes: Int,
     val scheduledStartMillis: Long?,
     val scheduledEndMillis: Long?,
-    val restorable: Boolean,
-)
+    val current: QueueTask?,
+) {
+    val restorable: Boolean get() = current != null
+}
 
 /** A creation ref is batch-local: declare `ref = "a"`, then address it as `@a`. */
 data class TaskInput(val title: String, val notes: String = "", val minutes: Int = 30, val ref: String? = null)
 
 sealed interface PlannerCommand {
     data class TaskAdd(val task: TaskInput) : PlannerCommand
-    data class TaskEdit(val taskId: String, val title: String? = null, val notes: String? = null, val minutes: Int? = null) : PlannerCommand
+    data class TaskEdit(val taskId: String, val title: String? = null, val notes: String? = null, val minutes: Int? = null,
+        val expectedFrameId: String? = null) : PlannerCommand
     data class TaskFinish(val taskId: String) : PlannerCommand
     data class TaskRemove(val taskId: String) : PlannerCommand
     data class QueueOrder(val taskIds: List<String>) : PlannerCommand

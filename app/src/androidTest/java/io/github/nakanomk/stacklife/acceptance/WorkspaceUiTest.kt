@@ -155,6 +155,38 @@ class WorkspaceUiTest {
         assertEquals(0, restored.frames.single().remaining)
     }
 
+    @Test fun editTaskInFrameThenRestoreKeepsTheEditAndTheOriginalRecord() {
+        val frame = runBlocking {
+            store.apply(PlannerCommand.FrameCreate("复习", listOf(TaskInput("旧标题", "旧备注", 35))))
+            store.state().frames.single()
+        }
+        val id = frame.items.single().taskId
+        val edit = hasTestTag("frame-edit:$id")
+        show()
+        await(hasText("栈") and hasClickAction()).performClick()
+        await(hasTestTag("frame:${frame.id}")).performClick()
+        scrollTo(edit)
+        ui.onNode(edit).performClick()
+        await(hasTestTag("title:0")).performTextReplacement("新标题")
+        ui.onNodeWithTag("notes:0").performTextReplacement("新备注")
+        ui.onNodeWithText("保存修改").performClick()
+        await(hasText("帧内任务"))
+        scrollTo(hasText("新备注"))
+        ui.onNodeWithText("新备注").assertIsDisplayed()
+        val item = runBlocking { store.state() }.frames.single().items.single()
+        assertEquals("旧标题", item.title)
+        assertEquals("旧备注", item.notes)
+        assertEquals(QueueTask(id, "新标题", "新备注", 35), item.current)
+        val restore = hasText("全部恢复") and hasClickAction()
+        scrollTo(restore)
+        ui.onNode(restore).performClick()
+        val restored = awaitQueue("新标题")
+        assertEquals(item.current, restored.queue.single())
+        assertEquals(item.copy(current = null), restored.frames.single().items.single())
+        scrollTo(hasText("旧标题"))
+        ui.onNode(edit).assertDoesNotExist()
+    }
+
     @Test fun selectedPushKeepsItsReasonTargetAcrossAnotherPushAndRecreation() {
         runBlocking { for (name in listOf("A", "B", "C")) store.apply(PlannerCommand.TaskAdd(TaskInput(name))) }
         val scenario = ui.activityRule.scenario

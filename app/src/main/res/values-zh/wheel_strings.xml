@@ -1,0 +1,13 @@
+<resources>
+    <string name="wheel_choose_date">选择日期</string>
+    <string name="wheel_year">年</string>
+    <string name="wheel_month">月</string>
+    <string name="wheel_day">日</string>
+    <string name="wheel_hour">小时</string>
+    <string name="wheel_hours">小时数</string>
+    <string name="wheel_period">时段</string>
+    <string name="wheel_unset">未设置</string>
+    <string name="wheel_clear_date">清除日期</string>
+    <string name="hub_import_help">华科课程导入方法：</string>
+    <string name="hub_import_steps">1. 从当前页面正常登录hubs\n2. 进入hubs主页后，点击右上角“总课表”按钮，跳转到课表页面\n3. 点击页面内的“总课表”按钮\n4. 切换到总课表后，点击导入</string>
+</resources>

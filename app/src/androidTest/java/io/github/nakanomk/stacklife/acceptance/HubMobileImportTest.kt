@@ -60,7 +60,7 @@ class HubMobileImportTest {
         val fixture = """<!doctype html><html><head><meta charset="utf-8"><title>$fixtureTitle</title></head><body>
             <table class="el-table"></table><script>
             document.querySelector('table').__vue__ = {weekTableData: [
-                {ZC: 1, KS: '${term.firstMonday}', WEDNESDAY: [{KCMC: '$title', JC: '5-6', JSMC: '$room'}]}
+                {ZC: 1, KS: '${term.firstMonday}', WEDNESDAY: [{KCMC: '$title', JC: '5-6', JSMC: '$room'}, {KCMC: '待核对', JC: '实践'}]}
             ]};
             </script></body></html>"""
         val scheduleButton = hasText("总课表") and isEnabled()
@@ -79,6 +79,11 @@ class HubMobileImportTest {
             web
         }
         ui.waitUntil(timeoutMillis = 10_000) { ui.runOnUiThread { webView.title == "Local landing" && webView.progress == 100 } }
+        ui.onNodeWithTag("hubImportHelp").assertIsDisplayed().performClick()
+        ui.onNodeWithText("点击页面内的“总课表”按钮", substring = true).assertIsDisplayed()
+        ui.onNodeWithTag("hubHelpClose").performClick()
+        assertEquals("Local landing", ui.runOnUiThread { webView.title })
+        ui.onNodeWithTag("hubExtract").assertIsNotEnabled()
         ui.onNode(scheduleButton).performClick()
         ui.waitUntil(timeoutMillis = 10_000) { ui.runOnUiThread { webView.title == fixtureTitle && webView.progress == 100 } }
         await(hasTestTag("hubExtract") and isEnabled()).performClick()
@@ -86,13 +91,19 @@ class HubMobileImportTest {
         await(hasTestTag("termMonday")).assertTextContains(term.firstMonday.toString())
         assertNotImported()
         ui.onNodeWithTag("termId").performScrollTo().performTextInput(term.id)
-        ui.onNodeWithTag("termWeeks").performScrollTo().performTextInput(term.weeks.toString())
+        ui.chooseNumber("termWeeks", term.weeks)
         ui.onNodeWithTag("reviewCourseRows").performScrollTo().performClick()
-        val preview = hasTestTag("previewCourseImport")
-        await(hasTestTag("courseIssues")).performScrollToNode(preview)
-        ui.onNode(preview).performClick()
-        val confirm = hasTestTag("confirmCourseImport")
-        await(hasTestTag("courseImportDiff")).performScrollToNode(confirm)
+        val list = await(hasTestTag("courseIssues"))
+        val preview = hasTestTag("previewCourseImportTop")
+        await(preview).assertIsDisplayed().assertIsNotEnabled()
+        list.performScrollToNode(hasTestTag("previewCourseImport"))
+        ui.onNodeWithTag("previewCourseImport").assertIsNotEnabled()
+        list.performScrollToNode(hasTestTag("excludeIssue-0"))
+        ui.onNodeWithTag("excludeIssue-0").performClick()
+        list.performScrollToNode(preview)
+        ui.onNode(preview).assertIsEnabled().performClick()
+        val confirm = hasTestTag("confirmCourseImportTop")
+        await(confirm).assertIsDisplayed()
         assertNotImported()
         ui.onNode(confirm).performClick()
 

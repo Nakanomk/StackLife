@@ -15,12 +15,17 @@ import android.widget.FrameLayout
 import android.webkit.*
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -334,6 +339,7 @@ internal fun HubWebView(onRows: (JsonArray) -> Unit, onBack: () -> Unit, onFile:
     var attached by remember { mutableStateOf(true) }
     var leaving by remember { mutableStateOf(false) }
     var extracting by remember { mutableStateOf(false) }
+    var help by rememberSaveable { mutableStateOf(false) }
     DisposableEffect(session) {
         attached = true
         session?.start()
@@ -378,8 +384,17 @@ internal fun HubWebView(onRows: (JsonArray) -> Unit, onBack: () -> Unit, onFile:
                 TextButton(enabled = !leaving, onClick = { leave(onFile) }, modifier = Modifier.testTag("hubUseFile")) { Text(stringResource(R.string.courses_use_file)) }
             }
         }
-        if (session != null && !session.closed) {
-            AndroidView(factory = { session.container }, modifier = Modifier.fillMaxSize())
+        Box(Modifier.fillMaxSize()) {
+            if (session != null && !session.closed) AndroidView(factory = { session.container }, modifier = Modifier.fillMaxSize())
+            val description = stringResource(R.string.hub_import_help)
+            FilledTonalIconButton(onClick = { help = true }, enabled = !leaving, shape = CircleShape,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp).size(48.dp).testTag("hubImportHelp")) {
+                Icon(painterResource(R.drawable.ic_info), description)
+            }
         }
     }
+    // Static local help: no browser callback, backdrop or optical sampling of the school page.
+    if (help) AlertDialog(onDismissRequest = { help = false }, title = { Text(stringResource(R.string.hub_import_help)) },
+        text = { Text(stringResource(R.string.hub_import_steps), Modifier.verticalScroll(rememberScrollState())) },
+        confirmButton = { TextButton(onClick = { help = false }, modifier = Modifier.testTag("hubHelpClose")) { Text(stringResource(R.string.courses_close)) } })
 }

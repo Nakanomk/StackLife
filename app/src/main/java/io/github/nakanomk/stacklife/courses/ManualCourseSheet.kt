@@ -53,11 +53,11 @@ internal class ManualEditorModel : ViewModel() {
 
 internal class ManualCourseForm(term: TermSpec?, val openedWeek: Int, val original: CoursePattern? = null) {
     var existing by mutableStateOf(term)
-    var newTerm by mutableStateOf(TermForm(weeks = "16"))
+    var newTerm by mutableStateOf(TermForm(weeks = 16))
     var pattern by mutableStateOf(original ?: CoursePattern("", "", 1, 1, 2))
     var weeks by mutableStateOf(setOf(openedWeek))
     var choosingWeeks by mutableStateOf<Set<Int>?>(null)
-    val weekCount get() = existing?.weeks ?: newTerm.weeks.trim().toIntOrNull()?.takeIf { it in 1..53 }
+    val weekCount get() = existing?.weeks ?: newTerm.weeks
     var before by mutableStateOf<ManualSeries?>(null)
     var reviewedTerm: TermSpec? = null
     var revealWeek = openedWeek
@@ -130,8 +130,6 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
             }
         }
     }
-    val sheet = rememberBottomSheetState(initialValue = SheetValue.Expanded, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
-        confirmValueChange = { it != SheetValue.Hidden || !submission.busy })
     val enabled = !loading && !submission.busy && (form.original == null || form.before != null)
     val review = ready
     val weekChoice = form.choosingWeeks
@@ -148,8 +146,7 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
         if (weekChoice != null) { form.choosingWeeks = null; return }
         if (review == null) close() else { model.discardProposal(review.proposalId); ready = null; error = null }
     }
-    PlannerModalBottomSheet({ if (!submission.busy) close() }, sheet, nested = pane != ManualPane.Fields, onNestedBack = ::back,
-        windowKey = "manual-course", canDismiss = !submission.busy) {
+    PlannerModalBottomSheet(close, nested = pane != ManualPane.Fields, onNestedBack = ::back, canDismiss = !submission.busy) {
         Box(Modifier.fillMaxWidth().fillMaxHeight(.9f).imePadding().testTag("manual-course-sheet")) {
             // Pickers sample this sheet, not the timetable in the window beneath it.
             PlannerPopupHost {

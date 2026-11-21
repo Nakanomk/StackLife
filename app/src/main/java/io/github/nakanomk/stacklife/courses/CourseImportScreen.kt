@@ -61,14 +61,12 @@ import kotlinx.serialization.json.JsonArray
 
 private val chromePackages = listOf("com.android.chrome", "com.chrome.beta", "com.chrome.dev", "com.chrome.canary")
 
-internal data class TermForm(val id: String = "", val monday: String = "", val weeks: String = "",
-    val initial: BellSchedule = BellSchedule.SUMMER, val switchDate: String = "") {
+internal data class TermForm(val id: String = "", val monday: LocalDate? = null, val weeks: Int? = null,
+    val initial: BellSchedule = BellSchedule.SUMMER, val switchDate: LocalDate? = null) {
     fun term(): TermSpec {
-        fun date(text: String): LocalDate = try { LocalDate.parse(text.trim()) } catch (_: DateTimeParseException) {
-            throw IllegalArgumentException(uiText("Enter a valid date in YYYY-MM-DD format.", "日期须为有效的 YYYY-MM-DD"))
-        }
-        val term = TermSpec(id, date(monday), weeks.trim().toIntOrNull() ?: throw IllegalArgumentException(uiText("Enter the number of weeks in the term.", "请填写学期总周数")),
-            initial, switchDate.takeIf { it.isNotBlank() }?.let(::date))
+        val start = monday ?: throw IllegalArgumentException(uiText("Choose the first Monday of the term.", "请选择学期首周周一。"))
+        val term = TermSpec(id, start, weeks ?: throw IllegalArgumentException(uiText("Choose the number of weeks in the term.", "请选择学期总周数。")),
+            initial, switchDate)
         term.problem()?.let { throw IllegalArgumentException(it) }
         return term
     }
@@ -80,7 +78,7 @@ private sealed class ImportStep(val key: String, val depth: Int) {
     class Calendar(val rows: JsonArray, fromHub: Boolean) : ImportStep(if (fromHub) "hub-calendar" else "file-calendar", 2)
     class Entries(val draft: ImportDraft) : ImportStep("entries", 3)
     class Fix(val issue: ImportIssue, val fields: CourseFields, val term: TermSpec) : ImportStep("issue:${issue.position}", 4)
-    class Diff(val draft: ImportDraft, val meetings: List<CourseMeeting>, val ready: PreviewResult.Ready) : ImportStep("diff", 4)
+    class Diff(val draft: ImportDraft, val meetings: List<CourseMeeting>, val ready: PreviewResult.Ready, origin: String) : ImportStep(origin, 4)
 }
 
 @Composable
@@ -99,6 +97,7 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
     var editing by remember { mutableStateOf<ImportIssue?>(null) }
     var effective by remember { mutableStateOf(emptyList<CourseMeeting>()) }
     var proposal by remember { mutableStateOf<PreviewResult.Ready?>(null) }
+    var previewOrigin by remember { mutableStateOf("diff-top") }
     var confirmedTerm by rememberSaveable { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     val submission = rememberSubmission(model, onError = { message = it }) { outcome ->
@@ -124,7 +123,10 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
         if (data.isEmpty()) { message = uiText("The raw array is empty. Your existing timetable has not changed.", "原始数组为空，已有课表未更改"); return }
         hints = firstWeekHints(data)
         rows = data
-        form = TermForm(monday = hints.singleOrNull().orEmpty())
+        val hint = hints.singleOrNull()?.let { text ->
+            try { LocalDate.parse(text).takeIf { it.year in 1..9999 } } catch (_: DateTimeParseException) { null }
+        }
+        form = TermForm(monday = hint)
         message = null
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -185,8 +187,8 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
             ImportStep.Fix(issue, it, parsed.term)
         }
     }
-    val diff = remember(ready, parsed, effective) {
-        if (ready == null || parsed == null) null else ImportStep.Diff(parsed, effective, ready)
+    val diff = remember(ready, parsed, effective, previewOrigin) {
+        if (ready == null || parsed == null) null else ImportStep.Diff(parsed, effective, ready, previewOrigin)
     }
     val step = if (hub) ImportStep.Hub else fix ?: diff ?: entries ?: calendar ?: ImportStep.Source
     val previous = when (step) {
@@ -250,12 +252,36 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
             }
             is ImportStep.Entries -> {
                 val parsed = shown.draft
+                val canPreview = !busy && !writing && proposal == null && decisions.size == parsed.issues.size
+                fun preview(origin: String) {
+                    if (busy || submission.busy || proposal != null || !attached || decisions.size != parsed.issues.size) return
+                    previewOrigin = origin
+                    busy = true; message = null
+                    val choices = decisions.toMap()
+                    scope.launch {
+                        try {
+                            val meetings = withContext(Dispatchers.Default) { parsed.resolve(choices) }
+                            val owner = currentCoroutineContext()
+                            withContext(NonCancellable) {
+                                when (val preview = model.previewImport(parsed.term, meetings)) {
+                                    is PreviewResult.Ready -> if (owner.isActive && attached) {
+                                        effective = meetings; proposal = preview
+                                    } else model.discardProposal(preview.proposalId)
+                                    is PreviewResult.Rejected -> if (attached) message = preview.message
+                                }
+                            }
+                        } catch (e: IllegalArgumentException) { message = e.message }
+                        finally { busy = false }
+                    }
+                }
                 LazyColumn(Modifier.fillMaxSize().testTag("courseIssues"), state = entriesScroll, contentPadding = dockListPadding(top, 0.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     Text(stringResource(R.string.courses_review_source), style = MaterialTheme.typography.titleLarge)
                     Text(stringResource(R.string.courses_review_counts, parsed.term.id, parsed.validCount, parsed.issues.size - decisions.size))
                     Text(stringResource(R.string.courses_issue_counts, decisions.values.count { it is IssueDecision.Correct }, decisions.values.count { it == IssueDecision.Exclude }))
+                    ActionPill(stringResource(R.string.courses_preview_import), { preview("diff-top") },
+                        Modifier.paneOrigin(origins, "diff-top").testTag("previewCourseImportTop"), enabled = canPreview, prominent = true)
                     Secondary(stringResource(R.string.courses_edit_term), !busy) { draft = null; decisions.clear(); message = null }
                 }
                 itemsIndexed(parsed.issues, key = { _, issue -> issue.position }) { index, issue ->
@@ -281,27 +307,8 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
                     }
                 }
                 item {
-                    ActionPill(stringResource(R.string.courses_preview_import), enabled = !busy && decisions.size == parsed.issues.size, prominent = true,
-                        modifier = Modifier.paneOrigin(origins, "diff").testTag("previewCourseImport"), onClick = {
-                        if (busy) return@ActionPill
-                        busy = true; message = null
-                        val choices = decisions.toMap()
-                        scope.launch {
-                            try {
-                                val meetings = withContext(Dispatchers.Default) { parsed.resolve(choices) }
-                                val owner = currentCoroutineContext()
-                                withContext(NonCancellable) {
-                                    when (val preview = model.previewImport(parsed.term, meetings)) {
-                                        is PreviewResult.Ready -> if (owner.isActive && attached) {
-                                            effective = meetings; proposal = preview
-                                        } else model.discardProposal(preview.proposalId)
-                                        is PreviewResult.Rejected -> if (attached) message = preview.message
-                                    }
-                                }
-                            } catch (e: IllegalArgumentException) { message = e.message }
-                            finally { busy = false }
-                        }
-                    })
+                    ActionPill(stringResource(R.string.courses_preview_import), { preview("diff-bottom") },
+                        Modifier.paneOrigin(origins, "diff-bottom").testTag("previewCourseImport"), enabled = canPreview, prominent = true)
                 }
             }
             }
@@ -333,7 +340,7 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
                     val id = staged ?: model.planner.stageCourseImport(parsed.term, shown.meetings).also { staged = it }
                     AssistantPage.CourseDraft(id, parsed.term.id)
                 }, onEdit = ::leavePreview, onConfirm = {
-                    if (!busy && submission.submit { model.confirmProposal(ready.proposalId) }) {
+                    if (!busy && attached && proposal?.proposalId == ready.proposalId && submission.submit { model.confirmProposal(ready.proposalId) }) {
                         confirmedTerm = parsed.term.id
                         message = null
                     }
@@ -365,11 +372,18 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
 }
 
 @Composable
-internal fun TermFields(form: TermForm, enabled: Boolean, frosted: Boolean = false, change: (TermForm) -> Unit) {
+internal fun TermFields(form: TermForm, enabled: Boolean, frosted: Boolean = false, change: (TermForm) -> Unit) =
+    // Raw HUB dates and unconfirmed calendar choices stay in the editor, not an Activity Bundle.
+    CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
+    val campusToday = remember { LocalDate.now(campusZone) }
+    val thisMonday = remember(campusToday) { campusToday.minusDays((campusToday.dayOfWeek.value - 1).toLong()) }
     FormGroup(frosted = frosted) {
         ImportField(stringResource(R.string.courses_term_id), form.id, "termId", enabled) { change(form.copy(id = it)) }
-        ImportField(stringResource(R.string.courses_first_monday), form.monday, "termMonday", enabled) { change(form.copy(monday = it)) }
-        ImportField(stringResource(R.string.courses_week_count), form.weeks, "termWeeks", enabled) { change(form.copy(weeks = it)) }
+        DateWheelField(stringResource(R.string.courses_first_monday), form.monday, thisMonday, enabled, Modifier.testTag("termMonday")) {
+            change(form.copy(monday = it))
+        }
+        NumberWheelField(stringResource(R.string.courses_week_count), form.weeks, 1..53, enabled, Modifier.testTag("termWeeks"),
+            initial = 16) { change(form.copy(weeks = it)) }
     }
     Text(stringResource(R.string.courses_initial_bell))
     val initial = rememberUpdatedState(form.initial.ordinal.toFloat())
@@ -388,7 +402,8 @@ internal fun TermFields(form: TermForm, enabled: Boolean, frosted: Boolean = fal
         }
     }
     val switchFields: @Composable () -> Unit = {
-        ImportField(stringResource(R.string.courses_change_date), form.switchDate, "termSwitchDate", enabled) { change(form.copy(switchDate = it)) }
+        DateWheelField(stringResource(R.string.courses_change_date), form.switchDate, form.monday ?: campusToday, enabled,
+            Modifier.testTag("termSwitchDate"), onClear = { change(form.copy(switchDate = null)) }) { change(form.copy(switchDate = it)) }
         Text(stringResource(R.string.courses_change_date_hint))
     }
     if (frosted) FormGroup(frosted = true) { switchFields() } else switchFields()
@@ -404,20 +419,30 @@ internal fun ImportField(label: String, value: String, tag: String, enabled: Boo
 }
 
 @Composable
-private fun Correction(issue: ImportIssue, source: CourseFields, term: TermSpec, top: Dp, onClose: () -> Unit, onSave: (CourseFields) -> Unit) {
+private fun Correction(issue: ImportIssue, source: CourseFields, term: TermSpec, top: Dp, onClose: () -> Unit, onSave: (CourseFields) -> Unit) =
+    CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
     var fields by remember(issue.position) { mutableStateOf(source) }
+    val problem = remember(fields, term) { fields.problem(term) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, 0.dp)),
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
             SectionTitle(stringResource(R.string.courses_correct_entry))
             Text(issue.label)
-            ImportField(stringResource(R.string.courses_week_number), fields.week, "fixWeek") { fields = fields.copy(week = it) }
+            issue.fields?.let { raw ->
+                Text(stringResource(R.string.courses_raw_entry, raw.week.ifEmpty { "?" }, raw.title.ifEmpty { stringResource(R.string.courses_no_name) },
+                    raw.period, raw.room.ifEmpty { stringResource(R.string.courses_no_location) }), Modifier.testTag("fixOriginal"))
+            }
+            NumberWheelField(stringResource(R.string.courses_week_number), fields.weekNumber(term), 1..term.weeks, true, Modifier.testTag("fixWeek")) {
+                fields = fields.copy(week = it.toString())
+            }
             ImportField(stringResource(R.string.courses_name), fields.title, "fixTitle") { fields = fields.copy(title = it) }
             ImportField(stringResource(R.string.courses_location), fields.room, "fixRoom") { fields = fields.copy(room = it) }
-            ImportField(stringResource(R.string.courses_periods), fields.period, "fixPeriod") { fields = fields.copy(period = it) }
-            fields.problem(term)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            PeriodWheelField(fields.periodRange(), Modifier.testTag("fixPeriod")) {
+                fields = fields.copy(period = if (it.first == it.last) it.first.toString() else "${it.first}-${it.last}")
+            }
+            problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Actions {
                 Secondary(stringResource(R.string.courses_cancel), onClick = onClose)
-                Primary(stringResource(R.string.courses_save_correction), enabled = fields.problem(term) == null) { onSave(fields) }
+                Primary(stringResource(R.string.courses_save_correction), enabled = problem == null) { onSave(fields) }
             }
     }
 }
@@ -438,6 +463,7 @@ private fun ImportDiff(draft: ImportDraft, meetings: List<CourseMeeting>, propos
             item {
                 Text(stringResource(R.string.courses_confirm_import_diff), style = MaterialTheme.typography.titleLarge)
                 Text(stringResource(R.string.courses_import_summary, draft.term.id, meetings.size, groups.size))
+                ActionPill(stringResource(R.string.courses_confirm_import), onConfirm, Modifier.testTag("confirmCourseImportTop"), enabled = !busy, prominent = true)
                 Text(stringResource(R.string.courses_calendar_summary, draft.term.firstMonday, draft.term.weeks, stringResource(if (draft.term.initial == BellSchedule.SUMMER) R.string.courses_summer else R.string.courses_winter)) +
                     (draft.term.switchDate?.let { stringResource(R.string.courses_switch_on, it) } ?: stringResource(R.string.courses_no_switch)))
                 if (locations.isNotEmpty()) Text(stringResource(R.string.courses_different_locations), style = MaterialTheme.typography.titleMedium)

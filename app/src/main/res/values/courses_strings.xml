@@ -13,7 +13,7 @@
     <string name="courses_cancel">Cancel</string>
     <string name="courses_cancel_import">Cancel import</string>
     <string name="courses_change_date">Bell schedule change date (optional)</string>
-    <string name="courses_change_date_hint">The other bell schedule starts on this date. Leave blank to keep one schedule for the whole term.</string>
+    <string name="courses_change_date_hint">The other bell schedule starts on this date. Clear the date to keep one schedule for the whole term.</string>
     <string name="courses_changeover">Bell schedule changes on %1$s. Open a class for its actual time.</string>
     <string name="courses_choose_json">Choose raw JSON file</string>
     <string name="courses_choose_new_source">Choose another source</string>
@@ -45,10 +45,10 @@
     <string name="courses_even_weeks">Even weeks</string>
     <string name="courses_exclude">Exclude entry</string>
     <string name="courses_excluded">Entry excluded</string>
-    <string name="courses_extract">Extract</string>
+    <string name="courses_extract">Import</string>
     <string name="courses_extracting">Extracting</string>
     <string name="courses_field_change">%1$s: %2$s → %3$s</string>
-    <string name="courses_first_monday">First Monday (YYYY-MM-DD)</string>
+    <string name="courses_first_monday">First Monday</string>
     <string name="courses_first_period">First period</string>
     <string name="courses_fixed_class">Fixed class</string>
     <string name="courses_fixed_timetable">Fixed timetable</string>

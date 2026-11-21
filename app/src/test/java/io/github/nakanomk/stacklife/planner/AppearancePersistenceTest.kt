@@ -24,18 +24,20 @@ class AppearancePersistenceTest {
         assertEquals(Appearance(glass = false), AppearanceFields(AppearanceGroup.LAYOUT, null).applyTo(pinned))
     }
 
-    @Test fun courseTextOutlineDefaultsOnForOldProfilesAndExplicitOffRoundTrips() {
-        assertTrue(decodeAppearance("{}").courseTextOutline)
+    @Test fun missingCourseOutlineIsOffAndExplicitChoicesSurviveUpgrade() {
+        assertFalse(decodeAppearance("{}").courseTextOutline)
         val legacy = decodeAppearance("""{"compact":true,"glass":false}""")
-        assertTrue(legacy.courseTextOutline)
+        assertFalse(legacy.courseTextOutline)
         val material = AppearanceGroup.MATERIAL
-        val off = AppearanceFields(material, buildJsonObject { put("courseTextOutline", JsonPrimitive(false)) }).applyTo(legacy)
-        assertEquals(legacy.copy(courseTextOutline = false), off)
-        assertEquals(off, decodeAppearance(encodeAppearance(off)))
+        val on = decodeAppearance("""{"compact":true,"glass":false,"courseTextOutline":true}""")
+        assertEquals(legacy.copy(courseTextOutline = true), on)
+        assertEquals(on, decodeAppearance(encodeAppearance(on)))
+        val off = AppearanceFields(material, buildJsonObject { put("courseTextOutline", JsonPrimitive(false)) }).applyTo(on)
+        assertEquals(legacy, decodeAppearance(encodeAppearance(off)))
         assertEquals(JsonPrimitive(false), material.project(off)["courseTextOutline"])
         assertFalse("courseTextOutline" in AppearanceGroup.LAYOUT.project(off))
-        val reset = AppearanceFields(material, null).applyTo(off)
-        assertTrue(reset.courseTextOutline)
+        val reset = AppearanceFields(material, null).applyTo(on)
+        assertFalse(reset.courseTextOutline)
         assertTrue(reset.compact)
     }
 }
