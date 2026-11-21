@@ -119,21 +119,27 @@ class ManualCourseEntryTest {
         ui.setContent { StackLifeTheme(appearance) {
             available = glassUnavailableReason(appearance) == null
             CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
-                Box(Modifier.wrapContentHeight(Alignment.Top).height(360.dp)) { WeekGrid(term, week, 0.dp, 0.dp) {} }
+                Box(Modifier.wrapContentHeight(Alignment.Top).height(360.dp)) { WeekGrid(term, week, 60.dp, 0.dp) {} }
             }
         } }
         if (live) ui.runOnIdle { assumeTrue("Requires accelerated backdrop rendering", available) }
-        val date = ui.onNodeWithContentDescription("2026年9月7日，周一")
-        val adjacentDate = ui.onNodeWithContentDescription("2026年9月8日，周二")
+        val date = ui.onNode(hasText("9/7") and hasClickAction())
+        val adjacentDate = ui.onNode(hasText("9/8") and hasClickAction())
+        val spokenDate = date.fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription].single()
         // Empty Tuesday: probe just outside Monday’s tile and well inside the unoccupied column.
         // A transparent scrim can transmit the course, but cannot spread its pigment into Tuesday.
-        val points = listOf(point(date, .48f, .10f), point(adjacentDate, .07f, .10f), point(adjacentDate, .58f, .10f))
+        val dateRow = listOf(point(date, .48f, .10f), point(adjacentDate, .07f, .10f), point(adjacentDate, .58f, .10f))
+        val header = ui.onNodeWithTag("week-dates").fetchSemanticsNode()
+        val (top, bottom) = ui.runOnIdle { header.positionOnScreen.y to header.positionOnScreen.y + header.size.height }
+        val dp = ui.density.density
+        val points = listOf(dateRow, dateRow.map { Point(it.x, (top - 8 * dp).roundToInt()) },
+            dateRow.map { Point(it.x, (bottom + 3 * dp).roundToInt()) },
+            dateRow.map { Point(it.x, (bottom + 34 * dp).roundToInt()) }).flatten()
         val initial = colorsAt(points, "dates-$live-rest")
         val grid = ui.onNode(hasScrollAction() and hasAnyAncestor(hasTestTag("week-grid")))
         val tile = ui.onNodeWithTag("grid-course:0")
         fun tileTop(): Float = tile.fetchSemanticsNode().let { ui.runOnIdle { it.positionOnScreen.y } }
         val before = tileTop()
-        val dp = ui.density.density
         grid.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 130f * dp) }
         ui.waitForIdle()
         assertTrue("Course must actually travel behind the date", before - tileTop() > 80f * dp)
@@ -145,14 +151,20 @@ class ManualCourseEntryTest {
         }
         val after = colorsAt(points, "dates-$live-scrolled")
         if (live) {
-            val (course, near, empty) = after.map { Color(it) }
-            val r = course.red - empty.red; val g = course.green - empty.green; val b = course.blue - empty.blue
-            val spread = r * (near.red - empty.red) + g * (near.green - empty.green) + b * (near.blue - empty.blue)
-            assertTrue("Blur must spread course pigment across the edge; samples=$after",
-                spread > .06f * (r * r + g * g + b * b))
-        } else assertEquals("Solid weekday leaked a moving course", initial, after)
+            fun edgeSpread(rgb: List<Int>): Float {
+                val (course, near, empty) = rgb.map { Color(it) }
+                val r = course.red - empty.red; val g = course.green - empty.green; val b = course.blue - empty.blue
+                return (r * (near.red - empty.red) + g * (near.green - empty.green) + b * (near.blue - empty.blue)) /
+                    (r * r + g * g + b * b).coerceAtLeast(.0001f)
+            }
+            val (dateSpread, toolbarSpread, tail, clear) = after.chunked(3).map(::edgeSpread)
+            assertTrue("No sharp hole between toolbar and dates: $toolbarSpread, $dateSpread",
+                dateSpread > .06f && toolbarSpread > .06f)
+            assertTrue("Blur must continue below dates, then clear: $tail vs $clear", tail > clear + .015f)
+        } else assertEquals("Solid toolbar and weekday leaked a moving course", initial.take(6), after.take(6))
         date.performTouchInput { click() }
-        ui.onNodeWithText("9月7日 · 周一").assertIsDisplayed()
+        ui.onNode(hasText(spokenDate) and hasAnyAncestor(isDialog())).assertIsDisplayed()
+        ui.onNode(hasText("测试课") and hasAnyAncestor(isDialog())).assertIsDisplayed()
         ui.onNodeWithText("关闭").performClick()
     }
 
@@ -281,7 +293,13 @@ class ManualCourseEntryTest {
         await("manual-save").performClick(); awaitClosed(); await("grid-course:0").performClick()
         await("course-detail").assertExists()
         ui.onNode(hasText("线性代数") and hasAnyAncestor(hasTestTag("course-detail"))).assertExists()
-        val class1 = week(1).classes.single()
+        val firstWeek = week(1)
+        val terms = store.api.observe(PlannerQuery.Terms).first() as Terms
+        assertEquals("Saved under a different term: ${terms.terms}", listOf("手动学期"), terms.terms.map { it.id })
+        assertNotNull("Saved term missing from the week query", firstWeek.term)
+        assertEquals("Wrong occurrences after confirming weeks 1 and 3: ${firstWeek.classes}; week 3: ${week(3).classes}",
+            1, firstWeek.classes.size)
+        val class1 = firstWeek.classes.single()
         assertEquals(MANUAL_SOURCE, class1.source); assertEquals(2, class1.meeting.day)
         assertEquals(5, class1.meeting.firstPeriod); assertEquals(6, class1.meeting.lastPeriod)
         assertEquals("东101", class1.meeting.room); assertTrue(week(2).classes.isEmpty()); assertEquals("线性代数", week(3).classes.single().meeting.title)

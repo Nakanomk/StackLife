@@ -21,10 +21,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.appearance.PlannerModalBottomSheet
+import io.github.nakanomk.stacklife.appearance.LocalPanelBack
 import io.github.nakanomk.stacklife.RootPane
 import androidx.compose.ui.unit.Dp
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.*
+import androidx.compose.foundation.shape.CircleShape
+import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,6 +53,7 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
     var failure by rememberSaveable(goalId) { mutableStateOf<String?>(null) }
     var receipt by rememberSaveable { mutableStateOf<String?>(null) }
     val busy = ticket != null
+    val frameLaunch = rememberRouteLaunch("generated-frame", CircleShape)
     val currentOnFrame by rememberUpdatedState(onFrame)
     LaunchedEffect(model, ticket) {
         val id = ticket ?: return@LaunchedEffect
@@ -57,7 +61,7 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
         if (result == SaveOutcome.APPLIED) {
             if (savingFrame) {
                 val frame = model.reviewedRef(id, "frame")
-                if (frame != null) currentOnFrame(frame) else receipt = context.getString(R.string.ui_frame_saved)
+                if (frame != null) frameLaunch.open { currentOnFrame(frame) } else receipt = context.getString(R.string.ui_frame_saved)
             } else receipt = context.getString(R.string.ui_queue_appended)
         }
         ticket = null
@@ -73,13 +77,14 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
         ticket = model.startReviewed(commands, value.revision)
     }
     val list = rememberLazyListState()
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true,
+    val sheet = rememberBottomSheetState(initialValue = SheetValue.Expanded, enabledValues = setOf(SheetValue.Expanded, SheetValue.Hidden),
         confirmValueChange = { it != SheetValue.Hidden || ticket == null })
     val body: @Composable (Dp) -> Unit = { top ->
+        val close = LocalPanelBack.current ?: onClose
         LazyColumn(Modifier.fillMaxWidth().imePadding().testTag("goal-order"), state = list, contentPadding = dockListPadding(top, 0.dp),
             verticalArrangement = listSpacing) {
             when {
-                receipt != null -> item { SectionTitle(checkNotNull(receipt)); Secondary(stringResource(R.string.ui_done), onClick = onClose) }
+                receipt != null -> item { SectionTitle(checkNotNull(receipt)); Secondary(stringResource(R.string.ui_done), onClick = close) }
                 graphState == ReadState.Loading -> item { CircularProgressIndicator() }
                 detail?.graph == null -> item { Text(if (graphState == ReadState.ReadFailed) stringResource(R.string.ui_graph_read_failed) else stringResource(R.string.ui_graph_missing)) }
                 detail.nodes.isEmpty() -> item { Hint(stringResource(R.string.ui_add_nodes_first)) }
@@ -126,7 +131,8 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
                                     val enabled = !busy && reviewedRevision == order.revision && detail.revision == order.revision
                                     Actions {
                                         ActionPill(stringResource(R.string.ui_add_to_queue), { save(order, false) }, Modifier.testTag("graph-append"), enabled, prominent = true)
-                                        ActionPill(stringResource(R.string.ui_save_as_frame), { save(order, true) }, Modifier.testTag("graph-generate"), enabled && reason.isNotBlank())
+                                        ActionPill(stringResource(R.string.ui_save_as_frame), { save(order, true) },
+                                            frameLaunch.modifier.testTag("graph-generate"), enabled && reason.isNotBlank())
                                     }
                                     if (busy) Text(stringResource(R.string.ui_saving))
                                 }
@@ -137,9 +143,11 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
             }
         }
     }
-    PlannerModalBottomSheet(onDismissRequest = { if (ticket == null) onClose() }, sheetState = sheet) {
+    PlannerModalBottomSheet(onDismissRequest = { if (ticket == null) onClose() }, sheetState = sheet,
+        windowKey = "goal-review", canDismiss = !busy) {
         Box(Modifier.fillMaxWidth().fillMaxHeight(.88f)) {
-            RootPane(header = { PageTitle(stringResource(R.string.ui_topological_order), back = onClose, backEnabled = !busy) }) { top, _ -> body(top) }
+            val close = LocalPanelBack.current ?: onClose
+            RootPane(header = { PageTitle(stringResource(R.string.ui_topological_order), back = close, backEnabled = !busy) }) { top, _ -> body(top) }
         }
     }
 }

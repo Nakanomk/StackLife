@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +25,7 @@ import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.RestorePolicy
 import io.github.nakanomk.stacklife.planner.Workspace
 import io.github.nakanomk.stacklife.transitions.title
+import io.github.nakanomk.stacklife.transitions.routeOrigin
 
 @Composable
 internal fun TaskScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: () -> Unit,
@@ -41,7 +43,7 @@ internal fun TaskScreen(id: String, state: Workspace, actions: WorkspaceActions,
     EditorPage(stringResource(R.string.ui_task_details), back, AssistantPage.Task(id), backEnabled = !action.busy, footer = {
         Actions {
             Primary(stringResource(R.string.ui_finish_task), enabled = !action.busy) { action.send(PlannerCommand.TaskFinish(id)) }
-            Secondary(stringResource(R.string.ui_edit_task), enabled = !action.busy, onClick = onEdit)
+            ActionPill(stringResource(R.string.ui_edit_task), onEdit, Modifier.routeOrigin("edit:$id", CircleShape), enabled = !action.busy)
             Secondary(stringResource(R.string.ui_remove_from_queue), enabled = !action.busy) { action.send(PlannerCommand.TaskRemove(id)) }
         }
     }) { top, bottom ->
@@ -83,15 +85,19 @@ internal fun SettingsScreen(restorePolicy: RestorePolicy, actions: WorkspaceActi
     EditorPage(stringResource(R.string.ui_settings), onBack, AssistantPage.Settings) { top, bottom ->
             LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 item { SettingsGroup(stringResource(R.string.ui_appearance)) {
-                    PreferenceRow(stringResource(R.string.ui_colors), leadingIcon = R.drawable.ic_palette) { onAppearance(AppearanceGroup.COLOR) }
+                    PreferenceRow(stringResource(R.string.ui_colors), modifier = Modifier.routeOrigin("appearance:${AppearanceGroup.COLOR.key}"),
+                        leadingIcon = R.drawable.ic_palette) { onAppearance(AppearanceGroup.COLOR) }
                     HorizontalDivider(Modifier.padding(start = 32.dp))
-                    PreferenceRow(stringResource(R.string.ui_layout), leadingIcon = R.drawable.ic_apps) { onAppearance(AppearanceGroup.LAYOUT) }
+                    PreferenceRow(stringResource(R.string.ui_layout), modifier = Modifier.routeOrigin("appearance:${AppearanceGroup.LAYOUT.key}"),
+                        leadingIcon = R.drawable.ic_apps) { onAppearance(AppearanceGroup.LAYOUT) }
                     HorizontalDivider(Modifier.padding(start = 32.dp))
-                    PreferenceRow(stringResource(R.string.ui_material_motion), leadingIcon = R.drawable.ic_blur_on) { onAppearance(AppearanceGroup.MATERIAL) }
+                    PreferenceRow(stringResource(R.string.ui_material_motion), modifier = Modifier.routeOrigin("appearance:${AppearanceGroup.MATERIAL.key}"),
+                        leadingIcon = R.drawable.ic_blur_on) { onAppearance(AppearanceGroup.MATERIAL) }
                 } }
                 item { SettingsGroup(stringResource(R.string.pref_general)) { LanguagePreference() } }
                 item { SettingsGroup(stringResource(R.string.ui_assistant)) {
-                    PreferenceRow(stringResource(R.string.ui_model_connection), leadingIcon = R.drawable.ic_chat, onClick = onConnection)
+                    PreferenceRow(stringResource(R.string.ui_model_connection), modifier = Modifier.routeOrigin("model"),
+                        leadingIcon = R.drawable.ic_chat, onClick = onConnection)
                 } }
                 item { SettingsGroup(stringResource(R.string.ui_restore_policy)) { Column(Modifier.selectableGroup()) {
                     for (policy in RestorePolicy.entries) {

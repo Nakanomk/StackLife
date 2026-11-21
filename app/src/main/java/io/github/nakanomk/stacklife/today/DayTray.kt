@@ -45,6 +45,7 @@ import io.github.nakanomk.stacklife.planner.DayPlan
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.taskFabMargin
 import io.github.nakanomk.stacklife.taskFabSize
+import io.github.nakanomk.stacklife.transitions.routeOrigin
 import kotlinx.coroutines.awaitCancellation
 
 @Composable
@@ -149,7 +150,7 @@ private fun QueueTray(
                         Text(stringResource(R.string.today_tray_empty), Modifier.padding(8.dp), style = MaterialTheme.typography.bodyMedium)
                     }
                     items(tasks, key = { it.id }) { task ->
-                        Row(Modifier.fillMaxWidth().testTag("tray:${task.id}").clip(MaterialTheme.shapes.medium)
+                        Row(Modifier.fillMaxWidth().testTag("tray:${task.id}").routeOrigin("slot:${task.id}", MaterialTheme.shapes.medium).clip(MaterialTheme.shapes.medium)
                             .then(pickup?.invoke(task) ?: Modifier)
                             .clickable(enabled && expanded, onClickLabel = stringResource(R.string.today_schedule), role = Role.Button) { onEdit(task.id) }
                             .heightIn(min = 48.dp).padding(horizontal = 8.dp, vertical = 4.dp),

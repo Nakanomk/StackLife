@@ -37,6 +37,10 @@ import io.github.nakanomk.stacklife.appearance.plannerBackdrop
 import io.github.nakanomk.stacklife.appearance.rememberPlannerBackdrop
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.*
+import io.github.nakanomk.stacklife.transitions.PaneMotion
+import io.github.nakanomk.stacklife.transitions.PaneOrigins
+import io.github.nakanomk.stacklife.transitions.paneOrigin
+import io.github.nakanomk.stacklife.appearance.LocalPanelBack
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -58,6 +62,12 @@ internal class ManualCourseForm(term: TermSpec?, val openedWeek: Int, val origin
     var reviewedTerm: TermSpec? = null
     var revealWeek = openedWeek
     var removing = false
+}
+
+private sealed interface ManualPane {
+    data object Fields : ManualPane
+    data object Weeks : ManualPane
+    data class Review(val ready: PreviewResult.Ready, val removing: Boolean) : ManualPane
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -120,11 +130,17 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
             }
         }
     }
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true,
+    val sheet = rememberBottomSheetState(initialValue = SheetValue.Expanded, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
         confirmValueChange = { it != SheetValue.Hidden || !submission.busy })
     val enabled = !loading && !submission.busy && (form.original == null || form.before != null)
     val review = ready
     val weekChoice = form.choosingWeeks
+    val pane = when {
+        weekChoice != null -> ManualPane.Weeks
+        review != null -> ManualPane.Review(review, form.removing)
+        else -> ManualPane.Fields
+    }
+    val origins = remember { PaneOrigins() }
     val scroll = rememberScrollState()
     LaunchedEffect(error) { if (error != null) scroll.scrollTo(0) }
     fun back() {
@@ -132,7 +148,8 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
         if (weekChoice != null) { form.choosingWeeks = null; return }
         if (review == null) close() else { model.discardProposal(review.proposalId); ready = null; error = null }
     }
-    PlannerModalBottomSheet({ if (!submission.busy) close() }, sheet) {
+    PlannerModalBottomSheet({ if (!submission.busy) close() }, sheet, nested = pane != ManualPane.Fields, onNestedBack = ::back,
+        windowKey = "manual-course", canDismiss = !submission.busy) {
         Box(Modifier.fillMaxWidth().fillMaxHeight(.9f).imePadding().testTag("manual-course-sheet")) {
             // Pickers sample this sheet, not the timetable in the window beneath it.
             PlannerPopupHost {
@@ -146,9 +163,9 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
                                 title = { Text(when { weekChoice != null -> stringResource(R.string.courses_choose_weeks); review != null -> stringResource(R.string.courses_review_changes); form.original == null -> stringResource(R.string.courses_add); else -> stringResource(R.string.courses_edit) },
                                     style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 navigationIcon = {
-                                    SheetAction(if (review == null) stringResource(R.string.courses_cancel) else stringResource(R.string.courses_back), "manual-cancel", !submission.busy, ::back)
+                                    SheetAction(if (pane == ManualPane.Fields) stringResource(R.string.courses_cancel) else stringResource(R.string.courses_back), "manual-cancel", !submission.busy, onClick = LocalPanelBack.current ?: ::back)
                                 }, actions = {
-                                    when {
+                                    Box(Modifier.paneOrigin(origins, "preview")) { when {
                                         weekChoice != null -> SheetAction(stringResource(R.string.courses_ok), "manual-weeks-done", weekChoice.isNotEmpty()) {
                                             form.weeks = weekChoice; form.choosingWeeks = null
                                         }
@@ -156,38 +173,48 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
                                         else -> SheetAction(if (form.removing) stringResource(R.string.courses_confirm_remove) else stringResource(R.string.courses_save_class), "manual-save", !submission.busy) {
                                             submission.submit { model.confirmProposal(review.proposalId) }
                                         }
-                                    }
+                                    } }
                                 }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent,
                                     scrolledContainerColor = Color.Transparent), windowInsets = WindowInsets(0))
                         }
                     }
                 }) { insets ->
-                    val body = Modifier.fillMaxSize().plannerBackdrop(scrollingPlane)
+                    val body = Modifier.fillMaxSize()
                     val top = insets.calculateTopPadding()
-                    if (weekChoice != null) WeekSelection(checkNotNull(form.weekCount), weekChoice, body, top) {
+                    androidx.activity.compose.BackHandler(enabled = submission.busy) { }
+                    PaneMotion(pane, origins, depth = { if (it == ManualPane.Fields) 0 else 1 }, originKey = {
+                        when (it) {
+                            ManualPane.Fields -> "fields"
+                            ManualPane.Weeks -> "weeks"
+                            is ManualPane.Review -> if (it.removing) "remove" else "preview"
+                        }
+                    }, modifier = body.plannerBackdrop(scrollingPlane), parent = ManualPane.Fields.takeIf { pane != it && !submission.busy },
+                        onBack = ::back) { shown ->
+                    if (shown == ManualPane.Weeks) WeekSelection(form.weekCount ?: 0, weekChoice ?: form.weeks, body, top) {
                         form.choosingWeeks = it
-                    } else if (review == null) Column(body.verticalScroll(scroll).padding(dockListPadding(top, 0.dp)),
+                    } else if (shown == ManualPane.Fields) Column(body.verticalScroll(scroll).padding(dockListPadding(top, 0.dp)),
                         verticalArrangement = listSpacing) {
                         error?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("manual-error"),
                             color = MaterialTheme.colorScheme.error) }
                         if (loading || submission.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                        ManualFields(form, terms, enabled)
+                        ManualFields(form, terms, enabled, origins)
                         if (form.original != null) {
                             HorizontalDivider()
                             TextButton(onClick = { focus.clearFocus(); preview(true) }, enabled = enabled,
                                 colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
                                 modifier = Modifier.align(Alignment.CenterHorizontally).sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-                                    .testTag("manual-remove")) { Text(stringResource(R.string.courses_remove_class)) }
+                                    .paneOrigin(origins, "remove").testTag("manual-remove")) { Text(stringResource(R.string.courses_remove_class)) }
                         }
-                    } else LazyColumn(body.testTag("manual-review"), contentPadding = dockListPadding(top, 0.dp),
+                    } else if (shown is ManualPane.Review) LazyColumn(body.testTag("manual-review"), contentPadding = dockListPadding(top, 0.dp),
                         verticalArrangement = listSpacing) {
                         item { Hint(stringResource(R.string.courses_manual_review_hint)) }
-                        items(review.changes) { change ->
+                        items(shown.ready.changes) { change ->
                             FormGroup(Modifier.testTag("manual-change"), frosted = true) {
                                 Text(change.field, style = MaterialTheme.typography.titleSmall)
                                 change.before?.let { Text(stringResource(R.string.courses_before, it)) }; change.after?.let { Text(stringResource(R.string.courses_after, it)) }
                             }
                         }
+                    }
                     }
                 }
             }
@@ -204,7 +231,7 @@ private fun SheetAction(label: String, tag: String, enabled: Boolean, onClick: (
 }
 
 @Composable
-private fun ManualFields(form: ManualCourseForm, terms: List<TermSpec>, enabled: Boolean) {
+private fun ManualFields(form: ManualCourseForm, terms: List<TermSpec>, enabled: Boolean, origins: PaneOrigins) {
     SectionTitle(stringResource(R.string.courses_term))
     if (form.original == null && terms.isNotEmpty()) {
         FormGroup(frosted = true) {
@@ -235,7 +262,7 @@ private fun ManualFields(form: ManualCourseForm, terms: List<TermSpec>, enabled:
     val chooseWeeks = enabled && count != null
     FormGroup(frosted = true) {
         PreferenceRow(stringResource(R.string.courses_class_weeks), if (count == null) stringResource(R.string.courses_enter_weeks_first) else displayWeeks,
-            Modifier.testTag("manual-weeks").alpha(if (chooseWeeks) 1f else .38f), chooseWeeks) {
+            Modifier.paneOrigin(origins, "weeks").testTag("manual-weeks").alpha(if (chooseWeeks) 1f else .38f), chooseWeeks) {
             if (count != null) { focus.clearFocus(); form.choosingWeeks = form.weeks.filterTo(mutableSetOf()) { it in 1..count } }
         }
         PickRow(stringResource(R.string.courses_weekday), weekday(p.day), "manual-day", enabled) { dismiss ->

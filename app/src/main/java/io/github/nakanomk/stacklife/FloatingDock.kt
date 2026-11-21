@@ -37,6 +37,7 @@ import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.assistant.LocalAssistant
 import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.planner.NavStyle
+import io.github.nakanomk.stacklife.transitions.LocalDetailChrome
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -64,7 +65,7 @@ internal fun DockOverlay(
         }
         Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), bottomBar = {
             CompositionLocalProvider(LocalCapsuleBackdrop provides source) {
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(LocalDetailChrome.current().fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     if (composer != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                             Box(chromeRail(top = 0.dp).onFocusChanged { composerFocused = it.hasFocus }.focusGroup()) {

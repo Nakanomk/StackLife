@@ -19,11 +19,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
@@ -61,7 +62,7 @@ class MainActivity : LocalizedActivity() {
 @Serializable @SerialName("io.github.nakanomk.stacklife.Workbench") private data object Home : NavKey
 @Serializable private data class TaskDetail(val id: String) : NavKey
 @Serializable private data class EditTask(val id: String) : NavKey
-@Serializable private data class FrameDetail(val id: String) : NavKey
+@Serializable private data class FrameDetail(val id: String, val generated: Boolean = false) : NavKey
 @Serializable private data object Preferences : NavKey
 @Serializable private data class EditAppearance(val group: String) : NavKey
 @Serializable private data object ModelConnection : NavKey
@@ -70,6 +71,23 @@ class MainActivity : LocalizedActivity() {
 @Serializable private data object ImportCourses : NavKey
 @Serializable private data class RemoveTerm(val id: String) : NavKey
 @Serializable private data class GraphEditor(val id: String) : NavKey
+
+private fun NavKey.motionKey(): String = when (this) {
+    Home -> "home"
+    is TaskDetail -> "task:$id"
+    is FrameDetail -> if (generated) "generated-frame" else "frame:$id"
+    is EditTask -> "edit:$id"
+    is SlotEditorKey -> "slot:$taskId"
+    is GraphEditor -> "graph:$id"
+    is EditAppearance -> "appearance:$group"
+    is RemoveTerm -> "remove-term:$id"
+    Preferences -> "settings"
+    ModelConnection -> "model"
+    AddTask -> "add-task"
+    CreateFrame -> "create-frame"
+    ImportCourses -> "course-import"
+    else -> error("Unknown planner entry: ${this::class}")
+}
 
 @Composable
 internal fun StackLifeApp(model: WorkspaceViewModel, assistantModel: AssistantModel? = null,
@@ -107,26 +125,28 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
     var revealStart by rememberSaveable { mutableStateOf<Long?>(null) }
     var selectedTerm by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedWeek by rememberSaveable { mutableStateOf<Int?>(null) }
-    val back = { if (stack.size > 1) stack.removeAt(stack.lastIndex) else if (initialDetail != null) onDetailBack(); Unit }
-    val navigate: (NavKey) -> Unit = { key -> if (stack.last() != key) stack.add(key) }
+    val origins = remember { RouteOrigins() }
+    val back = {
+        if (stack.size > 1) origins.pop(stack.removeAt(stack.lastIndex).motionKey())
+        else if (initialDetail != null) onDetailBack()
+        Unit
+    }
+    val navigate: (NavKey) -> Unit = { key ->
+        if (stack.last() != key) {
+            origins.push(key.motionKey(), stack.last().motionKey())
+            stack.add(key)
+        }
+    }
     val animate = LocalMotionEnabled.current
-    val direction = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
     val privateScreens = remember { mutableIntStateOf(0) }
     var historySource by rememberSaveable { mutableStateOf<String?>(null) }
-    CompositionLocalProvider(LocalOpenChatHistory provides { historySource = it.historyKey() }) {
+    CompositionLocalProvider(LocalRouteOrigins provides origins, LocalOpenChatHistory provides { historySource = it.historyKey() }) {
     PlannerPopupHost(stack.last() != ModelConnection && stack.last() != ImportCourses && privateScreens.intValue == 0) {
     SharedTransitionLayout {
         val shared: SharedModifier = { key ->
             if (animate && initialDetail == null) cardBoundsModifier(key) else Modifier
         }
-        NavDisplay(
-            backStack = stack,
-            onBack = back,
-            sharedTransitionScope = this,
-            transitionSpec = { sceneMotion(animate, pop = false, direction = direction) },
-            popTransitionSpec = { sceneMotion(animate, pop = true, direction = direction) },
-            predictivePopTransitionSpec = { sceneMotion(animate, pop = true, direction = direction) },
-            entryProvider = entryProvider {
+        val entries = entryProvider<NavKey> {
                 entry<Home> {
                     val order = LocalAppearance.current.order
                     val startPage = LocalAppearance.current.start
@@ -206,7 +226,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     CourseImportScreen(model, back) { id -> selectedTerm = id; selectedWeek = 1; back() }
                 } }
                 entry<RemoveTerm> { key -> RemoveTermReview(key.id, model, back) }
-                entry<GraphEditor> { key -> GraphEditorRoute(model, key.id, back) { navigate(FrameDetail(it)) } }
+                entry<GraphEditor> { key -> GraphEditorRoute(model, key.id, back) { navigate(FrameDetail(it, generated = true)) } }
                 entry<TaskDetail> { key ->
                     DetailRoute("task:${key.id}", animate && initialDetail == null) {
                         WorkspacePanel(model) { TaskScreen(key.id, it, model, back, shared) { navigate(EditTask(key.id)) } }
@@ -218,7 +238,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     else TaskEditor(model, back, original = task)
                 } }
                 entry<FrameDetail> { key ->
-                    DetailRoute("frame:${key.id}", animate && initialDetail == null) {
+                    DetailRoute("frame:${key.id}", animate && initialDetail == null && !key.generated) {
                         WorkspacePanel(model) { FrameScreen(key.id, it, model, back, shared) }
                     }
                 }
@@ -228,13 +248,26 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 entry<EditAppearance> { key -> AppearanceEditor(preferences.appearance,
                     AppearanceGroup.entries.first { it.key == key.group }, model, back) }
                 entry<ModelConnection> { PrivateScreen(privateScreens) { ConnectionScreen(assistant.connections, back) } }
-            },
-        )
+        }
+        EntityMotionScope {
+            NavDisplay(backStack = stack, onBack = back, sharedTransitionScope = this,
+                modifier = Modifier.onGloballyPositioned { origins.window = it.localToScreen(Offset.Zero) },
+                transitionSpec = { sceneMotion(animate) }, popTransitionSpec = { sceneMotion(animate) },
+                predictivePopTransitionSpec = { sceneMotion(animate) },
+                entryProvider = { key ->
+                    val entry = entries(key)
+                    NavEntry(navEntry = entry) {
+                        val depth = remember(key) { stack.indexOfLast { it == key } }
+                        val parent = stack.getOrNull(depth - 1)?.motionKey()
+                        origins.Entry(key.motionKey(), depth, stack.lastIndex, parent, animate,
+                            ordinary = key != Home && key !is TaskDetail && (key !is FrameDetail || key.generated)) { entry.Content() }
+                    }
+                })
+        }
     }
     val source = historySource
-    if (source != null) ConversationHistorySheet(assistant, remember(source) { historyPage(source) },
-        configuring = stack.last() == ModelConnection, onSettings = { navigate(ModelConnection) }, onClose = { historySource = null })
-    else AssistantSheet(assistant, onSettings = { navigate(ModelConnection) }, onImport = { navigate(ImportCourses) })
+    AssistantPanels(assistant, source?.let { remember(it) { historyPage(it) } }, configuring = stack.last() == ModelConnection,
+        onCloseHistory = { historySource = null }, onSettings = { navigate(ModelConnection) }, onImport = { navigate(ImportCourses) })
     }
     }
 }

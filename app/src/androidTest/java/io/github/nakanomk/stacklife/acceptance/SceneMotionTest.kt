@@ -3,11 +3,13 @@ package io.github.nakanomk.stacklife.acceptance
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PixelMap
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
-import androidx.compose.ui.unit.toSize
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigationevent.DirectNavigationEventInput
 import androidx.navigationevent.NavigationEvent
@@ -21,6 +23,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @RunWith(AndroidJUnit4::class)
 class SceneMotionTest {
@@ -73,56 +77,137 @@ class SceneMotionTest {
         ui.mainClock.advanceTimeBy(600)
     }
 
-    private fun uncut(node: SemanticsNodeInteraction): Rect = node.fetchSemanticsNode().let {
-        Rect(it.positionInRoot, it.size.toSize())
-    }
-    private fun backHit() = uncut(ui.onNode(hasContentDescription("返回") and hasClickAction()))
-    private fun clearOfBack(title: Rect, back: Rect, settledBack: Rect) {
-        assertEquals("The detail toolbar must not descend with the contracting card", settledBack.top, back.top, 1f)
-        assertTrue("The actual shared title must clear the Back target: $title / $back", !title.overlaps(back))
-        assertTrue("Do not shrink Back to avoid the title", back.height >= 48f * ui.density.density - 1f)
+    private fun pixels() = ui.onRoot().captureToImage().toPixelMap()
+    private fun delta(a: Color, b: Color) = maxOf(abs(a.red - b.red), abs(a.green - b.green), abs(a.blue - b.blue))
+
+    /** Outside the reveal, even the *ink* of the original toolbar, rows and dock must stay
+     * put. A stationary semantics tree behind a blank or translucent page is not enough. */
+    private fun assertUncoveredPixels(before: PixelMap, during: PixelMap, clip: Rect) {
+        val trim = (28 * ui.density.density).roundToInt() // exclude system clock / navigation bar
+        val reveal = clip.inflate(2f)
+        var edges = 0
+        var changed = 0
+        for (y in trim until before.height - trim step 3) for (x in 3 until before.width - 3 step 3) {
+            if (reveal.contains(Offset(x.toFloat(), y.toFloat()))) continue
+            if (delta(before[x, y], before[x + 2, y]) > .15f) edges++
+            if (delta(before[x, y], during[x, y]) > .12f) changed++
+        }
+        assertTrue("Need real uncovered text or controls in this keyframe", edges > 15)
+        assertTrue("Detail/chrome leaked or erased the original scene outside $clip: $changed changed / $edges edges",
+            changed <= maxOf(8, edges / 12))
     }
 
-    private fun title(key: String, owner: String) =
-        uncut(ui.onNodeWithTag("$owner-title/$key", useUnmergedTree = true))
+    private fun title(key: String) =
+        ui.onNodeWithTag("detail-title/$key", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+    private fun backHit() = ui.onNode(hasContentDescription("返回") and hasClickAction()).fetchSemanticsNode().boundsInRoot
+    private data class DetailFrame(val box: Rect, val title: Rect, val pixels: PixelMap, val headerEnd: Float, val dockStart: Float)
+    private fun frame(key: String): DetailFrame {
+        val inside = hasAnyAncestor(hasTestTag("detail:$key"))
+        val back = ui.onNode(inside and hasContentDescription("返回") and hasClickAction())
+        val firstAction = if (key.startsWith("task:")) hasText("完成任务") and hasClickAction() else hasTestTag("assistant-input")
+        return DetailFrame(bounds("detail:$key"), title(key), pixels(),
+            windowRect(back).bottom, windowRect(ui.onNode(inside and firstAction)).top)
+    }
 
-    /** The opaque reading viewport moves between the card and the space below route chrome. */
+    private fun windowRect(node: SemanticsNodeInteraction): Rect {
+        val c = node.fetchSemanticsNode().layoutInfo.coordinates
+        return ui.runOnIdle { Rect(c.localToRoot(Offset.Zero), c.localToRoot(Offset(c.size.width.toFloat(), c.size.height.toFloat()))) }
+    }
+
+    /** Compare actual title ink at *both ends*, and actual blank paper around it, against
+     * the settled page at the measured title scale. Catches truncated glyphs and second
+     * copies of row text/drag handles shining through the moving surface. */
+    private fun assertDetailInk(open: DetailFrame, moving: DetailFrame) {
+        assertTrue("Title ${moving.title} must be visible inside the moving window ${moving.box}", moving.title.width > 0 && moving.title.height > 0)
+        val paper = open.pixels[open.box.right.toInt() - 3, open.box.center.y.toInt()]
+        fun titleInk(f: DetailFrame, half: Int): Float {
+            var dark = 0
+            var total = 0
+            val x0 = (f.title.left + half * f.title.width / 2).roundToInt()
+            val x1 = (f.title.left + (half + 1) * f.title.width / 2).roundToInt()
+            for (y in f.title.top.roundToInt() until f.title.bottom.roundToInt())
+                for (x in x0 until x1) {
+                    total++
+                    if (delta(f.pixels[x, y], paper) > .35f) dark++
+                }
+            return dark.toFloat() / total.coerceAtLeast(1)
+        }
+        for (half in 0..1) {
+            val ink = titleInk(open, half)
+            assertTrue("Reference title has no ink in half $half", ink > .02f)
+            assertTrue("Missing or ghosted title ink in half $half at ${moving.box}",
+                titleInk(moving, half) in ink * .60f..ink * 1.55f)
+        }
+
+        val scale = moving.title.width / open.title.width
+        var tested = 0
+        var foreignInk = 0
+        var firstInkY = Int.MAX_VALUE
+        var lastInkY = -1
+        val inset = 5
+        for (y in moving.box.top.toInt() + inset until moving.box.bottom.toInt() - inset step 3)
+            for (x in moving.box.left.toInt() + inset until moving.box.right.toInt() - inset step 3) {
+                val ox = ((x - moving.title.left) / scale + open.title.left).roundToInt()
+                val oy = ((y - moving.title.top) / scale + open.title.top).roundToInt()
+                // Only sample definite background, not glyph edges at fractional scale.
+                if (oy < open.title.top || oy > open.box.center.y || ox !in inset until open.pixels.width - inset) continue
+                if (delta(open.pixels[ox, oy], paper) > .05f) continue
+                tested++
+                val pixel = moving.pixels[x, y]
+                if (delta(pixel, paper) <= .22f) continue
+                // Fixed controls reveal their exact settled pixels instead of following the body.
+                if ((y <= open.headerEnd || y >= open.dockStart) && delta(pixel, open.pixels[x, y]) < .12f) continue
+                if ((-inset..inset step inset).all { dy -> (-inset..inset step inset).all { dx ->
+                        delta(open.pixels[ox + dx, oy + dy], paper) <= .05f
+                    } }) {
+                    foreignInk++
+                    firstInkY = minOf(firstInkY, y)
+                    lastInkY = maxOf(lastInkY, y)
+                }
+            }
+        assertTrue("Need blank paper within the animated detail", tested > 30)
+        assertTrue("Extra ink on detail: $foreignInk/$tested at y=$firstInkY..$lastInkY, title=${moving.title}, window=${moving.box}",
+            foreignInk <= maxOf(6, tested / 350))
+    }
+
+    private fun between(origin: Rect, box: Rect, page: Rect) {
+        assertTrue("Width must interpolate: $origin / $box / $page",
+            box.width > origin.width + 1f && box.width < page.width - 1f)
+        assertTrue("Height must interpolate: $origin / $box / $page",
+            box.height > origin.height + 2f && box.height < page.height - 2f)
+        // All four edges use the same bounds transform, from this particular origin.
+        val t = (box.height - origin.height) / (page.height - origin.height)
+        assertEquals(origin.top + (page.top - origin.top) * t, box.top, 3f)
+        assertEquals(origin.left + (page.left - origin.left) * t, box.left, 3f)
+    }
+
     private fun checkCardTrip(key: String, input: DirectNavigationEventInput) {
         val row = bounds(key)
+        val before = pixels()
         val detail = "detail:$key"
         click(ui.onNodeWithTag(key))
         ui.mainClock.advanceTimeBy(128)
-        val middle = bounds(detail)
-        val pushingTitle = title(key, "detail")
-        val pushingBack = backHit()
+        val middle = frame(key)
         ui.mainClock.advanceTimeBy(600)
-        val page = bounds(detail)
-        val back = backHit()
-        assertTrue("The settled reading viewport starts below Back", page.top >= back.bottom - 1f)
-        clearOfBack(pushingTitle, pushingBack, back)
-        fun between(box: Rect) {
-            assertTrue("Height must interpolate row → page: $row / $box / $page",
-                box.height > row.height + 2f && box.height < page.height - 2f)
-            assertTrue("Must originate at the tapped row, not the top of the scene: $box",
-                box.top > page.top + 1f && box.top < row.top - 1f)
-        }
-        between(middle)
+        val open = frame(key)
+        between(row, middle.box, open.box)
+        assertUncoveredPixels(before, middle.pixels, middle.box)
+        assertDetailInk(open, middle)
 
         start(input); seek(input, .35f)
         val nearDetail = bounds(detail)
-        between(nearDetail)
-        clearOfBack(title(key, "row"), backHit(), back)
+        between(row, nearDetail, open.box)
         seek(input, .70f)
-        val nearCard = bounds(detail)
-        between(nearCard)
-        clearOfBack(title(key, "row"), backHit(), back)
-        assertTrue("More back progress must contract the same surface", nearCard.height < nearDetail.height - 2f)
+        val nearCard = frame(key)
+        between(row, nearCard.box, open.box)
+        assertUncoveredPixels(before, nearCard.pixels, nearCard.box)
+        assertDetailInk(open, nearCard)
+        assertTrue("More back progress must contract the same surface", nearCard.box.height < nearDetail.height - 2f)
         seek(input, .30f)
-        assertTrue("Dragging the finger back must expand the surface again", bounds(detail).height > nearCard.height + 2f)
-        clearOfBack(title(key, "row"), backHit(), back)
+        assertTrue("Dragging the finger back must expand the surface again", bounds(detail).height > nearCard.box.height + 2f)
         ui.runOnUiThread { input.backCancelled() }
         ui.mainClock.advanceTimeBy(600)
-        assertEquals("Cancel must keep the original detail fully open", page, bounds(detail))
+        assertEquals("Cancel must keep the original detail fully open", open.box, bounds(detail))
         start(input); seek(input, .55f); complete(input)
         assertEquals("Return must restore this ID at its old scroll position", row, bounds(key))
         ui.onNodeWithTag(detail).assertDoesNotExist()
@@ -136,20 +221,151 @@ class SceneMotionTest {
         assertEquals(queue, runBlocking { store.state().queue })
     }
 
+    @Test fun chromeIsRevealedInItsOwnSlotNeverCarriedUnderTheRootToolbar() {
+        show(PlannerCommand.TaskAdd(TaskInput("报告提纲")), PlannerCommand.TaskAdd(TaskInput("取资料")))
+        val key = "task:${runBlocking { store.state().queue.first().id }}"
+        val rootHeader = bounds("root-toolbar")
+        val rootPixels = pixels()
+        val inside = hasAnyAncestor(hasTestTag("detail:$key"))
+        val heading = ui.onNode(hasText("任务详情") and inside, useUnmergedTree = true)
+        val assistant = ui.onNode(hasTestTag("assistant-input") and inside, useUnmergedTree = true)
+        withClockAndBack { input ->
+            click(ui.onNodeWithTag(key))
+            ui.mainClock.advanceTimeBy(144)
+            val push = frame(key)
+            val pushHeading = windowRect(heading)
+            val pushDock = windowRect(assistant)
+            ui.mainClock.advanceTimeBy(600)
+            val open = frame(key)
+            val finalHeading = windowRect(heading)
+            val finalDock = windowRect(assistant)
+            val paper = open.pixels[open.box.right.toInt() - 3, open.box.center.y.toInt()]
+            // PageTitle centers its text in a weighted row. Use the glyphs, not that
+            // row's layout width; the left side legitimately contains moving task text.
+            var glyphLeft = finalHeading.right.toInt()
+            var glyphRight = finalHeading.left.toInt()
+            for (y in finalHeading.top.toInt() until finalHeading.bottom.toInt())
+                for (x in finalHeading.left.toInt() until finalHeading.right.toInt())
+                    if (delta(open.pixels[x, y], paper) > .40f) {
+                        glyphLeft = minOf(glyphLeft, x)
+                        glyphRight = maxOf(glyphRight, x)
+                    }
+            assertTrue("Need actual settled heading glyphs", glyphRight - glyphLeft > 30)
+            val headerBand = Rect(minOf(rootHeader.left, finalHeading.left), minOf(rootHeader.top, finalHeading.top),
+                maxOf(rootHeader.right, finalHeading.right), maxOf(rootHeader.bottom, finalHeading.bottom))
+            var rootGlyphs = 0
+            var detailGlyphs = 0
+            var checkedBlank = 0
+            fun check(f: DetailFrame, header: Rect, dock: Rect) {
+                fun assertFixed(label: String, fixed: Rect, now: Rect) {
+                    assertEquals(label, fixed.left, now.left, 1f); assertEquals(label, fixed.top, now.top, 1f)
+                    assertEquals(label, fixed.right, now.right, 1f); assertEquals(label, fixed.bottom, now.bottom, 1f)
+                }
+                assertFixed("Detail header must not travel below the root header", finalHeading, header)
+                assertFixed("Detail composer must replace the dock in place", finalDock, dock)
+                val visible = f.box.deflate(3f)
+                val excluded = f.box.inflate(3f)
+                var expected = 0
+                var wrong = 0
+                for (y in headerBand.top.toInt() until headerBand.bottom.toInt() step 2)
+                    for (x in headerBand.left.toInt() until headerBand.right.toInt() step 2) {
+                        val p = Offset(x.toFloat(), y.toFloat())
+                        val ink = when {
+                            visible.contains(p) && finalHeading.contains(p) && delta(open.pixels[x, y], paper) > .40f ->
+                                open.pixels[x, y].also { detailGlyphs++ }
+                            !excluded.contains(p) && rootHeader.contains(p) && delta(rootPixels[x, y], paper) > .40f ->
+                                rootPixels[x, y].also { rootGlyphs++ }
+                            else -> continue
+                        }
+                        expected++
+                        // The glass compositor can resample an edge within one physical pixel.
+                        if ((-1..1).all { dy -> (-1..1).all { dx -> delta(f.pixels[x + dx, y + dy], ink) > .15f } }) wrong++
+                    }
+                assertTrue("Wrong toolbar visible in ${f.box}: $wrong/$expected glyph samples",
+                    wrong <= maxOf(2, expected / 15))
+                // The short fixture texts are left aligned. The center below the fixed
+                // heading is bare paper, even when the real root toolbar is still above it.
+                val y0 = maxOf(visible.top, finalHeading.bottom + 4f).toInt()
+                val y1 = minOf(visible.bottom, open.box.center.y).toInt()
+                val x0 = maxOf(visible.left.toInt(), glyphLeft)
+                val x1 = minOf(visible.right.toInt(), glyphRight + 1)
+                var probes = 0
+                var ghosts = 0
+                for (y in y0 until y1 step 3) for (x in x0 until x1 step 3) {
+                    if (delta(open.pixels[x, y], paper) > .05f) continue
+                    probes++
+                    if (delta(f.pixels[x, y], paper) > .28f) ghosts++
+                }
+                checkedBlank += probes
+                assertTrue("Displaced heading ink under the fixed toolbar: $ghosts/$probes", ghosts <= maxOf(2, probes / 700))
+            }
+            check(push, pushHeading, pushDock)
+            start(input)
+            for (progress in listOf(.12f, .30f, .45f, .56f, .68f)) {
+                seek(input, progress)
+                check(frame(key), windowRect(heading), windowRect(assistant))
+            }
+            assertTrue("Need glyphs from both visible toolbars and blank paper between them: $rootGlyphs/$detailGlyphs/$checkedBlank",
+                rootGlyphs > 40 && detailGlyphs > 40 && checkedBlank > 200)
+            complete(input)
+        }
+    }
+
+    @Test fun backUsesTheNewLocationOfTheSameTaskAfterReorder() {
+        show(*(1..3).map { PlannerCommand.TaskAdd(TaskInput("步骤 $it")) }.toTypedArray())
+        val (a, b, c) = runBlocking { store.state().queue }
+        val key = "task:${b.id}"
+        val old = bounds(key)
+        ui.onNodeWithTag(key).performClick()
+        runBlocking { store.apply(PlannerCommand.QueueOrder(listOf(c.id, a.id, b.id))) }
+        ui.waitUntil(12_000) { ui.onAllNodesWithText("队列第 3 项").fetchSemanticsNodes().size == 1 }
+        val page = bounds("detail:$key")
+        withClockAndBack { input ->
+            start(input); seek(input, .65f)
+            val middle = bounds("detail:$key")
+            complete(input)
+            val reordered = bounds(key)
+            assertTrue("The source really moved", reordered.top > old.top + 2f)
+            between(reordered, middle, page)
+        }
+    }
+
+    @Test fun partiallyCoveredRowIsNeverUsedAsAFullCardOrigin() {
+        show(*(1..18).map { PlannerCommand.TaskAdd(TaskInput("步骤 $it")) }.toTypedArray())
+        val key = "task:${runBlocking { store.state().queue[5].id }}"
+        val list = ui.onNodeWithTag("queue")
+        list.performScrollToIndex(6) // list header is item zero
+        val aligned = bounds(key)
+        list.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, aligned.height / 2) }
+        assertTrue("The row must now straddle the top clearance", bounds(key).top < aligned.top - 2f)
+        withClockAndBack { input ->
+            click(ui.onNodeWithTag(key)); ui.mainClock.advanceTimeBy(128)
+            val first = bounds("detail:$key")
+            ui.mainClock.advanceTimeBy(600)
+            assertEquals("Do not expand from the hidden part of a row", bounds("detail:$key"), first)
+            start(input); seek(input, .55f)
+            assertEquals("The still-obscured source must not attract Back", first, bounds("detail:$key"))
+            complete(input)
+        }
+    }
+
     @Test fun heldAndReversedBackNeverMovesLargeTypeTitleAcrossBackButton() {
         show(PlannerCommand.TaskAdd(TaskInput("A - Outline")), fontScale = 2f)
         val key = "task:${runBlocking { store.state().queue.single().id }}"
         ui.onNodeWithTag(key).performClick()
-        val resting = backHit()
+        val open = frame(key)
         withClockAndBack { input ->
             start(input)
             for (progress in listOf(.30f, .45f, .55f, .68f, .42f)) {
                 seek(input, progress)
-                clearOfBack(title(key, "row"), backHit(), resting)
+                val moving = frame(key)
+                assertTrue("Large title must stay within the moving surface", moving.box.inflate(1f).contains(moving.title.center))
+                assertFalse("The clipped Back control must never cover the title", moving.title.overlaps(backHit()))
+                assertDetailInk(open, moving)
             }
             ui.runOnUiThread { input.backCancelled() }
             ui.mainClock.advanceTimeBy(600)
-            clearOfBack(title(key, "detail"), backHit(), resting)
+            assertEquals(open.title, title(key))
         }
     }
 
@@ -173,34 +389,62 @@ class SceneMotionTest {
         }
     }
 
-    @Test fun unpairedEditorSlidesAndCancelledBackRetainsTheDraft() {
+    @Test fun fabExpandsIntoEditorAndCancelledBackRetainsTheDraft() {
         show()
         val queue = ui.onNodeWithTag("queue").fetchSemanticsNode()
-        val origin = x(queue)
+        val originX = x(queue)
+        val fab = bounds("add-task")
+        val route = "route:add-task"
+        val before = pixels()
         withClockAndBack { input ->
             click(ui.onNodeWithTag("add-task")); ui.mainClock.advanceTimeBy(112)
-            val midEditor = x(ui.onNodeWithTag("title:0").fetchSemanticsNode())
-            assertTrue("The covered scene must recede, not fade in place", x(queue) < origin - 1f)
+            val middle = bounds(route)
+            assertEquals("The queue behind the editor must stay put", originX, x(queue), 1f)
+            assertUncoveredPixels(before, pixels(), middle)
             ui.mainClock.advanceTimeBy(600)
             val field = ui.onNodeWithTag("title:0")
-            val end = x(field.fetchSemanticsNode())
-            assertTrue("The editor must enter from the trailing edge", midEditor > end + 1f)
+            val page = bounds(route)
+            between(fab, middle, page)
             ui.mainClock.autoAdvance = true
             field.performTextInput("未提交的草稿")
             ui.waitForIdle()
             ui.mainClock.autoAdvance = false
             start(input); seek(input, .35f)
-            val partial = x(field.fetchSemanticsNode())
-            assertTrue(partial > end + 1f)
+            val partial = bounds(route)
+            between(fab, partial, page)
             seek(input, .65f)
-            assertTrue(x(field.fetchSemanticsNode()) > partial + 1f)
+            val smaller = bounds(route)
+            between(fab, smaller, page)
+            assertTrue(smaller.width < partial.width && smaller.height < partial.height)
             ui.runOnUiThread { input.backCancelled() }; ui.mainClock.advanceTimeBy(600)
-            assertEquals(end, x(field.fetchSemanticsNode()), 1f)
+            assertEquals(page, bounds(route))
             field.assertTextContains("未提交的草稿")
             start(input); seek(input, .50f); complete(input)
             field.assertDoesNotExist()
         }
         assertTrue(runBlocking { store.state().queue.isEmpty() })
+    }
+
+    @Test fun aSettingsRowExpandsWithoutRetractingSettingsIntoItsOwnGear() {
+        show()
+        ui.onNode(hasContentDescription("设置") and hasClickAction()).performClick()
+        val row = ui.onNode(hasText("布局") and hasClickAction())
+        val origin = row.fetchSemanticsNode().boundsInRoot
+        val parent = bounds("route:settings")
+        val before = pixels()
+        val tag = "route:appearance:layout"
+        withClockAndBack { input ->
+            click(row); ui.mainClock.advanceTimeBy(112)
+            between(origin, bounds(tag), parent)
+            assertUncoveredPixels(before, pixels(), bounds(tag))
+            ui.mainClock.advanceTimeBy(500)
+            start(input); seek(input, .58f)
+            between(origin, bounds(tag), parent)
+            assertUncoveredPixels(before, pixels(), bounds(tag))
+            complete(input)
+            assertEquals(parent, bounds("route:settings"))
+            assertEquals(origin, row.fetchSemanticsNode().boundsInRoot)
+        }
     }
 
     @Test fun rootTapMovesBothAdjacentPagesAndSwipingBackUpdatesSelection() {
@@ -248,9 +492,7 @@ class SceneMotionTest {
         withClockAndBack { input ->
             start(input); seek(input, .50f)
             val outgoing = ui.onNodeWithTag(key).fetchSemanticsNode()
-            assertEquals("No source: preserve the viewport height while sliding, never shrink toward B",
-                full.height, outgoing.size.height.toFloat(), 1f)
-            assertTrue("Missing source still needs a spatial pop", x(outgoing) > full.left + 2f)
+            assertEquals("No source: do not contract toward its replacement", full, outgoing.boundsInRoot)
             complete(input)
         }
         ui.onNodeWithTag("task:${b.id}").assertIsDisplayed()

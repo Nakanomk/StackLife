@@ -47,10 +47,10 @@ import io.github.nakanomk.stacklife.appearance.CapsuleScene
 import io.github.nakanomk.stacklife.appearance.GlassBacking
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.StackLifeSurface
-import io.github.nakanomk.stacklife.appearance.LocalCapsuleBackdrop
+import io.github.nakanomk.stacklife.ScrollEdge
 import io.github.nakanomk.stacklife.appearance.plannerBackdrop
 import io.github.nakanomk.stacklife.appearance.rememberPlannerBackdrop
-import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
+import io.github.nakanomk.stacklife.appearance.rememberPanelLaunch
 import io.github.nakanomk.stacklife.planner.CourseWeek
 import java.time.LocalDate
 
@@ -108,7 +108,7 @@ private fun tiles(classes: List<ScheduledCourse>): List<Tile> = buildList {
 }
 
 @Composable
-internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, open: (ScheduledCourse) -> Unit) {
+internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, openDay: ((Int) -> Unit)? = null, open: (ScheduledCourse) -> Unit) {
     val monday = remember(term.firstMonday, week.week) { term.firstMonday.plusWeeks(week.week - 1L) }
     val periods = remember(term, monday) { term.periodsOn(monday) }
     val changeover = term.switchDate?.takeIf { it > monday && it < monday.plusWeeks(1) }
@@ -127,30 +127,26 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, ope
     if (selectedDay != 0) {
         val day = monday.plusDays(selectedDay - 1L)
         val courses = remember(week.classes, selectedDay) { week.classes.filter { it.meeting.day == selectedDay } }
-        PlannerAlertDialog(onDismissRequest = { selectedDay = 0 }, title = { Text(day.format(dateFormat)) },
-            text = {
-                if (courses.isEmpty()) Text(stringResource(R.string.courses_no_classes_day)) else LazyColumn {
-                    items(courses) { course -> ListItem(headlineContent = { Text(course.meeting.title) },
-                        supportingContent = { Text("${course.meeting.periodLabel()} · ${course.meeting.room.ifBlank { stringResource(R.string.courses_no_room) }}") },
-                        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) { selectedDay = 0; open(course) }) }
-                }
-            }, confirmButton = { TextButton(onClick = { selectedDay = 0 }) { Text(stringResource(R.string.courses_close)) } })
+        CourseReadPanel(null, day.format(dateFormat), courses, open = { selectedDay = 0; open(it) }, close = { selectedDay = 0 })
     }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("week-grid")) {
         val dayWidth = ((maxWidth - rail) / 7).coerceAtLeast(0.dp)
         val scrollingPlane = rememberPlannerBackdrop()
         Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), topBar = {
-            CompositionLocalProvider(LocalCapsuleBackdrop provides scrollingPlane) {
-                StackLifeSurface(CapsuleScene.FROST, Modifier.padding(top = top).fillMaxWidth().testTag("week-dates"),
-                    solid = colors.surface, shape = RoundedCornerShape(0.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.fillMaxWidth().then(if (scrollingPlane == null) Modifier.background(colors.surface) else Modifier)) {
+                if (scrollingPlane != null) ScrollEdge(scrollingPlane, Modifier.matchParentSize(), overhang = 24.dp)
+                Row(Modifier.padding(top = top).fillMaxWidth().testTag("week-dates"), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.width(rail), contentAlignment = Alignment.Center) {
                             Text(monday.month.getDisplayName(DateTextStyle.SHORT, locale), style = typography.labelSmall, maxLines = 1, color = colors.onSurfaceVariant)
                         }
                         for (i in 0..6) {
                             val date = monday.plusDays(i.toLong())
                             val dateDescription = date.format(dateFormat)
-                            Column(Modifier.width(dayWidth).heightIn(min = 48.dp).clickable(onClickLabel = stringResource(R.string.courses_open_day), role = Role.Button) { selectedDay = i + 1 }
+                            val launch = rememberPanelLaunch("course-detail")
+                            Column(Modifier.width(dayWidth).heightIn(min = 48.dp).then(launch.modifier)
+                                .clickable(onClickLabel = stringResource(R.string.courses_open_day), role = Role.Button) {
+                                    launch.open { if (openDay != null) openDay(i + 1) else selectedDay = i + 1 }
+                                }
                                 .semantics { contentDescription = dateDescription },
                                 verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                                 val ink = if (date == today) colors.primary else colors.onSurface
@@ -161,7 +157,6 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, ope
                             }
                         }
                     }
-                }
             }
         }) { insets ->
             Column(Modifier.fillMaxSize().plannerBackdrop(scrollingPlane).verticalScroll(rememberScrollState()).padding(top = insets.calculateTopPadding())) {
@@ -239,8 +234,9 @@ private fun CourseTile(tile: Tile, swatch: Color, outline: Stroke?, open: ((Sche
         if (tile.course.conflicts.isEmpty()) "" else stringResource(R.string.courses_tile_conflict, tile.course.conflicts.joinToString(stringResource(R.string.courses_list_separator)))
     val interaction = if (open == null) null else remember { MutableInteractionSource() }
     StackLifeSurface(CapsuleScene.COURSE, modifier, solid = swatch, shape = courseShape, tint = swatch, interactionSource = interaction) {
-        val action = if (open == null) Modifier else Modifier.clickable(interactionSource = interaction, role = Role.Button, onClickLabel = stringResource(R.string.courses_view_fixed_class)) {
-            open(tile.course)
+        val launch = if (open == null) null else rememberPanelLaunch("course-detail")
+        val action = if (open == null || launch == null) Modifier else launch.modifier.clickable(interactionSource = interaction, role = Role.Button, onClickLabel = stringResource(R.string.courses_view_fixed_class)) {
+            launch.open { open(tile.course) }
         }
         Column(Modifier.fillMaxSize().clipToBounds().testTag("grid-course:${tile.index}").then(action)
             .semantics { contentDescription = description }.padding(horizontal = 3.dp, vertical = 4.dp)) {

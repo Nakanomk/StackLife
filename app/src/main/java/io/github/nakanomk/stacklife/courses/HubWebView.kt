@@ -327,7 +327,7 @@ internal class HubSession(private val context: Context) {
 }
 
 @Composable
-internal fun HubWebView(onRows: (JsonArray) -> Unit, onBack: () -> Unit, onFile: () -> Unit) {
+internal fun HubWebView(onRows: (JsonArray) -> Unit, onBack: () -> Unit, onFile: () -> Unit, extractOrigin: Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val session = remember(context) { try { HubSession(context) } catch (_: RuntimeException) { null } }
@@ -366,7 +366,7 @@ internal fun HubWebView(onRows: (JsonArray) -> Unit, onBack: () -> Unit, onFile:
                     catch (_: IOException) { session.message = uiText("Extraction failed.", "提取失败") }
                     finally { extracting = false }
                 }
-            }, modifier = Modifier.testTag("hubExtract")) { Text(if (extracting) stringResource(R.string.courses_extracting) else stringResource(R.string.courses_extract)) }
+            }, modifier = extractOrigin.testTag("hubExtract")) { Text(if (extracting) stringResource(R.string.courses_extracting) else stringResource(R.string.courses_extract)) }
         }
         if (session?.hasAppLink == true) {
             TextButton(onClick = session::openAppLink) { Text(stringResource(R.string.courses_open_auth)) }

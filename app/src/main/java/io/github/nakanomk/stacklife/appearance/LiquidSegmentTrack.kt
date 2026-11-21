@@ -51,7 +51,8 @@ private class Scrub {
 
 @Composable
 internal fun SegmentTrack(position: State<Float>, count: Int, ink: Color, onSelect: (Int) -> Unit,
-    modifier: Modifier = Modifier, enabled: Boolean = true, navigationInset: Dp? = null, content: @Composable (highlighted: Int) -> Unit) {
+    modifier: Modifier = Modifier, enabled: Boolean = true, navigationInset: Dp? = null, indicatorInset: Dp = 0.dp,
+    content: @Composable (highlighted: Int) -> Unit) {
     val scrub = remember(count) { Scrub() }
     val select = rememberUpdatedState(onSelect)
     val page = rememberUpdatedState(position)
@@ -123,9 +124,11 @@ internal fun SegmentTrack(position: State<Float>, count: Int, ink: Color, onSele
             val width = constraints.maxWidth.toFloat() / count
             val slotWidth = maxWidth / count
             // Fit the lens, not the hit target, when a wrapped caption makes a slot taller than wide.
-            val rest = if (navigationInset != null && slotWidth < maxHeight) slotWidth / 1.35f else maxHeight
-            val shape = Modifier.align(Alignment.CenterStart).offset { IntOffset((width * slot.value).roundToInt(), 0) }
-                .fillMaxWidth(1f / count).height(rest)
+            val slotHeight = if (navigationInset != null && slotWidth < maxHeight) slotWidth / 1.35f else maxHeight
+            val rest = (slotHeight - indicatorInset * 2).coerceAtLeast(0.dp)
+            val slotBounds = Modifier.align(Alignment.CenterStart).offset { IntOffset((width * slot.value).roundToInt(), 0) }
+                .fillMaxWidth(1f / count)
+            val shape = (if (indicatorInset > 0.dp) slotBounds.padding(horizontal = indicatorInset) else slotBounds).height(rest)
             if (shell == null) Spacer(shape.background(ink, CircleShape))
             else {
                 // BiliPai's 64/56/78dp shell/rest/press reference, capped even when the text grows.

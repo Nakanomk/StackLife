@@ -25,6 +25,8 @@ import io.github.nakanomk.stacklife.transitions.DetailCard
 import io.github.nakanomk.stacklife.transitions.DetailListSource
 import io.github.nakanomk.stacklife.transitions.detailListSource
 import io.github.nakanomk.stacklife.transitions.title
+import androidx.compose.foundation.shape.CircleShape
+import io.github.nakanomk.stacklife.transitions.routeOrigin
 
 @Composable
 internal fun FrameList(
@@ -41,7 +43,7 @@ internal fun FrameList(
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.ui_frame_counts, available, frames.size - available), Modifier.weight(1f),
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Secondary(stringResource(R.string.ui_new_frame), onClick = onCreate)
+                ActionPill(stringResource(R.string.ui_new_frame), onCreate, Modifier.routeOrigin("create-frame", CircleShape))
             }
         }
         if (frames.isEmpty()) item {

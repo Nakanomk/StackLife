@@ -8,6 +8,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -39,6 +40,8 @@ import io.github.nakanomk.stacklife.courses.ScheduledCourse
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.PlannerQuery
 import io.github.nakanomk.stacklife.planner.ScheduledState
+import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch
+import io.github.nakanomk.stacklife.appearance.rememberPanelLaunch
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -54,7 +57,7 @@ internal fun DayAxis(
     val gutter = spine + railWidth / 2
     var selectedEnd by remember(drag, revision) { mutableStateOf<String?>(null) }
     Box(modifier.fillMaxWidth().clipToBounds()) {
-        Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll).padding(top = topInset)) {
+        Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll).padding(top = topInset, bottom = 16.dp)) {
             Box(Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() })) {
                 for (band in scale.bands) for (tick in band.ticks) {
                     Box(Modifier.offset { IntOffset(0, band.top + band.yAt(tick.millis)) }.width(spine - 10.dp)
@@ -178,10 +181,11 @@ private fun EventRail(
                     drag.scroll.scrollTo((endY - visibleHeight + margin).coerceAtLeast(0))
                 }
             }
-            Spacer(Modifier.align(Alignment.BottomCenter).size(48.dp).testTag("resize-end:${resizable.taskId}")
+            val handle = rememberRouteLaunch("slot:${resizable.taskId}", CircleShape)
+            Spacer(Modifier.align(Alignment.BottomCenter).size(48.dp).then(handle.modifier).testTag("resize-end:${resizable.taskId}")
                 .onGloballyPositioned { railX = it.localToRoot(Offset(it.size.width / 2f, 0f)).x }
                 .endDrag(source, drag, revision, enabled, send)
-                .clickable(enabled, onClickLabel = stringResource(R.string.today_edit_exact_time), role = Role.Button) { onEdit(resizable.taskId) }
+                .clickable(enabled, onClickLabel = stringResource(R.string.today_edit_exact_time), role = Role.Button) { handle.open { onEdit(resizable.taskId) } }
                 .semantics { contentDescription = handleLabel }
                 .drawBehind {
                     if (drag.resizeRailX == null || drag.candidate == null) drawEndKnob(size.width / 2, size.height, ink, colors.surface)
@@ -212,7 +216,12 @@ internal fun BlockCard(
     val range = "${clockLabel(block.startMillis, day)}–${clockLabel(block.endMillis, day)}"
     val editable = block.state != ScheduledState.DONE
     val lines = if (wrap) Int.MAX_VALUE else 1
-    val action = if (!editable) Modifier else move.clickable(enabled, onClickLabel = stringResource(R.string.today_edit_time), role = Role.Button) { onEdit(block.taskId) }
+    val action = if (!editable) Modifier else {
+        val launch = rememberRouteLaunch("slot:${block.taskId}", MaterialTheme.shapes.medium)
+        move.then(launch.modifier).clickable(enabled, onClickLabel = stringResource(R.string.today_edit_time), role = Role.Button) {
+            launch.open { onEdit(block.taskId) }
+        }
+    }
     Column(modifier.testTag("block:${block.taskId}").clip(MaterialTheme.shapes.medium).then(action)
         .semantics(mergeDescendants = true) {}.padding(start = 4.dp, end = 4.dp)) {
         Text(range, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = lines, overflow = TextOverflow.Ellipsis)
@@ -228,9 +237,10 @@ internal fun CourseCard(course: ScheduledCourse, day: PlannerQuery.Day, modifier
     val scheme = MaterialTheme.colorScheme
     val lines = if (wrap) Int.MAX_VALUE else 1
     var open by rememberSaveable { mutableStateOf(false) }
+    val launch = rememberPanelLaunch("course-detail")
     if (open) CourseDetails(course) { open = false }
-    Column(modifier.testTag("day-course").clip(MaterialTheme.shapes.medium)
-        .clickable(onClickLabel = stringResource(R.string.today_view_class), role = Role.Button) { open = true }.padding(horizontal = 4.dp)) {
+    Column(modifier.testTag("day-course").then(launch.modifier).clip(MaterialTheme.shapes.medium)
+        .clickable(onClickLabel = stringResource(R.string.today_view_class), role = Role.Button) { launch.open { open = true } }.padding(horizontal = 4.dp)) {
         Text("${clockLabel(meeting.startMillis, day)}–${clockLabel(meeting.endMillis, day)}",
             style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = lines, overflow = TextOverflow.Ellipsis)
         Text(meeting.title, style = MaterialTheme.typography.titleSmall, maxLines = lines, overflow = TextOverflow.Ellipsis)

@@ -54,7 +54,9 @@ internal fun SemanticsNodeInteractionsProvider.assertFloatingAxisMeetsDock() {
     fun box(tag: String) = onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
     val top = box("assistant-input").top
     val rail = box("day-rail")
-    assertEquals("The time rail fills the viewport up to the assistant, including at maximum scroll", top, rail.bottom, 1f)
+    val midnight = dayMark("time-day-end").fetchSemanticsNode()
+    assertEquals("The rail reaches the assistant unless midnight is already visible",
+        minOf(top, midnight.positionInRoot.y + midnight.size.height), rail.bottom, 1f)
     assertEquals(top, box("day-axis").bottom, 1f)
     assertEquals(top, box("day-drop-area").bottom, 1f)
     assertFalse("Opaque queue must not obscure the rail", rail.overlaps(box("day-tray-container")))
@@ -366,13 +368,18 @@ class DayTimelineTest {
             val rail = bounds("day-rail")
             val end = ui.dayMark("time-day-end").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             assertEquals("Midnight is the final visible instant", end.bottom, rail.bottom, 1f)
-            assertEquals("No scrollable space between midnight and the assistant", end.bottom, bounds("assistant-input").top, 1f)
+            assertEquals("Only a fixed breathing space follows midnight",
+                with(axis.fetchSemanticsNode().layoutInfo.density) { 16.dp.toPx() }, bounds("assistant-input").top - end.bottom, 1f)
             val pixels = ui.onRoot().captureToImage().toPixelMap()
             val x = rail.center.x.toInt()
             val adjacent = rail.left.toInt() - 3
             for (rise in listOf(1, 4, 8)) {
                 val y = rail.bottom.toInt() - rise
                 assertNotEquals("Day rail disappeared before midnight at $x,$y", pixels[adjacent, y], pixels[x, y])
+            }
+            for (below in listOf(2, 6, 10)) {
+                val y = rail.bottom.toInt() + below
+                assertEquals("No rail may continue into the day-end inset at $x,$y", pixels[adjacent, y], pixels[x, y])
             }
             val scroll = axis.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
             assertEquals("There must be no scroll range beyond this boundary", scroll.maxValue(), scroll.value(), 0f)
@@ -407,7 +414,7 @@ class DayTimelineTest {
             .assertWidthIsEqualTo(48.dp).assertHeightIsEqualTo(48.dp)
     }
 
-    @Test fun midnightMeetsAssistantAndLastTaskIsReachableWithoutScrollingIntoTomorrow() {
+    @Test fun midnightStopsJustAboveAssistantAndLastTaskIsReachable() {
         runBlocking {
             store.apply(TaskAdd(TaskInput("Late class", ref = "last")), SlotSet("@last", at(23, 30), 30),
                 TaskAdd(TaskInput("Unscheduled task")))
@@ -420,7 +427,7 @@ class DayTimelineTest {
         val end = ui.dayMark("time-day-end").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val rail = bounds("day-rail")
         assertEquals(end.bottom, rail.bottom, 1f)
-        assertEquals(end.bottom, bounds("assistant-input").top, 1f)
+        assertEquals(with(ui.density) { 16.dp.toPx() }, bounds("assistant-input").top - end.bottom, 1f)
         assertEquals("The 23:30–00:00 task ends at the same boundary", end.bottom, bounds("block:${before.blocks.single().taskId}").bottom, 1f)
         val source = bounds("tray:${before.tray.single().id}").center
         val dock = bounds("assistant-input").center
@@ -557,7 +564,8 @@ class DayTimelineTest {
         ui.onNodeWithTag("day-axis").performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
         val tick = ui.dayTick("23:45").fetchSemanticsNode().boundsInRoot
         assertTrue(tick.height > 0f && !tick.overlaps(fab) && !tick.overlaps(ball))
-        assertEquals(box("assistant-input").top, ui.dayMark("time-day-end").fetchSemanticsNode().boundsInRoot.bottom, 1f)
+        assertEquals(with(ui.density) { 16.dp.toPx() },
+            box("assistant-input").top - ui.dayMark("time-day-end").fetchSemanticsNode().boundsInRoot.bottom, 1f)
     }
 
     @Test fun dragFromTrayThenMoveSameBlockAndCancelInEditor() {

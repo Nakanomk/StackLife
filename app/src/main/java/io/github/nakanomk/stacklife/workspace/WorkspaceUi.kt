@@ -40,7 +40,7 @@ import io.github.nakanomk.stacklife.i18n.AppLanguage
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.planner.NavStyle
 import io.github.nakanomk.stacklife.planner.PlannerCommand
-import io.github.nakanomk.stacklife.transitions.LocalDetailViewport
+import io.github.nakanomk.stacklife.transitions.LocalDetailChrome
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -103,13 +103,16 @@ internal fun PageChrome(title: String, back: () -> Unit, backEnabled: Boolean = 
                 .onSizeChanged { footerPixels = it.height }.padding(horizontal = 12.dp, vertical = 6.dp)) {
                 ActionDock(footer)
             }
-        }) { top, bottom -> content(top, bottom + if (short || footer == null) 0.dp else with(density) { footerPixels.toDp() }) }
+        }) { top, bottom ->
+            val clearance = bottom + if (short || footer == null) 0.dp else with(density) { footerPixels.toDp() }
+            content(top, clearance)
+        }
     }
 }
 
 @Composable
 private fun ActionDock(actions: @Composable () -> Unit) {
-    StackLifeSurface(CapsuleScene.PANEL, Modifier, MaterialTheme.colorScheme.surfaceContainerHigh,
+    StackLifeSurface(CapsuleScene.PANEL, LocalDetailChrome.current(), MaterialTheme.colorScheme.surfaceContainerHigh,
         elevation = 2.dp, shape = RoundedCornerShape(24.dp)) {
         Box(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
             CompositionLocalProvider(LocalActionGroup provides true, content = actions)
@@ -121,11 +124,8 @@ private fun ActionDock(actions: @Composable () -> Unit) {
 internal fun EditorPage(title: String, back: () -> Unit, assistantPage: AssistantPage? = null,
     backEnabled: Boolean = true, footer: (@Composable () -> Unit)? = null,
     content: @Composable (top: Dp, bottom: Dp) -> Unit) {
-    val viewport = LocalDetailViewport.current
     Page(assistantPage) {
-        PageChrome(title, back, backEnabled, footer) { top, bottom ->
-            if (viewport == null) content(top, bottom) else viewport(top, bottom) { content(top, bottom) }
-        }
+        PageChrome(title, back, backEnabled, footer, content)
     }
 }
 
@@ -144,7 +144,7 @@ internal fun FormGroup(modifier: Modifier = Modifier, frosted: Boolean = false, 
 
 @Composable
 internal fun PageTitle(title: String, back: () -> Unit, backEnabled: Boolean = true) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+    Row(LocalDetailChrome.current().fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         GlassIcon(R.drawable.ic_arrow_back, stringResource(R.string.ui_back), back, enabled = backEnabled)
         Text(title, Modifier.weight(1f).semantics { heading() }, maxLines = 1, overflow = TextOverflow.Ellipsis,

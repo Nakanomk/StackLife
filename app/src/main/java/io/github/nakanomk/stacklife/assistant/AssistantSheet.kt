@@ -44,6 +44,12 @@ import io.github.nakanomk.stacklife.appearance.CapsuleScene
 import io.github.nakanomk.stacklife.appearance.StackLifeSurface
 import io.github.nakanomk.stacklife.appearance.PlannerModalBottomSheet
 import io.github.nakanomk.stacklife.workspace.ActionPill
+import io.github.nakanomk.stacklife.appearance.rememberPanelLaunch
+import io.github.nakanomk.stacklife.appearance.LocalPanelBack
+import io.github.nakanomk.stacklife.transitions.PaneMotion
+import io.github.nakanomk.stacklife.transitions.PaneOrigins
+import io.github.nakanomk.stacklife.transitions.paneOrigin
+import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch
 import io.github.nakanomk.stacklife.planner.PlannerChange
 import io.github.nakanomk.stacklife.workspace.CheckRow
 import io.github.nakanomk.stacklife.workspace.Hint
@@ -78,12 +84,13 @@ private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: As
     MessageEditor(if (active && ui.composerId == id) ui.draft else "", origin?.scopeName() ?: scope,
         { model.editLocal(id, it, page) }, { model.submitLocal(id, target) },
         origin?.takeIf { page != null && privateScope == null }?.let { stringResource(R.string.assistant_draft_scope, it.scopeName()) }, active, surface,
-        openHistory = { openHistory(page ?: AssistantPage.Terms) })
+        openHistory = { openHistory(page ?: AssistantPage.Terms) }, opensPanel = true)
 }
 
 @Composable
 internal fun MessageEditor(text: String, scope: String, onChange: (String) -> Unit, onSend: () -> Unit, originHint: String? = null,
-    active: Boolean = true, modifier: Modifier = Modifier, openHistory: (() -> Unit)? = null, tagPrefix: String = "assistant") {
+    active: Boolean = true, modifier: Modifier = Modifier, openHistory: (() -> Unit)? = null, tagPrefix: String = "assistant",
+    historyOrigin: Modifier = Modifier, opensPanel: Boolean = false) {
     val colors = MaterialTheme.colorScheme
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -96,17 +103,18 @@ internal fun MessageEditor(text: String, scope: String, onChange: (String) -> Un
     }
     val fieldDescription = stringResource(R.string.assistant_message_field, scope)
     val enabled = active && text.isSendable()
+    val launch = if (opensPanel) rememberPanelLaunch("assistant") else null
     fun submit() {
         if (!enabled) return
         keyboard?.hide()
         focus.clearFocus()
         haptics.performHapticFeedback(HapticFeedbackType.VirtualKey)
-        onSend()
+        if (launch != null) launch.open(onSend) else onSend()
     }
-    StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth().then(modifier), colors.surfaceContainerHigh, solidBorder = solidBorder) {
+    StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth().then(modifier).then(launch?.modifier ?: Modifier), colors.surfaceContainerHigh, solidBorder = solidBorder) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            if (openHistory != null) IconButton(onClick = { keyboard?.hide(); openHistory() }, enabled = active,
-                modifier = Modifier.size(48.dp).testTag("assistant-history")) {
+            if (openHistory != null) IconButton(onClick = { keyboard?.hide(); if (launch != null) launch.open(openHistory) else openHistory() }, enabled = active,
+                modifier = historyOrigin.size(48.dp).testTag("assistant-history")) {
                 Icon(painterResource(R.drawable.ic_history), stringResource(R.string.assistant_history), tint = colors.onSurfaceVariant)
             } else Spacer(Modifier.width(16.dp))
             CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
@@ -140,15 +148,71 @@ internal fun MessageEditor(text: String, scope: String, onChange: (String) -> Un
 }
 
 
+private sealed interface AssistantPanel {
+    data object Chat : AssistantPanel
+    data class History(val fallback: AssistantPage) : AssistantPanel
+    data class Thread(val fallback: AssistantPage, val id: Long) : AssistantPanel
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImport: () -> Unit) {
+internal fun AssistantPanels(model: AssistantModel, history: AssistantPage?, configuring: Boolean,
+    onCloseHistory: () -> Unit, onSettings: () -> Unit, onImport: () -> Unit) {
     val ui by model.state.collectAsStateWithLifecycle()
+    var selected by rememberSaveable(history) { mutableStateOf<Long?>(null) }
+    if (history == null && ui.page == null) return
+    val origins = remember { PaneOrigins() }
+    val listState = rememberLazyListState()
+    val chatState = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+    if (configuring) return
+    val threads = if (history != null) remember(model) { model.history.observeConversations() }
+        .collectAsStateWithLifecycle(initialValue = null).value else null
+    val thread = selected
+    val panel = when {
+        history == null -> AssistantPanel.Chat
+        thread == null -> AssistantPanel.History(history)
+        else -> AssistantPanel.Thread(history, thread)
+    }
+    val previous = when (panel) {
+        is AssistantPanel.Thread -> AssistantPanel.History(panel.fallback)
+        is AssistantPanel.History -> AssistantPanel.Chat.takeIf { ui.page != null }
+        AssistantPanel.Chat -> null
+    }
+    fun back() {
+        when (panel) {
+            is AssistantPanel.Thread -> selected = null
+            is AssistantPanel.History -> onCloseHistory()
+            AssistantPanel.Chat -> model.close()
+        }
+    }
+    val sheet = rememberBottomSheetState(initialValue = SheetValue.Expanded, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+        confirmValueChange = { it != SheetValue.Hidden || model.state.value.work != AssistantWork.COMMIT })
+    PlannerModalBottomSheet(::back, sheet, nested = previous != null, onNestedBack = ::back, windowKey = "assistant",
+        canDismiss = ui.work != AssistantWork.COMMIT) {
+        PaneMotion(panel, origins, depth = { when (it) {
+            AssistantPanel.Chat -> 0; is AssistantPanel.History -> 1; is AssistantPanel.Thread -> 2
+        } }, originKey = { when (it) {
+            AssistantPanel.Chat -> "chat"; is AssistantPanel.History -> "history"; is AssistantPanel.Thread -> "thread:${it.id}"
+        } }, parent = previous, onBack = ::back, modifier = Modifier.fillMaxWidth()) { shown ->
+            when (shown) {
+                AssistantPanel.Chat -> chatState.SaveableStateProvider("chat") { ChatPanel(model, ui, origins, onSettings, onImport) }
+                else -> {
+                    val id = (shown as? AssistantPanel.Thread)?.id
+                    val fallback = if (shown is AssistantPanel.Thread) shown.fallback else (shown as AssistantPanel.History).fallback
+                    ConversationHistoryPane(model, fallback, id, origins, threads, listState, onThread = { selected = it },
+                        onBack = LocalPanelBack.current ?: ::back,
+                        onSettings = onSettings, onClose = onCloseHistory)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatPanel(model: AssistantModel, ui: AssistantState, origins: PaneOrigins, onSettings: () -> Unit, onImport: () -> Unit) {
     val page = ui.page ?: return
     val openHistory = LocalOpenChatHistory.current
     var expanded by rememberSaveable(page) { mutableStateOf(false) }
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true,
-        confirmValueChange = { it != SheetValue.Hidden || model.state.value.work != AssistantWork.COMMIT })
     var options by remember(page) { mutableStateOf(false) }
     val service = ui.profile
     val ready = ui.pending
@@ -186,7 +250,8 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
         else if (ui.lines.isNotEmpty()) list.scrollToItem(ui.lines.lastIndex)
     }
     val compact = ui.profile == null
-    PlannerModalBottomSheet(onDismissRequest = model::close, sheetState = sheet) {
+    val settingsLaunch = rememberRouteLaunch("model")
+    val importLaunch = rememberRouteLaunch("course-import")
         val density = LocalDensity.current
         val needsHeight = LocalConfiguration.current.screenHeightDp < 480 || density.fontScale >= 1.5f ||
             WindowInsets.ime.getBottom(density) > 0
@@ -213,7 +278,7 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
                     Icon(painterResource(if (expanded) R.drawable.ic_expand_more else R.drawable.ic_expand_less),
                         contentDescription = if (expanded) stringResource(R.string.assistant_collapse) else stringResource(R.string.assistant_expand))
                 }
-                TextButton(onClick = model::close, enabled = ui.work != AssistantWork.COMMIT) { Text(stringResource(R.string.assistant_close)) }
+                TextButton(onClick = LocalPanelBack.current ?: model::close, enabled = ui.work != AssistantWork.COMMIT) { Text(stringResource(R.string.assistant_close)) }
             }
             if (service != null) Text("${service.origin} · ${service.model}", style = MaterialTheme.typography.labelMedium,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -267,7 +332,8 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
             }
             when {
                 ui.work == AssistantWork.LOADING -> Unit
-                service == null -> ActionPill(stringResource(R.string.assistant_configure_service), { model.leaveForConfiguration(); onSettings() }, prominent = true)
+                service == null -> ActionPill(stringResource(R.string.assistant_configure_service),
+                    { settingsLaunch.open { model.leaveForConfiguration(); onSettings() } }, settingsLaunch.modifier, prominent = true)
                 ui.work == AssistantWork.COMMIT -> Text(stringResource(R.string.assistant_saving))
                 ui.work == AssistantWork.REQUEST -> Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -280,11 +346,15 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
                     ActionPill(stringResource(R.string.assistant_apply), { model.apply(ready.proposalId) }, Modifier.testTag("assistant-apply"), prominent = true)
                 }
                 ui.reviewAgain -> Row { ActionPill(stringResource(R.string.assistant_discard), model::cancel); ActionPill(stringResource(R.string.assistant_preview_again), model::refreshProposal, prominent = true) }
-                ui.importRequested -> Row { ActionPill(stringResource(R.string.assistant_cancel), model::cancel); ActionPill(stringResource(R.string.assistant_open_importer), { model.close(); onImport() }, prominent = true) }
-                else -> MessageEditor(ui.draft, page.scopeName(), model::editMessage, model::send, openHistory = { openHistory(page) })
+                ui.importRequested -> Row {
+                    ActionPill(stringResource(R.string.assistant_cancel), model::cancel)
+                    ActionPill(stringResource(R.string.assistant_open_importer),
+                        { importLaunch.open { model.close(); onImport() } }, importLaunch.modifier, prominent = true)
+                }
+                else -> MessageEditor(ui.draft, page.scopeName(), model::editMessage, model::send, openHistory = { openHistory(page) },
+                    historyOrigin = Modifier.paneOrigin(origins, "history"))
             }
         }
-    }
 }
 
 @Composable

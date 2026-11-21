@@ -75,7 +75,7 @@ interface PlannerApi {
 
 完整导航为「今天 / 工作台 / 流程图 / 课表」，设置从顶栏进；今天默认设备所在日期。时间轴延伸至日程助理输入栏的上沿，不藏在输入栏或导航下面。右下加号下的**非模态**待排队列默认展开；点标题可收成小球，再点原地展开，收起后时间轴仍用满输入栏上方的空间。切日、切页和旋转不重置用户刚选的开合状态。收起时箭头向上，展开时向下，队列上缘渐变磨砂。「布局 → 待排队列」可改回常驻托盘。待排指无时段的在队任务。轴和拖动参考 [Structured](https://structured.app/visual-planning) 与 [Planner Hours](https://github.com/baslawson/Planner#features)，小球变列表参考 [Material Container Transform](https://github.com/material-components/material-components-android/blob/master/docs/theming/Motion.md#container-transform)。
 
-队列是覆盖层：开合不改变轴线、滚动位置或拖放的时刻映射。收起的小球与加号同为 56dp。左上圆钮用时钟／事件列表图标表示当前视图，点开才显示选项文字。**时间视图**保留比例刻度；滚到底时，当地次日零点、「一天结束」标记的下沿和竖线末端恰好停在日程助理输入框上沿。午夜后没有可滚动的留白，助理及导航下不画时间轴。展开队列时末刻显示在左侧时刻栏，收起队列可直接点开深夜任务。**事件视图**沿用原布局：竖线贯穿至助理上沿，列表保留让末项滚出队列遮挡区的余量。参考 [Structured Full 布局](https://help.structured.app/en/articles/354306#2_change_app_layout)，左侧标刻、沿线排列任务和固定课。连续空档只占一行，注明真实时长；点该行可将新任务直接排入其中。根据重叠时段的并集取空档，跨日裁剪、夏令时和空白日均按当地日界计算。
+队列是覆盖层：开合不改变轴线、滚动位置或拖放的时刻映射。收起的小球与加号同为 56dp。左上圆钮用时钟／事件列表图标表示当前视图，点开才显示选项文字。**时间视图**保留比例刻度；只有滚到日末时，当地次日零点、「一天结束」下沿和竖线末端一起停在助理上方 16dp。这段间距不能落任务，也不续画空线；平时不为它截短时间轴。展开队列时末刻显示在左侧时刻栏，收起队列可直接点开深夜任务。**事件视图**沿用原布局：竖线贯穿至助理上沿，列表保留让末项滚出队列遮挡区的余量。参考 [Structured Full 布局](https://help.structured.app/en/articles/354306#2_change_app_layout)，左侧标刻、沿线排列任务和固定课。连续空档只占一行，注明真实时长；点该行可将新任务直接排入其中。根据重叠时段的并集取空档，跨日裁剪、夏令时和空白日均按当地日界计算。
 
 - Compose 可滚动刻度接[原生拖动手势](https://developer.android.com/develop/ui/compose/touch-input/pointer-input/drag-swipe-fling)。长按拖动，边缘滚动；指针换算为含滚动偏移的轴内容坐标，按 5 分钟就近吸附。预览半透明落点、起止与冲突。松手才落库；轴外、取消、目标失效不改原数据。「安排时间」打开同一日期/时间/时长编辑器，无需拖动也可完成全部安排。
 - `TimeBlock(taskId UNIQUE, startInstant, endInstant)` 引用原任务。长按标题拖动整段；长按任务旁竖条，松开后直接拖下端点，只改结束时间，起点不动。交互参考 [Google 日历的底部圆形时长手柄](https://support.google.com/calendar/answer/72143?co=GENIE.Platform%3DAndroid)和 [FullCalendar 的触摸选择](https://fullcalendar.io/docs/touch)。课程、完成项和没有真实结束点的续段不提供手柄。取消只释放时段；移出任务释放占位，完成任务保留历史块。
@@ -175,10 +175,12 @@ interface PlannerApi {
 
 **时间轴与底栏。** [Structured 日视图](https://help.structured.app/en/articles/380546)在同一竖轴左侧标时刻、右侧读事件；StackLife 保留比例空白供五分钟拖放。参考 [Etar 的当前时刻线](https://github.com/Etar-Group/Etar-Calendar/blob/6fb46d1606622aecc719b7e5dc15a48528768c94/app/src/main/java/com/android/calendar/DayView.java#L2425-L2440)，分钟线从轴起画，不用标签覆盖整点；刻度列按系统字号实测文本宽度。[Etar 的 FAB](https://github.com/Etar-Group/Etar-Calendar/blob/6fb46d1606622aecc719b7e5dc15a48528768c94/app/src/main/res/layout/all_in_one_material.xml) 对应今天和工作台的页面级加号；队列、加号、助理和导航覆盖的区域不是时间轴落点，末项可滚到控件上方。导航和工具栏矢量取自 [Google Material Design Icons](https://github.com/google/material-design-icons)，Apache-2.0 许可随 APK 分发。
 
+工作台「队列／栈」采用 [BiliPai 的紧凑顶部指示器](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/TopTabStylePolicy.kt#L357-L374)：普通字号下选中胶囊高 30 dp；字号变大时为文字留空间。玻璃和不透明样式共用轮廓，每个标签的点击与拖动区域仍至少高 48 dp。
+
 
 ## 动效与材质
 
-**应用内连续性。** 四个根页与队列／栈在分页器内移动；工具栏选取器读取实际分页位置，根页的助理输入框不参与翻页。按稳定实体 ID 做 [Compose 共享容器](https://developer.android.com/develop/ui/compose/animation/shared-elements)：完整可见的任务卡／栈帧卡与整页详情配对；源丢失时不飞向同位置的其他卡。[Nav3 预测返回](https://developer.android.com/guide/navigation/navigation-3/animate-destinations)可沿同一路径取消；设置、编辑等无配对页面横向进退。系统动画比例为零或勾选「减弱」时直接切换。动画不触发业务写入。
+**应用内连续性。** 四个根页、队列／栈和相邻日／周保留分页器，根页的助理输入框不参与翻页。层级导航不推走前一页：设置齿轮、加号、列表项和操作按钮按实际屏幕位置展开为目的页，参照 [Material Container Transform](https://github.com/material-components/material-components-android/blob/master/docs/theming/Motion.md#container-transform)。工作台按实体 ID 和标题位置配对[共享容器](https://developer.android.com/develop/ui/compose/animation/shared-elements/customize)：标题和正文随卡片展开，详情工具栏和底部输入框留在最终屏幕位置，由同一张卡片逐步揭开。源卡不可见或已删除时不缩回替代项。[Nav3 预测返回](https://developer.android.com/guide/navigation/navigation-3/animate-destinations)可反向拖动和取消，不改草稿或业务数据。助理历史与消息、添加课程的选周与预览都在原弹层内切换，不重开窗口。系统选择器和 Chrome 保留平台动效；系统动画比例为零或勾选「减弱」时，应用内直接切换。
 
 **联盟系统能力（M6 单列验收）。** 依据 [ITGSA SharedViewDemo](https://gitee.com/itgsa_sharedviewkit/SharedViewDemo)。`gsai.sdk:sharedview-kit` 运行时调用 `ViewAnimationManager.isViewAnimationSupported()`，不按品牌猜。仅在协议支持、动效允许、源卡片完整可见时，对队列事件/栈帧卡片用非导出 `EntityDetailActivity`，复用同一详情 Composable，Intent 只传实体类型和 ID。用 `PixelCopy` 取被点卡片的 window 矩形，不把整屏 `LocalView` 当卡片。按 Kit 能力约定区分屏幕/窗口坐标、转换 bounds，圆角转 px，交给 `makeViewAnimationOptions(bitmap, bounds, radius, …)`；成功只让系统播一次。返回按实体 key 刷新落点，在详情 Activity 的 `finish()` **之前** `overrideViewAnimationTransition`；源丢失跟随系统。能力为 0、options 为空或取图失败，走同一应用内详情路径，不叠动画、不阻断导航。
 
@@ -190,7 +192,7 @@ interface PlannerApi {
 
 浮动导航、队列／栈和作息分段都可横拖水滴，松手选定、取消保留原项；点按、键盘和 TalkBack 仍使用原来的选项。玻璃档采样真实页面和壳体，按住时向四周有弹性，释放后回到分页器的位置；实色档不建立透镜。玻璃课格恢复有深度的透镜：透过有色材质能看到实际节次线在两侧弯折，按住时透镜和内容一起轻微放大；不在课格里另画装饰弧线，白字也不参与背景折射。材质页与周视图共用 `PeriodGrid` / `CourseTile`；关闭玻璃时课程变为不透明实色，色相、位置与点击区域不变。外观编辑沿用 [Apple Sheets](https://developer.apple.com/design/human-interface-guidelines/sheets)：顶栏取消／保存，居中重置只影响当前分组草稿。
 
-课格先对真实节次线做 [Miuix 高斯模糊](https://github.com/compose-miuix-ui/miuix/blob/v0.9.5-beta02/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/internal/BlurEffect.kt)，再折射；白字最后绘制。月份、星期和日期固定在网格上方，课块能从下方滚过。添加课程的顶栏、表单组、选周和核对页都使用同一材质，弹出选项采样自己所在的窗口。磨砂过渡参考 [BiliPai 渐变模糊](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/OfficialProgressiveTopBlur.kt)。关闭玻璃、减少透明度或增强对比时，同一布局改为不透明表面。
+课格先对真实节次线做 [Miuix 高斯模糊](https://github.com/compose-miuix-ui/miuix/blob/v0.9.5-beta02/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/internal/BlurEffect.kt)，再折射；白字最后绘制。周表沿用 [BiliPai 的渐变模糊](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/components/OfficialProgressiveTopBlur.kt)：顶栏与星期／日期共用一个取自滚动网格的 [ProgressiveBlur](https://github.com/compose-miuix-ui/miuix/blob/v0.9.5-beta02/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/ProgressiveBlur.kt)，模糊半径逐渐降为零，到日期下方 24dp 恢复清晰。不叠独立磨砂带，不挪动课程或扩大日期点击区；周次与日期文字绘在效果上方。添加课程的顶栏、表单组、选周和核对页沿用当前材质。关闭玻璃、减少透明度或增强对比时，表头使用同样大小的不透明表面。
 
 玻璃仅在 API 33+、硬件加速、非低内存/省电、无减少透明度/高对比要求时可用。否则提示「当前使用实色」及原因，不把模糊称为折射；关玻璃完全卸下光学层。按 [Google 无障碍标准](https://developer.android.com/guide/topics/ui/accessibility/apps)，触控目标至少 48×48 dp，普通文字对比 4.5:1、大字 3:1；TalkBack 读状态并有等价非拖拽操作。系统字体缩放、edge-to-edge 安全区、输入法和旋转都不能遮操作。减少动态与减少透明度分开处理。
 

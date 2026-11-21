@@ -26,6 +26,8 @@ import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
 import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
+import io.github.nakanomk.stacklife.appearance.rememberPanelLaunch
+import io.github.nakanomk.stacklife.transitions.routeOrigin
 import androidx.compose.ui.unit.Dp
 import io.github.nakanomk.stacklife.assistant.*
 import io.github.nakanomk.stacklife.ReadState
@@ -88,7 +90,9 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
                 Secondary(stringResource(R.string.ui_cancel_link)) { sourceId = null }
                 Text(stringResource(R.string.ui_choose_successor, source.title), Modifier.padding(horizontal = 8.dp), style = MaterialTheme.typography.labelLarge)
             } else {
-                ActionPill(stringResource(R.string.ui_topological_order), { onGoal(selected?.id) }, Modifier.testTag("graph-goal"),
+                val review = rememberPanelLaunch("goal-review")
+                ActionPill(stringResource(R.string.ui_topological_order), { review.open { onGoal(selected?.id) } },
+                    review.modifier.routeOrigin("generated-frame").testTag("graph-goal"),
                     enabled = detail.nodes.isNotEmpty() && !submission.busy, prominent = true)
                 if (selected != null) {
                     var menu by remember { mutableStateOf(false) }
