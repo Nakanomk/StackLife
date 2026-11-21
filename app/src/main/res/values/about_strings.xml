@@ -2,7 +2,7 @@
     <string name="about_title">Help &amp; About</string>
     <string name="about_help">How to use StackLife</string>
     <string name="about_build">Build and project</string>
-    <string name="about_licenses">Third-party licenses</string>
+    <string name="about_licenses">Open-source licenses</string>
     <string name="about_license_text">License text</string>
     <string name="about_diagnostics">Diagnostics</string>
     <string name="about_developer">Developer: Nakanomk</string>
@@ -13,11 +13,11 @@
     <string name="about_open_repo">Open on GitHub</string>
     <string name="about_link_failed">No browser could open this link. You can select and copy the address above.</string>
     <string name="about_project_license">StackLife license</string>
-    <string name="about_project_license_body">This version does not declare a license for StackLife itself. A public repository does not by itself grant an open-source license. Third-party notices apply to the components they name.</string>
+    <string name="about_project_license_body">© 2026 Nakanomk and contributors. You may redistribute and modify StackLife under the GNU General Public License, version 3 or any later version. It comes without warranty. See Open-source licenses for the full text and third-party notices.</string>
     <string name="about_apk">Installed base APK · SHA-256</string>
     <string name="about_apk_hint">Compare this hash to a trusted copy of the same base APK. It excludes split APKs and is not the signing certificate.</string>
     <string name="about_signer">Current signing certificate · SHA-256</string>
-    <string name="about_license_intro">Select a component to read the full notice bundled with this installation. No connection is needed.</string>
+    <string name="about_license_intro">Select StackLife or a third-party component to read its license offline.</string>
     <string name="about_help_workspace">Pause work without losing your place</string>
     <string name="about_help_workspace_body">In Workspace, add tasks in the order you want to do them. Push the queue when interrupted, or select a few tasks to push. You can add a reason afterward. Open the frame to edit tasks in place or restore all or selected tasks. Restore behavior in Settings decides where they go.</string>
     <string name="about_help_today">Give a task a time</string>

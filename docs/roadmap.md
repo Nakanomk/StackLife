@@ -2,6 +2,8 @@
 
 StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Android 日程工具。**队列**回答「我现在要做什么」，**栈帧**记录「我为什么停下、怎样接回去」。**DAG** 决定为选定目标先做什么，**时间轴**决定哪天几点做，**课表**标出已经占用的时段。一项工作不因换视图而变成几份任务。
 
+**项目许可：** StackLife 采用 [GNU 通用公共许可证第 3 版或任何后续版本](../LICENSE)（`GPL-3.0-or-later`）。第三方代码与资源保留[各自的许可和署名](../app/src/main/assets/licenses/)。
+
 **当前交付：v0.9.0 · 手动录课与日程交互。** 空课表可直接添加课程；已有学期从「课表选项 → 添加课程」进入。今天可长按已排任务旁的竖条，拖下端点改变结束时间。顶栏箭头横移日／周；底部输入和导航不参与横移。玻璃使用 BiliPai 同源的 Miuix 渲染器及其原版折射着色器，不支持时仍使用同形 MD3。普通包不含联盟 SDK。
 
 ## 起点与产品决定
@@ -154,7 +156,7 @@ interface PlannerApi {
 - 四个根页面在同一横向分页容器中，导航与助理位于容器外。默认浮动导航，支持改为贴底；键盘出现时收起主导航。根页不重复页名，顶栏中间胶囊放日期、队列/栈、流程图创建或教学周；独立动作用圆形按钮。右下加号属于页面。手动操作不依赖模型。
 - 设置首页按外观、通用、日程助理和工作台恢复策略分组。「色彩」「布局」「材质与动态」各有独立目的地，只显示、保存或恢复本页字段。色彩支持随系统/浅/深、Android 12+ 动态色或种子（默认 `#435D92`）；使用 [MaterialKolor 6.0.0](https://github.com/jordond/MaterialKolor/releases/tag/6.0.0) 生成 `SPEC_2025` 颜色角色。
 - 「通用 → 语言」使用和外观相同的[单选项设置](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/SettingsSelectionComponents.kt#L14-L45)：**跟随系统**（默认）、**English**、**中文**。跟随系统按语言顺序选择中／英文，均不匹配或列表为空时用英文。Android 13 起与[系统的应用语言设置](https://developer.android.com/guide/topics/resources/app-languages#app-language-settings)双向同步，旧系统在本机保存。语言选择不改任务、课程、栈帧快照和历史对话原文。
-- 「通用 → 帮助与关于」参照 [BiliPai 关于页](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/ui/MaterialAboutContent.kt)，列出开发者、仓库、实装版本、基础 APK 和签名证书各自的 SHA-256，并可离线阅读包内许可。项目自身未声明许可证。诊断仅在主动开始后监听主窗口的 [FrameMetrics](https://developer.android.com/reference/android/view/FrameMetrics)，退到后台即结束；帧超时和丢失采样分别计数。事件日志只含固定代码，不含账号、密钥、任务或消息正文；只有手动选择[系统文件位置](https://developer.android.com/training/data-storage/shared/documents-files#create-file)才会导出。
+- 「通用 → 帮助与关于」参照 [BiliPai 关于页](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/ui/MaterialAboutContent.kt)，列出开发者、仓库、实装版本、基础 APK 和签名证书各自的 SHA-256。「开源许可」可离线阅读 StackLife 与第三方组件的许可全文。诊断仅在主动开始后监听主窗口的 [FrameMetrics](https://developer.android.com/reference/android/view/FrameMetrics)，退到后台即结束；帧超时和丢失采样分别计数。事件日志只含固定代码，不含账号、密钥、任务或消息正文；只有手动选择[系统文件位置](https://developer.android.com/training/data-storage/shared/documents-files#create-file)才会导出。
 - 支持标准/紧凑留白、主导航次序/启动页、任务时长/备注、贴底/浮动、常驻/悬浮队列、材质总开关和导航/助理分项、减弱动效、减少透明度、增强对比及系统触感。默认舒适、今天、动态色、悬浮队列、玻璃开启。首次启动和升级时没有 `glass` 字段的配置均用开启；显式 `false` 不因升级改变，减少透明度和增强对比仍优先。三种恢复策略不受外观重置影响。
 - 首发图标为原创 fumo 颜文字 **`ᗜˬᗜ`**：两只对称方眼和低位短弧嘴，用独立矢量笔画，不依赖字库、商业布偶照片，不强画天子肖像。按 [Android Adaptive Icon](https://developer.android.com/develop/ui/views/launch/icon_design_adaptive) 做 108×108 dp 分层，识别区在中心 66×66 dp，彩色前景/背景及 monochrome 层共用轮廓，不预烘启动器圆角/阴影。空队列小标沿用同一张脸，不用颜文字代替操作标签。
 

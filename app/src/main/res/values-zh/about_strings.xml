@@ -2,7 +2,7 @@
     <string name="about_title">帮助与关于</string>
     <string name="about_help">使用指南</string>
     <string name="about_build">版本与项目</string>
-    <string name="about_licenses">第三方许可证</string>
+    <string name="about_licenses">开源许可</string>
     <string name="about_license_text">许可全文</string>
     <string name="about_diagnostics">本机诊断</string>
     <string name="about_developer">开发者：Nakanomk</string>
@@ -13,11 +13,11 @@
     <string name="about_open_repo">在 GitHub 上打开</string>
     <string name="about_link_failed">没有浏览器能打开此链接。可选中并复制上方地址。</string>
     <string name="about_project_license">StackLife 项目许可</string>
-    <string name="about_project_license_body">此版本未声明适用于 StackLife 自身的许可证。仓库公开并不等于授予开源许可。第三方许可仅适用于各自注明的组件。</string>
+    <string name="about_project_license_body">© 2026 Nakanomk 及贡献者。你可以按 GNU 通用公共许可证第 3 版或自选的任何后续版本再分发和修改 StackLife。本软件不提供担保。许可全文和第三方组件的原始声明见「开源许可」。</string>
     <string name="about_apk">已安装的基础 APK · SHA-256</string>
     <string name="about_apk_hint">可与可信来源的同一基础 APK 核对。此摘要不含拆分 APK，也不是签名证书指纹。</string>
     <string name="about_signer">当前签名证书 · SHA-256</string>
-    <string name="about_license_intro">选择组件即可离线阅读此安装包随附的完整许可声明。</string>
+    <string name="about_license_intro">选择 StackLife 或第三方组件，即可离线阅读许可全文。</string>
     <string name="about_help_workspace">中断手头的事，回来接着做</string>
     <string name="about_help_workspace_body">在工作台按打算执行的顺序排列任务。被打断时可将整个队列压栈，也可先多选再压栈。保存后可补充原因。打开栈帧就能编辑其中的任务，也可恢复全部或仅恢复所选。恢复到哪里由设置中的恢复策略决定。</string>
     <string name="about_help_today">给任务留出时间</string>
