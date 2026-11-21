@@ -21,6 +21,7 @@ import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.transitions.DetailCard
 import io.github.nakanomk.stacklife.transitions.DetailListSource
 import io.github.nakanomk.stacklife.transitions.detailListSource
+import io.github.nakanomk.stacklife.transitions.title
 
 @Composable
 internal fun FrameList(
@@ -63,7 +64,8 @@ private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: Share
     DetailCard(source, "frame", frame.id, onFrame, modifier = shared("frame:${frame.id}").fillMaxWidth().testTag("frame:${frame.id}"),
         shape = RectangleShape, color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxWidth().padding(vertical = if (appearance.compact) 4.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(frame.reason, style = MaterialTheme.typography.bodyLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Text(frame.reason, shared.title("frame:${frame.id}"), style = MaterialTheme.typography.bodyLarge,
+                maxLines = 3, overflow = TextOverflow.Ellipsis)
             Text("${savedTime(frame.savedAtMillis)} · 原有 ${frame.items.size} 项 · 剩余 ${frame.remaining} 项",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(frame.items.joinToString("、", limit = 3, truncated = "…") { it.title }, style = MaterialTheme.typography.bodyMedium,
@@ -74,7 +76,7 @@ private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: Share
 }
 
 @Composable
-fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: () -> Unit, shared: SharedModifier) {
+internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: () -> Unit, shared: SharedModifier) {
     val frame = state.frames.find { it.id == id }
     if (frame == null) {
         MissingDetail("栈帧详情", "这份栈帧已不存在。", onBack)
@@ -89,7 +91,7 @@ fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack:
         val ids = selected.toHashSet()
         entries.mapNotNull { if (it.taskId in ids) it.taskId else null }
     }
-    BackHandler(enabled = choosing) { if (!action.busy) leaveSelection() }
+    BackHandler(enabled = choosing || action.busy) { if (!action.busy) leaveSelection() }
     EditorPage("栈帧详情", { if (choosing) leaveSelection() else onBack() }, AssistantPage.Frame(id), backEnabled = !action.busy,
         footer = if (!choosing) null else ({
             Column(Modifier.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -104,18 +106,16 @@ fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack:
         })) { top, bottom ->
         LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
             item {
-                Surface(modifier = shared("frame:$id").fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
-                    Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        val source = when (frame.source) {
-                            FrameSource.PUSH -> "队列压栈"
-                            FrameSource.MANUAL -> "直接新建"
-                            FrameSource.SWAP -> "切换前自动保存"
-                            FrameSource.GRAPH -> "流程图生成"
-                        }
-                        Text("$source · ${savedTime(frame.savedAtMillis)}", style = MaterialTheme.typography.labelMedium)
-                        Text(frame.reason, style = MaterialTheme.typography.titleLarge)
-                        Text("原有 ${entries.size} 项 · 剩余 ${frame.remaining} 项", style = MaterialTheme.typography.bodyMedium)
+                Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    val source = when (frame.source) {
+                        FrameSource.PUSH -> "队列压栈"
+                        FrameSource.MANUAL -> "直接新建"
+                        FrameSource.SWAP -> "切换前自动保存"
+                        FrameSource.GRAPH -> "流程图生成"
                     }
+                    Text(frame.reason, shared.title("frame:$id"), style = MaterialTheme.typography.titleLarge)
+                    Text("$source · ${savedTime(frame.savedAtMillis)}", style = MaterialTheme.typography.labelMedium)
+                    Text("原有 ${entries.size} 项 · 剩余 ${frame.remaining} 项", style = MaterialTheme.typography.bodyMedium)
                 }
             }
             if (frame.remaining > 0) item {

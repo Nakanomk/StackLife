@@ -35,7 +35,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.RootPane
-import io.github.nakanomk.stacklife.SegmentTrack
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.assistant.AssistantComposer
 import io.github.nakanomk.stacklife.workspace.*
@@ -325,12 +324,15 @@ internal fun TermFields(form: TermForm, enabled: Boolean, change: (TermForm) -> 
     Text("首周作息")
     val initial = rememberUpdatedState(form.initial.ordinal.toFloat())
     ControlGroup {
-        SegmentTrack(initial, BellSchedule.entries.size, MaterialTheme.colorScheme.secondaryContainer) {
+        SegmentTrack(initial, BellSchedule.entries.size, MaterialTheme.colorScheme.secondaryContainer,
+            { change(form.copy(initial = BellSchedule.entries[it])) }, enabled = enabled) { highlighted ->
             Row(Modifier.selectableGroup()) {
                 BellSchedule.entries.forEach { bell ->
-                    Box(Modifier.clip(CircleShape).selectable(form.initial == bell, enabled = enabled, role = Role.RadioButton,
-                        onClick = { change(form.copy(initial = bell)) }).heightIn(min = 48.dp).padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.Center) { Text(if (bell == BellSchedule.SUMMER) "夏令" else "冬令") }
+                    Box(Modifier.clip(CircleShape).selectable(form.initial == bell, enabled = enabled, role = Role.RadioButton) {
+                        change(form.copy(initial = bell))
+                    }.heightIn(min = 48.dp).padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center) { Text(if (bell == BellSchedule.SUMMER) "夏令" else "冬令",
+                            color = if (enabled && highlighted == bell.ordinal) MaterialTheme.colorScheme.primary else LocalContentColor.current) }
                 }
             }
         }

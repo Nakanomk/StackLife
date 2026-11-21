@@ -3,8 +3,6 @@ package io.github.nakanomk.stacklife
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.focusGroup
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.animateFloatAsState
@@ -29,10 +27,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 
-import kotlin.math.roundToInt
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.assistant.AssistantComposer
 import io.github.nakanomk.stacklife.assistant.AssistantPage
@@ -59,8 +55,8 @@ internal fun DockOverlay(
         val shareRow = maxWidth >= 600.dp && maxWidth > maxHeight && composer != null && showNav
         val navSlot: @Composable () -> Unit = {
             if (navigationBar != null) AnimatedVisibility(showNav,
-                enter = expandVertically(tween(ms), expandFrom = Alignment.Bottom) + fadeIn(tween(ms)),
-                exit = shrinkVertically(tween(ms), shrinkTowards = Alignment.Bottom) + fadeOut(tween(ms))) {
+                enter = expandVertically(tween(ms), expandFrom = Alignment.Bottom),
+                exit = shrinkVertically(tween(ms), shrinkTowards = Alignment.Bottom)) {
                 Box(if (docked) Modifier.fillMaxWidth() else chromeRail()) { navigationBar() }
             }
         }
@@ -87,19 +83,6 @@ internal fun DockOverlay(
 }
 
 private fun chromeRail() = Modifier.widthIn(max = 520.dp).fillMaxWidth().padding(horizontal = chromeGutter, vertical = 4.dp)
-
-@Composable
-internal fun SegmentTrack(position: State<Float>, count: Int, ink: Color, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Box(modifier) {
-        BoxWithConstraints(Modifier.matchParentSize()) {
-            val width = constraints.maxWidth.toFloat() / count
-            StackLifeSurface(CapsuleScene.INDICATOR, Modifier.offset { IntOffset(
-                (width * position.value.coerceIn(0f, count - 1f)).roundToInt(), 0) }.fillMaxWidth(1f / count).fillMaxHeight(),
-                solid = ink, tint = ink) {}
-        }
-        content()
-    }
-}
 
 @Composable
 internal fun rememberDestinationCapsule(active: String, pagerPosition: State<Float>? = null, onSelect: (String) -> Unit): @Composable () -> Unit {
@@ -139,23 +122,20 @@ private fun DockedNavigation(tabs: List<Destination>, active: String, onSelect: 
 @Composable
 private fun DestinationCapsule(tabs: List<Destination>, active: String, slot: State<Float>, onSelect: (String) -> Unit) {
     val colors = MaterialTheme.colorScheme
-    val appearanceGlass = LocalCapsuleBackdrop.current != null && LocalAppearance.current.navGlass
     StackLifeSurface(CapsuleScene.NAVIGATION, Modifier.fillMaxWidth().testTag("navigation-capsule"),
         solid = colors.surfaceContainerLow, elevation = 2.dp) {
-        CompositionLocalProvider(LocalCapsuleBackdrop provides LocalCapsuleBackdrop.current.takeIf { appearanceGlass }) {
-            SegmentTrack(slot, tabs.size, colors.secondaryContainer, Modifier.fillMaxWidth().padding(4.dp)) {
-                Row(Modifier.fillMaxWidth().selectableGroup()) {
-                    for (tab in tabs) key(tab.key) {
-                        val id = tab.key
-                        val selected = active == id
-                        val ink = if (selected) colors.primary else colors.onSurfaceVariant
-                        Column(Modifier.weight(1f).clip(CircleShape)
-                            .testTag("nav:$id").selectable(selected, role = Role.Tab) { onSelect(id) }
-                            .heightIn(min = 48.dp).padding(vertical = 2.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                            DockIcon(id, ink)
-                            Text(tab.label, color = ink, style = MaterialTheme.typography.labelMedium)
-                        }
+        SegmentTrack(slot, tabs.size, colors.secondaryContainer, { onSelect(tabs[it].key) },
+            Modifier.fillMaxWidth().padding(4.dp), compact = false) { highlighted ->
+            Row(Modifier.fillMaxWidth().selectableGroup()) {
+                for (index in tabs.indices) key(tabs[index].key) {
+                    val tab = tabs[index]
+                    val ink = if (highlighted == index) colors.primary else colors.onSurfaceVariant
+                    Column(Modifier.weight(1f).clip(CircleShape)
+                        .testTag("nav:${tab.key}").selectable(active == tab.key, role = Role.Tab) { onSelect(tab.key) }
+                        .heightIn(min = 56.dp).padding(vertical = 2.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                        DockIcon(tab.key, ink)
+                        Text(tab.label, color = ink, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }

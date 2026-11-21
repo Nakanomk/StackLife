@@ -37,6 +37,7 @@ import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.planner.NavStyle
 import io.github.nakanomk.stacklife.planner.PlannerCommand
+import io.github.nakanomk.stacklife.transitions.LocalDetailViewport
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -117,7 +118,12 @@ private fun ActionDock(actions: @Composable () -> Unit) {
 internal fun EditorPage(title: String, back: () -> Unit, assistantPage: AssistantPage? = null,
     backEnabled: Boolean = true, footer: (@Composable () -> Unit)? = null,
     content: @Composable (top: Dp, bottom: Dp) -> Unit) {
-    Page(assistantPage) { PageChrome(title, back, backEnabled, footer, content) }
+    val viewport = LocalDetailViewport.current
+    Page(assistantPage) {
+        PageChrome(title, back, backEnabled, footer) { top, bottom ->
+            if (viewport == null) content(top, bottom) else viewport(top, bottom) { content(top, bottom) }
+        }
+    }
 }
 
 @Composable
@@ -207,7 +213,7 @@ internal fun ActionPill(label: String, onClick: () -> Unit, modifier: Modifier =
     }
     if (LocalActionGroup.current) labelBox(if (emphasized) target.background(fill, CircleShape) else target)
     else StackLifeSurface(CapsuleScene.ACTION, target, fill, elevation = 1.dp,
-        tint = if (emphasized) fill else Color.Unspecified, interactionSource = interactions) { labelBox(Modifier) }
+        tint = if (emphasized) fill else Color.Unspecified, interactionSource = interactions.takeIf { enabled }) { labelBox(Modifier) }
 }
 
 @Composable

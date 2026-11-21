@@ -7,21 +7,21 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
-import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.planner.AppearanceGroup
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.RestorePolicy
 import io.github.nakanomk.stacklife.planner.Workspace
+import io.github.nakanomk.stacklife.transitions.title
 
 @Composable
-fun TaskScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: () -> Unit, shared: SharedModifier) {
+internal fun TaskScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: () -> Unit,
+    shared: SharedModifier, onEdit: () -> Unit) {
     val index = state.queue.indexOfFirst { it.id == id }
     val task = state.queue.getOrNull(index)
     // Room may publish the removal before our receipt arrives. Await it even without a card.
@@ -32,28 +32,22 @@ fun TaskScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: 
         MissingDetail("任务详情", "这项任务已不在队列中。", back)
         return
     }
-    var editing by rememberSaveable(id) { mutableStateOf(false) }
-    if (editing) {
-        TaskEditor(actions, { editing = false }, original = task)
-        return
-    }
     EditorPage("任务详情", back, AssistantPage.Task(id), backEnabled = !action.busy, footer = {
         Actions {
             Primary("完成任务", enabled = !action.busy) { action.send(PlannerCommand.TaskFinish(id)) }
-            Secondary("编辑任务", enabled = !action.busy) { editing = true }
+            Secondary("编辑任务", enabled = !action.busy, onClick = onEdit)
             Secondary("移出队列", enabled = !action.busy) { action.send(PlannerCommand.TaskRemove(id)) }
         }
     }) { top, bottom ->
         LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
             item {
-                Surface(modifier = shared("task:$id").fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
-                    Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(if (index == 0) "当前优先" else "队列第 ${index + 1} 项", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                        Text(task.title, style = MaterialTheme.typography.titleLarge)
-                        Text("预计 ${task.minutes} 分钟", style = MaterialTheme.typography.bodyMedium)
-                        if (task.scheduledStartMillis != null && task.scheduledEndMillis != null) {
-                            Hint("已安排 ${scheduledRange(task.scheduledStartMillis, task.scheduledEndMillis)}")
-                        }
+                Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (index == 0) Text("当前优先", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(task.title, shared.title("task:$id"), style = MaterialTheme.typography.titleLarge)
+                    if (index != 0) Text("队列第 ${index + 1} 项", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text("预计 ${task.minutes} 分钟", style = MaterialTheme.typography.bodyMedium)
+                    if (task.scheduledStartMillis != null && task.scheduledEndMillis != null) {
+                        Hint("已安排 ${scheduledRange(task.scheduledStartMillis, task.scheduledEndMillis)}")
                     }
                 }
             }

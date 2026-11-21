@@ -2,7 +2,6 @@ package io.github.nakanomk.stacklife.courses
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -193,7 +192,11 @@ private fun PeriodGrid(termId: String, week: CourseWeek, periods: List<PeriodTim
                 val x = x0 + cell * i
                 drawLine(colors.outlineVariant, Offset(x, 0f), Offset(x, size.height), rule, blendMode = ruleBlend)
             }
-            for (i in 0..periods.size) drawLine(colors.outlineVariant, Offset(0f, row * i), Offset(size.width, row * i), rule, blendMode = ruleBlend)
+            // A stroke centred on the texture boundary loses half its coverage before sampling.
+            for (i in 0..periods.size) {
+                val y = when (i) { 0 -> rule / 2; periods.size -> size.height - rule / 2; else -> row * i }
+                drawLine(colors.outlineVariant, Offset(0f, y), Offset(size.width, y), rule, blendMode = ruleBlend)
+            }
         }) {
             Column(Modifier.width(rail)) {
                 for ((i, period) in periods.withIndex()) Column(Modifier.fillMaxWidth().height(periodHeight),
@@ -226,9 +229,8 @@ private fun CourseTile(tile: Tile, swatch: Color, outline: Stroke?, open: ((Sche
         "${m.title}，周${weekdays[m.day - 1]}，${m.periodLabel()}，${m.room.ifBlank { "教室未提供" }}" +
             if (tile.course.conflicts.isEmpty()) "" else "，时段冲突：${tile.course.conflicts.joinToString("、")}"
     }
-    val interaction = if (open == null) null else remember { MutableInteractionSource() }
-    StackLifeSurface(CapsuleScene.COURSE, modifier, solid = swatch, shape = courseShape, tint = swatch, interactionSource = interaction) {
-        val action = if (open == null) Modifier else Modifier.clickable(interactionSource = interaction, role = Role.Button, onClickLabel = "查看固定课程") {
+    StackLifeSurface(CapsuleScene.COURSE, modifier, solid = swatch, shape = courseShape, tint = swatch) {
+        val action = if (open == null) Modifier else Modifier.clickable(role = Role.Button, onClickLabel = "查看固定课程") {
             open(tile.course)
         }
         Column(Modifier.fillMaxSize().clipToBounds().testTag("grid-course:${tile.index}").then(action)

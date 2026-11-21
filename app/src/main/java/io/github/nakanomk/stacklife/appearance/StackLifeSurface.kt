@@ -3,19 +3,20 @@ package io.github.nakanomk.stacklife.appearance
 import android.os.Build
 import androidx.annotation.RequiresApi
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.InteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Surface
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -47,10 +48,22 @@ import top.yukonga.miuix.kmp.material.drawEdgeStroke
 internal val LocalPlannerGlassAllowed = staticCompositionLocalOf { false }
 internal val LocalCapsuleBackdrop = compositionLocalOf<Backdrop?> { null }
 private val LocalParentShell = compositionLocalOf { false }
-internal enum class CapsuleScene { NAVIGATION, ASSISTANT, CHROME, ACTION, COURSE, INDICATOR, PANEL }
+internal enum class CapsuleScene { NAVIGATION, ASSISTANT, CHROME, ACTION, COURSE, PANEL }
 
 private val dockEdge = EdgeStroke(width = 1.dp, bevel = 2.dp, color = Color.White.copy(alpha = .12f),
     primary = EdgeLightSource(.5f, -.3f, -.05f), secondary = EdgeLightSource(.5f, .8f, -.5f, intensity = .4f), peak = EdgePeak.Dual)
+
+@Composable
+internal fun rememberGlassEdge(rotation: Int): State<EdgeStroke> {
+    val angle = LocalGlassLight.current
+    return remember(angle, rotation) { derivedStateOf {
+        val r = Math.toRadians((angle.intValue + rotation).toDouble())
+        val x = cos(r).toFloat()
+        val y = sin(r).toFloat()
+        dockEdge.copy(primary = dockEdge.primary.copy(x = .5f + x, y = .7f + y),
+            secondary = dockEdge.secondary.copy(x = .5f - x, y = .7f - y))
+    } }
+}
 
 @Stable
 internal class PlannerBackdrop(val layer: GraphicsLayer, private val base: Color, private val below: Backdrop?) : Backdrop {
@@ -115,76 +128,82 @@ internal fun StackLifeSurface(scene: CapsuleScene, modifier: Modifier, solid: Co
         stateDescription = if (source == null) "实色胶囊" else "折射胶囊"
     } else Modifier
     if (Build.VERSION.SDK_INT < 33 || source == null) {
-        if (scene == CapsuleScene.INDICATOR) Box(modifier.background(solid, shape)) { content() }
-        else Surface(modifier.then(semantics), shape = shape, color = solid, contentColor = LocalContentColor.current, shadowElevation = elevation) {
+        Surface(modifier.then(semantics), shape = shape, color = solid, contentColor = LocalContentColor.current, shadowElevation = elevation) {
             if (nestedShell) CompositionLocalProvider(LocalCapsuleBackdrop provides null, LocalParentShell provides false, content = content) else content()
         }
         return
     }
-    OpticalSurface(scene, modifier.then(semantics), source, nestedShell, shape, tint, interactionSource, content)
+    val floating = scene == CapsuleScene.CHROME || (scene == CapsuleScene.NAVIGATION && shape == CircleShape)
+    val elastic = LocalMotionEnabled.current && !LocalParentShell.current &&
+        (floating || (scene == CapsuleScene.ACTION && interactionSource != null))
+    OpticalSurface(scene, modifier.then(semantics), source, nestedShell, shape, tint, floating, elastic, content)
 }
 
 @RequiresApi(33)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Backdrop, nestedShell: Boolean,
-    shape: RoundedCornerShape, tint: Color, interactionSource: InteractionSource?, content: @Composable () -> Unit) {
+    shape: RoundedCornerShape, tint: Color, floating: Boolean, elastic: Boolean, content: @Composable () -> Unit) {
+    val touch = if (elastic) remember { GlassTouch() } else null
+    val transform = touch?.let { rememberGlassTouchLayer(it) }
     val export = if (nestedShell) rememberLayerBackdrop() else null
     val base = MaterialTheme.colorScheme.surface
     val dark = base.luminance() < .5f
     val course = scene == CapsuleScene.COURSE
-    val indicator = scene == CapsuleScene.INDICATOR
     val panel = scene == CapsuleScene.PANEL
     val input = scene == CapsuleScene.ASSISTANT
-    val inline = LocalParentShell.current && !indicator
+    val inline = LocalParentShell.current && !course
     val hasLens = !inline && !input
     val wash = when {
         course -> tint.copy(alpha = .88f)
-        indicator -> (if (dark) Color.White else Color.Black).copy(alpha = .10f)
         panel -> base.copy(alpha = if (dark) .63f else .70f)
         input -> base.copy(alpha = .54f)
         else -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .40f)
     }
     val blend = if (!course) BlendMode.SrcOver else if (dark) BlendMode.Screen else BlendMode.Multiply
     val blurDp = when (scene) {
-        CapsuleScene.COURSE, CapsuleScene.INDICATOR -> 1.dp
+        CapsuleScene.COURSE -> 1.dp
         CapsuleScene.ASSISTANT -> 10.dp
         CapsuleScene.PANEL -> 24.dp
         else -> 4.dp
     }
-    val depth = when { indicator -> 10.dp; panel -> 12.dp; else -> 24.dp }
-    val displacement = if (indicator) 14.dp else depth
-    val angle = LocalGlassLight.current
-    val specular = remember(angle) { derivedStateOf {
-        val r = Math.toRadians((angle.intValue - 45).toDouble())
-        dockEdge.copy(primary = dockEdge.primary.copy(x = .5f + cos(r).toFloat(), y = .7f + sin(r).toFloat()))
-    } }
-    val shadow = if (inline || indicator) Modifier else Modifier.dropShadow(shape,
-        remember(dark, course) { Shadow(radius = if (course) 4.dp else 10.dp, color = Color.Black, alpha = if (dark) .20f else .10f) })
-    val press = if (!inline && interactionSource != null && LocalMotionEnabled.current) {
-        val down by interactionSource.collectIsPressedAsState()
-        val progress = animateFloatAsState(if (down) 1f else 0f, spring(dampingRatio = .8f, stiffness = 550f), label = "glass press")
-        Modifier.graphicsLayer { val s = 1f + progress.value * 16.dp.toPx() / size.maxDimension.coerceAtLeast(1f); scaleX = s; scaleY = s }
-    } else Modifier
-    val material = Modifier.drawBackdrop(source, shape = { shape }, effects = {
+    val chromeDepth = if (panel) 12.dp else 24.dp
+    val specular = if (hasLens && !panel && !course) rememberGlassEdge(-45) else null
+    val shadow = if (inline || course) Modifier else Modifier.dropShadow(shape,
+        remember(dark) { Shadow(radius = 10.dp, color = Color.Black, alpha = if (dark) .20f else .10f) })
+    val material = Modifier.drawBackdrop(source, shape = { shape }, layerBlock = transform, effects = {
         if (!inline) {
-            if (hasLens) padding = maxOf(padding, displacement.toPx())
+            // A timetable cell is a flat sheet over registered period rules, not a dock droplet.
+            // Keep a clear centre even in a skinny collision lane. A radial depth normal
+            // would pull those rules vertically along the entire length of its side walls.
+            val band = if (course) minOf(2.dp.toPx(), size.minDimension / 8f) else chromeDepth.toPx()
+            val reach = if (course) band * .375f else band
+            if (hasLens) padding = maxOf(padding, reach)
             colorControls(saturation = 1.5f)
             blur(blurDp.toPx())
-            if (hasLens) dockLens(depth.toPx(), displacement.toPx(), depth = course, dispersion = if (indicator) .5f else 0f)
+            if (hasLens && band > 0f) dockLens(band, reach, depth = false, dispersion = 0f)
         }
     }, onDrawSurface = {
-        if (tint.isSpecified && !course && !indicator) {
+        if (tint.isSpecified && !course) {
             drawRect(tint, blendMode = BlendMode.Hue)
             drawRect(tint.copy(alpha = .75f))
         }
         drawRect(wash, blendMode = blend)
-    }, onDrawFront = if (!hasLens || indicator || panel) null else {
+    }, onDrawFront = if (specular == null) null else {
         { drawEdgeStroke(shape, specular.value, .75f) }
     })
-    Surface(modifier.then(press).then(shadow), shape = shape, color = Color.Transparent, contentColor = LocalContentColor.current) {
-        Box {
-            Spacer(Modifier.matchParentSize().then(if (export != null) Modifier.layerBackdrop(export) else Modifier).then(material))
-            if (export != null) CompositionLocalProvider(LocalCapsuleBackdrop provides export, LocalParentShell provides true, content = content) else content()
+    val receiver = if (touch == null) modifier else modifier.observeGlassTouch(touch, ownsScrub = floating)
+    Box(receiver, propagateMinConstraints = true) {
+        Spacer(Modifier.matchParentSize().then(if (export == null) Modifier else Modifier.layerBackdrop(export))
+            .then(shadow).then(material))
+        val body = if (transform == null) Modifier else Modifier.graphicsLayer(block = transform)
+        Box(if (floating) body else body.clip(shape), propagateMinConstraints = true) {
+            if (export == null && touch == null) content()
+            else CompositionLocalProvider(
+                LocalCapsuleBackdrop provides if (floating && export != null) rememberCombinedBackdrop(source, export) else export ?: source,
+                LocalParentShell provides (export != null || LocalParentShell.current),
+                LocalRippleConfiguration provides if (touch != null && LocalInputModeManager.current.inputMode == InputMode.Touch) null else LocalRippleConfiguration.current,
+                content = content)
         }
     }
 }

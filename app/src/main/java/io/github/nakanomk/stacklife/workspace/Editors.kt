@@ -56,7 +56,7 @@ internal fun TaskEditor(
     var reason by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
     val scroll = rememberLazyListState()
     val close = { if (!action.busy) onClose() }
-    BackHandler(onBack = close)
+    BackHandler(enabled = action.busy) { /* The receipt closes the editor once. */ }
     val heading = if (createFrame) "新建栈帧" else if (original != null) "编辑任务" else "新增任务"
     EditorPage(heading, close, original?.let { AssistantPage.Task(it.id) } ?: if (createFrame) AssistantPage.Frames else AssistantPage.Queue,
         backEnabled = !action.busy, footer = {
@@ -133,7 +133,7 @@ internal fun PushEditor(queue: List<QueueTask>, actions: WorkspaceActions, onClo
     var reason by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
     var selected by rememberSaveable { mutableStateOf(ArrayList(queue.map { it.id })) }
     val close = { if (!action.busy) onClose() }
-    BackHandler(onBack = close)
+    BackHandler(enabled = action.busy) { /* The receipt closes the editor once. */ }
     EditorPage("压栈", close, AssistantPage.Queue, backEnabled = !action.busy, footer = {
         Primary("保存到栈", enabled = !action.busy && selected.isNotEmpty()) {
             action.send(PlannerCommand.FramePush(reason.text, selected.toList()))

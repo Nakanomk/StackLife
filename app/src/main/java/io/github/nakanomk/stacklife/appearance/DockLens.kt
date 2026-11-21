@@ -9,7 +9,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import top.yukonga.miuix.kmp.blur.BackdropEffectScope
 import top.yukonga.miuix.kmp.blur.runtimeShaderEffect
 
-internal fun BackdropEffectScope.dockLens(height: Float, amount: Float, depth: Boolean, dispersion: Float) {
+internal fun BackdropEffectScope.dockLens(height: Float, amount: Float, depth: Boolean, dispersion: Float, band: Float = -1f) {
     val corners = shape as? CornerBasedShape ?: return
     val limit = size.minDimension * .5f
     if (limit <= 0f) return
@@ -31,7 +31,7 @@ internal fun BackdropEffectScope.dockLens(height: Float, amount: Float, depth: B
         setFloatUniform("depthEffect", if (depth) 1f else 0f)
         if (dispersed) {
             setFloatUniform("chromaticAberration", dispersion)
-            setFloatUniform("chromaticEdgeBand", -1f)
+            setFloatUniform("chromaticEdgeBand", if (band < 0f) -1f else band / sf)
             setFloatUniform("chromaticBandHorizontal", 0f)
         }
     }

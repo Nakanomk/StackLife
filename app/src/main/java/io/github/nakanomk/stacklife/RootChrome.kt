@@ -88,7 +88,7 @@ internal fun RootToolbar(onSettings: () -> Unit, leading: (@Composable () -> Uni
 internal fun GlassIcon(icon: Int, label: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
     val interaction = remember { MutableInteractionSource() }
     StackLifeSurface(CapsuleScene.ACTION, modifier.size(48.dp), MaterialTheme.colorScheme.surfaceContainer,
-        elevation = 1.dp, interactionSource = interaction) {
+        elevation = 1.dp, interactionSource = interaction.takeIf { enabled }) {
         IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxSize(), interactionSource = interaction) {
             Icon(painterResource(icon), label)
         }

@@ -7,6 +7,12 @@ https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8
 Copyright 2026, compose-miuix-ui contributors
 Adapted upstream from Kyant0/AndroidLiquidGlass: https://github.com/Kyant0/AndroidLiquidGlass
 
+CombinedBackdrop.kt and the segmented glass indicator adapt compositing and press
+optics from Miuix LiquidGlassNavigationBar (Apache-2.0). StackLife uses a
+single foreground row as in Miuix GlassNavigationBar so glyphs are not refracted.
+https://github.com/compose-miuix-ui/miuix/tree/d27cbb0b375912cdf42670553fdb564d8ff7fc23/example/shared/src/commonMain/kotlin/component/liquid
+Elastic press motion: Copyright 2025 Kyant, AndroidLiquidGlass (Apache-2.0).
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/

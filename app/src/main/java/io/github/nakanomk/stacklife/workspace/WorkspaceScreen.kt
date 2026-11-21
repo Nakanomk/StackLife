@@ -1,7 +1,5 @@
 package io.github.nakanomk.stacklife.workspace
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -13,6 +11,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,9 +27,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import io.github.nakanomk.stacklife.PagerPane
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.RootToolbar
-import io.github.nakanomk.stacklife.SegmentTrack
+import io.github.nakanomk.stacklife.appearance.SegmentTrack
 import io.github.nakanomk.stacklife.AddTaskFab
 import io.github.nakanomk.stacklife.taskFabClearance
 import io.github.nakanomk.stacklife.R
@@ -40,7 +41,10 @@ import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
 import io.github.nakanomk.stacklife.transitions.DetailCard
+import io.github.nakanomk.stacklife.transitions.LocalCardList
+import io.github.nakanomk.stacklife.transitions.noCardBounds
 import io.github.nakanomk.stacklife.transitions.detailListSource
+import io.github.nakanomk.stacklife.transitions.title
 import kotlinx.coroutines.flow.collect
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -58,18 +62,35 @@ internal fun WorkspaceScreen(
 ) {
     val queueScroll = rememberLazyListState()
     val stackScroll = rememberLazyListState()
-    RootPane(header = { RootToolbar(onSettings) { WorkspaceSegments(stack, setStack) } },
+    val mode = if (stack) 1 else 0
+    val pager = rememberPagerState(initialPage = mode) { 2 }
+    val motion = LocalMotionEnabled.current
+    LaunchedEffect(mode, motion) {
+        if (pager.currentPage != mode || pager.currentPageOffsetFraction != 0f) {
+            if (motion) pager.animateScrollToPage(mode, animationSpec = tween(320)) else pager.scrollToPage(mode)
+        }
+    }
+    val position = remember(pager) { derivedStateOf { pager.currentPage + pager.currentPageOffsetFraction } }
+    RootPane(header = { RootToolbar(onSettings) { WorkspaceSegments(stack, setStack, position) } },
         overlay = { _, bottom -> if (!stack) AddTaskFab(onAdd, bottomInset = bottom) }) { top, bottom ->
-        if (stack) FrameList(state.frames, stackScroll, onFrame, onCreateFrame, shared, top, bottom, state.revision)
-        else QueueList(state.queue, queueScroll, actions, onTask, onPush, shared, top, bottom + taskFabClearance, state.revision)
+        HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = false, beyondViewportPageCount = 1) { index ->
+            val selected = index == mode
+            val inViewport by remember(pager, index) { derivedStateOf { kotlin.math.abs(position.value - index) < 1f } }
+            PagerPane(selected, selected || inViewport) {
+                val cardBounds = if (selected) shared else noCardBounds
+                CompositionLocalProvider(LocalCardList provides if (index == 0) queueScroll else stackScroll) {
+                    if (index == 1) FrameList(state.frames, stackScroll, onFrame, onCreateFrame, cardBounds, top, bottom, state.revision)
+                    else QueueList(state.queue, queueScroll, actions, onTask, onPush, cardBounds, top, bottom + taskFabClearance, state.revision)
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun WorkspaceSegments(stack: Boolean, change: (Boolean) -> Unit) {
-    val position = animateFloatAsState(if (stack) 1f else 0f, if (LocalMotionEnabled.current) tween(200) else snap(), label = "workspace segment")
+private fun WorkspaceSegments(stack: Boolean, change: (Boolean) -> Unit, position: State<Float>) {
     val colors = MaterialTheme.colorScheme
-    SegmentTrack(position, 2, colors.secondaryContainer, Modifier.widthIn(max = 168.dp).fillMaxWidth()) {
+    SegmentTrack(position, 2, colors.secondaryContainer, { change(it == 1) }, Modifier.widthIn(max = 168.dp).fillMaxWidth()) { highlighted ->
         Row(Modifier.fillMaxWidth().selectableGroup()) {
             for (index in 0..1) {
                 val frame = index == 1
@@ -77,7 +98,7 @@ private fun WorkspaceSegments(stack: Boolean, change: (Boolean) -> Unit) {
                 Box(Modifier.weight(1f).clip(CircleShape).selectable(selected, role = Role.Tab) { change(frame) }
                     .heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
                     Text(if (frame) "栈" else "队列", style = MaterialTheme.typography.labelLarge,
-                        color = if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant)
+                        color = if (highlighted == index) colors.primary else colors.onSurfaceVariant)
                 }
             }
         }
@@ -142,7 +163,8 @@ private fun QueueList(
                         .padding(vertical = if (appearance.compact) 4.dp else 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             if (head) Text("当前优先", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
-                            Text(task.title, style = MaterialTheme.typography.bodyLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                            Text(task.title, shared.title("task:${task.id}"), style = MaterialTheme.typography.bodyLarge,
+                                maxLines = 3, overflow = TextOverflow.Ellipsis)
                             val meta = remember(task.minutes, task.notes, appearance.showDuration, appearance.showNotes) {
                                 listOfNotNull("${task.minutes} 分钟".takeIf { appearance.showDuration },
                                     task.notes.takeIf { appearance.showNotes && it.isNotBlank() }).joinToString(" · ")

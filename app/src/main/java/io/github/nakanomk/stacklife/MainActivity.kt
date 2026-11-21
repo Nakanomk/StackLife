@@ -1,8 +1,5 @@
 package io.github.nakanomk.stacklife
 
-import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -20,24 +17,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
-import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import androidx.navigation3.ui.NavDisplay
-import androidx.navigation3.ui.defaultTransitionSpec
-import androidx.navigation3.ui.defaultPopTransitionSpec
-import androidx.navigation3.ui.defaultPredictivePopTransitionSpec
 import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.assistant.*
 import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
 import io.github.nakanomk.stacklife.appearance.AppearanceEditor
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
-import io.github.nakanomk.stacklife.transitions.DetailTarget
+import io.github.nakanomk.stacklife.transitions.*
 import io.github.nakanomk.stacklife.appearance.LocalGlassLight
 import io.github.nakanomk.stacklife.appearance.PlannerPopupHost
 import io.github.nakanomk.stacklife.appearance.rememberGlassLight
@@ -63,6 +58,7 @@ class MainActivity : ComponentActivity() {
 
 @Serializable @SerialName("io.github.nakanomk.stacklife.Workbench") private data object Home : NavKey
 @Serializable private data class TaskDetail(val id: String) : NavKey
+@Serializable private data class EditTask(val id: String) : NavKey
 @Serializable private data class FrameDetail(val id: String) : NavKey
 @Serializable private data object Preferences : NavKey
 @Serializable private data class EditAppearance(val group: String) : NavKey
@@ -113,20 +109,20 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
     val back = { if (stack.size > 1) stack.removeAt(stack.lastIndex) else if (initialDetail != null) onDetailBack(); Unit }
     val navigate: (NavKey) -> Unit = { key -> if (stack.last() != key) stack.add(key) }
     val animate = LocalMotionEnabled.current
+    val direction = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
     val privateScreens = remember { mutableIntStateOf(0) }
     PlannerPopupHost(stack.last() != ModelConnection && stack.last() != ImportCourses && privateScreens.intValue == 0) {
     SharedTransitionLayout {
         val shared: SharedModifier = { key ->
-            if (animate) Modifier.sharedBounds(rememberSharedContentState(key), LocalNavAnimatedContentScope.current)
-            else Modifier
+            if (animate && initialDetail == null) cardBoundsModifier(key) else Modifier
         }
         NavDisplay(
             backStack = stack,
             onBack = back,
             sharedTransitionScope = this,
-            transitionSpec = if (animate) defaultTransitionSpec() else { { noMotion() } },
-            popTransitionSpec = if (animate) defaultPopTransitionSpec() else { { noMotion() } },
-            predictivePopTransitionSpec = if (animate) defaultPredictivePopTransitionSpec() else { { _ -> noMotion() } },
+            transitionSpec = { sceneMotion(animate, pop = false, direction = direction) },
+            popTransitionSpec = { sceneMotion(animate, pop = true, direction = direction) },
+            predictivePopTransitionSpec = { sceneMotion(animate, pop = true, direction = direction) },
             entryProvider = entryProvider {
                 entry<Home> {
                     val order = LocalAppearance.current.order
@@ -138,7 +134,12 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     val date = selectedDate?.let(LocalDate::ofEpochDay) ?: local.date
                     val pager = rememberPagerState(initialPage = order.indexOf(destination)) { order.size }
                     val moves = rememberCoroutineScope()
-                    LaunchedEffect(order) { pager.scrollToPage(order.indexOf(destination)) }
+                    LaunchedEffect(pager, order) {
+                        pager.scrollToPage(order.indexOf(destination))
+                        snapshotFlow { pager.settledPage.takeUnless { pager.isScrollInProgress } }.collect { settled ->
+                            if (settled != null) destination = order[settled]
+                        }
+                    }
                     val position = remember(pager) { derivedStateOf { pager.currentPage + pager.currentPageOffsetFraction } }
                     val bar = rememberDestinationCapsule(destination.key, position) { key ->
                         val target = order.indexOfFirst { it.key == key }
@@ -155,7 +156,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                         Page {
                             DockOverlay(bar, scope) { bottom ->
                                 CompositionLocalProvider(LocalRootBottom provides bottom) {
-                                    HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = false,
+                                    HorizontalPager(pager, Modifier.fillMaxSize(),
                                         beyondViewportPageCount = order.lastIndex, key = { order[it].key }) { index ->
                                         val page = order[index]
                                         val front = page == destination
@@ -170,7 +171,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                                                     onRevealed = { revealStart = null }, onAdd = { navigate(AddTask) })
                                                 Destination.WORKSPACE -> WorkspacePanel(model) { workspace ->
                                                     WorkspaceScreen(workspace, model, { navigate(TaskDetail(it)) }, { navigate(FrameDetail(it)) },
-                                                        { navigate(Preferences) }, shared, frames, { frames = it }, { navigate(PushTasks) },
+                                                        { navigate(Preferences) }, if (front) shared else noCardBounds, frames, { frames = it }, { navigate(PushTasks) },
                                                         { navigate(CreateFrame) }, { navigate(AddTask) })
                                                 }
                                                 Destination.GRAPHS -> GraphsRoute(model, { navigate(GraphEditor(it)) }, { navigate(Preferences) })
@@ -204,8 +205,21 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 } }
                 entry<RemoveTerm> { key -> RemoveTermReview(key.id, model, back) }
                 entry<GraphEditor> { key -> GraphEditorRoute(model, key.id, back) { navigate(FrameDetail(it)) } }
-                entry<TaskDetail> { key -> WorkspacePanel(model) { TaskScreen(key.id, it, model, back, shared) } }
-                entry<FrameDetail> { key -> WorkspacePanel(model) { FrameScreen(key.id, it, model, back, shared) } }
+                entry<TaskDetail> { key ->
+                    DetailRoute("task:${key.id}", animate && initialDetail == null) {
+                        WorkspacePanel(model) { TaskScreen(key.id, it, model, back, shared) { navigate(EditTask(key.id)) } }
+                    }
+                }
+                entry<EditTask> { key -> WorkspacePanel(model) { workspace ->
+                    val task = workspace.queue.find { it.id == key.id }
+                    if (task == null) MissingDetail("编辑任务", "这项任务已不在队列中。", back)
+                    else TaskEditor(model, back, original = task)
+                } }
+                entry<FrameDetail> { key ->
+                    DetailRoute("frame:${key.id}", animate && initialDetail == null) {
+                        WorkspacePanel(model) { FrameScreen(key.id, it, model, back, shared) }
+                    }
+                }
                 entry<Preferences> {
                     SettingsScreen(preferences.policy, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) })
                 }
@@ -227,8 +241,6 @@ private fun PrivateScreen(count: MutableIntState, content: @Composable () -> Uni
     }
     content()
 }
-
-private fun noMotion() = ContentTransform(EnterTransition.None, ExitTransition.None)
 
 @Composable
 private fun WorkspacePanel(model: WorkspaceViewModel, content: @Composable (Workspace) -> Unit) {
