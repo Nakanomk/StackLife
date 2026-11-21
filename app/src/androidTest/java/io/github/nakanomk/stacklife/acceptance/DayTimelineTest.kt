@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
@@ -14,8 +15,10 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import io.github.nakanomk.stacklife.courses.*
 import androidx.core.graphics.Insets
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -45,15 +48,13 @@ internal fun SemanticsNodeInteractionsProvider.dayTick(label: String): Semantics
 }
 
 internal fun SemanticsNodeInteractionsProvider.assertFloatingAxisMeetsDock() {
-    fun box(tag: String) = onNodeWithTag(tag).getUnclippedBoundsInRoot()
-    val input = box("assistant-input").top
-    val nav = onAllNodesWithTag("navigation-capsule")
-    val dockTop = if (nav.fetchSemanticsNodes().isEmpty()) input else minOf(input, box("navigation-capsule").top)
-    val bottom = box("day-axis").bottom
-    // Floating chrome has a 4 dp exterior margin; side-by-side docked navigation has none.
-    val gap = dockTop - bottom
-    assertTrue("Timeline must end at the measured dock, not inside or far above it: $gap", gap in 0.dp..5.dp)
-    assertEquals(bottom.value, box("day-drop-area").bottom.value, .5f)
+    fun box(tag: String) = onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+    val top = box("assistant-input").top
+    val rail = box("day-rail")
+    assertEquals("Painted rail must end at the composer surface", top, rail.bottom, 1f)
+    assertEquals(top, box("day-axis").bottom, 1f)
+    assertEquals(top, box("day-drop-area").bottom, 1f)
+    assertFalse("Opaque queue must not obscure the rail", rail.overlaps(box("day-tray-container")))
 }
 
 @RunWith(AndroidJUnit4::class)
@@ -272,7 +273,11 @@ class DayTimelineTest {
         val closed = bounds()
         val identity = panel.fetchSemanticsNode().id
         ui.assertFloatingAxisMeetsDock()
-        toggle.assertWidthIsEqualTo(48.dp).assertHeightIsEqualTo(48.dp).assert(hasStateDescription("已收起"))
+        toggle.assertWidthIsEqualTo(56.dp).assertHeightIsEqualTo(56.dp).assert(hasStateDescription("已收起"))
+        val fab = ui.onNodeWithTag("add-task").fetchSemanticsNode().boundsInRoot
+        assertEquals(fab.width, closed.width, 1f)
+        assertEquals(fab.height, closed.height, 1f)
+        assertEquals(fab.center.x, closed.center.x, 1f)
         assertEquals("展开待排队列", toggle.fetchSemanticsNode().config[SemanticsActions.OnClick].label)
         ui.onNodeWithTag("day-tray").assertDoesNotExist()
         ui.mainClock.autoAdvance = false
@@ -329,40 +334,146 @@ class DayTimelineTest {
         ui.assertFloatingAxisMeetsDock()
     }
 
-    @Test fun pinnedQueueStillResizesTheTimelineInBothDirections() {
-        runBlocking { store.apply(EditAppearance(AppearancePatch.Replace(Appearance(floatingDayTray = false)))) }
-        show()
-        val toggle = ui.onNodeWithTag("day-tray-toggle").assert(hasStateDescription("已展开"))
-        val wide = ui.onNodeWithTag("day-axis").fetchSemanticsNode().boundsInRoot.width < ui.onRoot().fetchSemanticsNode().boundsInRoot.width - 1f
-        fun axis() = ui.onNodeWithTag("day-axis").fetchSemanticsNode().boundsInRoot.let { if (wide) it.width else it.height }
-        fun assertPinnedFloor(sideBySide: Boolean) {
-            if (sideBySide) ui.assertFloatingAxisMeetsDock() else {
-                fun box(tag: String) = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
-                val bottom = box("day-axis").bottom
-                assertEquals("The pinned tray reserves its own space", bottom, box("day-tray-container").top, 1f)
-                assertEquals(bottom, box("day-drop-area").bottom, 1f)
-                assertTrue(bottom <= minOf(box("assistant-input").top, box("navigation-capsule").top))
+    @OptIn(ExperimentalTestApi::class)
+    private fun assertOverlayKeepsDayStable(pinned: Boolean, landscape: Boolean) {
+        runBlocking { store.apply(EditAppearance(AppearancePatch.Replace(Appearance(floatingDayTray = !pinned)))) }
+        ui.setContent {
+            if (landscape) DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(780.dp, 360.dp))) {
+                StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
+            } else StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
+        }
+        val toggle = await(hasTestTag("day-tray-toggle"))
+        toggle.assert(hasStateDescription("已展开"))
+        val axis = ui.onNodeWithTag("day-axis")
+        fun bounds(tag: String) = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        // A moving tail inset used to silently clamp scroll only at the very end of a day.
+        axis.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
+        fun geometry(): List<Any> {
+            val scroll = axis.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+            return listOf(bounds("day-axis"), bounds("day-drop-area"), bounds("day-rail"),
+                scroll.value(), scroll.maxValue(), ui.dayTick("23:45").getUnclippedBoundsInRoot().top)
+        }
+        val original = geometry()
+        val panel = bounds("day-tray-container")
+        fun assertPaint() {
+            ui.assertFloatingAxisMeetsDock()
+            val rail = bounds("day-rail")
+            val pixels = ui.onRoot().captureToImage().toPixelMap()
+            val x = rail.center.x.toInt()
+            val adjacent = rail.left.toInt() - 3
+            for (rise in listOf(1, 4, 8)) {
+                val y = rail.bottom.toInt() - rise
+                assertNotEquals("Empty day rail disappeared at $x,$y", pixels[adjacent, y], pixels[x, y])
             }
         }
-        assertPinnedFloor(wide)
-        val short = axis()
-        ui.onNodeWithText("队列中没有待排任务").assertIsDisplayed()
+        assertPaint()
         ui.mainClock.autoAdvance = false
         try {
             toggle.performClick(); ui.mainClock.advanceTimeBy(144)
-            val closing = axis()
-            ui.mainClock.advanceTimeBy(400)
-            val tall = axis()
-            assertTrue(closing > short && closing < tall)
+            assertNotEquals(panel, bounds("day-tray-container")); assertEquals(original, geometry())
+            ui.mainClock.advanceTimeBy(640)
             toggle.assert(hasStateDescription("已收起")); ui.onNodeWithTag("day-tray").assertDoesNotExist()
-            assertPinnedFloor(false)
+            assertEquals(original, geometry())
             toggle.performClick(); ui.mainClock.advanceTimeBy(144)
-            val opening = axis()
-            assertTrue(opening < tall && opening > short)
-            ui.mainClock.advanceTimeBy(400)
-            assertEquals(short, axis(), 1f)
+            assertEquals(original, geometry())
+            ui.mainClock.advanceTimeBy(640)
         } finally { ui.mainClock.autoAdvance = true }
-        ui.onNodeWithText("队列中没有待排任务").assertIsDisplayed()
+        assertEquals(original, geometry()); assertEquals(panel, bounds("day-tray-container"))
+        assertPaint()
+    }
+
+    @Test fun pinnedQueueIsOnlyAnOverlayAtEndOfEmptyDay() = assertOverlayKeepsDayStable(true, false)
+    @Test fun landscapePinnedQueueNeverMovesTheClockOrViewport() = assertOverlayKeepsDayStable(true, true)
+    @Test fun floatingQueueDoesNotChangeScrollRangeAtEndOfDay() = assertOverlayKeepsDayStable(false, false)
+
+    private fun selectDayView(mode: String) {
+        await(hasTestTag("day-view")).performClick()
+        await(hasTestTag("day-view-$mode")).performClick()
+    }
+
+    @Test fun eventViewCompressesFreeTimeAndAddsOnlyOneScheduledTaskOnConfirmation() {
+        runBlocking {
+            store.apply(TaskAdd(TaskInput("早班", ref = "a")), SlotSet("@a", at(9, 0), 30),
+                TaskAdd(TaskInput("评审", ref = "b")), SlotSet("@b", at(11, 0), 30))
+        }
+        val before = readDay()
+        show()
+        ui.onNodeWithTag("day-tray-toggle").performClick()
+        selectDayView("events")
+        val list = await(hasTestTag("day-events"))
+        val gap = hasTestTag("day-gap:${at(9, 30).toInstant().toEpochMilli()}")
+        val nineHours = ui.onNodeWithTag("day-gap:${query.startMillis}").fetchSemanticsNode().size.height
+        list.performScrollToNode(gap)
+        assertEquals("Long free periods use one compact row, not proportional whitespace", nineHours,
+            await(gap).fetchSemanticsNode().size.height)
+        await(gap).assert(hasText("空闲 · 1 小时 30 分钟")).performClick()
+        await(hasTestTag("gap-title")).performTextInput("在空档读论文")
+        ui.onNodeWithTag("gap-time").performTextReplacement("10:15")
+        ui.onNodeWithTag("gap-duration").performTextReplacement("46")
+        ui.onNodeWithTag("gap-save").assertIsNotEnabled()
+        assertEquals(before, readDay())
+        ui.onNodeWithTag("gap-duration").performTextReplacement("15")
+        ui.onNodeWithTag("gap-save").assertIsEnabled().performClick()
+        val after = readDay { it.revision > before.revision }
+        assertEquals(before.revision + 1, after.revision)
+        val task = after.blocks.single { it.title == "在空档读论文" }
+        assertEquals(at(10, 15).toInstant().toEpochMilli(), task.startMillis)
+        assertEquals(at(10, 30).toInstant().toEpochMilli(), task.endMillis)
+        assertEquals(3, after.blocks.size); assertTrue(after.tray.isEmpty())
+        assertEquals(1, runBlocking { store.state().queue.count { it.id == task.taskId } })
+        val block = hasTestTag("block:${task.taskId}")
+        list.performScrollToNode(block)
+        await(block).performClick()
+        await(hasText("取消安排") and hasClickAction()).performScrollTo().performClick()
+        assertEquals(task.taskId, readDay { it.blocks.size == 2 }.tray.single().id)
+        await(hasTestTag("day-events")).assertIsDisplayed()
+    }
+
+    @Test fun emptyEventDaySurvivesDateTabAndRotationAndRefusesStaleGapDraft() {
+        val restore = StateRestorationTester(ui)
+        restore.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
+        await(hasTestTag("day-axis"))
+        selectDayView("events")
+        fun bounds(tag: String) = await(hasTestTag(tag)).fetchSemanticsNode().boundsInRoot
+        val rail = bounds("day-rail")
+        val list = bounds("day-events")
+        assertEquals(bounds("assistant-input").top, rail.bottom, 1f)
+        assertEquals(rail.bottom, list.bottom, 1f)
+        assertFalse(rail.overlaps(bounds("day-tray-container")))
+        ui.onNodeWithTag("day-tray-toggle").performClick()
+        assertEquals(rail, bounds("day-rail")); assertEquals(list, bounds("day-events"))
+        ui.onNodeWithContentDescription("后一天").performClick()
+        await(hasTestTag("nav:workspace")).performClick()
+        await(hasTestTag("nav:today")).performClick()
+        restore.emulateSavedInstanceStateRestore()
+        val tomorrow = PlannerQuery.Day(query.date.plusDays(1), query.zone)
+        val gap = await(hasTestTag("day-gap:${tomorrow.startMillis}"))
+        gap.assert(hasText("空闲 · ${(tomorrow.endMillis - tomorrow.startMillis) / 3_600_000L} 小时")).performClick()
+        await(hasTestTag("gap-title")).performTextInput("过期待办")
+        runBlocking { store.apply(TaskAdd(TaskInput("同步变化"))) }
+        await(hasText("日程已变更，请关闭并重新选择空闲时段。"))
+        ui.onNodeWithTag("gap-save").assertIsNotEnabled()
+        ui.onNodeWithText("取消").performClick()
+        assertEquals(listOf("同步变化"), runBlocking { store.state().queue.map { it.title } })
+        selectDayView("time"); await(hasTestTag("day-axis")).assertIsDisplayed()
+    }
+
+    @Test fun eventViewFixedCourseOpensItsActualDetails() {
+        val date = LocalDate.of(2026, 11, 2)
+        val term = TermSpec("秋季", date.minusWeeks(8), 18, BellSchedule.SUMMER, date)
+        runBlocking {
+            val draft = store.api.stageCourseImport(term, listOf(term.meeting(9, 1, "操作系统", "B", 5, 6)))
+            try { store.apply(CourseImport(draft)) } finally { store.api.discardCourseImport(draft) }
+        }
+        ui.setContent {
+            val vm = viewModel { WorkspaceViewModel(store.api) }
+            StackLifeTheme { TodayRoute(vm, date, campusZone, {}, {}, {}, null, {}, {}) }
+        }
+        await(hasTestTag("day-axis")); selectDayView("events")
+        val course = hasTestTag("day-course")
+        await(hasTestTag("day-events")).performScrollToNode(course)
+        await(course).assert(hasText("固定课程") and hasText("14:00–15:35")).performClick()
+        await(hasText("教室：B")).assertIsDisplayed()
     }
 
     @Test fun reducedMotionKeepsRtlKeyboardFocusAndTheLastDaySlotCanClearTheControls() {
@@ -533,8 +644,6 @@ class DayTimelineTest {
         // Change ownership through the real workbench; assert the same block is live on returning to Today.
         await(hasTestTag("nav:workspace")).performClick()
         await(hasText("压栈") and hasClickAction()).performClick()
-        await(hasTestTag("reason")).performTextInput("开会")
-        ui.onNodeWithText("保存到栈").performClick()
         assertEquals(changed.copy(state = ScheduledState.FRAME), readDay { it.blocks.single().state == ScheduledState.FRAME }.blocks.single())
         await(hasTestTag("nav:today")).performClick(); await(hasTestTag("day-axis")); centerTick("16:00")
         await(hasText("已压栈 · 仍占用时段", substring = true)).assertIsDisplayed()

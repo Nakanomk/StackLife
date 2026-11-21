@@ -5,6 +5,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -17,7 +18,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.RootToolbar
-import io.github.nakanomk.stacklife.GlassIcon
+import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
 import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.WorkspaceViewModel
@@ -55,9 +56,10 @@ internal fun TodayRoute(
     var choosingDate by rememberSaveable { mutableStateOf(false) }
     val floatingTray = LocalAppearance.current.floatingDayTray
     var trayOpen by rememberSaveable(floatingTray) { mutableStateOf(true) }
+    var eventView by rememberSaveable { mutableStateOf(false) }
     if (choosingDate) DateChooser(date, { choosingDate = false; onDate(it) }, { choosingDate = false })
     RootPane(header = {
-        DayHeader(date, { choosingDate = true }, onDate, { onDate(LocalDate.now(zone)) }, onSettings)
+        DayHeader(date, { choosingDate = true }, onDate, { onDate(LocalDate.now(zone)) }, onSettings, eventView, { eventView = it })
     }) { top, bottom ->
         CalendarPager((date.toEpochDay() - firstDay.toEpochDay()).toInt(),
             (lastDay.toEpochDay() - firstDay.toEpochDay() + 1).toInt(),
@@ -65,8 +67,15 @@ internal fun TodayRoute(
             val query = remember(index, zone) { PlannerQuery.Day(firstDay.plusDays(index.toLong()), zone) }
             val state by remember(model, query) { model.day(query) }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
             ReadPanel(state) { plan ->
-                DayBody(plan, model, model::checkSlot, { id -> plan.editorFor(id)?.let(onEdit) }, onAdd,
-                    revealStart.takeIf { query.date == date }, onRevealed, top, bottom, trayOpen, { trayOpen = !trayOpen })
+                val timeEditor: (String) -> Unit = { id -> plan.editorFor(id)?.let(onEdit) }
+                val target = revealStart.takeIf { query.date == date }
+                val entries = remember(plan.blocks, plan.courses, plan.conflictingTaskIds) { plan.chronologicalEntries() }
+                rememberSaveableStateHolder().SaveableStateProvider(eventView) {
+                    if (eventView) EventDay(plan, entries, model, timeEditor, onAdd, target, onRevealed,
+                        top, bottom, trayOpen, { trayOpen = !trayOpen })
+                    else DayBody(plan, entries, model, model::checkSlot, timeEditor, onAdd,
+                        target, onRevealed, top, bottom, trayOpen, { trayOpen = !trayOpen })
+                }
             }
         }
     }
@@ -74,7 +83,7 @@ internal fun TodayRoute(
 
 @Composable
 private fun DayBody(
-    plan: DayPlan, actions: WorkspaceActions, checkSlot: suspend (PlannerCommand.SlotSet) -> String?,
+    plan: DayPlan, entries: List<AxisEntry>, actions: WorkspaceActions, checkSlot: suspend (PlannerCommand.SlotSet) -> String?,
     onEdit: (String) -> Unit, onAdd: () -> Unit, revealStart: Long?, onRevealed: () -> Unit,
     top: Dp, clearance: Dp, trayOpen: Boolean, toggleTray: () -> Unit,
 ) {
@@ -86,8 +95,8 @@ private fun DayBody(
     }
     val minCourse = minCard + with(density) { type.bodySmall.lineHeight.toDp().roundToPx() }
     val minutePx = with(density) { 2.dp.toPx() }
-    val scale = remember(plan.day, plan.blocks, plan.courses, plan.conflictingTaskIds, minutePx, minCard, minCourse) {
-        DayAxisScale(plan, minutePx, minCard, minCourse)
+    val scale = remember(plan.day, entries, minutePx, minCard, minCourse) {
+        DayAxisScale(plan.day, entries, minutePx, minCard, minCourse)
     }
     val initial = remember {
         val now = System.currentTimeMillis()
@@ -113,7 +122,10 @@ private fun DayBody(
     Box(Modifier.fillMaxSize()) {
         val noticeSource = rememberPlannerBackdrop(drag.dropNotice != null)
         Box(Modifier.fillMaxSize().plannerBackdrop(noticeSource)) {
-            DayWithTray(plan, drag, !submission.busy, onEdit, onAdd, send, top, clearance, trayOpen, toggleTray)
+            DayWithTray(plan, drag, !submission.busy, onEdit, onAdd, top, clearance, trayOpen, toggleTray,
+                pickup = { task -> Modifier.slotDrag(SlotSource(task.id, task.minutes), drag, plan.revision, !submission.busy && trayOpen, send) }) { spine, tail ->
+                DayAxis(drag, plan.revision, !submission.busy, onEdit, send, Modifier.fillMaxSize(), top, tail, spine)
+            }
         }
         drag.dropNotice?.let { message ->
             CompositionLocalProvider(LocalCapsuleBackdrop provides noticeSource) {
@@ -133,9 +145,35 @@ private fun DayBody(
 @Composable
 private fun DayHeader(
     date: LocalDate, onPick: () -> Unit, onDate: (LocalDate) -> Unit, onToday: () -> Unit, onSettings: () -> Unit,
+    events: Boolean, setEvents: (Boolean) -> Unit,
 ) {
     val short = LocalDensity.current.fontScale >= 1.35f
-    RootToolbar(onSettings, leading = { GlassIcon(R.drawable.ic_today, "回到今天", onToday) }) {
+    var options by remember { mutableStateOf(false) }
+    RootToolbar(onSettings, leading = {
+        Box {
+            val label = if (events) "事件" else "时间"
+            StackLifeSurface(CapsuleScene.CHROME, Modifier.size(48.dp), MaterialTheme.colorScheme.surfaceContainer, elevation = 1.dp) {
+                TextButton(onClick = { options = true }, contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier.fillMaxSize().testTag("day-view").semantics { contentDescription = "日视图：$label，切换视图" }) {
+                    if (short) Icon(painterResource(if (events) R.drawable.ic_view_agenda else R.drawable.ic_schedule), null)
+                    else Text(label, maxLines = 1, style = MaterialTheme.typography.labelLarge)
+                }
+            }
+            PlannerDropdownMenu(options, { options = false }) {
+                for (mode in listOf(false, true)) {
+                    val name = if (mode) "事件" else "时间"
+                    DropdownMenuItem(text = { Text(name) },
+                        leadingIcon = { Icon(painterResource(if (mode) R.drawable.ic_view_agenda else R.drawable.ic_schedule), null) },
+                        trailingIcon = { RadioButton(events == mode, onClick = null) },
+                        modifier = Modifier.testTag(if (mode) "day-view-events" else "day-view-time"),
+                        onClick = { setEvents(mode); options = false })
+                }
+                HorizontalDivider()
+                DropdownMenuItem(text = { Text("回到今天") }, leadingIcon = { Icon(painterResource(R.drawable.ic_today), null) },
+                    onClick = { options = false; onToday() })
+            }
+        }
+    }) {
         IconButton(onClick = { onDate(date.minusDays(1)) }, enabled = date > firstDay) {
             Icon(painterResource(R.drawable.ic_chevron_left), "前一天")
         }

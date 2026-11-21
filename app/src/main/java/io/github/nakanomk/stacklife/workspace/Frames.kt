@@ -45,7 +45,7 @@ internal fun FrameList(
             Surface(color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("还没有栈帧", style = MaterialTheme.typography.titleMedium)
-                    Hint("中断时，把队列和原因一起存到这里。也可以直接新建一份稍后再做的清单。")
+                    Hint("中断时可以先把队列存到这里，再补充原因。也可以直接新建一份稍后再做的清单。")
                 }
             }
         }
@@ -64,7 +64,7 @@ private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: Share
     DetailCard(source, "frame", frame.id, onFrame, modifier = shared("frame:${frame.id}").fillMaxWidth().testTag("frame:${frame.id}"),
         shape = RectangleShape, color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxWidth().padding(vertical = if (appearance.compact) 4.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(frame.reason, shared.title("frame:${frame.id}"), style = MaterialTheme.typography.bodyLarge,
+            Text(frameLabel(frame.reason), shared.title("frame:${frame.id}"), style = MaterialTheme.typography.bodyLarge,
                 maxLines = 3, overflow = TextOverflow.Ellipsis)
             Text("${savedTime(frame.savedAtMillis)} · 原有 ${frame.items.size} 项 · 剩余 ${frame.remaining} 项",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -84,6 +84,7 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
     }
     var choosing by rememberSaveable(id) { mutableStateOf(false) }
     var selected by rememberSaveable(id) { mutableStateOf(arrayListOf<String>()) }
+    var editingReason by rememberSaveable(id) { mutableStateOf(false) }
     val entries = frame.items
     val leaveSelection = { choosing = false; selected = arrayListOf() }
     val action = rememberSubmission(actions) { if (it != SaveOutcome.REJECTED) leaveSelection() }
@@ -93,7 +94,8 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
     }
     BackHandler(enabled = choosing || action.busy) { if (!action.busy) leaveSelection() }
     EditorPage("栈帧详情", { if (choosing) leaveSelection() else onBack() }, AssistantPage.Frame(id), backEnabled = !action.busy,
-        footer = if (!choosing) null else ({
+        footer = if (editingReason) ({ PushReasonEditor(id, actions) { editingReason = false } })
+        else if (!choosing) null else ({
             Column(Modifier.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("已选 ${selectionIds.size} 项 · 按清单原序恢复", style = MaterialTheme.typography.labelLarge)
                 Actions {
@@ -113,9 +115,11 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
                         FrameSource.SWAP -> "切换前自动保存"
                         FrameSource.GRAPH -> "流程图生成"
                     }
-                    Text(frame.reason, shared.title("frame:$id"), style = MaterialTheme.typography.titleLarge)
+                    Text(frameLabel(frame.reason), shared.title("frame:$id"), style = MaterialTheme.typography.titleLarge)
                     Text("$source · ${savedTime(frame.savedAtMillis)}", style = MaterialTheme.typography.labelMedium)
                     Text("原有 ${entries.size} 项 · 剩余 ${frame.remaining} 项", style = MaterialTheme.typography.bodyMedium)
+                    if (frame.source == FrameSource.PUSH && frame.reason.isBlank() && !editingReason && !choosing)
+                        TextButton(onClick = { editingReason = true }) { Text("补充原因") }
                 }
             }
             if (frame.remaining > 0) item {
@@ -124,7 +128,7 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
                     Hint(restoreHint(state.restorePolicy, choosing, state.queue.size))
                     if (!choosing) Actions {
                         Primary("全部恢复", enabled = !action.busy) { action.send(PlannerCommand.FrameRestore(id, RestoreMode.ALL)) }
-                        Secondary("选择恢复", enabled = !action.busy) { choosing = true }
+                        Secondary("选择恢复", enabled = !action.busy) { editingReason = false; choosing = true }
                     }
                 }
             }

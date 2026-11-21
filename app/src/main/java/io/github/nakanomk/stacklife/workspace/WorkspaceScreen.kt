@@ -15,9 +15,12 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
@@ -27,6 +30,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.PagerPane
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.RootToolbar
@@ -52,12 +57,12 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 @Composable
 internal fun WorkspaceScreen(
     state: Workspace,
-    actions: WorkspaceActions,
+    actions: WorkspaceViewModel,
     onTask: (String) -> Unit,
     onFrame: (String) -> Unit,
     onSettings: () -> Unit,
     shared: SharedModifier,
-    stack: Boolean, setStack: (Boolean) -> Unit, onPush: () -> Unit, onCreateFrame: () -> Unit,
+    stack: Boolean, setStack: (Boolean) -> Unit, onCreateFrame: () -> Unit,
     onAdd: () -> Unit,
 ) {
     val queueScroll = rememberLazyListState()
@@ -71,16 +76,42 @@ internal fun WorkspaceScreen(
         }
     }
     val position = remember(pager) { derivedStateOf { pager.currentPage + pager.currentPageOffsetFraction } }
+    val pushedId by actions.pushedFrame.collectAsStateWithLifecycle()
+    var editingId by rememberSaveable { mutableStateOf<String?>(null) }
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(pushedId, editingId) {
+        val frameId = pushedId ?: return@LaunchedEffect
+        if (editingId != null) return@LaunchedEffect
+        if (snackbar.showSnackbar("已压栈", actionLabel = "补充原因", withDismissAction = true,
+                duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) editingId = frameId
+        actions.dismissPush(frameId)
+    }
+    var feedbackHeight by remember { mutableIntStateOf(0) }
+    val hasFeedback = editingId != null || pushedId != null
+    val feedbackInset = if (hasFeedback) with(LocalDensity.current) { feedbackHeight.toDp() } else 0.dp
     RootPane(header = { RootToolbar(onSettings) { WorkspaceSegments(stack, setStack, position) } },
-        overlay = { _, bottom -> if (!stack) AddTaskFab(onAdd, bottomInset = bottom) }) { top, bottom ->
+        overlay = { _, bottom ->
+            if (!stack) AddTaskFab(onAdd, bottomInset = bottom + feedbackInset)
+            if (hasFeedback) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = bottom)
+                .onSizeChanged { feedbackHeight = it.height }) {
+                val frameId = editingId
+                if (frameId == null) SnackbarHost(snackbar) { data ->
+                    Snackbar(data, modifier = Modifier.testTag("push-feedback"))
+                } else Surface(Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shadowElevation = 3.dp) {
+                    key(frameId) { PushReasonEditor(frameId, actions) { editingId = null } }
+                }
+            }
+        }) { top, bottom ->
         HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = false, beyondViewportPageCount = 1) { index ->
             val selected = index == mode
             val inViewport by remember(pager, index) { derivedStateOf { kotlin.math.abs(position.value - index) < 1f } }
             PagerPane(selected, selected || inViewport) {
                 val cardBounds = if (selected) shared else noCardBounds
                 CompositionLocalProvider(LocalCardList provides if (index == 0) queueScroll else stackScroll) {
-                    if (index == 1) FrameList(state.frames, stackScroll, onFrame, onCreateFrame, cardBounds, top, bottom, state.revision)
-                    else QueueList(state.queue, queueScroll, actions, onTask, onPush, cardBounds, top, bottom + taskFabClearance, state.revision)
+                    if (index == 1) FrameList(state.frames, stackScroll, onFrame, onCreateFrame, cardBounds, top, bottom + feedbackInset, state.revision)
+                    else QueueList(state.queue, queueScroll, actions, onTask, actions::pushQueue, cardBounds, top, bottom + taskFabClearance + feedbackInset, state.revision)
                 }
             }
         }
@@ -108,13 +139,17 @@ private fun WorkspaceSegments(stack: Boolean, change: (Boolean) -> Unit, positio
 @Composable
 private fun QueueList(
     tasks: List<QueueTask>, scroll: LazyListState, actions: WorkspaceActions, onTask: (String) -> Unit,
-    onPush: () -> Unit, shared: SharedModifier, topClearance: Dp, bottomClearance: Dp, revision: Long,
+    onPush: (List<String>) -> String?, shared: SharedModifier, topClearance: Dp, bottomClearance: Dp, revision: Long,
 ) {
     val appearance = LocalAppearance.current
     val source = detailListSource(scroll, topClearance, bottomClearance, revision)
     var order by remember(tasks) { mutableStateOf(tasks) }
     val settledSource = if (source != null && order != tasks) null else source
-    val action = rememberSubmission(actions) { if (it != SaveOutcome.APPLIED) order = tasks }
+    // null means ordinary browsing: the primary action saves the entire visible queue.
+    var selection by rememberSaveable { mutableStateOf<ArrayList<String>?>(null) }
+    val action = rememberSubmission(actions) {
+        if (it == SaveOutcome.APPLIED) selection = null else order = tasks
+    }
     val drags = remember { MutableInteractionSource() }
     val reorder = rememberReorderableLazyListState(scroll) { from, to ->
         val start = order.indexOfFirst { it.id == from.key }
@@ -134,9 +169,18 @@ private fun QueueList(
         contentPadding = dockListPadding(topClearance, bottomClearance)) {
         item {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${tasks.size} 项未完成 · 预计 ${tasks.sumOf { it.minutes.toLong() }} 分钟", Modifier.weight(1f),
+                val selected = selection
+                Text(if (selected == null) "${tasks.size} 项未完成 · 预计 ${tasks.sumOf { it.minutes.toLong() }} 分钟"
+                    else "已选 ${selected.size} 项", Modifier.weight(1f),
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (tasks.isNotEmpty()) Secondary("压栈", !action.busy, onPush)
+                if (tasks.size > 1 || selected != null) TextButton(modifier = Modifier.testTag("queue-select"), enabled = !action.busy,
+                    onClick = { selection = if (selected == null) arrayListOf() else null }) {
+                    Text(if (selected == null) "多选" else "取消")
+                }
+                if (tasks.isNotEmpty()) ActionPill(if (selected == null) "压栈" else "压入所选",
+                    modifier = Modifier.testTag("queue-push"),
+                    enabled = !action.busy && (selected == null || selected.isNotEmpty()),
+                    onClick = { action.submit { onPush(selected ?: tasks.map { it.id }) } })
             }
         }
         if (order.isEmpty()) item {
@@ -150,6 +194,12 @@ private fun QueueList(
             }
         }
         itemsIndexed(order, key = { _, task -> task.id }) { index, task ->
+            val selected = selection
+            if (selected != null) {
+                CheckRow(task.title, task.id in selected, enabled = !action.busy) { selection = ArrayList(selected.toggle(task.id)) }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                return@itemsIndexed
+            }
             ReorderableItem(reorder, key = task.id) { dragging ->
                 val head = index == 0
                 DetailCard(

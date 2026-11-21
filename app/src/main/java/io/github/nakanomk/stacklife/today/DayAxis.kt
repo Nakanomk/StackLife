@@ -31,11 +31,11 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.courses.CourseDetails
 import io.github.nakanomk.stacklife.courses.ScheduledCourse
 import io.github.nakanomk.stacklife.planner.PlannerCommand
+import io.github.nakanomk.stacklife.planner.PlannerQuery
 import io.github.nakanomk.stacklife.planner.ScheduledState
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
@@ -43,32 +43,23 @@ import kotlin.math.roundToInt
 @Composable
 internal fun DayAxis(
     drag: AxisDrag, revision: Long, enabled: Boolean, onEdit: (String) -> Unit,
-    send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier, topInset: Dp, scrollTail: Dp,
+    send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier, topInset: Dp, scrollTail: Dp, spine: Dp,
 ) {
     val density = LocalDensity.current
     val scale = drag.scale
-    val colors = MaterialTheme.colorScheme
     val hourStyle = MaterialTheme.typography.labelMedium
-    val measurer = rememberTextMeasurer()
-    val spine = remember(measurer, hourStyle, density) {
-        val clockWidth = measurer.measure("00:00", style = hourStyle).size.width
-        with(density) { (clockWidth.toDp() + 16.dp).coerceAtLeast(56.dp) }
-    }
     val railWidth = 48.dp
     val gutter = spine + railWidth / 2
     var selectedEnd by remember(drag, revision) { mutableStateOf<String?>(null) }
     Box(modifier.fillMaxWidth().clipToBounds()) {
         Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll).padding(top = topInset, bottom = scrollTail)) {
-            Box(Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() }).drawBehind {
-                val x = if (layoutDirection == LayoutDirection.Ltr) spine.toPx() else size.width - spine.toPx()
-                drawLine(colors.outlineVariant, Offset(x, 0f), Offset(x, size.height), 2.dp.toPx())
-            }) {
+            Box(Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() })) {
                 for (band in scale.bands) for (tick in band.ticks) {
                     Box(Modifier.offset { IntOffset(0, band.top + band.yAt(tick.millis)) }.width(spine - 10.dp)
                         .testTag(tick.tag)) {
                         if (tick.major) Text(tick.label, Modifier.padding(start = 4.dp), style = hourStyle, softWrap = false,
-                            color = colors.onSurfaceVariant)
-                        else Spacer(Modifier.align(Alignment.TopEnd).size(4.dp, 1.dp).background(colors.outlineVariant))
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        else Spacer(Modifier.align(Alignment.TopEnd).size(4.dp, 1.dp).background(MaterialTheme.colorScheme.outlineVariant))
                     }
                 }
                 for (group in scale.groups) key(group.start) {
@@ -88,8 +79,14 @@ internal fun DayAxis(
                                         EventRail(entry, selectedEnd, { selectedEnd = it }, drag, revision, enabled, onEdit, send,
                                             Modifier.width(railWidth).fillMaxHeight())
                                         when (entry) {
-                                            is AxisEntry.Task -> BlockCard(entry, drag, revision, enabled, onEdit, send, Modifier.fillMaxSize())
-                                            is AxisEntry.Course -> CourseCard(entry.course, drag.scale, Modifier.fillMaxSize())
+                                            is AxisEntry.Task -> {
+                                                val block = entry.block
+                                                BlockCard(entry, scale.day, enabled, onEdit, Modifier.fillMaxSize(),
+                                                    Modifier.slotDrag(SlotSource(block.taskId,
+                                                        ((block.endMillis - block.startMillis) / MINUTE_MS).toInt(), block.startMillis),
+                                                        drag, revision, enabled, send))
+                                            }
+                                            is AxisEntry.Course -> CourseCard(entry.course, scale.day, Modifier.fillMaxSize())
                                         }
                                     }
                                 }
@@ -104,6 +101,16 @@ internal fun DayAxis(
             CurrentLine(drag, spine)
             DropPreview(drag, gutter)
         }
+    }
+}
+
+@Composable
+internal fun daySpine(): Dp {
+    val density = LocalDensity.current
+    val style = MaterialTheme.typography.labelMedium
+    val measurer = rememberTextMeasurer()
+    return remember(measurer, style, density) {
+        with(density) { (measurer.measure("00:00", style = style).size.width.toDp() + 16.dp).coerceAtLeast(56.dp) }
     }
 }
 
@@ -177,9 +184,9 @@ private fun DrawScope.drawEndKnob(x: Float, endY: Float, ink: Color, centerColor
 }
 
 @Composable
-private fun BlockCard(
-    entry: AxisEntry.Task, drag: AxisDrag, revision: Long, enabled: Boolean,
-    onEdit: (String) -> Unit, send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier,
+internal fun BlockCard(
+    entry: AxisEntry.Task, day: PlannerQuery.Day, enabled: Boolean, onEdit: (String) -> Unit,
+    modifier: Modifier, move: Modifier = Modifier, wrap: Boolean = false,
 ) {
     val scheme = MaterialTheme.colorScheme
     val block = entry.block
@@ -188,36 +195,35 @@ private fun BlockCard(
         ScheduledState.FRAME -> "已压栈 · 仍占用时段"
         ScheduledState.DONE -> "已完成"
     }
-    val range = "${clockLabel(block.startMillis, drag.scale.day)}–${clockLabel(block.endMillis, drag.scale.day)}"
+    val range = "${clockLabel(block.startMillis, day)}–${clockLabel(block.endMillis, day)}"
     val editable = block.state != ScheduledState.DONE
-    val action = if (!editable) Modifier else Modifier.slotDrag(
-        SlotSource(block.taskId, ((block.endMillis - block.startMillis) / MINUTE_MS).toInt(), block.startMillis),
-        drag, revision, enabled, send,
-    ).clickable(enabled, onClickLabel = "编辑时间", role = Role.Button) { onEdit(block.taskId) }
+    val lines = if (wrap) Int.MAX_VALUE else 1
+    val action = if (!editable) Modifier else move.clickable(enabled, onClickLabel = "编辑时间", role = Role.Button) { onEdit(block.taskId) }
     Column(modifier.testTag("block:${block.taskId}").clip(MaterialTheme.shapes.medium).then(action)
         .semantics(mergeDescendants = true) {}.padding(start = 4.dp, end = 4.dp)) {
-        Text(range, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(block.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(range, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = lines, overflow = TextOverflow.Ellipsis)
+        Text(block.title, style = MaterialTheme.typography.titleSmall, maxLines = lines, overflow = TextOverflow.Ellipsis)
         Text(if (entry.conflict) "时段冲突 · $state" else state, style = MaterialTheme.typography.labelMedium,
-            color = if (entry.conflict) scheme.error else scheme.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            color = if (entry.conflict) scheme.error else scheme.secondary, maxLines = lines, overflow = TextOverflow.Ellipsis)
     }
 }
 
 @Composable
-private fun CourseCard(course: ScheduledCourse, scale: DayAxisScale, modifier: Modifier) {
+internal fun CourseCard(course: ScheduledCourse, day: PlannerQuery.Day, modifier: Modifier, wrap: Boolean = false) {
     val meeting = course.meeting
     val scheme = MaterialTheme.colorScheme
+    val lines = if (wrap) Int.MAX_VALUE else 1
     var open by rememberSaveable { mutableStateOf(false) }
     if (open) CourseDetails(course) { open = false }
     Column(modifier.testTag("day-course").clip(MaterialTheme.shapes.medium)
         .clickable(onClickLabel = "查看固定课程", role = Role.Button) { open = true }.padding(horizontal = 4.dp)) {
-        Text("${clockLabel(meeting.startMillis, scale.day)}–${clockLabel(meeting.endMillis, scale.day)}",
-            style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(meeting.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("${clockLabel(meeting.startMillis, day)}–${clockLabel(meeting.endMillis, day)}",
+            style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = lines, overflow = TextOverflow.Ellipsis)
+        Text(meeting.title, style = MaterialTheme.typography.titleSmall, maxLines = lines, overflow = TextOverflow.Ellipsis)
         Text(if (course.conflicts.isEmpty()) "固定课程" else "时段冲突 · 固定课程",
             style = MaterialTheme.typography.labelMedium, color = if (course.conflicts.isEmpty()) scheme.tertiary else scheme.error,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (meeting.room.isNotBlank()) Text(meeting.room, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            maxLines = lines, overflow = TextOverflow.Ellipsis)
+        if (meeting.room.isNotBlank()) Text(meeting.room, style = MaterialTheme.typography.bodySmall, maxLines = lines, overflow = TextOverflow.Ellipsis)
     }
 }
 

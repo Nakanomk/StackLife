@@ -60,7 +60,7 @@ interface PlannerApi {
 
 工作台分「队列 / 栈」。队列可新增、编辑、完成、移出、拖排/菜单移动；显示未完成数及预计总时长。队首是当前优先项，不强制计时；显示排程也不按时间重排队列。标题非空，预计时长为正，未填默认 30 分钟。手柄借 [Reorderable 3.1.0](https://github.com/Calvin-LL/Reorderable) 的稳定 key、拖动、边缘滚动，结束才提交新次序。栈按保存时间倒序，最新可恢复帧优先；原因作标题，显示保存时刻、原始项目和剩余数。取空的帧仍可看历史，也可在栈内直接新建一帧事件清单。
 
-- **压栈：**默认选整个未完成队列，显式多选只压所选。原因必填且非空。按队列原序在同一事务建帧、写快照、移动归属，保留其余项相对顺序；空集合、空原因、选项失效都不建帧。不复制任务 ID；再次压入形成另一帧。
+- **压栈：**点「压栈」立即按原序保存整个未完成队列；「多选 → 压入所选」只移动勾选项。原因可空，不弹预填对话框。事务成功后才在底部显示「已压栈 · 补充原因」；保存原因只更新本次回执指定的帧，关闭提示不影响栈帧。无原因时显示「暂存的队列」，不写假原因。空集合、失效选项及事务失败均不建帧。反馈参考 BiliPai 的[底部宿主](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/HomeScreen.kt#L2576-L2582)和[下载成功后的附加动作](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/home/HomeBatchDownload.kt#L170-L181)，未移植 GPL 代码。
 - **恢复：**手动「全部恢复」一次执行；「选择恢复」按帧内源序而非勾选顺序。已取走/完成/移出的项不复活、不重复。操作与预览均说明实际策略。空帧即使连点也不触发切换。
 
 |本机偏好|全部恢复帧 `[A,B]` 到当前 `[X]`|选择恢复|
@@ -74,6 +74,8 @@ interface PlannerApi {
 ## M2 今天
 
 完整导航为「今天 / 工作台 / 流程图 / 课表」，设置从顶栏进；今天默认设备所在日期。时间轴延伸至日程助理输入栏的上沿，不藏在输入栏或导航下面。右下加号下的**非模态**待排队列默认展开；点标题可收成小球，再点原地展开，收起后时间轴仍用满输入栏上方的空间。切日、切页和旋转不重置用户刚选的开合状态。收起时箭头向上，展开时向下，队列上缘渐变磨砂。「布局 → 待排队列」可改回常驻托盘。待排指无时段的在队任务。轴和拖动参考 [Structured](https://structured.app/visual-planning) 与 [Planner Hours](https://github.com/baslawson/Planner#features)，小球变列表参考 [Material Container Transform](https://github.com/material-components/material-components-android/blob/master/docs/theming/Motion.md#container-transform)。
+
+队列是覆盖层：开合不改变轴线、滚动位置或拖放的时刻映射。收起的小球与加号同为 56dp。左上「时间 / 事件」切换两种表示；「时间」保留比例刻度，「事件」参考 [Structured Full 布局](https://help.structured.app/en/articles/354306#2_change_app_layout)，左侧标刻、沿线排列任务和固定课。连续空档只占一行，注明真实时长；点该行可将新任务直接排入其中。根据重叠时段的并集取空档，跨日裁剪、夏令时和空白日均按当地日界计算。
 
 - Compose 可滚动刻度接[原生拖动手势](https://developer.android.com/develop/ui/compose/touch-input/pointer-input/drag-swipe-fling)。长按拖动，边缘滚动；指针换算为含滚动偏移的轴内容坐标，按 5 分钟就近吸附。预览半透明落点、起止与冲突。松手才落库；轴外、取消、目标失效不改原数据。「安排时间」打开同一日期/时间/时长编辑器，无需拖动也可完成全部安排。
 - `TimeBlock(taskId UNIQUE, startInstant, endInstant)` 引用原任务。长按标题拖动整段；长按任务旁竖条，松开后直接拖下端点，只改结束时间，起点不动。交互参考 [Google 日历的底部圆形时长手柄](https://support.google.com/calendar/answer/72143?co=GENIE.Platform%3DAndroid)和 [FullCalendar 的触摸选择](https://fullcalendar.io/docs/touch)。课程、完成项和没有真实结束点的续段不提供手柄。取消只释放时段；移出任务释放占位，完成任务保留历史块。
@@ -104,6 +106,8 @@ interface PlannerApi {
 
 **阅读与失败路径。** 周视图按 [WakeUp](https://www.wakeup.fun/images/mobile3.png) 的「七日列 × 实际节次」排列。课块用已有的 [MaterialKolor](https://github.com/jordond/MaterialKolor/releases/tag/6.0.0) 生成 [HCT](https://github.com/material-foundation/material-color-utilities/blob/main/concepts/color_spaces.md#hct) 底色：按学期确定起始色相，再按课程序号错开色相；目标色度 39、明度 71–83，取自 WakeUp 白字周表的明亮色域，不跟随壁纸或深色主题调暗。课名、地点和冲突标记统一白字，可单独关闭文字描边。同课跨周或换教室不变色。冲突并列，点课看教室、节次、实际起止及冲突；点日期或「课表选项 → 课程列表」提供等价入口。横向切相邻周，纵向滚节次，周次胶囊可直接跳周。切学期、导入和移除集中在课表选项。无课表时胶囊直接提供导入。当天实例仍是时间轴的锁定块。登录、加载或校园网失败不覆盖原课表，文件通过不代表在线登录通过。
 
+周数读取 [Compose Pager](https://developer.android.com/develop/ui/compose/layouts/pager#page-state) 的手势方向与目标页：箭头、选周和横向拖动一开始就更新标题，回拉取消恢复原周；业务查询与助理范围不因为一次未完成的触摸而提前提交。
+
 **许可。** 移植部分随附 `../WadwaitaUp/LICENSE` 完整 MIT 文本及 `Copyright (c) 2024–2026 Nakanomk`；不携带个人样本。
 
 ## M4 流程图
@@ -127,7 +131,7 @@ interface PlannerApi {
 
 |领域|写命令与关键输入|
 |---|---|
-|队列 / 栈|`task_add`（每项一条，可成批）、`task_edit`、`task_finish`、`task_remove`、`queue_order`（当前完整 ID 排列）；`frame_create(reason, tasks)`、`frame_push(reason, taskIds)`、`frame_restore(frameId, mode, taskIds)`。`mode=all/selected`；是否切换队列由本机偏好决定。|
+|队列 / 栈|`task_add`（每项一条，可成批）、`task_edit`、`task_finish`、`task_remove`、`queue_order`（当前完整 ID 排列）；`frame_create(reason, tasks)`、`frame_push(taskIds, reason?)`、`frame_add_reason(frameId, reason)`、`frame_restore(frameId, mode, taskIds)`。`mode=all/selected`；是否切换队列由本机偏好决定。|
 |DAG|`graph_create`、`graph_patch`（按 ID 增改删节点、位置、边）、`graph_remove`、`graph_frame(graphId, goalId, reason)`。新实体可声明批内唯一 `ref`；`graph_frame` 还可声明新帧 `ref` 和 `taskRefs`（图节点 → 新任务别名），让「生成 → 选取 → 排程」不猜数据库 ID。|
 |日程 / 课表|`slot_set(taskId, start, durationMinutes)` 新排、移动或调整结束，开始须带 offset；`slot_clear(taskId)`。`manual_course_add` 按学期、周集合与节次提议手动课程；`course_import(draftId)` 必须使用用户核对的本地草稿；`term_remove(termId)` 仅移除 HUB 来源。|
 |外观 / 偏好|`prefs_set`、`prefs_reset` 只接受已公开的外观/交互字段与合法值；重设只动所选组。配置凭据或扩大披露范围不能走模型授权捷径。|
@@ -137,6 +141,8 @@ interface PlannerApi {
 **谁能提交。** 纯查询直接答。每轮所有写操作合为**一张差异卡**，列项目名、顺序、旧 → 新时间、实际生成的节点/边/帧或受影响设置。模型没有 `commit` 工具；只有用户点一次「应用这些更改」，手机才消费对应本地提案，收到事务回执才说「已应用」。校验失败、重名歧义、空结果、协议不兼容、401、限流、超时、取消均给具体反馈，不写业务项。每条消息最多四次只读往返，写提案返回即停；不运行自主后台 Agent。
 
 **使用。** 「设置 → 模型服务配置」可选 [DeepSeek](https://api-docs.deepseek.com/guides/tool_calls/)、[Claude](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk)、[GPT](https://developers.openai.com/api/docs/models/gpt-5.4-mini) 或自定义。预设填入官方 API 地址和可编辑的模型，用户填写 API Key，不是登录聊天软件账号。选择和保存均不联网，切换服务不携带未保存的密钥。点输入栏左侧的「历史对话」按最近消息浏览，未配置服务或重启后也可读；详情可删除整段，不能重放提案。每次最多接受一个工具调用；课程来源页只能问已保存数据，核对完成的差异页才可生成本地草稿 ID。模型要写日程仍须逐次确认差异，失效提案须重新预览。
+
+点开历史对话后可直接在底部输入并发送。只从该条记录恢复最多 12 条已发送的用户/模型文字，同一条记录追加新消息；本机回执、旧提案、草稿 ID 和旧授权不作为对话上下文发送。输入栏上方显示这次使用的接收服务。Room v7 为新对话保留原页面定位；旧版只保存了显示名，能还原的日期或教学周沿用，不能还原的短实体 ID 不猜测，显示并使用打开历史时的页面。
 
 ## 设计与外观
 
@@ -283,9 +289,11 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 
 **v0.10.3 复审。** 带三项待排任务从 0.10.2 覆盖安装后，首次打开今天即展开队列；同一模拟器上，展开和收起时轴下沿均为 `y=1944 px`，助理输入区始于 `y=1955 px`。纸飞机与键盘发送均不先弹核对页；本地 HTTPS 验收中，改数据范围、看历史、删除对话均未触发模型请求。另在飞行模式下强停冷启，仍能打开历史原文。USB 覆盖安装后 OnePlus PLR110 的包管理器回读 0.10.3（18）。
 
+**v0.10.4 复审。** API 37、440 dpi：收起的队列球与加号均为 154 × 154 px。队列展开和收起时，时间轴下沿与助理输入栏上沿均为 `y=1955 px`；末端三个像素采样位置仍有轴线。第 11 周向第 12 周拖动，手指尚未松开、11/16–11/22 的日期仍在画面内时，标题已是「第 12 周」。事件视图把 09:30–11:00 显示为一行「空闲 · 1 小时 30 分钟」。用 0.10.3 写入的对话覆盖升级后可以续聊，消息仍在同一条记录；另用本地 HTTPS 服务验证上下文只取本对话最近 12 条文字。
+
 |阶段 / 用例|输入 → 可观察结果（校方登录、真实模型、联盟真机和性能有各自的验收条件）|
 |---|---|
-|M1 `WorkspaceTest`|新建 A、B、C，完成 C；以「去开会」压栈，添加 X。仅取 B 得 `[B,X]`，原帧仍显示 A、B 原序及原因，仅 A 可取；再全部恢复得 `[A,B,X]`。改 B 标题再压另一帧，旧快照不变。独立复位，对 `[A,B]` 帧与 `[X]` 队列分别验三种策略：队首 `[A,B,X]`、队尾 `[X,A,B]`、切换 `[A,B]` 且新帧只含 X；切换模式下选择 B 不新建帧。空原因/事务失败不移动任何项；连点、旋转、`adb shell am force-stop io.github.nakanomk.stacklife` 再启动均不重复、不丢任务。|
+|M1 `WorkspaceTest`|压栈 `[A,B]` 后加入 X；仅取 B 得 `[B,X]`，再全部恢复得 `[A,B,X]`。空原因允许入栈；事后补原因只改回执对应的帧，原序和快照不变。独立验证队首、队尾、整帧切换和输入失效回滚；重复点、旋转、强停冷启均不重复或丢任务。|
 |M2 `DayTimelineTest`|待排「报告提纲」30 分钟拖到 15:45 → 显示 15:45–16:15，仍是同一队列 ID，只有一个块。改到 16:00 → 原块移动；取消排程 → 块消失，队列保留。用 TalkBack 的「安排时间」走同一路。压栈再恢复已排任务，时段不变。|
 |M3 `HustImportTest`、`CourseTimelineTest`|自造周数组：首周周一 2026-09-07，第 1、3、9 周周一「操作系统」`JC="5–6"`，地点依次 A、B、B；周 1 重复一条，再加 `JC="实践"`。11 月 2 日起用冬表；待修正项不得成第一节。明确排除后，9 月 7 日显示 A 14:30–16:05，9 月 21 日显示 B，11 月 2 日显示 B 14:00–15:35。相同文件导两次仍三次课程，第 2 周为空。将任务拖入冬令课程 15:00 被拒，旧时段未动；15:35 可紧接安排。在线另须本人在获准设备登录 HUB，选学期、核对一门真实课再确认；遮挡身份/地点，不自动保存响应。|
 |M4 `GoalOrderTest`、`GraphTransactionTest`、`GraphEditorTest`|依 A/B/C/D/X 顺序创建，画 `A→B, A→C, B→D, C→D`，选 D：预览并生成 `[A,B,C,D]`，不含 X，A 只一次；原队列不变。拖动 C 不改变次序；加 `D→A` 被拒且图/帧不变；仅选孤立 X 生成一项。生成后改图不改历史帧。|

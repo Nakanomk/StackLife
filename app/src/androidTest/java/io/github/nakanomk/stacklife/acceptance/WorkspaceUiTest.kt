@@ -120,9 +120,16 @@ class WorkspaceUiTest {
     @Test fun pushSelectBThenResumeAThroughTheWorkbench() {
         runBlocking { store.apply(PlannerCommand.TaskAdd(TaskInput("A")), PlannerCommand.TaskAdd(TaskInput("B"))) }
         show()
-        ui.onNodeWithText("压栈").performClick()
-        ui.onNodeWithTag("reason").performTextInput("去开会")
-        ui.onNodeWithText("保存到栈").performClick()
+        ui.onNodeWithTag("queue-push").performSemanticsAction(SemanticsActions.OnClick) { press -> press(); press() }
+        val pushed = awaitQueue().frames.single()
+        assertEquals("", pushed.reason)
+        await(hasText("已压栈")).assertIsDisplayed()
+        ui.onNodeWithTag("push-reason").assertDoesNotExist()
+        ui.onNodeWithText("补充原因").performClick()
+        await(hasTestTag("push-reason")).performTextInput("去开会")
+        ui.onNodeWithText("保存").performClick()
+        ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodesWithTag("push-reason").fetchSemanticsNodes().isEmpty() }
+        assertEquals(pushed.copy(reason = "去开会"), runBlocking { store.state() }.frames.single())
         await(hasText("队列是空的"))
         ui.onNodeWithContentDescription("新增任务").performClick()
         ui.onNodeWithTag("title:0").performTextInput("X")
@@ -146,6 +153,62 @@ class WorkspaceUiTest {
         val restored = awaitQueue("A", "B", "X")
         assertEquals(interrupted.frames.single().items.map { it.taskId } + interrupted.queue.single().id, restored.queue.map { it.id })
         assertEquals(0, restored.frames.single().remaining)
+    }
+
+    @Test fun selectedPushKeepsItsReasonTargetAcrossAnotherPushAndRecreation() {
+        runBlocking { for (name in listOf("A", "B", "C")) store.apply(PlannerCommand.TaskAdd(TaskInput(name))) }
+        val scenario = ui.activityRule.scenario
+        fun attach() = scenario.onActivity { activity ->
+            activity.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
+        }
+        attach()
+        await(hasTestTag("nav:workspace")).performClick()
+        await(hasTestTag("queue-select")).performClick()
+        ui.onNodeWithTag("queue-push").assertIsNotEnabled()
+        ui.onNode(hasText("C") and isToggleable()).performClick()
+        ui.onNode(hasText("A") and isToggleable()).performClick()
+        ui.onNodeWithTag("queue-push").performClick()
+        val first = awaitQueue("B").frames.single()
+        assertEquals(listOf("A", "C"), first.items.map { it.title })
+        await(hasText("补充原因")).performClick()
+        // Nonmodal: B can be pushed while the original editor is still on screen.
+        await(hasText("压栈") and isEnabled()).performClick()
+        val second = awaitQueue().frames.single { it.id != first.id }
+        await(hasTestTag("push-reason")).performTextInput("接电话")
+        scenario.recreate()
+        attach()
+        await(hasTestTag("push-reason")).assertTextContains("接电话")
+        ui.onNodeWithText("保存").performClick()
+        await(hasText("补充原因")).performClick() // the second push now offers its own action
+        await(hasTestTag("push-reason")).performTextInput("不要保存")
+        ui.onNodeWithText("取消").performClick()
+        val frames = runBlocking { store.state() }.frames
+        assertEquals(listOf(second, first.copy(reason = "接电话")), frames)
+        await(hasText("栈") and hasClickAction()).performClick()
+        await(hasTestTag("frame:${second.id}")).assertTextContains("暂存的队列").performClick()
+        await(hasText("暂存的队列")).assertIsDisplayed()
+    }
+
+    @Test fun failedDirectPushShowsErrorAndRetryCreatesJustOneFrame() {
+        runBlocking { store.apply(PlannerCommand.TaskAdd(TaskInput("A"))) }
+        val before = runBlocking { store.state() }
+        val db = store.db.openHelper.writableDatabase
+        db.execSQL("CREATE TRIGGER reject_push BEFORE INSERT ON frame_items BEGIN SELECT RAISE(ABORT, 'push failure'); END")
+        show()
+        ui.onNodeWithTag("queue-push").performClick()
+        await(hasText("未能保存更改", substring = true)).assertIsDisplayed()
+        ui.onNodeWithTag("push-feedback").assertDoesNotExist()
+        assertEquals(before, runBlocking { store.state() })
+        db.execSQL("DROP TRIGGER reject_push")
+        ui.onNodeWithTag("queue-push").performClick()
+        await(hasText("已压栈")).assertIsDisplayed()
+        val dismissPush = SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and
+            (hasText("已压栈") or hasAnyDescendant(hasText("已压栈")))
+        await(dismissPush).performSemanticsAction(SemanticsActions.Dismiss)
+        ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodesWithTag("push-feedback").fetchSemanticsNodes().isEmpty() }
+        val frame = awaitQueue().frames.single()
+        assertEquals("", frame.reason)
+        assertEquals(listOf(before.queue.single().id), frame.items.map { it.taskId })
     }
 
     @Test fun recreatingDuringSaveConsumesTheOriginalReceipt() = runBlocking {

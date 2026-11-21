@@ -423,6 +423,34 @@ class AssistantProposalTest {
         assertEquals(2, server.requestCount); assertEquals(state, store.state())
     }
 
+    @Test fun historicalFollowUpSendsOnlyRecentTextAndAppendsToTheOriginalThread() = runBlocking {
+        val history = store.db.conversationHistory()
+        val originalPage = AssistantPage.Day(LocalDate.of(2026, 10, 17), ZoneId.of("Asia/Shanghai"))
+        val id = history.start(originalPage.scopeName(), "最早的旧消息", originalPage.historyKey())
+        repeat(8) {
+            history.append(id, HistoryRole.USER, "问题 $it")
+            history.append(id, HistoryRole.ASSISTANT, "答复 $it")
+        }
+        history.append(id, HistoryRole.NOTICE, "不可执行的旧提案回执")
+        val other = history.start("当前队列", "另一段不应发送的聊天")
+        tag("nav:workspace").performClick()
+        tag("assistant-history").performClick(); tag("assistant-history-thread-$id").performClick()
+        tag("history-reply-input").performTextReplacement("接着最后一条")
+        val baseline = store.state()
+        capture("history-continue.png")
+        assertEquals(0, server.requestCount)
+        assertEquals(18, history.observeMessages(id).first().size)
+        reply("接上了")
+        tag("history-reply-send").performClick(); await(hasText("接上了"))
+        val body = Json.parseToJsonElement(server.takeRequest(3, TimeUnit.SECONDS)!!.body!!.utf8()).jsonObject
+        val text = body.getValue("messages").jsonArray.map { it.jsonObject.getValue("content").jsonPrimitive.content }
+        assertTrue("2026-10-17" in text[1] && "Asia/Shanghai" in text[1])
+        assertEquals((2..7).flatMap { listOf("问题 $it", "答复 $it") } + "接着最后一条", text.drop(2))
+        assertEquals(listOf(id, other), history.observeConversations().first().map { it.id })
+        assertEquals(listOf("接着最后一条", "接上了"), history.observeMessages(id).first().takeLast(2).map { it.text })
+        assertEquals(baseline, store.state())
+    }
+
     @Test fun changingDisclosureOnlyAffectsAnExplicitNewSendAndDoesNotForwardOldChat() {
         reply("先不读取"); send("上一段对话"); await(hasText("先不读取"))
         server.takeRequest(3, TimeUnit.SECONDS)!!

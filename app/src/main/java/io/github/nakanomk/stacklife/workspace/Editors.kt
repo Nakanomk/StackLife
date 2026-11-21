@@ -3,7 +3,6 @@ package io.github.nakanomk.stacklife.workspace
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -11,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
@@ -128,26 +128,14 @@ private fun ReasonField(reason: TextFieldValue, onChange: (TextFieldValue) -> Un
 }
 
 @Composable
-internal fun PushEditor(queue: List<QueueTask>, actions: WorkspaceActions, onClose: () -> Unit) {
-    val action = rememberSubmission(actions) { if (it != SaveOutcome.REJECTED) onClose() }
-    var reason by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
-    var selected by rememberSaveable { mutableStateOf(ArrayList(queue.map { it.id })) }
-    val close = { if (!action.busy) onClose() }
-    BackHandler(enabled = action.busy) { /* The receipt closes the editor once. */ }
-    EditorPage("压栈", close, AssistantPage.Queue, backEnabled = !action.busy, footer = {
-        Primary("保存到栈", enabled = !action.busy && selected.isNotEmpty()) {
-            action.send(PlannerCommand.FramePush(reason.text, selected.toList()))
-        }
-    }) { top, bottom ->
-        LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
-            item { ReasonField(reason) { reason = it } }
-            item {
-                SectionTitle("保存哪些任务 · 已选 ${selected.size} 项")
-                Hint("默认保存整个队列，也可以取消勾选。任务将按此处的顺序保存。")
-            }
-            items(queue, key = { it.id }) { task ->
-                CheckRow(task.title, task.id in selected) { selected = ArrayList(selected.toggle(task.id)) }
-            }
-        }
+internal fun PushReasonEditor(frameId: String, actions: WorkspaceActions, close: () -> Unit) {
+    var reason by rememberSaveable(frameId, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
+    val action = rememberSubmission(actions) { if (it != SaveOutcome.REJECTED) close() }
+    Row(Modifier.fillMaxWidth().testTag("push-reason-editor"), verticalAlignment = Alignment.CenterVertically) {
+        TextField(reason, { reason = it }, Modifier.weight(1f).testTag("push-reason"),
+            enabled = !action.busy, singleLine = true, colors = lineFieldColors(), label = { Text("压栈原因") })
+        TextButton(onClick = close, enabled = !action.busy) { Text("取消") }
+        TextButton(onClick = { action.send(PlannerCommand.FrameAddReason(frameId, reason.text)) },
+            enabled = !action.busy && reason.text.isNotBlank()) { Text("保存") }
     }
 }

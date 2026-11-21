@@ -234,14 +234,14 @@ internal fun Secondary(label: String, enabled: Boolean = true, onClick: () -> Un
 }
 
 @Composable
-internal fun CheckRow(label: String, checked: Boolean, onToggle: () -> Unit) {
+internal fun CheckRow(label: String, checked: Boolean, enabled: Boolean = true, onToggle: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().toggleable(value = checked, role = Role.Checkbox, onValueChange = { onToggle() })
+        Modifier.fillMaxWidth().toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = { onToggle() })
             .heightIn(min = 48.dp).padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Checkbox(checked = checked, onCheckedChange = null)
+        Checkbox(checked = checked, onCheckedChange = null, enabled = enabled)
         Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }

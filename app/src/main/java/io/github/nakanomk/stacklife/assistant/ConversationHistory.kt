@@ -19,6 +19,7 @@ internal data class ConversationRow(
     val title: String,
     val updatedAtMillis: Long = 0,
     val lastMessageId: Long = 0,
+    val scopeKey: String? = null,
 )
 
 @Entity(
@@ -43,21 +44,25 @@ internal abstract class ConversationHistory {
     @Query("SELECT * FROM conversation_messages WHERE conversationId = :id ORDER BY id")
     abstract fun observeMessages(id: Long): Flow<List<ConversationMessageRow>>
 
+    @Query("SELECT * FROM conversation_messages WHERE conversationId = :id AND role IN ('USER', 'ASSISTANT') ORDER BY id DESC LIMIT :limit")
+    abstract suspend fun recentDialogue(id: Long, limit: Int): List<ConversationMessageRow>
+
     @Query("DELETE FROM conversations WHERE id = :id")
     abstract suspend fun delete(id: Long)
 
     @Transaction
-    open suspend fun start(scope: String, prompt: String): Long {
+    open suspend fun start(scope: String, prompt: String, scopeKey: String? = null): Long {
         val title = prompt.trimStart().take(80).trimEnd { it.isWhitespace() || it.isHighSurrogate() }
-        val id = insertConversation(ConversationRow(scope = scope, title = title))
+        val id = insertConversation(ConversationRow(scope = scope, scopeKey = scopeKey, title = title))
         record(id, HistoryRole.USER, prompt)
         return id
     }
 
     @Transaction
-    open suspend fun append(id: Long, role: HistoryRole, text: String) {
-        // A request may finish after its user deleted the conversation.
-        if (exists(id)) record(id, role, text)
+    open suspend fun append(id: Long, role: HistoryRole, text: String): Boolean {
+        if (!exists(id)) return false
+        record(id, role, text)
+        return true
     }
 
     private suspend fun record(id: Long, role: HistoryRole, text: String) {

@@ -78,6 +78,17 @@ class PlannerToolTest {
         detail.proposal(remove("active")); denied { detail.proposal(remove("departed")) }
     }
 
+    @Test fun pushReasonIsOptionalAndAmendmentRequiresAKnownFrame() {
+        val tools = PlannerTools(Reads(), AssistantPage.Task("t"), Disclosure())
+        assertEquals(ToolPlan.Commands(listOf(PlannerCommand.FramePush(taskIds = listOf("t"), ref = "saved"),
+            PlannerCommand.FrameAddReason("@saved", "等回电"))), tools.proposal(cmd("""
+            {"kind":"frame_push","taskIds":["t"],"ref":"saved"},
+            {"kind":"frame_add_reason","frameId":"@saved","reason":"等回电"}
+        """)))
+        denied { tools.proposal(cmd("""{"kind":"frame_add_reason","frameId":"unknown","reason":"冒用"}""")) }
+        denied { tools.proposal(cmd("""{"kind":"frame_create","tasks":[{"title":"A"}]}""")) }
+    }
+
     @Test fun protocolRejectsMalformedAndPrivilegedInputs() = runBlocking {
         val tools = PlannerTools(Reads(), AssistantPage.Task("t"), Disclosure())
         for (input in listOf(

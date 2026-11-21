@@ -63,9 +63,9 @@ internal fun DockOverlay(
         Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), bottomBar = {
             CompositionLocalProvider(LocalCapsuleBackdrop provides source) {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (composer != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    if (composer != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            Box(chromeRail().onFocusChanged { composerFocused = it.hasFocus }.focusGroup()) {
+                            Box(chromeRail(top = 0.dp).onFocusChanged { composerFocused = it.hasFocus }.focusGroup()) {
                                 AssistantComposer(composer, persistentRoot = navigationBar != null)
                             }
                         }
@@ -82,7 +82,8 @@ internal fun DockOverlay(
     }
 }
 
-private fun chromeRail() = Modifier.widthIn(max = 520.dp).fillMaxWidth().padding(horizontal = chromeGutter, vertical = 4.dp)
+private fun chromeRail(top: Dp = 4.dp) = Modifier.widthIn(max = 520.dp).fillMaxWidth()
+    .padding(start = chromeGutter, end = chromeGutter, top = top, bottom = 4.dp)
 
 @Composable
 internal fun rememberDestinationCapsule(active: String, pagerPosition: State<Float>? = null, onSelect: (String) -> Unit): @Composable () -> Unit {

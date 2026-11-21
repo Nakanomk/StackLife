@@ -1,9 +1,12 @@
 package io.github.nakanomk.stacklife.courses
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -45,7 +48,19 @@ private fun CourseMeeting.timeLabel() = "${campusClock.format(Instant.ofEpochMil
 internal fun CourseMeeting.periodLabel() = if (firstPeriod == lastPeriod) "第 $firstPeriod 节" else "第 $firstPeriod–$lastPeriod 节"
 
 @Composable
-private fun RowScope.WeekPicker(term: TermSpec, week: Int, onWeek: (Int) -> Unit) {
+private fun RowScope.WeekPicker(term: TermSpec, selected: Int, pager: PagerState, onWeek: (Int) -> Unit) {
+    val dragged by pager.interactionSource.collectIsDraggedAsState()
+    val week by remember(pager, selected) { derivedStateOf {
+        val origin = pager.settledPage
+        when {
+            dragged -> {
+                val travel = pager.currentPage - origin + pager.currentPageOffsetFraction
+                (origin + travel.compareTo(0f)).coerceIn(0, pager.pageCount - 1) + 1
+            }
+            pager.isScrollInProgress && selected == origin + 1 -> pager.targetPage + 1
+            else -> selected
+        }
+    } }
     IconButton(onClick = { onWeek(week - 1) }, enabled = week > 1, modifier = Modifier.testTag("course-prev")) {
         Icon(painterResource(R.drawable.ic_chevron_left), "上周")
     }
@@ -77,6 +92,9 @@ internal fun CourseHome(
     onRemove: (TermSpec) -> Unit, onSettings: () -> Unit,
 ) {
     var listMode by rememberSaveable { mutableStateOf(false) }
+    val pager = if (term != null && week != null) key(term.id) {
+        rememberPagerState(initialPage = week - 1) { term.weeks }
+    } else null
     val editor: ManualEditorModel = viewModel { ManualEditorModel() }
     val add = { editor.form = ManualCourseForm(term, week ?: 1) }
     val terms = catalog.terms
@@ -112,11 +130,11 @@ internal fun CourseHome(
                 }
             }
         }) {
-            if (term != null && week != null) WeekPicker(term, week) { onWeek(term, it) }
+            if (term != null && week != null && pager != null) WeekPicker(term, week, pager) { onWeek(term, it) }
             else TextButton(onClick = onImport, modifier = Modifier.testTag("course-import")) { Text("导入课表") }
         }
     }) { top, bottom ->
-        if (term == null || week == null) {
+        if (term == null || week == null || pager == null) {
             Column(Modifier.fillMaxSize().padding(top = top, bottom = bottom).verticalScroll(rememberScrollState())
                 .padding(16.dp)) {
                 Text("还没有课表", style = MaterialTheme.typography.titleMedium)
@@ -127,7 +145,7 @@ internal fun CourseHome(
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else key(term.id) {
-            CalendarPager(week - 1, term.weeks, { onWeek(term, it + 1) }, Modifier.fillMaxSize()) { index ->
+            CalendarPager(week - 1, term.weeks, { onWeek(term, it + 1) }, Modifier.fillMaxSize(), pager) { index ->
                 val query = remember(term.id, index) { PlannerQuery.Week(term.id, index + 1) }
                 val data by remember(model, query) { model.week(query) }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
                 ReadPanel(data) { result ->

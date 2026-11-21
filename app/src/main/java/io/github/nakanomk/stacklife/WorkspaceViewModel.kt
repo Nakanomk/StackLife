@@ -12,6 +12,8 @@ import java.util.UUID
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -84,10 +86,24 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
     }
     private var latest: Ticket? = null
 
-    override fun start(command: PlannerCommand): String? = startWrite(notifyOnFailure = true) {
+    // Keep the confirmed frame ID separate from the most recent write ticket: another task or
+    // restore may commit before the user taps the snackbar. Never infer it from frame list order.
+    private val pushed = MutableStateFlow<String?>(null)
+    val pushedFrame = pushed.asStateFlow()
+    fun dismissPush(id: String) { pushed.compareAndSet(id, null) }
+
+    fun pushQueue(taskIds: List<String>): String? {
+        // A previous success must not be mistaken for the outcome of this attempt.
+        pushed.value = null
+        return submit(PlannerCommand.FramePush(taskIds = taskIds, ref = "pushed")) { pushed.value = it.refs.getValue("pushed") }
+    }
+
+    override fun start(command: PlannerCommand): String? = submit(command)
+
+    private fun submit(command: PlannerCommand, applied: ((PreviewResult.Ready) -> Unit)? = null): String? = startWrite(notifyOnFailure = true) {
         when (val preview = planner.preview(listOf(command))) {
             is PreviewResult.Rejected -> preview.message
-            is PreviewResult.Ready -> commit(preview.proposalId)
+            is PreviewResult.Ready -> commit(preview.proposalId).also { error -> if (error == null) applied?.invoke(preview) }
         }
     }
 

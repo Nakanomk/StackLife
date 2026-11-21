@@ -72,6 +72,9 @@ enum class FrameSource { PUSH, MANUAL, SWAP, GRAPH }
 enum class RestorePolicy { PREPEND, APPEND, SWAP }
 enum class RestoreMode { ALL, SELECTED }
 
+/** A label for local UI and confirmation cards, never stored as a reason. */
+internal fun frameLabel(reason: String): String = reason.ifBlank { "暂存的队列" }
+
 /** Items are immutable snapshots in their original order. */
 data class FrameView(
     val id: String,
@@ -104,7 +107,8 @@ sealed interface PlannerCommand {
     data class TaskRemove(val taskId: String) : PlannerCommand
     data class QueueOrder(val taskIds: List<String>) : PlannerCommand
     data class FrameCreate(val reason: String, val tasks: List<TaskInput>, val ref: String? = null) : PlannerCommand
-    data class FramePush(val reason: String, val taskIds: List<String>, val ref: String? = null) : PlannerCommand
+    data class FramePush(val reason: String = "", val taskIds: List<String>, val ref: String? = null) : PlannerCommand
+    data class FrameAddReason(val frameId: String, val reason: String) : PlannerCommand
     data class FrameRestore(val frameId: String, val mode: RestoreMode, val taskIds: List<String> = emptyList()) : PlannerCommand
     data class SetRestorePolicy(val policy: RestorePolicy) : PlannerCommand
     data class EditAppearance(val patch: AppearancePatch, val expected: Appearance? = null) : PlannerCommand

@@ -78,6 +78,38 @@ class WorkspaceTest {
         assertEquals("新标题", expected.frames.single { it.id != frame.id }.items.single().title)
     }
 
+    @Test fun optionalPushReasonAmendsOnlyTheCommittedFrameAcrossReopen() = runBlocking {
+        store.apply(TaskAdd(TaskInput("A")), TaskAdd(TaskInput("B")), TaskAdd(TaskInput("C")))
+        val (a, b, c) = store.state().queue
+        val push = FramePush("  ", listOf(c.id, a.id), ref = "held")
+        val preview = store.proposal(push)
+        val id = preview.refs.getValue("held")
+        assertTrue(preview.changes.any { it.entityId == id && it.field == "压栈原因" && it.after == "未填写" && it.entityLabel == "暂存的队列" })
+        assertTrue(store.api.commit(preview.proposalId) is CommitResult.Applied)
+        assertTrue(store.api.commit(preview.proposalId) is CommitResult.Rejected)
+        assertTrue(store.api.preview(listOf(push)) is PreviewResult.Rejected)
+        val first = store.state().frames.single()
+        assertEquals(id, first.id)
+        assertEquals("", first.reason)
+        assertEquals(listOf(a.id, c.id), first.items.map { it.taskId })
+
+        store.apply(FramePush(taskIds = listOf(b.id)))
+        store.reopen()
+        val before = store.state()
+        assertEquals(first, before.frames.last())
+        assertTrue(store.api.preview(listOf(FrameAddReason(id, "  "))) is PreviewResult.Rejected)
+        assertTrue(store.api.preview(listOf(FrameAddReason("不存在", "补充"))) is PreviewResult.Rejected)
+        val reason = FrameAddReason(id, "  临时开会  ")
+        val change = store.proposal(reason)
+        assertEquals(before, store.state())
+        assertTrue(store.api.commit(change.proposalId) is CommitResult.Applied)
+        assertTrue(store.api.commit(change.proposalId) is CommitResult.Rejected)
+        assertTrue(store.api.preview(listOf(FrameAddReason(id, "覆盖"))) is PreviewResult.Rejected)
+        store.reopen()
+        assertEquals(before.copy(revision = before.revision + 1,
+            frames = listOf(before.frames.first(), first.copy(reason = "临时开会"))), store.state())
+    }
+
     @Test fun prependKeepsCurrentQueueBehindSourceOrder() = checkRestore(RestorePolicy.PREPEND, listOf("A", "B", "X"))
     @Test fun appendKeepsCurrentQueueInFront() = checkRestore(RestorePolicy.APPEND, listOf("X", "A", "B"))
     @Test fun swapSavesCurrentQueueOnce() = checkRestore(RestorePolicy.SWAP, listOf("A", "B"))
@@ -128,7 +160,7 @@ class WorkspaceTest {
         store.apply(QueueOrder(listOf(d, b, c, a)))
         val before = store.state()
         val invalid = listOf(
-            FramePush("  ", listOf(a)), FramePush("停", emptyList()), FramePush("停", listOf(a, "missing")),
+            FrameCreate("  ", listOf(TaskInput("A"))), FramePush("停", emptyList()), FramePush("停", listOf(a, "missing")),
             QueueOrder(listOf(a, b, b, d)), TaskAdd(TaskInput(" ")), TaskEdit(a, "A", minutes = 0),
             FramePush("停", listOf("@not-declared")),
         )

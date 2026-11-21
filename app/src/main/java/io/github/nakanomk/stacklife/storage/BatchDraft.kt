@@ -6,6 +6,7 @@ import io.github.nakanomk.stacklife.planner.AppearancePatch
 import io.github.nakanomk.stacklife.planner.decodeAppearance
 import io.github.nakanomk.stacklife.planner.encodeAppearance
 import io.github.nakanomk.stacklife.planner.FrameSource
+import io.github.nakanomk.stacklife.planner.frameLabel
 import io.github.nakanomk.stacklife.planner.PlannerChange
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.RestoreMode
@@ -25,6 +26,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     private val courses = CourseDraft(courseDao)
     private val graphs = LinkedHashMap<String, GraphDraft>()
     private val frames = ArrayList<FrameRow>()
+    private var amendedFrames: MutableList<FrameRow>? = null
     private val frameNames by lazy(LazyThreadSafetyMode.NONE) { HashMap<String, String>() }
     private val items = ArrayList<FrameItemRow>()
     private val members = HashMap<String, List<String>>()
@@ -83,6 +85,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
                 if (ids.isEmpty()) invalid("请选择需要压栈的任务。")
                 saveQueue(newFrame(cmd.reason, FrameSource.PUSH, cmd.ref), ids)
             }
+            is PlannerCommand.FrameAddReason -> addReason(cmd)
             is PlannerCommand.FrameRestore -> restore(cmd)
             is PlannerCommand.SetRestorePolicy -> policy = cmd.policy
             is PlannerCommand.EditAppearance -> {
@@ -182,11 +185,31 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     }
 
     private fun newFrame(reason: String, source: FrameSource, ref: String?): FrameRow {
-        val label = reason.trim().ifEmpty { invalid("请填写保存栈帧的原因。") }
-        return FrameRow(newId(ref, Kind.FRAME), label, System.currentTimeMillis(), source).also { frames.add(it); frameNames[it.id] = label }
+        val label = reason.trim()
+        if (label.isEmpty() && source != FrameSource.PUSH) invalid("请填写保存栈帧的原因。")
+        return FrameRow(newId(ref, Kind.FRAME), label, System.currentTimeMillis(), source).also {
+            frames.add(it); frameNames[it.id] = frameLabel(label)
+        }
     }
 
-    private fun frameName(id: String) = frameNames.getOrPut(id) { dao.frame(id)?.reason ?: id }
+    private fun addReason(cmd: PlannerCommand.FrameAddReason) {
+        val id = resolve(cmd.frameId, Kind.FRAME)
+        val reason = cmd.reason.trim().ifEmpty { invalid("补充的原因不能为空。") }
+        val index = frames.indexOfFirst { it.id == id }
+        val frame = if (index >= 0) frames[index] else amendedFrames?.find { it.id == id } ?: dao.frame(id)
+        if (frame == null || frame.source != FrameSource.PUSH) invalid("只能给从队列压入的栈帧补充原因。")
+        if (frame.reason.isNotBlank()) invalid("此栈帧已有原因，未覆盖原内容。")
+        val amended = frame.copy(reason = reason)
+        if (index >= 0) {
+            frames[index] = amended
+        } else {
+            (amendedFrames ?: ArrayList<FrameRow>().also { amendedFrames = it }).add(amended)
+            change(id, "压栈原因", "未填写", reason, frameLabel(frame.reason))
+        }
+        frameNames[id] = reason
+    }
+
+    private fun frameName(id: String) = frameNames.getOrPut(id) { dao.frame(id)?.let { frameLabel(it.reason) } ?: id }
 
     private inline fun populateFrame(frame: FrameRow, count: Int, makeTask: (Int) -> TaskRow) {
         val ids = ArrayList<String>(count)
@@ -361,7 +384,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             change(id, "队列位置", before?.queuePosition?.plus(1), row.queuePosition?.plus(1))
         }
         for (frame in frames) {
-            change(frame.id, "压栈原因", null, frame.reason)
+            change(frame.id, "压栈原因", null, frame.reason.ifBlank { "未填写" }, frameLabel(frame.reason))
             change(frame.id, "保存时刻", null, Instant.ofEpochMilli(frame.savedAtMillis).atZone(ZoneId.systemDefault()).format(savedTimeFormat))
             change(frame.id, "栈帧来源", null, when (frame.source) {
                 FrameSource.PUSH -> "从队列保存"
@@ -390,7 +413,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         val graphWrites = graphs.values.mapNotNull { it.finish(changes) }
         val refs = if (bindings.isEmpty()) emptyMap() else Collections.unmodifiableMap(bindings.mapValues { it.value.id })
         return Proposal(base.revision, base.copy(revision = base.revision + 1, restorePolicy = policy, appearance = settingsJson),
-            Collections.unmodifiableList(changes), frames, inserts, updates, positions, items, slotDelta, courseWrites, graphWrites, refs)
+            Collections.unmodifiableList(changes), frames, amendedFrames.orEmpty(), inserts, updates, positions, items, slotDelta, courseWrites, graphWrites, refs)
     }
 
     private fun change(id: String, field: String, before: Any?, after: Any?, label: String? = edited[id]?.title) {

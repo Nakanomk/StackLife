@@ -83,7 +83,8 @@ internal class PlannerTools(private val api: PlannerApi, val page: AssistantPage
             "task_remove" -> PlannerCommand.TaskRemove(taskId())
             "queue_order" -> PlannerCommand.QueueOrder(taskIds())
             "frame_create" -> PlannerCommand.FrameCreate(o.string("reason"), o.objects("tasks").map { it.input() }, ref)
-            "frame_push" -> PlannerCommand.FramePush(o.string("reason"), taskIds(), ref)
+            "frame_push" -> PlannerCommand.FramePush(o.optString("reason").orEmpty(), taskIds(), ref)
+            "frame_add_reason" -> PlannerCommand.FrameAddReason(seen.frame(o.string("frameId")), o.string("reason"))
             "frame_restore" -> {
                 val mode = if (o.string("mode") == "all") RestoreMode.ALL else RestoreMode.SELECTED
                 val selection = if ("taskIds" in o) taskIds() else emptyList()

@@ -151,6 +151,7 @@ internal class Proposal(
     val settings: SettingsRow,
     val changes: List<PlannerChange>,
     private val frames: List<FrameRow>,
+    private val amendedFrames: List<FrameRow>,
     private val inserts: List<TaskRow>,
     private val updates: List<TaskRow>,
     private val positions: List<PositionUpdate>,
@@ -162,6 +163,7 @@ internal class Proposal(
 ) {
     fun applyTo(dao: PlannerDao, courseDao: CourseDao, graphDao: GraphDao) {
         if (frames.isNotEmpty()) dao.insertFrames(frames)
+        if (amendedFrames.isNotEmpty()) dao.updateFrames(amendedFrames)
         if (inserts.isNotEmpty()) dao.insertTasks(inserts)
         if (updates.isNotEmpty()) dao.updateTasks(updates)
         if (positions.isNotEmpty()) dao.updatePositions(positions)

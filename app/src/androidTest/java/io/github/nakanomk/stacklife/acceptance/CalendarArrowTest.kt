@@ -32,7 +32,7 @@ class CalendarArrowTest {
         return ui.onNode(matcher)
     }
 
-    private fun slide(content: String, arrow: SemanticsMatcher, direction: Int) {
+    private fun slide(content: String, arrow: SemanticsMatcher, direction: Int, weekHeading: String? = null) {
         val outgoing = awaitOne(hasTestTag(content)).fetchSemanticsNode()
         val width = outgoing.size.width
         val dock = ui.onNodeWithTag("navigation-capsule").fetchSemanticsNode().boundsInRoot
@@ -41,6 +41,7 @@ class CalendarArrowTest {
         try {
             ui.runOnUiThread { click() }
             ui.mainClock.advanceTimeBy(144)
+            if (weekHeading != null) ui.onNodeWithTag("course-week").assertTextContains(weekHeading)
             val displacement = ui.runOnIdle {
                 val coordinates = outgoing.layoutInfo.coordinates
                 assertTrue("Old $content must still be drawn mid-transition", coordinates.isAttached && outgoing.layoutInfo.isPlaced)
@@ -67,9 +68,18 @@ class CalendarArrowTest {
         slide("day-axis", hasContentDescription("后一天"), 1)
         slide("day-axis", hasContentDescription("前一天"), -1)
         ui.onNodeWithTag("nav:courses").performClick()
-        slide("week-grid", hasTestTag("course-next"), 1)
+        val grid = awaitOne(hasTestTag("week-grid"))
+        grid.performTouchInput {
+            down(center); moveBy(Offset(-width * .16f, 0f), 90)
+        }
+        ui.onNodeWithTag("course-week").assertTextContains("第 2 周")
+        grid.performTouchInput {
+            moveBy(Offset(width * .16f, 0f), 300); advanceEventTime(200); up()
+        }
+        awaitOne(hasTestTag("course-week") and hasText("第 1 周"))
+        slide("week-grid", hasTestTag("course-next"), 1, "第 2 周")
         awaitOne(hasTestTag("course-week") and hasText("第 2 周")).assertIsDisplayed()
-        slide("week-grid", hasTestTag("course-prev"), -1)
+        slide("week-grid", hasTestTag("course-prev"), -1, "第 1 周")
         awaitOne(hasTestTag("course-week") and hasText("第 1 周")).assertIsDisplayed()
     }
 }

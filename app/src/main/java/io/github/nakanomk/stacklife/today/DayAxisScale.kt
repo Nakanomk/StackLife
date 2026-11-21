@@ -40,12 +40,17 @@ internal sealed interface AxisEntry {
     }
 }
 
+internal fun DayPlan.chronologicalEntries(): List<AxisEntry> = buildList<AxisEntry> {
+    for (block in blocks) add(AxisEntry.Task(block, block.taskId in conflictingTaskIds))
+    for (course in courses) add(AxisEntry.Course(course))
+}.sortedBy { it.startMillis }
+
 internal data class AxisGroup(val start: Long, val end: Long, val lanes: List<List<AxisEntry>>)
 
 /** The same piecewise transform draws, hit-tests and auto-scrolls. Expand short occupied
  * intervals in place, rather than covering adjacent appointments with oversized touch targets. */
-internal class DayAxisScale(plan: DayPlan, pixelsPerMinute: Float, minimumBlockHeight: Int, minimumCourseHeight: Int) {
-    val day = plan.day
+internal class DayAxisScale(val day: PlannerQuery.Day, entries: List<AxisEntry>, pixelsPerMinute: Float,
+    minimumBlockHeight: Int, minimumCourseHeight: Int) {
     val bands: List<AxisBand>
     val groups: List<AxisGroup>
     val height: Int
@@ -63,10 +68,6 @@ internal class DayAxisScale(plan: DayPlan, pixelsPerMinute: Float, minimumBlockH
                 }
             }
         }.sortedBy { it.millis }
-        val entries = buildList<AxisEntry> {
-            for (block in plan.blocks) add(AxisEntry.Task(block, block.taskId in plan.conflictingTaskIds))
-            for (course in plan.courses) add(AxisEntry.Course(course))
-        }.sortedBy { it.startMillis }
         fun start(entry: AxisEntry) = maxOf(entry.startMillis, day.startMillis)
         fun end(entry: AxisEntry) = minOf(entry.endMillis, day.endMillis)
 

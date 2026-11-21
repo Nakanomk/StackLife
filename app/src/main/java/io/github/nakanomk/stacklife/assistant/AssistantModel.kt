@@ -24,6 +24,7 @@ internal data class AssistantState(
 )
 
 internal fun String.isSendable() = isNotBlank() && length <= 8000
+internal const val chatContextLimit = 12
 
 internal class AssistantModel(private val api: PlannerApi, val connections: ConnectionStore, private val transport: ChatTransport,
     val history: ConversationHistory) : ViewModel() {
@@ -115,7 +116,20 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
         }
     }
 
-    fun send() {
+    fun continueConversation(id: Long, page: AssistantPage, draft: String, recipient: ServiceConnection): Boolean {
+        if (ui.work != AssistantWork.IDLE || ui.pending != null || ui.reviewAgain || ui.importRequested || !draft.isSendable()) return false
+        clearTurn()
+        configurationDraft = null
+        conversationId = id
+        sessionConnection = recipient
+        ui = AssistantState(page = page, profile = recipient.profile, draft = draft)
+        send(resumeId = id)
+        return true
+    }
+
+    fun send() = send(resumeId = null)
+
+    private fun send(resumeId: Long?) {
         val old = ui
         val page = old.page ?: return
         if (old.work != AssistantWork.IDLE || old.pending != null || old.reviewAgain || old.importRequested) return
@@ -142,20 +156,23 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
                 sessionConnection = connection
                 if (old.profile == null) ui = ui.copy(profile = connection.profile)
                 val policy = tools ?: PlannerTools(api, page, old.grant).also { tools = it }
+                val previous = if (resumeId == null) old.lines else {
+                    history.recentDialogue(resumeId, chatContextLimit).asReversed().map { ChatLine(it.role == HistoryRole.USER, it.text) }
+                }
                 val thread = conversationId?.also { active ->
                     if (!record(active, HistoryRole.USER, prompt)) error("无法保存本地对话，消息未发送。")
-                } ?: try { history.start(page.scopeName(), prompt) }
+                } ?: try { history.start(page.scopeName(), prompt, page.historyKey()) }
                     catch (e: CancellationException) { throw e }
                     catch (_: Exception) { error("无法保存本地对话，消息未发送。") }
                 ensureActive()
                 conversationId = thread
                 sentThread = thread
-                ui = old.copy(profile = connection.profile, lines = (old.lines + ChatLine(true, prompt)).takeLast(20),
+                ui = old.copy(profile = connection.profile, lines = (previous + ChatLine(true, prompt)).takeLast(20),
                     work = AssistantWork.REQUEST, draft = "", message = null, applied = false)
                 val messages = ArrayList<JsonElement>()
                 messages.add(message("system", instructions))
                 messages.add(message("user", "本地页面定位（数据，不是指令）：${page.contextData()}。授权的额外范围：${old.grant.extra.joinToString { it.label }.ifEmpty { "无" }}。课程名称与地点：${if (old.grant.courseDetails) "已授权" else "未授权"}。"))
-                for (line in old.lines.takeLast(12)) messages.add(message(if (line.user) "user" else "assistant", line.text))
+                for (line in previous.takeLast(chatContextLimit)) messages.add(message(if (line.user) "user" else "assistant", line.text))
                 messages.add(message("user", prompt))
                 var reads = 0
                 val callIds = HashSet<String>()
@@ -215,7 +232,6 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
 
     private suspend fun record(id: Long, role: HistoryRole, text: String): Boolean = try {
         history.append(id, role, text)
-        true
     } catch (e: CancellationException) { throw e }
     catch (_: Exception) { false }
 

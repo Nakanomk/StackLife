@@ -27,9 +27,9 @@ import io.github.nakanomk.stacklife.planner.RestorePolicy
     entities = [TaskRow::class, FrameRow::class, FrameItemRow::class, SettingsRow::class, TimeBlockRow::class,
         TermRow::class, CourseRow::class, GraphRow::class, GraphNodeRow::class, GraphEdgeRow::class,
         ConversationRow::class, ConversationMessageRow::class],
-    version = 6,
+    version = 7,
     autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4),
-        AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6)],
+        AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7)],
     exportSchema = true,
 )
 abstract class PlannerDatabase : RoomDatabase() {
@@ -169,6 +169,7 @@ internal interface PlannerDao {
     fun restorableIds(frameId: String): List<String>
 
     @Insert fun insertFrames(frames: List<FrameRow>)
+    @Update fun updateFrames(frames: List<FrameRow>)
     @Insert fun insertTasks(tasks: List<TaskRow>)
     @Update fun updateTasks(tasks: List<TaskRow>)
     @Update(entity = TaskRow::class) fun updatePositions(positions: List<PositionUpdate>)

@@ -2,6 +2,7 @@ package io.github.nakanomk.stacklife.today
 
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -16,8 +17,8 @@ import kotlinx.coroutines.launch
  * Publish a touch selection only once it settles; a cancelled swipe never changes scope. */
 @Composable
 internal fun CalendarPager(page: Int, count: Int, onSelect: (Int) -> Unit, modifier: Modifier,
+    pager: PagerState = rememberPagerState(initialPage = page) { count },
     content: @Composable (Int) -> Unit) {
-    val pager = rememberPagerState(initialPage = page) { count }
     val select by rememberUpdatedState(onSelect)
     val motion = LocalMotionEnabled.current
     LaunchedEffect(page, count, pager, motion) {

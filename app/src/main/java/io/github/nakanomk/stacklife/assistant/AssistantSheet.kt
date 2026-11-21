@@ -49,7 +49,7 @@ import io.github.nakanomk.stacklife.workspace.Hint
 import java.util.UUID
 
 internal val LocalAssistant = staticCompositionLocalOf<AssistantModel?> { null }
-internal val LocalOpenChatHistory = staticCompositionLocalOf<() -> Unit> { error("Missing conversation history host") }
+internal val LocalOpenChatHistory = staticCompositionLocalOf<(AssistantPage) -> Unit> { error("Missing conversation history host") }
 
 @Composable
 internal fun AssistantComposer(page: AssistantPage, persistentRoot: Boolean = false) {
@@ -73,19 +73,20 @@ private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: As
     val active = ui.page == null
     val surface = if (active) Modifier else Modifier.clearAndSetSemantics {}
     val origin = ui.draftPage.takeIf { active && ui.composerId == id }
+    val openHistory = LocalOpenChatHistory.current
     MessageEditor(if (active && ui.composerId == id) ui.draft else "", origin?.scopeName() ?: scope,
         { model.editLocal(id, it, page) }, { model.submitLocal(id, target) },
-        origin?.takeIf { page != null && privateScope == null }?.let { "草稿范围：${it.scopeName()}" }, active, surface)
+        origin?.takeIf { page != null && privateScope == null }?.let { "草稿范围：${it.scopeName()}" }, active, surface,
+        openHistory = { openHistory(page ?: AssistantPage.Terms) })
 }
 
 @Composable
-private fun MessageEditor(text: String, scope: String, onChange: (String) -> Unit, onSend: () -> Unit, originHint: String? = null,
-    active: Boolean = true, modifier: Modifier = Modifier) {
+internal fun MessageEditor(text: String, scope: String, onChange: (String) -> Unit, onSend: () -> Unit, originHint: String? = null,
+    active: Boolean = true, modifier: Modifier = Modifier, openHistory: (() -> Unit)? = null, tagPrefix: String = "assistant") {
     val colors = MaterialTheme.colorScheme
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val haptics = LocalHapticFeedback.current
-    val openHistory = LocalOpenChatHistory.current
     var editing by remember { mutableStateOf(false) }
     val solidBorder = when {
         editing -> BorderStroke(1.5.dp, colors.primary)
@@ -102,13 +103,13 @@ private fun MessageEditor(text: String, scope: String, onChange: (String) -> Uni
     }
     StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth().then(modifier), colors.surfaceContainerHigh, solidBorder = solidBorder) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { keyboard?.hide(); openHistory() }, enabled = active,
+            if (openHistory != null) IconButton(onClick = { keyboard?.hide(); openHistory() }, enabled = active,
                 modifier = Modifier.size(48.dp).testTag("assistant-history")) {
                 Icon(painterResource(R.drawable.ic_history), "历史对话", tint = colors.onSurfaceVariant)
-            }
+            } else Spacer(Modifier.width(16.dp))
             CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
                 BasicTextField(value = text, onValueChange = onChange, singleLine = true, enabled = active,
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("assistant-input")
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("$tagPrefix-input")
                         .semantics { contentDescription = "$scope · 助理消息" }
                         .onFocusChanged { editing = it.isFocused }
                         .onPreviewKeyEvent {
@@ -128,7 +129,7 @@ private fun MessageEditor(text: String, scope: String, onChange: (String) -> Uni
                         }
                     } })
             }
-            IconButton(onClick = ::submit, enabled = enabled, modifier = Modifier.size(48.dp).testTag("assistant-send"),
+            IconButton(onClick = ::submit, enabled = enabled, modifier = Modifier.size(48.dp).testTag("$tagPrefix-send"),
                 colors = IconButtonDefaults.iconButtonColors(contentColor = colors.primary)) {
                 Icon(painterResource(R.drawable.ic_assistant_send), contentDescription = "发送消息")
             }
@@ -142,6 +143,7 @@ private fun MessageEditor(text: String, scope: String, onChange: (String) -> Uni
 internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImport: () -> Unit) {
     val ui by model.state.collectAsStateWithLifecycle()
     val page = ui.page ?: return
+    val openHistory = LocalOpenChatHistory.current
     var expanded by rememberSaveable(page) { mutableStateOf(false) }
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true,
         confirmValueChange = { it != SheetValue.Hidden || model.state.value.work != AssistantWork.COMMIT })
@@ -275,7 +277,7 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
                 }
                 ui.reviewAgain -> Row { ActionPill("放弃提案", model::cancel); ActionPill("重新预览", model::refreshProposal, prominent = true) }
                 ui.importRequested -> Row { ActionPill("取消", model::cancel); ActionPill("打开本地课表导入器", { model.close(); onImport() }, prominent = true) }
-                else -> MessageEditor(ui.draft, page.scopeName(), model::editMessage, model::send)
+                else -> MessageEditor(ui.draft, page.scopeName(), model::editMessage, model::send, openHistory = { openHistory(page) })
             }
         }
     }

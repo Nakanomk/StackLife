@@ -64,7 +64,6 @@ class MainActivity : ComponentActivity() {
 @Serializable private data class EditAppearance(val group: String) : NavKey
 @Serializable private data object ModelConnection : NavKey
 @Serializable private data object AddTask : NavKey
-@Serializable private data object PushTasks : NavKey
 @Serializable private data object CreateFrame : NavKey
 @Serializable private data object ImportCourses : NavKey
 @Serializable private data class RemoveTerm(val id: String) : NavKey
@@ -111,8 +110,8 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
     val animate = LocalMotionEnabled.current
     val direction = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
     val privateScreens = remember { mutableIntStateOf(0) }
-    var historyOpen by rememberSaveable { mutableStateOf(false) }
-    CompositionLocalProvider(LocalOpenChatHistory provides { historyOpen = true }) {
+    var historySource by rememberSaveable { mutableStateOf<String?>(null) }
+    CompositionLocalProvider(LocalOpenChatHistory provides { historySource = it.historyKey() }) {
     PlannerPopupHost(stack.last() != ModelConnection && stack.last() != ImportCourses && privateScreens.intValue == 0) {
     SharedTransitionLayout {
         val shared: SharedModifier = { key ->
@@ -173,7 +172,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                                                     onRevealed = { revealStart = null }, onAdd = { navigate(AddTask) })
                                                 Destination.WORKSPACE -> WorkspacePanel(model) { workspace ->
                                                     WorkspaceScreen(workspace, model, { navigate(TaskDetail(it)) }, { navigate(FrameDetail(it)) },
-                                                        { navigate(Preferences) }, if (front) shared else noCardBounds, frames, { frames = it }, { navigate(PushTasks) },
+                                                        { navigate(Preferences) }, if (front) shared else noCardBounds, frames, { frames = it },
                                                         { navigate(CreateFrame) }, { navigate(AddTask) })
                                                 }
                                                 Destination.GRAPHS -> GraphsRoute(model, { navigate(GraphEditor(it)) }, { navigate(Preferences) })
@@ -199,7 +198,6 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                         back()
                     })
                 }
-                entry<PushTasks> { WorkspacePanel(model) { PushEditor(it.queue, model, back) } }
                 entry<CreateFrame> { TaskEditor(model, back, createFrame = true) }
                 entry<AddTask> { TaskEditor(model, back) }
                 entry<ImportCourses> { PrivateScreen(privateScreens) {
@@ -231,7 +229,9 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
             },
         )
     }
-    if (historyOpen) ConversationHistorySheet(assistant.history, assistant::deleteConversation, onClose = { historyOpen = false })
+    val source = historySource
+    if (source != null) ConversationHistorySheet(assistant, remember(source) { historyPage(source) },
+        configuring = stack.last() == ModelConnection, onSettings = { navigate(ModelConnection) }, onClose = { historySource = null })
     else AssistantSheet(assistant, onSettings = { navigate(ModelConnection) }, onImport = { navigate(ImportCourses) })
     }
     }

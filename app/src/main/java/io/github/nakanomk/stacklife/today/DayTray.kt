@@ -40,8 +40,6 @@ import io.github.nakanomk.stacklife.ScrollEdge
 import io.github.nakanomk.stacklife.TaskAddButton
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.planner.DayPlan
-import io.github.nakanomk.stacklife.planner.NavStyle
-import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.taskFabMargin
 import io.github.nakanomk.stacklife.taskFabSize
@@ -49,8 +47,9 @@ import kotlinx.coroutines.awaitCancellation
 
 @Composable
 internal fun DayWithTray(
-    plan: DayPlan, drag: AxisDrag, enabled: Boolean, onEdit: (String) -> Unit, onAdd: () -> Unit,
-    send: (PlannerCommand.SlotSet) -> Unit, top: Dp, clearance: Dp, expanded: Boolean, toggle: () -> Unit,
+    plan: DayPlan, drag: AxisDrag?, enabled: Boolean, onEdit: (String) -> Unit, onAdd: () -> Unit,
+    top: Dp, clearance: Dp, expanded: Boolean, toggle: () -> Unit, pickup: ((QueueTask) -> Modifier)? = null,
+    content: @Composable (spine: Dp, scrollTail: Dp) -> Unit,
 ) {
     val appearance = LocalAppearance.current
     val floating = appearance.floatingDayTray
@@ -75,62 +74,58 @@ internal fun DayWithTray(
         }
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
+        val spine = daySpine()
         val wide = maxWidth >= 480.dp && maxWidth > maxHeight
         val usable = (maxHeight - top - clearance).coerceAtLeast(0.dp)
         val sideWidth = (maxWidth * .40f).coerceAtMost(420.dp)
-        // The pinned tray keeps its full-width footer (and its old side pane on wide screens).
-        val underDock = !floating && !wide && LocalAppearance.current.navStyle == NavStyle.FLOATING
-        val footer = if (underDock) clearance else 0.dp
-        val bottom = if (floating) clearance + 6.dp else clearance - footer
-        val openWidth = if (wide) sideWidth else if (floating) maxWidth - 16.dp else maxWidth
-        val width = lerp(if (floating) 48.dp else maxWidth, openWidth, progress)
-        val end = if (floating) lerp(taskFabMargin + (taskFabSize - 48.dp) / 2, 8.dp, progress)
-            else if (wide) (maxWidth - sideWidth) * progress else 0.dp
+        // Keep the clock column and spine visible even when the queue is opaque.
+        val bottom = clearance + if (floating) 6.dp else 0.dp
+        val openEnd = if (floating) 8.dp else 0.dp
+        val openWidth = if (wide) sideWidth else (maxWidth - spine - 12.dp - openEnd).coerceAtLeast(taskFabSize)
+        val width = if (floating) lerp(taskFabSize, openWidth, progress) else openWidth
+        val end = if (floating) lerp(taskFabMargin, openEnd, progress) else openEnd
         val limit = if (wide) usable - 12.dp else maxOf(usable * .44f, header + 48.dp)
-        val openHeight = (if (wide && !floating) usable else minOf(header + body + 8.dp, limit)).coerceAtLeast(48.dp) + footer
-        val closedHeight = if (floating) 48.dp else header + footer
+        val openHeight = minOf(header + body + 8.dp, limit).coerceAtLeast(header)
+        val closedHeight = if (floating) taskFabSize else header
         val height = lerp(closedHeight, openHeight, progress)
-        val axisBottom = when {
-            floating -> clearance
-            wide -> lerp(bottom + closedHeight, clearance, progress)
-            else -> bottom + height
-        }
-        val axisStart = if (wide && !floating) sideWidth * progress else 0.dp
+        // This is clearance for scrolling the final event above the largest overlay, not
+        // viewport padding. It must not change with the tray animation, even at max scroll.
+        val scrollTail = (bottom - clearance) + maxOf(closedHeight, openHeight) + taskFabSize + taskFabMargin
         // In a short wide window move + around the end pane, not over its rows: clear its
         // side first, then lower the button. Both legs use the same reversible progress.
-        val alongside = wide && floating
+        val alongside = wide
         val fabEnd = if (alongside) lerp(taskFabMargin, end + width + 8.dp, (progress * 3f).coerceAtMost(1f)) else taskFabMargin
         val fabBottom = when {
             alongside -> lerp(bottom + height + 4.dp, clearance + taskFabMargin, ((progress * 3f - 1f) / 2f).coerceIn(0f, 1f))
-            floating -> bottom + height + 4.dp
-            wide -> lerp(bottom + height + taskFabMargin, axisBottom + taskFabMargin,
-                ((end - taskFabMargin - taskFabSize) / taskFabMargin).coerceIn(0f, 1f))
-            else -> axisBottom + taskFabMargin
+            else -> bottom + height + 4.dp
         }
         val axisSource = rememberPlannerBackdrop()
         Box(Modifier.fillMaxSize().plannerBackdrop(axisSource)) {
-            DayAxis(drag, plan.revision, enabled, onEdit, send, Modifier.fillMaxSize().padding(start = axisStart, bottom = axisBottom),
-                top, (fabBottom + taskFabSize + 8.dp - axisBottom).coerceAtLeast(0.dp))
+            Box(Modifier.fillMaxSize().padding(bottom = clearance)) {
+                Spacer(Modifier.padding(start = spine - 1.dp, top = top).width(2.dp).fillMaxHeight()
+                    .testTag("day-rail").background(MaterialTheme.colorScheme.outlineVariant))
+                content(spine, scrollTail)
+            }
         }
         CompositionLocalProvider(LocalCapsuleBackdrop provides axisSource) {
             TaskAddButton(onAdd, Modifier.align(Alignment.BottomEnd).padding(end = fabEnd, bottom = fabBottom)
-                .onGloballyPositioned { drag.addBounds = it.boundsInRoot() })
-            QueueTray(plan.tray, plan.revision, drag, expanded, toggle, enabled, onEdit, send, progress, floating, axisSource != null, header, footer, openWidth,
+                .onGloballyPositioned { drag?.addBounds = it.boundsInRoot() })
+            QueueTray(plan.tray, expanded, toggle, enabled, onEdit, pickup, progress, floating, axisSource != null, header, openWidth,
                 Modifier.align(Alignment.BottomEnd).padding(end = end, bottom = bottom).size(width, height)
-                    .onGloballyPositioned { drag.trayBounds = it.boundsInRoot() }.testTag("day-tray-container"))
+                    .onGloballyPositioned { drag?.trayBounds = it.boundsInRoot() }.testTag("day-tray-container"))
         }
     }
 }
 
 @Composable
 private fun QueueTray(
-    tasks: List<QueueTask>, revision: Long, drag: AxisDrag, expanded: Boolean, toggle: () -> Unit,
-    enabled: Boolean, onEdit: (String) -> Unit, send: (PlannerCommand.SlotSet) -> Unit, progress: Float,
-    floating: Boolean, glass: Boolean, header: Dp, footer: Dp, openWidth: Dp, modifier: Modifier,
+    tasks: List<QueueTask>, expanded: Boolean, toggle: () -> Unit, enabled: Boolean,
+    onEdit: (String) -> Unit, pickup: ((QueueTask) -> Modifier)?, progress: Float,
+    floating: Boolean, glass: Boolean, header: Dp, openWidth: Dp, modifier: Modifier,
 ) {
     val appearance = LocalAppearance.current
     val solid = MaterialTheme.colorScheme.surfaceContainerHigh
-    val radius = if (floating) lerp(24.dp, 16.dp, progress) else 0.dp
+    val radius = if (floating) lerp(taskFabSize / 2, 16.dp, progress) else 0.dp
     val shape = remember(radius) { RoundedCornerShape(radius) }
     val listState = rememberLazyListState()
     val underHeader by remember(listState) { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 } }
@@ -143,14 +138,14 @@ private fun QueueTray(
             if (progress > 0f) {
                 LazyColumn(Modifier.fillMaxSize().wrapContentWidth(Alignment.End, unbounded = true).width(openWidth)
                     .plannerBackdrop(edgeSource).testTag("day-tray"), state = listState,
-                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = header, bottom = footer + 6.dp),
+                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = header, bottom = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(if (appearance.compact) 2.dp else 4.dp)) {
                     if (tasks.isEmpty()) item {
                         Text("队列中没有待排任务", Modifier.padding(8.dp), style = MaterialTheme.typography.bodyMedium)
                     }
                     items(tasks, key = { it.id }) { task ->
                         Row(Modifier.fillMaxWidth().testTag("tray:${task.id}").clip(MaterialTheme.shapes.medium)
-                            .slotDrag(SlotSource(task.id, task.minutes), drag, revision, enabled && expanded, send)
+                            .then(pickup?.invoke(task) ?: Modifier)
                             .clickable(enabled && expanded, onClickLabel = "安排时间", role = Role.Button) { onEdit(task.id) }
                             .heightIn(min = 48.dp).padding(horizontal = 8.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -158,7 +153,8 @@ private fun QueueTray(
                                 Text(task.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 if (appearance.showNotes && task.notes.isNotBlank()) Text(task.notes, style = MaterialTheme.typography.bodySmall,
                                     maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(if (appearance.showDuration) "${task.minutes} 分钟 · 长按拖动" else "长按拖动",
+                                val action = if (pickup == null) "点按安排" else "长按拖动"
+                                Text(if (appearance.showDuration) "${task.minutes} 分钟 · $action" else action,
                                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Icon(painterResource(R.drawable.ic_schedule), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -166,7 +162,7 @@ private fun QueueTray(
                     }
                 }
             }
-            val barHeight = if (floating) lerp(48.dp, header, progress) else header
+            val barHeight = if (floating) lerp(taskFabSize, header, progress) else header
             val bar = Modifier.fillMaxWidth().height(barHeight)
             if (glass && progress > 0f) {
                 // The empty list inset already shows the glass shell. Re-sampling that shell
@@ -188,8 +184,8 @@ private fun QueueTray(
                 if (progress > 0f) Text("待排队列 · ${tasks.size}", Modifier.align(Alignment.CenterStart).padding(start = 16.dp, end = 48.dp)
                     .graphicsLayer { alpha = progress }.clearAndSetSemantics {},
                     style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                TrayChevron(progress, Modifier.align(Alignment.CenterEnd).size(48.dp)
-                    .indication(interaction, ripple(bounded = false, radius = 24.dp)).padding(12.dp))
+                TrayChevron(progress, Modifier.align(Alignment.CenterEnd).size(lerp(taskFabSize, 48.dp, progress))
+                    .indication(interaction, ripple(bounded = false, radius = taskFabSize / 2)).wrapContentSize().size(24.dp))
             } else CompositionLocalProvider(LocalCapsuleBackdrop provides (edgeSource ?: LocalCapsuleBackdrop.current)) {
                 StackLifeSurface(CapsuleScene.CHROME, Modifier.align(Alignment.TopCenter).padding(vertical = 4.dp, horizontal = 12.dp), solid, elevation = 1.dp) {
                     Row(click.heightIn(min = 48.dp).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
