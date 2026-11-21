@@ -1,12 +1,10 @@
 package io.github.nakanomk.stacklife.appearance
 
+import androidx.compose.ui.res.stringResource
+
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,8 +26,8 @@ import io.github.nakanomk.stacklife.workspace.*
 
 private val appearanceSaver = Saver<Appearance, String>(save = { encodeAppearance(it) }, restore = ::decodeAppearance)
 private val validSeed = Regex("#[0-9A-F]{6}")
-private val AppearanceGroup.title get() = when (this) {
-    AppearanceGroup.COLOR -> "色彩"; AppearanceGroup.LAYOUT -> "布局"; AppearanceGroup.MATERIAL -> "材质与动态"
+private val AppearanceGroup.title: String @Composable get() = when (this) {
+    AppearanceGroup.COLOR -> stringResource(R.string.ui_colors); AppearanceGroup.LAYOUT -> stringResource(R.string.ui_layout); AppearanceGroup.MATERIAL -> stringResource(R.string.ui_material_motion)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -50,11 +48,11 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
     StackLifeTheme(preview) {
         Page {
             CenterAlignedTopAppBar(title = { Text(group.title, style = MaterialTheme.typography.titleLarge) },
-                navigationIcon = { TextButton(onClick = onBack, enabled = !receipt.busy) { Text("取消") } },
+                navigationIcon = { TextButton(onClick = onBack, enabled = !receipt.busy) { Text(stringResource(R.string.ui_cancel)) } },
                 actions = {
                     TextButton(enabled = !receipt.busy && seedOK && !stale && selected != persisted,
                         onClick = { receipt.send(PlannerCommand.EditAppearance(AppearanceFields(group, selected), expected = baseline)) }) {
-                        Text("保存外观")
+                        Text(stringResource(R.string.ui_save_appearance))
                     }
                 }, windowInsets = WindowInsets(0))
             LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("appearance-scroll"), contentPadding = dockListPadding(0.dp, 0.dp),
@@ -68,9 +66,9 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                         item { MaterialFields(draft) { draft = it } }
                         item {
                             Column {
-                                SectionTitle("课表预览 · 示例课程")
+                                SectionTitle(stringResource(R.string.ui_course_preview))
                                 CompositionLocalProvider(LocalPlannerGlassAllowed provides true) { CourseTimetablePreview() }
-                                SwitchRow("课程文字描边", draft.courseTextOutline) { draft = draft.copy(courseTextOutline = !draft.courseTextOutline) }
+                                SwitchRow(stringResource(R.string.ui_course_outline), draft.courseTextOutline) { draft = draft.copy(courseTextOutline = !draft.courseTextOutline) }
                             }
                         }
                         item { AccessibilityFields(draft) { draft = it } }
@@ -82,11 +80,11 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                         Spacer(Modifier.height(12.dp))
                         TextButton(onClick = { draft = AppearanceFields(group, null).applyTo(draft); seedInput = draft.seed; message = "" },
                             enabled = !receipt.busy, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
-                            Text("恢复默认设置")
+                            Text(stringResource(R.string.ui_restore_defaults))
                         }
                     }
                 }
-                if (stale) item { Secondary("重新载入已保存设置", enabled = !receipt.busy, onClick = reload) }
+                if (stale) item { Secondary(stringResource(R.string.ui_reload_settings), enabled = !receipt.busy, onClick = reload) }
             }
         }
     }
@@ -102,10 +100,10 @@ private fun AppearancePreview(value: Appearance) {
         CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
             DockOverlay(nav) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = if (value.compact) 4.dp else 8.dp)) {
-                    Text("${Destination.entries.first { it.key == selected }.label} · 预览", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
-                    Text("读完一章", style = MaterialTheme.typography.bodyLarge)
-                    if (value.showDuration || value.showNotes) Hint(listOfNotNull("25 分钟".takeIf { value.showDuration },
-                        "把问题记在书签上".takeIf { value.showNotes }).joinToString(" · "))
+                    Text(stringResource(R.string.ui_preview_of, Destination.entries.first { it.key == selected }.label), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.ui_sample_task), style = MaterialTheme.typography.bodyLarge)
+                    if (value.showDuration || value.showNotes) Hint(listOfNotNull(stringResource(R.string.ui_sample_duration).takeIf { value.showDuration },
+                        stringResource(R.string.ui_sample_note).takeIf { value.showNotes }).joinToString(" · "))
                 }
             }
         }
@@ -115,24 +113,24 @@ private fun AppearancePreview(value: Appearance) {
 @Composable
 private fun ColorFields(d: Appearance, seed: String, editSeed: (String) -> Unit, update: (Appearance) -> Unit) {
     Column {
-        Choice("明暗", ThemeMode.entries, d.theme, { when (it) { ThemeMode.SYSTEM -> "随系统"; ThemeMode.LIGHT -> "浅色"; ThemeMode.DARK -> "深色" } }) { update(d.copy(theme = it)) }
-        Choice("色彩来源", PaletteMode.entries, d.palette, { if (it == PaletteMode.DYNAMIC) "系统动态色" else "自选种子" }) { update(d.copy(palette = it)) }
+        Choice(stringResource(R.string.ui_color_theme), ThemeMode.entries, d.theme, { when (it) { ThemeMode.SYSTEM -> stringResource(R.string.ui_follow_system); ThemeMode.LIGHT -> stringResource(R.string.ui_light); ThemeMode.DARK -> stringResource(R.string.ui_dark) } }) { update(d.copy(theme = it)) }
+        Choice(stringResource(R.string.ui_palette), PaletteMode.entries, d.palette, { if (it == PaletteMode.DYNAMIC) stringResource(R.string.ui_dynamic_color) else stringResource(R.string.ui_custom_seed) }) { update(d.copy(palette = it)) }
         if (d.palette == PaletteMode.SEED) TextField(colors = lineFieldColors(), value = seed, onValueChange = { text ->
             val normalized = text.uppercase(); editSeed(normalized)
             if (validSeed.matches(normalized)) update(d.copy(seed = normalized))
-        }, label = { Text("种子色 #RRGGBB") }, singleLine = true, isError = !validSeed.matches(seed), modifier = Modifier.fillMaxWidth().testTag("seed-color"))
-        else Hint("Android 12 起可用动态色；其他系统使用默认靛蓝。")
+        }, label = { Text(stringResource(R.string.ui_seed_hex)) }, singleLine = true, isError = !validSeed.matches(seed), modifier = Modifier.fillMaxWidth().testTag("seed-color"))
+        else Hint(stringResource(R.string.ui_dynamic_hint))
     }
 }
 
 @Composable
 private fun LayoutFields(d: Appearance, update: (Appearance) -> Unit) {
     Column {
-        Choice("界面留白", listOf(false, true), d.compact, { if (it) "紧凑" else "标准" }) { update(d.copy(compact = it)) }
-        Choice("导航样式", NavStyle.entries, d.navStyle, { if (it == NavStyle.FLOATING) "浮动胶囊" else "贴底导航" }) { update(d.copy(navStyle = it)) }
-        Choice("待排队列", listOf(true, false), d.floatingDayTray, { if (it) "悬浮小球" else "常驻托盘" }) { update(d.copy(floatingDayTray = it)) }
-        Choice("启动页", d.order, d.start, { it.label }) { update(d.copy(start = it)) }
-        SectionTitle("导航次序")
+        Choice(stringResource(R.string.ui_spacing), listOf(false, true), d.compact, { if (it) stringResource(R.string.ui_compact) else stringResource(R.string.ui_standard) }) { update(d.copy(compact = it)) }
+        Choice(stringResource(R.string.ui_nav_style), NavStyle.entries, d.navStyle, { if (it == NavStyle.FLOATING) stringResource(R.string.ui_floating_nav) else stringResource(R.string.ui_bottom_nav) }) { update(d.copy(navStyle = it)) }
+        Choice(stringResource(R.string.ui_backlog), listOf(true, false), d.floatingDayTray, { if (it) stringResource(R.string.ui_floating_button) else stringResource(R.string.ui_persistent_tray) }) { update(d.copy(floatingDayTray = it)) }
+        Choice(stringResource(R.string.ui_start_page), d.order, d.start, { it.label }) { update(d.copy(start = it)) }
+        SectionTitle(stringResource(R.string.ui_nav_order))
         for ((i, dest) in d.order.withIndex()) {
             fun move(to: Int) { val next = d.order.toMutableList(); next[i] = next[to]; next[to] = dest; update(d.copy(order = next)) }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -141,58 +139,41 @@ private fun LayoutFields(d: Appearance, update: (Appearance) -> Unit) {
                 MoveButton(dest, up = false, enabled = i < d.order.lastIndex) { move(i + 1) }
             }
         }
-        SwitchRow("显示任务时长", d.showDuration) { update(d.copy(showDuration = !d.showDuration)) }
-        SwitchRow("显示任务备注", d.showNotes) { update(d.copy(showNotes = !d.showNotes)) }
+        SwitchRow(stringResource(R.string.ui_show_duration), d.showDuration) { update(d.copy(showDuration = !d.showDuration)) }
+        SwitchRow(stringResource(R.string.ui_show_notes), d.showNotes) { update(d.copy(showNotes = !d.showNotes)) }
     }
 }
 
 @Composable
 private fun MoveButton(dest: Destination, up: Boolean, enabled: Boolean, move: () -> Unit) {
-    val label = if (up) "上移" else "下移"
-    ToolbarIcon(if (up) R.drawable.ic_expand_less else R.drawable.ic_expand_more, "$label${dest.label}", enabled, move)
+    val label = stringResource(if (up) R.string.ui_move_tab_up else R.string.ui_move_tab_down, dest.label)
+    ToolbarIcon(if (up) R.drawable.ic_expand_less else R.drawable.ic_expand_more, label, enabled, move)
 }
 
 @Composable
 private fun MaterialFields(d: Appearance, update: (Appearance) -> Unit) {
     val reason = glassUnavailableReason(d)
     Column {
-        SectionTitle("材质")
-        SwitchRow("启用液态玻璃", d.glass) { update(d.copy(glass = !d.glass)) }
-        SwitchRow("浮动导航玻璃", d.navGlass, enabled = d.glass) { update(d.copy(navGlass = !d.navGlass)) }
-        SwitchRow("助理胶囊玻璃", d.assistantGlass, enabled = d.glass) { update(d.copy(assistantGlass = !d.assistantGlass)) }
-        Hint(when { reason != null -> "当前使用实色：$reason"; !d.glass -> "当前使用实色：总开关已关闭。";
-            else -> "页眉、圆形操作与课程块使用玻璃；关闭后保持相同布局。" })
+        SectionTitle(stringResource(R.string.ui_materials))
+        SwitchRow(stringResource(R.string.ui_liquid_glass), d.glass) { update(d.copy(glass = !d.glass)) }
+        SwitchRow(stringResource(R.string.ui_glass_navigation), d.navGlass, enabled = d.glass) { update(d.copy(navGlass = !d.navGlass)) }
+        SwitchRow(stringResource(R.string.ui_glass_assistant), d.assistantGlass, enabled = d.glass) { update(d.copy(assistantGlass = !d.assistantGlass)) }
+        Hint(when { reason != null -> stringResource(R.string.ui_solid_because, reason); !d.glass -> stringResource(R.string.ui_solid_disabled);
+            else -> stringResource(R.string.ui_glass_surfaces) })
     }
 }
 
 @Composable
 private fun AccessibilityFields(d: Appearance, update: (Appearance) -> Unit) {
     Column {
-        SectionTitle("动态与辅助功能")
-        SwitchRow("减弱动效", d.reduceMotion) { update(d.copy(reduceMotion = !d.reduceMotion)) }
-        SwitchRow("减少透明度", d.reduceTransparency) { update(d.copy(reduceTransparency = !d.reduceTransparency)) }
-        SwitchRow("增强对比", d.highContrast) { update(d.copy(highContrast = !d.highContrast)) }
-        SwitchRow("随系统触感", d.haptics) { update(d.copy(haptics = !d.haptics)) }
+        SectionTitle(stringResource(R.string.ui_motion_accessibility))
+        SwitchRow(stringResource(R.string.ui_reduce_motion), d.reduceMotion) { update(d.copy(reduceMotion = !d.reduceMotion)) }
+        SwitchRow(stringResource(R.string.ui_reduce_transparency), d.reduceTransparency) { update(d.copy(reduceTransparency = !d.reduceTransparency)) }
+        SwitchRow(stringResource(R.string.ui_increase_contrast), d.highContrast) { update(d.copy(highContrast = !d.highContrast)) }
+        SwitchRow(stringResource(R.string.ui_system_haptics), d.haptics) { update(d.copy(haptics = !d.haptics)) }
     }
 }
 
-@Composable
-private fun <T> Choice(title: String, options: List<T>, selected: T, label: (T) -> String, change: (T) -> Unit) {
-    var open by rememberSaveable { mutableStateOf(false) }
-    PreferenceRow(title, label(selected)) { open = true }
-    if (open) PlannerAlertDialog(onDismissRequest = { open = false }, title = { Text(title) },
-        text = {
-            Column(Modifier.selectableGroup().verticalScroll(rememberScrollState())) {
-                for (option in options) Row(Modifier.fillMaxWidth()
-                    .selectable(option == selected, role = Role.RadioButton) { change(option); open = false }
-                    .heightIn(min = 48.dp).padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    RadioButton(option == selected, onClick = null)
-                    Text(label(option), style = MaterialTheme.typography.bodyLarge)
-                }
-            }
-        }, confirmButton = { TextButton(onClick = { open = false }) { Text("取消") } })
-}
 
 @Composable
 private fun SwitchRow(label: String, checked: Boolean, enabled: Boolean = true, change: () -> Unit) {

@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.appearance
 
+import androidx.compose.ui.res.stringResource
+import io.github.nakanomk.stacklife.R
+
 import android.view.View
 import android.view.ViewTreeObserver
 import androidx.compose.foundation.clickable
@@ -94,7 +97,7 @@ internal fun PlannerModalBottomSheet(onDismissRequest: () -> Unit, sheetState: S
         contentColor = MaterialTheme.colorScheme.onSurface, dragHandle = null, contentWindowInsets = { WindowInsets(0) }) {
         PopupPanel(sheetShape, Modifier.fillMaxWidth()) {
             Column(Modifier.fillMaxWidth().windowInsetsPadding(BottomSheetDefaults.modalWindowInsets)) {
-                Box(Modifier.align(Alignment.CenterHorizontally).heightIn(min = 48.dp).clickable(onClickLabel = "关闭面板", onClick = close)
+                Box(Modifier.align(Alignment.CenterHorizontally).heightIn(min = 48.dp).clickable(onClickLabel = stringResource(R.string.ui_close_panel), onClick = close)
                     .semantics { dismiss { close(); true } }, contentAlignment = Alignment.Center) { BottomSheetDefaults.DragHandle() }
                 content()
             }

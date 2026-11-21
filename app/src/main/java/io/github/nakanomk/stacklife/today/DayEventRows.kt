@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife.today
 
+import java.util.Locale
+import io.github.nakanomk.stacklife.i18n.AppLanguage
 import io.github.nakanomk.stacklife.planner.PlannerQuery
 
 internal sealed interface DayEventRow {
@@ -23,11 +25,12 @@ internal fun dayEventRows(day: PlannerQuery.Day, chronological: List<AxisEntry>)
     if (occupiedUntil < day.endMillis) add(DayEventRow.Gap(occupiedUntil, day.endMillis))
 }
 
-internal fun elapsedLabel(millis: Long): String = buildList {
+internal fun elapsedLabel(millis: Long, locale: Locale = AppLanguage.locale): String = buildList {
+    val chinese = locale.language == "zh"
     val minutes = millis / MINUTE_MS
-    if (minutes >= 60) add("${minutes / 60} 小时")
-    if (minutes % 60 != 0L) add("${minutes % 60} 分钟")
+    if (minutes >= 60) add(if (chinese) "${minutes / 60} 小时" else "${minutes / 60} hr")
+    if (minutes % 60 != 0L) add(if (chinese) "${minutes % 60} 分钟" else "${minutes % 60} min")
     val seconds = millis % MINUTE_MS / 1000
-    if (seconds > 0) add("$seconds 秒")
-    if (isEmpty()) add(if (millis > 0) "不足 1 秒" else "0 分钟")
+    if (seconds > 0) add(if (chinese) "$seconds 秒" else "$seconds sec")
+    if (isEmpty()) add(if (millis > 0) { if (chinese) "不足 1 秒" else "Less than 1 sec" } else { if (chinese) "0 分钟" else "0 min" })
 }.joinToString(" ")

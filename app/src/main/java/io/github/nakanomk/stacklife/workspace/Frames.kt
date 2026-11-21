@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.workspace
 
+import androidx.compose.ui.res.stringResource
+import io.github.nakanomk.stacklife.R
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -36,22 +39,22 @@ internal fun FrameList(
         contentPadding = dockListPadding(topClearance, bottomClearance), verticalArrangement = listSpacing) {
         item {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("$available 帧可恢复 · ${frames.size - available} 帧已取空", Modifier.weight(1f),
+                Text(stringResource(R.string.ui_frame_counts, available, frames.size - available), Modifier.weight(1f),
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Secondary("新建栈帧", onClick = onCreate)
+                Secondary(stringResource(R.string.ui_new_frame), onClick = onCreate)
             }
         }
         if (frames.isEmpty()) item {
             Surface(color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("还没有栈帧", style = MaterialTheme.typography.titleMedium)
-                    Hint("中断时可以先把队列存到这里，再补充原因。也可以直接新建一份稍后再做的清单。")
+                    Text(stringResource(R.string.ui_no_frames), style = MaterialTheme.typography.titleMedium)
+                    Hint(stringResource(R.string.ui_no_frames_hint))
                 }
             }
         }
-        if (available > 0) item { SectionTitle("可恢复 · 最近保存优先") }
+        if (available > 0) item { SectionTitle(stringResource(R.string.ui_recent_frames)) }
         items(available, key = { frames[it].id }) { FrameCard(frames[it], onFrame, shared, source) }
-        if (available < frames.size) item { SectionTitle("历史 · 已取空") }
+        if (available < frames.size) item { SectionTitle(stringResource(R.string.ui_emptied_frames)) }
         items(frames.size - available, key = { frames[available + it].id }) {
             FrameCard(frames[available + it], onFrame, shared, source)
         }
@@ -64,9 +67,9 @@ private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: Share
     DetailCard(source, "frame", frame.id, onFrame, modifier = shared("frame:${frame.id}").fillMaxWidth().testTag("frame:${frame.id}"),
         shape = RectangleShape, color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxWidth().padding(vertical = if (appearance.compact) 4.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(frameLabel(frame.reason), shared.title("frame:${frame.id}"), style = MaterialTheme.typography.bodyLarge,
+            Text(frameLabel(frame.reason, frame.source), shared.title("frame:${frame.id}"), style = MaterialTheme.typography.bodyLarge,
                 maxLines = 3, overflow = TextOverflow.Ellipsis)
-            Text("${savedTime(frame.savedAtMillis)} · 原有 ${frame.items.size} 项 · 剩余 ${frame.remaining} 项",
+            Text(stringResource(R.string.ui_frame_summary, savedTime(frame.savedAtMillis), frame.items.size, frame.remaining),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(frame.items.joinToString("、", limit = 3, truncated = "…") { it.title }, style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -79,7 +82,7 @@ private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: Share
 internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: () -> Unit, shared: SharedModifier) {
     val frame = state.frames.find { it.id == id }
     if (frame == null) {
-        MissingDetail("栈帧详情", "这份栈帧已不存在。", onBack)
+        MissingDetail(stringResource(R.string.ui_frame_details), stringResource(R.string.ui_frame_missing), onBack)
         return
     }
     var choosing by rememberSaveable(id) { mutableStateOf(false) }
@@ -93,16 +96,16 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
         entries.mapNotNull { if (it.taskId in ids) it.taskId else null }
     }
     BackHandler(enabled = choosing || action.busy) { if (!action.busy) leaveSelection() }
-    EditorPage("栈帧详情", { if (choosing) leaveSelection() else onBack() }, AssistantPage.Frame(id), backEnabled = !action.busy,
+    EditorPage(stringResource(R.string.ui_frame_details), { if (choosing) leaveSelection() else onBack() }, AssistantPage.Frame(id), backEnabled = !action.busy,
         footer = if (editingReason) ({ PushReasonEditor(id, actions) { editingReason = false } })
         else if (!choosing) null else ({
             Column(Modifier.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("已选 ${selectionIds.size} 项 · 按清单原序恢复", style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(R.string.ui_restore_selection_count, selectionIds.size), style = MaterialTheme.typography.labelLarge)
                 Actions {
-                    Primary("恢复所选", enabled = !action.busy && selectionIds.isNotEmpty()) {
+                    Primary(stringResource(R.string.ui_restore_selected), enabled = !action.busy && selectionIds.isNotEmpty()) {
                         action.send(PlannerCommand.FrameRestore(id, RestoreMode.SELECTED, selectionIds))
                     }
-                    Secondary("取消选择", enabled = !action.busy, onClick = leaveSelection)
+                    Secondary(stringResource(R.string.ui_cancel_selection), enabled = !action.busy, onClick = leaveSelection)
                 }
             }
         })) { top, bottom ->
@@ -110,43 +113,43 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val source = when (frame.source) {
-                        FrameSource.PUSH -> "队列压栈"
-                        FrameSource.MANUAL -> "直接新建"
-                        FrameSource.SWAP -> "切换前自动保存"
-                        FrameSource.GRAPH -> "流程图生成"
+                        FrameSource.PUSH -> stringResource(R.string.ui_source_queue)
+                        FrameSource.MANUAL -> stringResource(R.string.ui_source_manual)
+                        FrameSource.SWAP -> stringResource(R.string.ui_source_swap)
+                        FrameSource.GRAPH -> stringResource(R.string.ui_source_graph)
                     }
-                    Text(frameLabel(frame.reason), shared.title("frame:$id"), style = MaterialTheme.typography.titleLarge)
+                    Text(frameLabel(frame.reason, frame.source), shared.title("frame:$id"), style = MaterialTheme.typography.titleLarge)
                     Text("$source · ${savedTime(frame.savedAtMillis)}", style = MaterialTheme.typography.labelMedium)
-                    Text("原有 ${entries.size} 项 · 剩余 ${frame.remaining} 项", style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.ui_frame_remaining, entries.size, frame.remaining), style = MaterialTheme.typography.bodyMedium)
                     if (frame.source == FrameSource.PUSH && frame.reason.isBlank() && !editingReason && !choosing)
-                        TextButton(onClick = { editingReason = true }) { Text("补充原因") }
+                        TextButton(onClick = { editingReason = true }) { Text(stringResource(R.string.ui_add_reason)) }
                 }
             }
             if (frame.remaining > 0) item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SectionTitle(if (choosing) "选择恢复" else "恢复到队列")
+                    SectionTitle(if (choosing) stringResource(R.string.ui_select_to_restore) else stringResource(R.string.ui_restore_to_queue))
                     Hint(restoreHint(state.restorePolicy, choosing, state.queue.size))
                     if (!choosing) Actions {
-                        Primary("全部恢复", enabled = !action.busy) { action.send(PlannerCommand.FrameRestore(id, RestoreMode.ALL)) }
-                        Secondary("选择恢复", enabled = !action.busy) { editingReason = false; choosing = true }
+                        Primary(stringResource(R.string.ui_restore_all), enabled = !action.busy) { action.send(PlannerCommand.FrameRestore(id, RestoreMode.ALL)) }
+                        Secondary(stringResource(R.string.ui_select_to_restore), enabled = !action.busy) { editingReason = false; choosing = true }
                     }
                 }
             }
             item {
-                SectionTitle("保存时的清单")
-                Hint(if (frame.remaining == 0) "这份栈帧已取空。下方保留保存时的内容。" else "按当时的顺序显示；之后的修改不会改写这里。")
+                SectionTitle(stringResource(R.string.ui_saved_list))
+                Hint(if (frame.remaining == 0) stringResource(R.string.ui_empty_frame_hint) else stringResource(R.string.ui_frame_history_hint))
             }
             itemsIndexed(entries, key = { _, item -> item.taskId }) { index, item ->
                 Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large) {
                     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("第 ${index + 1} 项 · ${if (item.restorable) "可恢复" else "已取走"}", style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(R.string.ui_entry_status, index + 1, stringResource(if (item.restorable) R.string.ui_restorable else R.string.ui_taken)), style = MaterialTheme.typography.labelMedium)
                         if (choosing && item.restorable) {
                             CheckRow(item.title, item.taskId in selected) { selected = ArrayList(selected.toggle(item.taskId)) }
                         } else Text(item.title, style = MaterialTheme.typography.titleMedium)
-                        Hint("${item.minutes} 分钟")
+                        Hint(stringResource(R.string.ui_minutes_value, item.minutes))
                         if (item.notes.isNotBlank()) Text(item.notes, style = MaterialTheme.typography.bodyMedium)
                         if (item.scheduledStartMillis != null && item.scheduledEndMillis != null) {
-                            Hint("保存时的预约：${savedTime(item.scheduledStartMillis)} 至 ${savedTime(item.scheduledEndMillis)}")
+                            Hint(stringResource(R.string.ui_saved_slot, savedTime(item.scheduledStartMillis), savedTime(item.scheduledEndMillis)))
                         }
                     }
                 }
@@ -155,12 +158,13 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
     }
 }
 
+@Composable
 private fun restoreHint(policy: RestorePolicy, selected: Boolean, queueSize: Int): String = when (policy) {
-    RestorePolicy.PREPEND -> "插入队首：按帧内原顺序恢复，当前队列排在其后。"
-    RestorePolicy.APPEND -> "追加队尾：按帧内原顺序恢复，接在当前队列之后。"
+    RestorePolicy.PREPEND -> stringResource(R.string.ui_prepend_detail)
+    RestorePolicy.APPEND -> stringResource(R.string.ui_append_detail)
     RestorePolicy.SWAP -> when {
-        selected -> "整帧切换仅用于全部恢复。本次所选任务按原序插入队首，不另存当前队列。"
-        queueSize == 0 -> "整帧切换：当前队列为空，直接按帧内原序恢复，不新建栈帧。"
-        else -> "整帧切换：全部恢复会先把当前 $queueSize 项另存为「切换栈帧前自动保存」，再接回这份清单。选择恢复只插入队首。"
+        selected -> stringResource(R.string.ui_swap_selected)
+        queueSize == 0 -> stringResource(R.string.ui_swap_empty)
+        else -> stringResource(R.string.ui_swap_all, queueSize)
     }
 }

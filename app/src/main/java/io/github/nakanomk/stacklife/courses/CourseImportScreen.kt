@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.courses
 
+import io.github.nakanomk.stacklife.R
+import androidx.compose.ui.res.stringResource
+import io.github.nakanomk.stacklife.i18n.uiText
 import android.content.ActivityNotFoundException
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -59,9 +62,9 @@ internal data class TermForm(val id: String = "", val monday: String = "", val w
     val initial: BellSchedule = BellSchedule.SUMMER, val switchDate: String = "") {
     fun term(): TermSpec {
         fun date(text: String): LocalDate = try { LocalDate.parse(text.trim()) } catch (_: DateTimeParseException) {
-            throw IllegalArgumentException("日期须为有效的 YYYY-MM-DD")
+            throw IllegalArgumentException(uiText("Enter a valid date in YYYY-MM-DD format.", "日期须为有效的 YYYY-MM-DD"))
         }
-        val term = TermSpec(id, date(monday), weeks.trim().toIntOrNull() ?: throw IllegalArgumentException("请填写学期总周数"),
+        val term = TermSpec(id, date(monday), weeks.trim().toIntOrNull() ?: throw IllegalArgumentException(uiText("Enter the number of weeks in the term.", "请填写学期总周数")),
             initial, switchDate.takeIf { it.isNotBlank() }?.let(::date))
         term.problem()?.let { throw IllegalArgumentException(it) }
         return term
@@ -103,7 +106,7 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
     }
     fun receive(data: JsonArray) {
         hub = false
-        if (data.isEmpty()) { message = "原始数组为空，已有课表未更改"; return }
+        if (data.isEmpty()) { message = uiText("The raw array is empty. Your existing timetable has not changed.", "原始数组为空，已有课表未更改"); return }
         hints = firstWeekHints(data)
         rows = data
         form = TermForm(monday = hints.singleOrNull().orEmpty())
@@ -115,12 +118,12 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
             scope.launch {
                 try {
                     val data = withContext(Dispatchers.IO) {
-                        resolver.openInputStream(uri)?.use(::readWeekFile) ?: throw SourceProblem("无法打开所选文件")
+                        resolver.openInputStream(uri)?.use(::readWeekFile) ?: throw SourceProblem(uiText("Cannot open the selected file.", "无法打开所选文件"))
                     }
                     receive(data)
                 } catch (e: SourceProblem) { message = e.message }
-                catch (_: SecurityException) { message = "没有读取权限，请重新选择原始文件" }
-                catch (_: IOException) { message = "无法读取 UTF-8 文件，请重新选择原始 JSON" }
+                catch (_: SecurityException) { message = uiText("Read permission denied. Select the raw file again.", "没有读取权限，请重新选择原始文件") }
+                catch (_: IOException) { message = uiText("Cannot read the UTF-8 file. Select the raw JSON again.", "无法读取 UTF-8 文件，请重新选择原始 JSON") }
                 finally { busy = false }
             }
         }
@@ -128,20 +131,20 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
     fun chooseFile() {
         message = null
         try { picker.launch(arrayOf("application/json", "text/*", "application/octet-stream")) }
-        catch (_: ActivityNotFoundException) { message = "设备没有可用的系统文件选择器" }
+        catch (_: ActivityNotFoundException) { message = uiText("No system file picker is available on this device.", "设备没有可用的系统文件选择器") }
     }
     fun openChrome() {
         message = null
         val chrome = CustomTabsClient.getPackageName(context, chromePackages, true)
         if (chrome == null) {
-            message = "未找到可用的 Chrome 浏览器"
+            message = uiText("No supported Chrome browser was found.", "未找到可用的 Chrome 浏览器")
             return
         }
         val tab = CustomTabsIntent.Builder().build()
         tab.intent.setPackage(chrome)
         try { tab.launchUrl(context, Uri.parse(HUB_LOGIN_URL)) }
-        catch (_: ActivityNotFoundException) { message = "无法打开 Chrome 浏览器" }
-        catch (_: SecurityException) { message = "系统不允许启动 Chrome 浏览器" }
+        catch (_: ActivityNotFoundException) { message = uiText("Cannot open Chrome.", "无法打开 Chrome 浏览器") }
+        catch (_: SecurityException) { message = uiText("The system did not allow Chrome to open.", "系统不允许启动 Chrome 浏览器") }
     }
     if (hub) {
         CompositionLocalProvider(LocalPlannerGlassAllowed provides false, LocalCapsuleBackdrop provides null) {
@@ -174,23 +177,23 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
             raw == null -> {
                 ImportPane(composer = { if (!busy) AssistantComposer(AssistantPage.Terms) }) { bottom ->
                     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, bottom))) {
-                        SectionTitle("选择课表来源")
+                        SectionTitle(stringResource(R.string.courses_choose_source))
                         FormGroup {
-                            PreferenceRow("从 HUB 网页提取课表", modifier = Modifier.testTag("importCourseHub"), enabled = !busy) { message = null; hub = true }
+                            PreferenceRow(stringResource(R.string.courses_hub_extract), modifier = Modifier.testTag("importCourseHub"), enabled = !busy) { message = null; hub = true }
                             HorizontalDivider()
-                            PreferenceRow("用 Chrome 浏览 HUB", modifier = Modifier.testTag("browseHubChrome"), enabled = !busy, onClick = ::openChrome)
+                            PreferenceRow(stringResource(R.string.courses_browse_chrome), modifier = Modifier.testTag("browseHubChrome"), enabled = !busy, onClick = ::openChrome)
                             HorizontalDivider()
-                            PreferenceRow("选择原始 JSON 文件", modifier = Modifier.testTag("importCourseFile"), enabled = !busy, onClick = ::chooseFile)
+                            PreferenceRow(stringResource(R.string.courses_choose_json), modifier = Modifier.testTag("importCourseFile"), enabled = !busy, onClick = ::chooseFile)
                         }
                     }
                 }
             }
             parsed == null -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, 0.dp)), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("确认学期与校区作息", style = MaterialTheme.typography.titleLarge)
-                Text("时间按 Asia/Shanghai。首周日期只作候选，请自行核实校历。")
-                if (hints.isNotEmpty()) Text("第一周 KS 候选：${hints.joinToString("、")}")
+                Text(stringResource(R.string.courses_confirm_calendar), style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.courses_confirm_calendar_hint))
+                if (hints.isNotEmpty()) Text(stringResource(R.string.courses_week_hint, hints.joinToString(stringResource(R.string.courses_list_separator))))
                 TermFields(form, !busy) { form = it }
-                ActionPill("确认学期并核对条目", enabled = !busy, prominent = true, modifier = Modifier.testTag("reviewCourseRows"), onClick = {
+                ActionPill(stringResource(R.string.courses_review_entries), enabled = !busy, prominent = true, modifier = Modifier.testTag("reviewCourseRows"), onClick = {
                     if (busy) return@ActionPill
                     busy = true; message = null
                     scope.launch {
@@ -202,39 +205,39 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
                         finally { busy = false }
                     }
                 })
-                Secondary("重选来源", !busy) { rows = null; hints = emptyList(); message = null }
+                Secondary(stringResource(R.string.courses_choose_new_source), !busy) { rows = null; hints = emptyList(); message = null }
             }
             ready == null -> LazyColumn(Modifier.fillMaxSize().testTag("courseIssues"), contentPadding = dockListPadding(top, 0.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
-                    Text("核对原始条目", style = MaterialTheme.typography.titleLarge)
-                    Text("${parsed.term.id} · 去重后有效 ${parsed.validCount} 次 · 待修正 ${parsed.issues.size - decisions.size} 项")
-                    Text("已修正 ${decisions.values.count { it is IssueDecision.Correct }} 项 · 已排除 ${decisions.values.count { it == IssueDecision.Exclude }} 项")
-                    Secondary("修改学期设置", !busy) { draft = null; decisions.clear(); message = null }
+                    Text(stringResource(R.string.courses_review_source), style = MaterialTheme.typography.titleLarge)
+                    Text(stringResource(R.string.courses_review_counts, parsed.term.id, parsed.validCount, parsed.issues.size - decisions.size))
+                    Text(stringResource(R.string.courses_issue_counts, decisions.values.count { it is IssueDecision.Correct }, decisions.values.count { it == IssueDecision.Exclude }))
+                    Secondary(stringResource(R.string.courses_edit_term), !busy) { draft = null; decisions.clear(); message = null }
                 }
                 itemsIndexed(parsed.issues, key = { _, issue -> issue.position }) { index, issue ->
                     val decision = decisions[issue.position]
                     OutlinedCard(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(issue.position, style = MaterialTheme.typography.titleSmall)
+                            Text(issue.label, style = MaterialTheme.typography.titleSmall)
                             Text(issue.reason)
-                            issue.fields?.let { Text("原始：第 ${it.week.ifEmpty { "?" }} 周 · ${it.title.ifEmpty { "无课名" }} · JC「${it.period}」 · ${it.room.ifEmpty { "未提供地点" }}") }
+                            issue.fields?.let { Text(stringResource(R.string.courses_raw_entry, it.week.ifEmpty { "?" }, it.title.ifEmpty { stringResource(R.string.courses_no_name) }, it.period, it.room.ifEmpty { stringResource(R.string.courses_no_location) })) }
                             when (decision) {
                                 null -> Unit
-                                IssueDecision.Exclude -> Text("已明确排除此项")
-                                is IssueDecision.Correct -> Text("已修正：第 ${decision.fields.week} 周 · ${decision.fields.title} · ${decision.fields.period} 节 · ${decision.fields.room.ifEmpty { "未提供地点" }}")
+                                IssueDecision.Exclude -> Text(stringResource(R.string.courses_excluded))
+                                is IssueDecision.Correct -> Text(stringResource(R.string.courses_corrected_entry, decision.fields.week, decision.fields.title, decision.fields.period, decision.fields.room.ifEmpty { stringResource(R.string.courses_no_location) }))
                             }
                             Actions {
-                                if (issue.fields != null) TextButton(enabled = !busy, onClick = { editing = issue }, modifier = Modifier.testTag("correctIssue-$index")) { Text("修正") }
+                                if (issue.fields != null) TextButton(enabled = !busy, onClick = { editing = issue }, modifier = Modifier.testTag("correctIssue-$index")) { Text(stringResource(R.string.courses_correct)) }
                                 if (decision == null || decision is IssueDecision.Correct) TextButton(enabled = !busy,
-                                    onClick = { decisions[issue.position] = IssueDecision.Exclude; message = null }, modifier = Modifier.testTag("excludeIssue-$index")) { Text("排除此项") }
-                                if (decision != null) TextButton(enabled = !busy, onClick = { decisions.remove(issue.position); message = null }) { Text("撤销处理") }
+                                    onClick = { decisions[issue.position] = IssueDecision.Exclude; message = null }, modifier = Modifier.testTag("excludeIssue-$index")) { Text(stringResource(R.string.courses_exclude)) }
+                                if (decision != null) TextButton(enabled = !busy, onClick = { decisions.remove(issue.position); message = null }) { Text(stringResource(R.string.courses_undo)) }
                             }
                         }
                     }
                 }
                 item {
-                    ActionPill("预览导入差异", enabled = !busy && decisions.size == parsed.issues.size, prominent = true,
+                    ActionPill(stringResource(R.string.courses_preview_import), enabled = !busy && decisions.size == parsed.issues.size, prominent = true,
                         modifier = Modifier.testTag("previewCourseImport"), onClick = {
                         if (busy) return@ActionPill
                         busy = true; message = null
@@ -293,13 +296,13 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
             RootPane(header = {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        SectionTitle("导入课表")
+                        SectionTitle(stringResource(R.string.courses_import))
                         Spacer(Modifier.weight(1f))
-                        ActionPill("取消导入", ::cancel, Modifier.testTag("cancelCourseImport"), enabled = !writing)
+                        ActionPill(stringResource(R.string.courses_cancel_import), ::cancel, Modifier.testTag("cancelCourseImport"), enabled = !writing)
                     }
                     message?.let { Text(it, color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("courseImportError")) }
-                    if (writing) Text("正在保存已确认的课表…", modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    if (writing) Text(stringResource(R.string.courses_saving_import), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
             }) { top, _ -> steps(top) }
@@ -307,7 +310,7 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
         editing?.let { issue ->
             val parsed = draft ?: return@let
             val fields = (decisions[issue.position] as? IssueDecision.Correct)?.fields ?: issue.fields ?: return@let
-            Correction(issue.position, fields, parsed.term, onClose = { editing = null }, onSave = {
+            Correction(issue, fields, parsed.term, onClose = { editing = null }, onSave = {
                 decisions[issue.position] = IssueDecision.Correct(it); editing = null; message = null
             })
         }
@@ -317,11 +320,11 @@ internal fun CourseImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, o
 @Composable
 internal fun TermFields(form: TermForm, enabled: Boolean, frosted: Boolean = false, change: (TermForm) -> Unit) {
     FormGroup(frosted = frosted) {
-        ImportField("学期标识", form.id, "termId", enabled) { change(form.copy(id = it)) }
-        ImportField("首周周一 YYYY-MM-DD", form.monday, "termMonday", enabled) { change(form.copy(monday = it)) }
-        ImportField("总周数", form.weeks, "termWeeks", enabled) { change(form.copy(weeks = it)) }
+        ImportField(stringResource(R.string.courses_term_id), form.id, "termId", enabled) { change(form.copy(id = it)) }
+        ImportField(stringResource(R.string.courses_first_monday), form.monday, "termMonday", enabled) { change(form.copy(monday = it)) }
+        ImportField(stringResource(R.string.courses_week_count), form.weeks, "termWeeks", enabled) { change(form.copy(weeks = it)) }
     }
-    Text("首周作息")
+    Text(stringResource(R.string.courses_initial_bell))
     val initial = rememberUpdatedState(form.initial.ordinal.toFloat())
     ControlGroup(frosted = frosted) {
         SegmentTrack(initial, BellSchedule.entries.size, MaterialTheme.colorScheme.secondaryContainer,
@@ -331,15 +334,15 @@ internal fun TermFields(form: TermForm, enabled: Boolean, frosted: Boolean = fal
                     Box(Modifier.clip(CircleShape).selectable(form.initial == bell, enabled = enabled, role = Role.RadioButton) {
                         change(form.copy(initial = bell))
                     }.heightIn(min = 48.dp).padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.Center) { Text(if (bell == BellSchedule.SUMMER) "夏令" else "冬令",
+                        contentAlignment = Alignment.Center) { Text(if (bell == BellSchedule.SUMMER) stringResource(R.string.courses_summer) else stringResource(R.string.courses_winter),
                             color = if (enabled && highlighted == bell.ordinal) MaterialTheme.colorScheme.primary else LocalContentColor.current) }
                 }
             }
         }
     }
     val switchFields: @Composable () -> Unit = {
-        ImportField("切换为另一作息的生效日（选填）", form.switchDate, "termSwitchDate", enabled) { change(form.copy(switchDate = it)) }
-        Text("填写后从该日开始切换；留空则整个学期不变。")
+        ImportField(stringResource(R.string.courses_change_date), form.switchDate, "termSwitchDate", enabled) { change(form.copy(switchDate = it)) }
+        Text(stringResource(R.string.courses_change_date_hint))
     }
     if (frosted) FormGroup(frosted = true) { switchFields() } else switchFields()
 }
@@ -354,19 +357,19 @@ internal fun ImportField(label: String, value: String, tag: String, enabled: Boo
 }
 
 @Composable
-private fun Correction(position: String, source: CourseFields, term: TermSpec, onClose: () -> Unit, onSave: (CourseFields) -> Unit) {
-    var fields by remember(position) { mutableStateOf(source) }
-    PlannerAlertDialog(onDismissRequest = onClose, title = { Text("修正课程项") }, text = {
+private fun Correction(issue: ImportIssue, source: CourseFields, term: TermSpec, onClose: () -> Unit, onSave: (CourseFields) -> Unit) {
+    var fields by remember(issue.position) { mutableStateOf(source) }
+    PlannerAlertDialog(onDismissRequest = onClose, title = { Text(stringResource(R.string.courses_correct_entry)) }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(position)
-            ImportField("周次", fields.week, "fixWeek") { fields = fields.copy(week = it) }
-            ImportField("课名", fields.title, "fixTitle") { fields = fields.copy(title = it) }
-            ImportField("地点（可空）", fields.room, "fixRoom") { fields = fields.copy(room = it) }
-            ImportField("节次", fields.period, "fixPeriod") { fields = fields.copy(period = it) }
+            Text(issue.label)
+            ImportField(stringResource(R.string.courses_week_number), fields.week, "fixWeek") { fields = fields.copy(week = it) }
+            ImportField(stringResource(R.string.courses_name), fields.title, "fixTitle") { fields = fields.copy(title = it) }
+            ImportField(stringResource(R.string.courses_location), fields.room, "fixRoom") { fields = fields.copy(room = it) }
+            ImportField(stringResource(R.string.courses_periods), fields.period, "fixPeriod") { fields = fields.copy(period = it) }
             fields.problem(term)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
-    }, confirmButton = { TextButton(enabled = fields.problem(term) == null, onClick = { onSave(fields) }) { Text("保存修正") } },
-        dismissButton = { TextButton(onClick = onClose) { Text("取消") } })
+    }, confirmButton = { TextButton(enabled = fields.problem(term) == null, onClick = { onSave(fields) }) { Text(stringResource(R.string.courses_save_correction)) } },
+        dismissButton = { TextButton(onClick = onClose) { Text(stringResource(R.string.courses_cancel)) } })
 }
 
 private data class CourseGroup(val title: String, val room: String, val day: Int, val first: Int, val last: Int, val start: String, val end: String)
@@ -383,23 +386,26 @@ private fun ImportDiff(draft: ImportDraft, meetings: List<CourseMeeting>, propos
         LazyColumn(Modifier.fillMaxSize().testTag("courseImportDiff"), contentPadding = dockListPadding(top, bottom),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item {
-                Text("确认导入差异", style = MaterialTheme.typography.titleLarge)
-                Text("只替换 ${draft.term.id} 的 HUB 课表；已有任务保留。最终 ${meetings.size} 次课程，${groups.size} 个时段分组。")
-                Text("首周 ${draft.term.firstMonday} · ${draft.term.weeks} 周 · ${if (draft.term.initial == BellSchedule.SUMMER) "夏令" else "冬令"}起始" +
-                    (draft.term.switchDate?.let { " · $it 起切换" } ?: " · 全期不切换"))
-                if (locations.isNotEmpty()) Text("同名不同地点", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.courses_confirm_import_diff), style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.courses_import_summary, draft.term.id, meetings.size, groups.size))
+                Text(stringResource(R.string.courses_calendar_summary, draft.term.firstMonday, draft.term.weeks, stringResource(if (draft.term.initial == BellSchedule.SUMMER) R.string.courses_summer else R.string.courses_winter)) +
+                    (draft.term.switchDate?.let { stringResource(R.string.courses_switch_on, it) } ?: stringResource(R.string.courses_no_switch)))
+                if (locations.isNotEmpty()) Text(stringResource(R.string.courses_different_locations), style = MaterialTheme.typography.titleMedium)
             }
-            items(locations.entries.toList()) { (title, rooms) -> Text("$title：${rooms.joinToString("、") { it.ifEmpty { "未提供地点" } }}") }
+            items(locations.entries.toList()) { (title, rooms) ->
+                val noLocation = stringResource(R.string.courses_no_location)
+                Text(stringResource(R.string.courses_room_list, title, rooms.joinToString(stringResource(R.string.courses_list_separator)) { it.ifEmpty { noLocation } }))
+            }
             items(groups) { (g, classes) ->
-                Text("${g.title} · ${g.room.ifEmpty { "未提供地点" }}\n第 ${classes.joinToString("、") { it.week.toString() }} 周 · ${weekday(g.day)} · ${g.first}–${g.last} 节 · ${g.start}–${g.end}")
+                Text(stringResource(R.string.courses_group_summary, g.title, g.room.ifEmpty { stringResource(R.string.courses_no_location) }, classes.joinToString(stringResource(R.string.courses_list_separator)) { it.week.toString() }, weekday(g.day), g.first, g.last, g.start, g.end))
             }
-            item { Text("数据库差异与冲突", style = MaterialTheme.typography.titleMedium)
-                if (proposal.changes.isEmpty()) Text("与当前课表一致，无新增或移除。") }
-            items(proposal.changes) { change -> Text("${change.field}：${change.before ?: "无"} → ${change.after ?: "无"}") }
+            item { Text(stringResource(R.string.courses_database_diff), style = MaterialTheme.typography.titleMedium)
+                if (proposal.changes.isEmpty()) Text(stringResource(R.string.courses_unchanged)) }
+            items(proposal.changes) { change -> Text(stringResource(R.string.courses_field_change, change.field, change.before ?: stringResource(R.string.courses_none), change.after ?: stringResource(R.string.courses_none))) }
             item {
                 Actions {
-                    Secondary("返回核对", !busy, onEdit)
-                    ActionPill("确认导入", onConfirm, Modifier.testTag("confirmCourseImport"), enabled = !busy, prominent = true)
+                    Secondary(stringResource(R.string.courses_back_to_review), !busy, onEdit)
+                    ActionPill(stringResource(R.string.courses_confirm_import), onConfirm, Modifier.testTag("confirmCourseImport"), enabled = !busy, prominent = true)
                 }
             }
         }

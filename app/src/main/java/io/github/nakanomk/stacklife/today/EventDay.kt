@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.today
 
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -50,7 +51,7 @@ internal fun EventDay(
                 }
             }
             item {
-                Text(if (rows.isEmpty()) "当地日历跳过了这一天" else "${clockLabel(plan.day.endMillis, plan.day)} · 一天结束",
+                Text(if (rows.isEmpty()) stringResource(R.string.today_skipped_day) else stringResource(R.string.today_end_at, clockLabel(plan.day.endMillis, plan.day)),
                     Modifier.padding(start = spine + 22.dp, top = 8.dp, bottom = 8.dp),
                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -86,12 +87,12 @@ private fun EventRow(row: DayEventRow, day: PlannerQuery.Day, spine: Dp, onEdit:
             }
             is DayEventRow.Gap -> {
                 val canAdd = row.end - row.start >= MINUTE_MS
-                val label = "空闲 · ${elapsedLabel(row.end - row.start)}"
-                val add = if (canAdd) Modifier.clickable(onClickLabel = "在此空闲时段添加任务", role = Role.Button) { onGap(row) } else Modifier
+                val label = stringResource(R.string.today_free_duration, elapsedLabel(row.end - row.start))
+                val add = if (canAdd) Modifier.clickable(onClickLabel = stringResource(R.string.today_add_in_gap), role = Role.Button) { onGap(row) } else Modifier
                 Row(body.testTag("day-gap:${row.start}").then(add).padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(label, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
-                    if (canAdd) Icon(painterResource(R.drawable.ic_add), "添加任务", Modifier.size(20.dp), tint = colors.primary)
+                    if (canAdd) Icon(painterResource(R.drawable.ic_add), stringResource(R.string.today_add_task), Modifier.size(20.dp), tint = colors.primary)
                 }
             }
         }

@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife.today
 
+import io.github.nakanomk.stacklife.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -25,7 +27,7 @@ import java.time.Instant
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
-private val clock = DateTimeFormatter.ofPattern("HH:mm")
+private val clock = DateTimeFormatter.ofPattern("HH:mm", java.util.Locale.ROOT)
 
 @Composable
 internal fun GapTaskEditor(plan: DayPlan, start: Long, end: Long, revision: Long, model: WorkspaceViewModel, close: () -> Unit) {
@@ -52,36 +54,36 @@ internal fun GapTaskEditor(plan: DayPlan, start: Long, end: Long, revision: Long
     val minutes = duration.toIntOrNull()?.takeIf { it > 0 }
     val atMillis = at?.toInstant()?.toEpochMilli()
     val problem = when {
-        revision != plan.revision -> "日程已变更，请关闭并重新选择空闲时段。"
-        local == null -> "请输入 24 小时时刻，如 09:30"
-        atMillis == null -> "当地时钟跳过了这个时刻，请选择其他时间"
-        minutes == null -> "时长须为正整数分钟"
-        atMillis < start || atMillis + minutes * MINUTE_MS > end -> "起止时间须在所选空闲时段内"
+        revision != plan.revision -> stringResource(R.string.today_stale_gap)
+        local == null -> stringResource(R.string.today_valid_clock)
+        atMillis == null -> stringResource(R.string.today_skipped_time)
+        minutes == null -> stringResource(R.string.today_positive_minutes)
+        atMillis < start || atMillis + minutes * MINUTE_MS > end -> stringResource(R.string.today_outside_gap)
         else -> null
     }
-    PlannerAlertDialog(onDismissRequest = { if (editable) close() }, title = { Text("在空闲时段添加任务") }, text = {
+    PlannerAlertDialog(onDismissRequest = { if (editable) close() }, title = { Text(stringResource(R.string.today_gap_title)) }, text = {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("${clockLabel(start, plan.day)}–${clockLabel(end, plan.day)} · ${elapsedLabel(end - start)}")
             OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth().testTag("gap-title"), singleLine = true,
-                enabled = editable, label = { Text("任务名称") })
+                enabled = editable, label = { Text(stringResource(R.string.today_task_name)) })
             OutlinedTextField(time, { time = it }, Modifier.fillMaxWidth().testTag("gap-time"), singleLine = true,
-                enabled = editable, label = { Text("开始时间（HH:mm）") })
+                enabled = editable, label = { Text(stringResource(R.string.today_start_clock)) })
             if (offsets.size > 1) {
-                Text("该时刻出现两次，请选择 UTC 偏移")
+                Text(stringResource(R.string.today_choose_offset))
                 for (choice in offsets) FilterChip(selected = choice == offset, onClick = { offsetId = choice.id },
                     label = { Text("UTC${choice.id}") }, enabled = editable)
             }
             OutlinedTextField(duration, { duration = it }, Modifier.fillMaxWidth().testTag("gap-duration"), singleLine = true,
-                enabled = editable, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), label = { Text("时长（分钟）") })
+                enabled = editable, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), label = { Text(stringResource(R.string.today_duration_minutes)) })
             (problem ?: rejection)?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.error) }
         }
-    }, dismissButton = { TextButton(onClick = close, enabled = editable) { Text("取消") } }, confirmButton = {
+    }, dismissButton = { TextButton(onClick = close, enabled = editable) { Text(stringResource(R.string.today_cancel)) } }, confirmButton = {
         TextButton(enabled = editable && title.isNotBlank() && problem == null, modifier = Modifier.testTag("gap-save"), onClick = {
             if (at != null && minutes != null) {
                 rejection = null
                 submission.submit { model.startReviewed(listOf(PlannerCommand.TaskAdd(TaskInput(title.trim(), minutes = minutes, ref = "task")),
                     PlannerCommand.SlotSet("@task", at, minutes, revision)), revision) }
             }
-        }) { Text("添加并安排") }
+        }) { Text(stringResource(R.string.today_add_and_schedule)) }
     })
 }

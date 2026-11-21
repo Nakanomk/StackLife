@@ -10,11 +10,11 @@ import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 internal const val MINUTE_MS = 60_000L
-private val clockFormat = DateTimeFormatter.ofPattern("HH:mm")
+private val clockFormat = DateTimeFormatter.ofPattern("HH:mm", java.util.Locale.ROOT)
 
-internal fun clockLabel(millis: Long, day: PlannerQuery.Day): String {
+internal fun clockLabel(millis: Long, day: PlannerQuery.Day, includeDate: Boolean = true): String {
     val time = Instant.ofEpochMilli(millis).atZone(day.zone)
-    val date = if (time.toLocalDate() == day.date) "" else "${time.monthValue}/${time.dayOfMonth} "
+    val date = if (!includeDate || time.toLocalDate() == day.date) "" else "${time.monthValue}/${time.dayOfMonth} "
     val offset = if (day.zone.rules.getValidOffsets(time.toLocalDateTime()).size > 1) " ${time.offset}" else ""
     return date + time.format(clockFormat) + offset
 }

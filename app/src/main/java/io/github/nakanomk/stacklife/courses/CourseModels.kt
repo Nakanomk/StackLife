@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.courses
 
+import io.github.nakanomk.stacklife.i18n.uiText
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
@@ -8,8 +9,8 @@ const val HUST_SOURCE = "hust-hub"
 const val MANUAL_SOURCE = "manual"
 internal const val MAX_COURSE_FIELD = 256
 internal fun courseFieldProblem(title: String, room: String): String? = when {
-    title.isBlank() -> "KCMC 课名不能为空"
-    title.length > MAX_COURSE_FIELD || room.length > MAX_COURSE_FIELD -> "课名或教室超过 $MAX_COURSE_FIELD 个字符，请修正或排除此项。"
+    title.isBlank() -> uiText("KCMC course name cannot be blank.", "KCMC 课名不能为空")
+    title.length > MAX_COURSE_FIELD || room.length > MAX_COURSE_FIELD -> uiText({ "Course name or room exceeds $MAX_COURSE_FIELD characters. Correct or exclude this entry." }, { "课名或教室超过 $MAX_COURSE_FIELD 个字符，请修正或排除此项。" })
     else -> null
 }
 
@@ -31,14 +32,14 @@ internal fun CourseMeeting.pattern() = CoursePattern(title, room, day, firstPeri
 data class ManualSeries(val pattern: CoursePattern, val weeks: Set<Int>)
 
 fun TermSpec.problem(): String? = when {
-    id.isBlank() || id != id.trim() || id.length > 128 -> "学期标识须为 1–128 个字符，首尾不能有空格。"
-    firstMonday.year !in 1..9999 || firstMonday.dayOfWeek.value != 1 -> "首周日期必须是有效的周一。"
-    weeks !in 1..53 -> "总周数须为 1–53。"
+    id.isBlank() || id != id.trim() || id.length > 128 -> uiText("Term ID must be 1–128 characters, with no leading or trailing spaces.", "学期标识须为 1–128 个字符，首尾不能有空格。")
+    firstMonday.year !in 1..9999 || firstMonday.dayOfWeek.value != 1 -> uiText("Week one must start on a valid Monday.", "首周日期必须是有效的周一。")
+    weeks !in 1..53 -> uiText("The term must have 1–53 weeks.", "总周数须为 1–53。")
     else -> {
         val last = firstMonday.plusWeeks(weeks.toLong()).minusDays(1)
         when {
-            last.year > 9999 -> "学期结束日期超出范围。"
-            switchDate != null && switchDate !in firstMonday..last -> "作息切换日不在本学期内。"
+            last.year > 9999 -> uiText("The end of the term is out of range.", "学期结束日期超出范围。")
+            switchDate != null && switchDate !in firstMonday..last -> uiText("The bell schedule change must fall within the term.", "作息切换日不在本学期内。")
             else -> null
         }
     }

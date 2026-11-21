@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.appearance
 
+import androidx.compose.ui.res.stringResource
+import io.github.nakanomk.stacklife.R
+
 import android.app.ActivityManager
 import android.app.UiModeManager
 import android.content.BroadcastReceiver
@@ -35,13 +38,13 @@ internal data class PlatformAppearance(
 internal fun glassUnavailableReason(appearance: Appearance): String? {
     val platform = LocalPlatformAppearance.current
     return when {
-        appearance.reduceTransparency -> "已开启减少透明度"
-        appearance.highContrast -> "已开启增强对比"
-        platform.contrast > 0f -> "系统已开启高对比"
-        Build.VERSION.SDK_INT < 33 -> "折射需要 Android 13 或更高版本"
-        !platform.accelerated -> "当前窗口未启用硬件加速"
-        platform.lowRam -> "设备为低内存配置"
-        platform.powerSave -> "系统处于省电模式"
+        appearance.reduceTransparency -> stringResource(R.string.ui_transparency_reduced)
+        appearance.highContrast -> stringResource(R.string.ui_contrast_increased)
+        platform.contrast > 0f -> stringResource(R.string.ui_system_contrast)
+        Build.VERSION.SDK_INT < 33 -> stringResource(R.string.ui_refraction_api)
+        !platform.accelerated -> stringResource(R.string.ui_no_acceleration)
+        platform.lowRam -> stringResource(R.string.ui_low_ram)
+        platform.powerSave -> stringResource(R.string.ui_power_saving)
         else -> null
     }
 }

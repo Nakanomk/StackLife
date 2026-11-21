@@ -75,7 +75,7 @@ interface PlannerApi {
 
 完整导航为「今天 / 工作台 / 流程图 / 课表」，设置从顶栏进；今天默认设备所在日期。时间轴延伸至日程助理输入栏的上沿，不藏在输入栏或导航下面。右下加号下的**非模态**待排队列默认展开；点标题可收成小球，再点原地展开，收起后时间轴仍用满输入栏上方的空间。切日、切页和旋转不重置用户刚选的开合状态。收起时箭头向上，展开时向下，队列上缘渐变磨砂。「布局 → 待排队列」可改回常驻托盘。待排指无时段的在队任务。轴和拖动参考 [Structured](https://structured.app/visual-planning) 与 [Planner Hours](https://github.com/baslawson/Planner#features)，小球变列表参考 [Material Container Transform](https://github.com/material-components/material-components-android/blob/master/docs/theming/Motion.md#container-transform)。
 
-队列是覆盖层：开合不改变轴线、滚动位置或拖放的时刻映射。收起的小球与加号同为 56dp。左上「时间 / 事件」切换两种表示；「时间」保留比例刻度，「事件」参考 [Structured Full 布局](https://help.structured.app/en/articles/354306#2_change_app_layout)，左侧标刻、沿线排列任务和固定课。连续空档只占一行，注明真实时长；点该行可将新任务直接排入其中。根据重叠时段的并集取空档，跨日裁剪、夏令时和空白日均按当地日界计算。
+队列是覆盖层：开合不改变轴线、滚动位置或拖放的时刻映射。收起的小球与加号同为 56dp。左上圆钮用时钟／事件列表图标表示当前视图，点开才显示选项文字。**时间视图**保留比例刻度；滚到底时，当地次日零点、「一天结束」标记的下沿和竖线末端恰好停在日程助理输入框上沿。午夜后没有可滚动的留白，助理及导航下不画时间轴。展开队列时末刻显示在左侧时刻栏，收起队列可直接点开深夜任务。**事件视图**沿用原布局：竖线贯穿至助理上沿，列表保留让末项滚出队列遮挡区的余量。参考 [Structured Full 布局](https://help.structured.app/en/articles/354306#2_change_app_layout)，左侧标刻、沿线排列任务和固定课。连续空档只占一行，注明真实时长；点该行可将新任务直接排入其中。根据重叠时段的并集取空档，跨日裁剪、夏令时和空白日均按当地日界计算。
 
 - Compose 可滚动刻度接[原生拖动手势](https://developer.android.com/develop/ui/compose/touch-input/pointer-input/drag-swipe-fling)。长按拖动，边缘滚动；指针换算为含滚动偏移的轴内容坐标，按 5 分钟就近吸附。预览半透明落点、起止与冲突。松手才落库；轴外、取消、目标失效不改原数据。「安排时间」打开同一日期/时间/时长编辑器，无需拖动也可完成全部安排。
 - `TimeBlock(taskId UNIQUE, startInstant, endInstant)` 引用原任务。长按标题拖动整段；长按任务旁竖条，松开后直接拖下端点，只改结束时间，起点不动。交互参考 [Google 日历的底部圆形时长手柄](https://support.google.com/calendar/answer/72143?co=GENIE.Platform%3DAndroid)和 [FullCalendar 的触摸选择](https://fullcalendar.io/docs/touch)。课程、完成项和没有真实结束点的续段不提供手柄。取消只释放时段；移出任务释放占位，完成任务保留历史块。
@@ -149,7 +149,8 @@ interface PlannerApi {
 基线是 Android 标准 Material 3。字形走平台 sans-serif 与中文回退，不分发苹方或按品牌模拟字形。页名使用 `titleLarge`（22/28sp），普通列表标题 `bodyLarge`（16/24sp），次要信息 `bodyMedium`（14/20sp），导航与时间刻度使用标签角色（12/16sp）。是否强调由信息角色决定，不把普通任务当成展示大标题。使用标准 motion scheme；减少动效仍然生效。
 
 - 四个根页面在同一横向分页容器中，导航与助理位于容器外。默认浮动导航，支持改为贴底；键盘出现时收起主导航。根页不重复页名，顶栏中间胶囊放日期、队列/栈、流程图创建或教学周；独立动作用圆形按钮。右下加号属于页面。手动操作不依赖模型。
-- 设置首页按外观、日程助理和工作台恢复策略分组。「色彩」「布局」「材质与动态」各有独立目的地，只显示、保存或恢复本页字段。色彩支持随系统/浅/深、Android 12+ 动态色或种子（默认 `#435D92`）；使用 [MaterialKolor 6.0.0](https://github.com/jordond/MaterialKolor/releases/tag/6.0.0) 生成 `SPEC_2025` 颜色角色。
+- 设置首页按外观、通用、日程助理和工作台恢复策略分组。「色彩」「布局」「材质与动态」各有独立目的地，只显示、保存或恢复本页字段。色彩支持随系统/浅/深、Android 12+ 动态色或种子（默认 `#435D92`）；使用 [MaterialKolor 6.0.0](https://github.com/jordond/MaterialKolor/releases/tag/6.0.0) 生成 `SPEC_2025` 颜色角色。
+- 「通用 → 语言」使用和外观相同的[单选项设置](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/SettingsSelectionComponents.kt#L14-L45)：**跟随系统**（默认）、**English**、**中文**。跟随系统按语言顺序选择中／英文，均不匹配或列表为空时用英文。Android 13 起与[系统的应用语言设置](https://developer.android.com/guide/topics/resources/app-languages#app-language-settings)双向同步，旧系统在本机保存。语言选择不改任务、课程、栈帧快照和历史对话原文。
 - 支持标准/紧凑留白、主导航次序/启动页、任务时长/备注、贴底/浮动、常驻/悬浮队列、材质总开关和导航/助理分项、减弱动效、减少透明度、增强对比及系统触感。默认舒适、今天、动态色、悬浮队列、玻璃开启。首次启动和升级时没有 `glass` 字段的配置均用开启；显式 `false` 不因升级改变，减少透明度和增强对比仍优先。三种恢复策略不受外观重置影响。
 - 首发图标为原创 fumo 颜文字 **`ᗜˬᗜ`**：两只对称方眼和低位短弧嘴，用独立矢量笔画，不依赖字库、商业布偶照片，不强画天子肖像。按 [Android Adaptive Icon](https://developer.android.com/develop/ui/views/launch/icon_design_adaptive) 做 108×108 dp 分层，识别区在中心 66×66 dp，彩色前景/背景及 monochrome 层共用轮廓，不预烘启动器圆角/阴影。空队列小标沿用同一张脸，不用颜文字代替操作标签。
 
@@ -290,6 +291,8 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 **v0.10.3 复审。** 带三项待排任务从 0.10.2 覆盖安装后，首次打开今天即展开队列；同一模拟器上，展开和收起时轴下沿均为 `y=1944 px`，助理输入区始于 `y=1955 px`。纸飞机与键盘发送均不先弹核对页；本地 HTTPS 验收中，改数据范围、看历史、删除对话均未触发模型请求。另在飞行模式下强停冷启，仍能打开历史原文。USB 覆盖安装后 OnePlus PLR110 的包管理器回读 0.10.3（18）。
 
 **v0.10.4 复审。** API 37、440 dpi：收起的队列球与加号均为 154 × 154 px。队列展开和收起时，时间轴下沿与助理输入栏上沿均为 `y=1955 px`；末端三个像素采样位置仍有轴线。第 11 周向第 12 周拖动，手指尚未松开、11/16–11/22 的日期仍在画面内时，标题已是「第 12 周」。事件视图把 09:30–11:00 显示为一行「空闲 · 1 小时 30 分钟」。用 0.10.3 写入的对话覆盖升级后可以续聊，消息仍在同一条记录；另用本地 HTTPS 服务验证上下文只取本对话最近 12 条文字。
+
+**v0.10.5–0.10.6 复审。** 按 OnePlus 上的参考画面对照：API 37、1080×2340、440 dpi，时间视图滚至次日 00:00；队列展开和收起时，日末标签下沿、轴线末端、助理输入框上沿均为 `y=1955 px`，间隔 `0 px`。像素回归检查最后 1、4、8 px 仍有线；23:30–00:00 的任务在收起队列后可直接点开，拖进助理不排程。事件视图仍贯穿短列表。Android 8 和 17 均实际切换中英文，选择中文后强停冷启仍为中文；API 37 系统改法语、应用选跟随系统时为英文，用系统应用语言改选中文立即生效。OnePlus USB 覆盖安装后回读 `0.10.6 (21)`。
 
 |阶段 / 用例|输入 → 可观察结果（校方登录、真实模型、联盟真机和性能有各自的验收条件）|
 |---|---|

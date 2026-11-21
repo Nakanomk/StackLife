@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife.workspace
 
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -79,10 +81,11 @@ internal fun WorkspaceScreen(
     val pushedId by actions.pushedFrame.collectAsStateWithLifecycle()
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
+    val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(pushedId, editingId) {
         val frameId = pushedId ?: return@LaunchedEffect
         if (editingId != null) return@LaunchedEffect
-        if (snackbar.showSnackbar("已压栈", actionLabel = "补充原因", withDismissAction = true,
+        if (snackbar.showSnackbar(context.getString(R.string.ui_pushed), actionLabel = context.getString(R.string.ui_add_reason), withDismissAction = true,
                 duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) editingId = frameId
         actions.dismissPush(frameId)
     }
@@ -128,7 +131,7 @@ private fun WorkspaceSegments(stack: Boolean, change: (Boolean) -> Unit, positio
                 val selected = stack == frame
                 Box(Modifier.weight(1f).clip(CircleShape).selectable(selected, role = Role.Tab) { change(frame) }
                     .heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
-                    Text(if (frame) "栈" else "队列", style = MaterialTheme.typography.labelLarge,
+                    Text(if (frame) stringResource(R.string.ui_stack) else stringResource(R.string.ui_queue), style = MaterialTheme.typography.labelLarge,
                         color = if (highlighted == index) colors.primary else colors.onSurfaceVariant)
                 }
             }
@@ -170,14 +173,14 @@ private fun QueueList(
         item {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                 val selected = selection
-                Text(if (selected == null) "${tasks.size} 项未完成 · 预计 ${tasks.sumOf { it.minutes.toLong() }} 分钟"
-                    else "已选 ${selected.size} 项", Modifier.weight(1f),
+                Text(if (selected == null) stringResource(R.string.ui_queue_summary, tasks.size, tasks.sumOf { it.minutes.toLong() })
+                    else stringResource(R.string.ui_selected_count, selected.size), Modifier.weight(1f),
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (tasks.size > 1 || selected != null) TextButton(modifier = Modifier.testTag("queue-select"), enabled = !action.busy,
                     onClick = { selection = if (selected == null) arrayListOf() else null }) {
-                    Text(if (selected == null) "多选" else "取消")
+                    Text(if (selected == null) stringResource(R.string.ui_select_multiple) else stringResource(R.string.ui_cancel))
                 }
-                if (tasks.isNotEmpty()) ActionPill(if (selected == null) "压栈" else "压入所选",
+                if (tasks.isNotEmpty()) ActionPill(if (selected == null) stringResource(R.string.ui_push) else stringResource(R.string.ui_push_selected),
                     modifier = Modifier.testTag("queue-push"),
                     enabled = !action.busy && (selected == null || selected.isNotEmpty()),
                     onClick = { action.submit { onPush(selected ?: tasks.map { it.id }) } })
@@ -188,8 +191,8 @@ private fun QueueList(
                 Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(painterResource(R.drawable.fumo_face), contentDescription = null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
-                    Text("队列是空的", style = MaterialTheme.typography.titleMedium)
-                    Hint("添加下一件要做的事，或从栈中恢复任务。")
+                    Text(stringResource(R.string.ui_empty_queue), style = MaterialTheme.typography.titleMedium)
+                    Hint(stringResource(R.string.ui_empty_queue_hint))
                 }
             }
         }
@@ -212,17 +215,18 @@ private fun QueueList(
                     Row(Modifier.fillMaxWidth().heightIn(min = if (appearance.compact) 52.dp else 64.dp)
                         .padding(vertical = if (appearance.compact) 4.dp else 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            if (head) Text("当前优先", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                            if (head) Text(stringResource(R.string.ui_current_priority), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
                             Text(task.title, shared.title("task:${task.id}"), style = MaterialTheme.typography.bodyLarge,
                                 maxLines = 3, overflow = TextOverflow.Ellipsis)
-                            val meta = remember(task.minutes, task.notes, appearance.showDuration, appearance.showNotes) {
-                                listOfNotNull("${task.minutes} 分钟".takeIf { appearance.showDuration },
-                                    task.notes.takeIf { appearance.showNotes && it.isNotBlank() }).joinToString(" · ")
+                            val duration = if (appearance.showDuration) stringResource(R.string.ui_minutes_value, task.minutes) else null
+                            val note = task.notes.takeIf { appearance.showNotes && it.isNotBlank() }
+                            val meta = remember(duration, note) {
+                                when { duration == null -> note.orEmpty(); note == null -> duration; else -> "$duration · $note" }
                             }
                             if (meta.isNotEmpty()) Text(meta, color = muted, style = MaterialTheme.typography.bodyMedium,
                                 maxLines = 2, overflow = TextOverflow.Ellipsis)
                             if (task.scheduledStartMillis != null && task.scheduledEndMillis != null)
-                                Text("已安排 ${scheduledRange(task.scheduledStartMillis, task.scheduledEndMillis)}", color = muted,
+                                Text(stringResource(R.string.ui_scheduled_range, scheduledRange(task.scheduledStartMillis, task.scheduledEndMillis)), color = muted,
                                     style = MaterialTheme.typography.bodySmall)
                         }
                         if (order.size > 1) MoveMenu(
@@ -244,13 +248,14 @@ private fun <T> List<T>.moved(from: Int, to: Int): List<T> = toMutableList().app
 @Composable
 private fun MoveMenu(modifier: Modifier, title: String, index: Int, lastIndex: Int, enabled: Boolean, onMove: (Int) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    val description = stringResource(R.string.ui_move_task_hint, title)
     Box {
         IconButton(onClick = { expanded = true }, enabled = enabled,
-            modifier = modifier.size(48.dp).semantics { contentDescription = "移动$title，长按拖动或点按选择位置" }) {
+            modifier = modifier.size(48.dp).semantics { contentDescription = description }) {
             Icon(painterResource(R.drawable.ic_drag_handle), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         PlannerDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            for ((label, target) in listOf("移到队首" to 0, "上移一位" to index - 1, "下移一位" to index + 1, "移到队尾" to lastIndex)) {
+            for ((label, target) in listOf(stringResource(R.string.ui_move_to_front) to 0, stringResource(R.string.ui_move_up_one) to index - 1, stringResource(R.string.ui_move_down_one) to index + 1, stringResource(R.string.ui_move_to_end) to lastIndex)) {
                 DropdownMenuItem(text = { Text(label) }, enabled = target in 0..lastIndex && target != index,
                     onClick = { expanded = false; onMove(target) })
             }

@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.planner
 
+import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.courses.*
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -72,8 +73,11 @@ enum class FrameSource { PUSH, MANUAL, SWAP, GRAPH }
 enum class RestorePolicy { PREPEND, APPEND, SWAP }
 enum class RestoreMode { ALL, SELECTED }
 
-/** A label for local UI and confirmation cards, never stored as a reason. */
-internal fun frameLabel(reason: String): String = reason.ifBlank { "暂存的队列" }
+internal fun swapReason(): String = uiText("Queue saved before switching frames", "切换栈帧前自动保存")
+
+/** SWAP reasons are system-owned. Never translate a user-entered reason based on its text. */
+internal fun frameLabel(reason: String, source: FrameSource): String =
+    if (source == FrameSource.SWAP) swapReason() else reason.ifBlank { uiText("Saved queue", "暂存的队列") }
 
 /** Items are immutable snapshots in their original order. */
 data class FrameView(

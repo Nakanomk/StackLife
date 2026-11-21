@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.assistant
 
+import io.github.nakanomk.stacklife.i18n.uiText
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -29,14 +30,14 @@ internal data class ServiceProfile(val baseUrl: String, val model: String, val o
 
 // Not a data class: no generated toString/componentN/copy that includes the credential.
 internal class ServiceConnection(val profile: ServiceProfile, val key: String) {
-    init { if (!validKey(key)) throw ConfigurationProblem("密钥不能包含空格、换行或无效字符。") }
+    init { if (!validKey(key)) throw ConfigurationProblem(uiText("The key must not contain spaces, line breaks, or invalid characters.", "密钥不能包含空格、换行或无效字符。")) }
 }
 
 private class ConfigurationProblem(message: String) : IllegalArgumentException(message)
 
 internal fun serviceProfile(baseUrl: String, model: String): ServiceProfile {
     val address = baseUrl.trim()
-    fun invalidAddress(): Nothing = throw ConfigurationProblem("请输入完整的 HTTPS 服务地址（可含 API 路径，不含账号、查询或片段）。")
+    fun invalidAddress(): Nothing = throw ConfigurationProblem(uiText("Enter a full HTTPS service address. An API path is allowed, but not credentials, a query, or a fragment.", "请输入完整的 HTTPS 服务地址（可含 API 路径，不含账号、查询或片段）。"))
     if (address.length > 4096) invalidAddress()
     val uri = try { URI(address) } catch (_: URISyntaxException) { invalidAddress() }
     if (!uri.scheme.equals("https", ignoreCase = true) || uri.rawAuthority.isNullOrBlank() ||
@@ -44,7 +45,7 @@ internal fun serviceProfile(baseUrl: String, model: String): ServiceProfile {
     val url = address.toHttpUrlOrNull() ?: invalidAddress()
     val modelName = model.trim()
     if (modelName.isBlank() || modelName.length > 256 || modelName.any(Char::isISOControl)) {
-        throw ConfigurationProblem("请输入有效的模型名称。")
+        throw ConfigurationProblem(uiText("Enter a valid model name.", "请输入有效的模型名称。"))
     }
     return ServiceProfile(
         url.toString().trimEnd('/'), modelName,
@@ -70,9 +71,9 @@ internal class ConnectionStore(context: Context, storageName: String = "assistan
         val previous = readConnection(target)
         val key = if (newKey.isNullOrBlank()) {
             previous?.takeIf { it.profile.origin == profile.origin }?.key
-                ?: throw ConfigurationProblem("首次连接或更换服务域（含端口）必须重新填写密钥。")
+                ?: throw ConfigurationProblem(uiText("Enter a key when connecting for the first time or changing the service origin, including its port.", "首次连接或更换服务域（含端口）必须重新填写密钥。"))
         } else newKey
-        if (!validKey(key)) throw ConfigurationProblem("密钥不能包含空格、换行或无效字符。")
+        if (!validKey(key)) throw ConfigurationProblem(uiText("The key must not contain spaces, line breaks, or invalid characters.", "密钥不能包含空格、换行或无效字符。"))
 
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, encryptionKey(create = true)) // Keystore supplies a fresh IV.
@@ -142,7 +143,7 @@ internal class ConnectionStore(context: Context, storageName: String = "assistan
             catch (cancelled: CancellationException) { throw cancelled }
             catch (invalid: ConfigurationProblem) { throw invalid }
             catch (_: Exception) {
-                throw IllegalStateException("无法访问加密连接配置：设备密钥可能已失效。请清除连接配置后重新填写。")
+                throw IllegalStateException(uiText("Could not access the encrypted service settings. The device key may no longer be valid. Remove the settings and enter them again.", "无法访问加密连接配置：设备密钥可能已失效。请清除连接配置后重新填写。"))
             }
         }
     }

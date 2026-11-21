@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.workspace
 
+import androidx.compose.ui.res.stringResource
+import io.github.nakanomk.stacklife.R
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -57,15 +60,15 @@ internal fun TaskEditor(
     val scroll = rememberLazyListState()
     val close = { if (!action.busy) onClose() }
     BackHandler(enabled = action.busy) { /* The receipt closes the editor once. */ }
-    val heading = if (createFrame) "新建栈帧" else if (original != null) "编辑任务" else "新增任务"
+    val heading = if (createFrame) stringResource(R.string.ui_new_frame) else if (original != null) stringResource(R.string.ui_edit_task) else stringResource(R.string.ui_add_task)
     EditorPage(heading, close, original?.let { AssistantPage.Task(it.id) } ?: if (createFrame) AssistantPage.Frames else AssistantPage.Queue,
         backEnabled = !action.busy, footer = {
             Actions {
-                if (createFrame) Secondary("继续添加任务", enabled = !action.busy) {
+                if (createFrame) Secondary(stringResource(R.string.ui_add_another), enabled = !action.busy) {
                     drafts.add(Draft(nextKey++))
                     scroll.requestScrollToItem(1 + drafts.lastIndex)
                 }
-                Primary(if (createFrame) "保存栈帧" else if (original != null) "保存修改" else "添加到队列",
+                Primary(if (createFrame) stringResource(R.string.ui_save_frame) else if (original != null) stringResource(R.string.ui_save_changes) else stringResource(R.string.ui_add_task_to_queue),
                     enabled = !action.busy && drafts.all { it.duration() != null }) {
                     val inputs = drafts.map { TaskInput(it.title.text, it.notes.text, checkNotNull(it.duration())) }
                     val command = when {
@@ -80,22 +83,22 @@ internal fun TaskEditor(
         LazyColumn(state = scroll, contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
             if (createFrame) item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Hint("按想要恢复的顺序添加任务。这份清单直接留在栈中，不改变当前队列。")
+                    Hint(stringResource(R.string.ui_new_frame_hint))
                     ReasonField(reason) { reason = it }
                 }
             }
             itemsIndexed(drafts, key = { _, draft -> draft.key }) { index, row ->
                 FormGroup {
                     if (createFrame) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Text("任务 ${index + 1}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                        if (drafts.size > 1) TextButton(enabled = !action.busy, onClick = { drafts.remove(row) }) { Text("删除此项") }
+                        Text(stringResource(R.string.ui_task_number, index + 1), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                        if (drafts.size > 1) TextButton(enabled = !action.busy, onClick = { drafts.remove(row) }) { Text(stringResource(R.string.ui_delete_item)) }
                     }
                     TextField(row.title, { drafts[index] = row.copy(title = it) }, enabled = !action.busy,
                         modifier = Modifier.fillMaxWidth().testTag("title:$index"), colors = lineFieldColors(),
-                        label = { Text("标题") }, singleLine = true)
+                        label = { Text(stringResource(R.string.ui_title)) }, singleLine = true)
                     TextField(row.notes, { drafts[index] = row.copy(notes = it) }, enabled = !action.busy,
                         modifier = Modifier.fillMaxWidth().testTag("notes:$index"), colors = lineFieldColors(),
-                        label = { Text("备注（选填）") }, maxLines = 5)
+                        label = { Text(stringResource(R.string.ui_optional_notes)) }, maxLines = 5)
                     DurationRow(row.minutes, !action.busy) { drafts[index] = row.copy(minutes = it) }
                 }
             }
@@ -106,16 +109,16 @@ internal fun TaskEditor(
 @Composable
 private fun DurationRow(value: TextFieldValue, enabled: Boolean, update: (TextFieldValue) -> Unit) {
     var editing by rememberSaveable { mutableStateOf(false) }
-    PreferenceRow("预计时长", "${value.text.ifBlank { "30" }} 分钟", enabled = enabled) { editing = true }
+    PreferenceRow(stringResource(R.string.ui_estimated_duration), stringResource(R.string.ui_minutes_value, value.text.ifBlank { "30" }), enabled = enabled) { editing = true }
     if (editing) {
         var draft by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(value) }
         val valid = draft.text.isBlank() || (draft.text.toIntOrNull() ?: 0) > 0
-        PlannerAlertDialog(onDismissRequest = { editing = false }, title = { Text("预计时长") },
-            text = { TextField(draft, { draft = it }, colors = lineFieldColors(), label = { Text("分钟") },
+        PlannerAlertDialog(onDismissRequest = { editing = false }, title = { Text(stringResource(R.string.ui_estimated_duration)) },
+            text = { TextField(draft, { draft = it }, colors = lineFieldColors(), label = { Text(stringResource(R.string.ui_minutes)) },
                 singleLine = true, isError = !valid, placeholder = { Text("30") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)) },
-            confirmButton = { TextButton(enabled = valid, onClick = { update(draft); editing = false }) { Text("确定") } },
-            dismissButton = { TextButton(onClick = { editing = false }) { Text("取消") } })
+            confirmButton = { TextButton(enabled = valid, onClick = { update(draft); editing = false }) { Text(stringResource(R.string.ui_ok)) } },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text(stringResource(R.string.ui_cancel)) } })
     }
 }
 
@@ -123,7 +126,7 @@ private fun DurationRow(value: TextFieldValue, enabled: Boolean, update: (TextFi
 private fun ReasonField(reason: TextFieldValue, onChange: (TextFieldValue) -> Unit) {
     TextField(colors = lineFieldColors(),
         value = reason, onValueChange = onChange, modifier = Modifier.fillMaxWidth().testTag("reason"),
-        label = { Text("保存原因") }, placeholder = { Text("为什么把这些任务留到稍后？") }, maxLines = 4,
+        label = { Text(stringResource(R.string.ui_reason)) }, placeholder = { Text(stringResource(R.string.ui_reason_prompt)) }, maxLines = 4,
     )
 }
 
@@ -133,9 +136,9 @@ internal fun PushReasonEditor(frameId: String, actions: WorkspaceActions, close:
     val action = rememberSubmission(actions) { if (it != SaveOutcome.REJECTED) close() }
     Row(Modifier.fillMaxWidth().testTag("push-reason-editor"), verticalAlignment = Alignment.CenterVertically) {
         TextField(reason, { reason = it }, Modifier.weight(1f).testTag("push-reason"),
-            enabled = !action.busy, singleLine = true, colors = lineFieldColors(), label = { Text("压栈原因") })
-        TextButton(onClick = close, enabled = !action.busy) { Text("取消") }
+            enabled = !action.busy, singleLine = true, colors = lineFieldColors(), label = { Text(stringResource(R.string.ui_push_reason)) })
+        TextButton(onClick = close, enabled = !action.busy) { Text(stringResource(R.string.ui_cancel)) }
         TextButton(onClick = { action.send(PlannerCommand.FrameAddReason(frameId, reason.text)) },
-            enabled = !action.busy && reason.text.isNotBlank()) { Text("保存") }
+            enabled = !action.busy && reason.text.isNotBlank()) { Text(stringResource(R.string.ui_save)) }
     }
 }

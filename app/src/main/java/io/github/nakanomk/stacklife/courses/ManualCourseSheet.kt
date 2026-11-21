@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.courses
 
+import io.github.nakanomk.stacklife.i18n.uiText
+import io.github.nakanomk.stacklife.R
+import androidx.compose.ui.res.stringResource
 import android.database.sqlite.SQLiteException
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -84,11 +87,11 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
         if (form.before != null) return@LaunchedEffect
         try {
             val read = model.planner.observe(PlannerQuery.ManualWeeks(checkNotNull(form.existing).id, original)).first() as ManualWeeksView
-            if (form.openedWeek !in read.weeks) error = "所选课次已不存在，请关闭并重新选择。" else {
+            if (form.openedWeek !in read.weeks) error = uiText("This class no longer exists. Close the sheet and select a class again.", "所选课次已不存在，请关闭并重新选择。") else {
                 form.before = ManualSeries(original, read.weeks)
                 form.weeks = read.weeks
             }
-        } catch (_: SQLiteException) { error = "无法读取课程，请关闭并重新打开。" }
+        } catch (_: SQLiteException) { error = uiText("Cannot read the class. Close the sheet and open it again.", "无法读取课程，请关闭并重新打开。") }
     }
     fun preview(remove: Boolean) {
         if (loading || submission.busy || ready != null || (form.original != null && form.before == null)) return
@@ -105,7 +108,7 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
                     when (result) {
                         is PreviewResult.Rejected -> error = result.message
                         is PreviewResult.Ready -> if (result.changes.isEmpty()) {
-                            model.discardProposal(result.proposalId); error = "没有需要保存的更改。"
+                            model.discardProposal(result.proposalId); error = uiText("There are no changes to save.", "没有需要保存的更改。")
                         } else {
                             form.removing = remove; form.reviewedTerm = term
                             form.revealWeek = if (form.openedWeek in form.weeks) form.openedWeek else form.weeks.minOrNull() ?: 1
@@ -140,17 +143,17 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
                         StackLifeSurface(CapsuleScene.FROST, Modifier.fillMaxWidth().testTag("manual-toolbar"),
                             solid = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(0.dp)) {
                             CenterAlignedTopAppBar(
-                                title = { Text(when { weekChoice != null -> "选择上课周"; review != null -> "核对课程变更"; form.original == null -> "添加课程"; else -> "编辑课程" },
+                                title = { Text(when { weekChoice != null -> stringResource(R.string.courses_choose_weeks); review != null -> stringResource(R.string.courses_review_changes); form.original == null -> stringResource(R.string.courses_add); else -> stringResource(R.string.courses_edit) },
                                     style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 navigationIcon = {
-                                    SheetAction(if (review == null) "取消" else "返回", "manual-cancel", !submission.busy, ::back)
+                                    SheetAction(if (review == null) stringResource(R.string.courses_cancel) else stringResource(R.string.courses_back), "manual-cancel", !submission.busy, ::back)
                                 }, actions = {
                                     when {
-                                        weekChoice != null -> SheetAction("确定", "manual-weeks-done", weekChoice.isNotEmpty()) {
+                                        weekChoice != null -> SheetAction(stringResource(R.string.courses_ok), "manual-weeks-done", weekChoice.isNotEmpty()) {
                                             form.weeks = weekChoice; form.choosingWeeks = null
                                         }
-                                        review == null -> SheetAction("预览", "manual-preview", enabled) { focus.clearFocus(); preview(false) }
-                                        else -> SheetAction(if (form.removing) "确认移除" else "保存课程", "manual-save", !submission.busy) {
+                                        review == null -> SheetAction(stringResource(R.string.courses_preview), "manual-preview", enabled) { focus.clearFocus(); preview(false) }
+                                        else -> SheetAction(if (form.removing) stringResource(R.string.courses_confirm_remove) else stringResource(R.string.courses_save_class), "manual-save", !submission.busy) {
                                             submission.submit { model.confirmProposal(review.proposalId) }
                                         }
                                     }
@@ -174,15 +177,15 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
                             TextButton(onClick = { focus.clearFocus(); preview(true) }, enabled = enabled,
                                 colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
                                 modifier = Modifier.align(Alignment.CenterHorizontally).sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-                                    .testTag("manual-remove")) { Text("移除课程") }
+                                    .testTag("manual-remove")) { Text(stringResource(R.string.courses_remove_class)) }
                         }
                     } else LazyColumn(body.testTag("manual-review"), contentPadding = dockListPadding(top, 0.dp),
                         verticalArrangement = listSpacing) {
-                        item { Hint("只更改当前手动课程。与已有时段重叠时会保留双方；确认前不会写入。") }
+                        item { Hint(stringResource(R.string.courses_manual_review_hint)) }
                         items(review.changes) { change ->
                             FormGroup(Modifier.testTag("manual-change"), frosted = true) {
                                 Text(change.field, style = MaterialTheme.typography.titleSmall)
-                                change.before?.let { Text("原：$it") }; change.after?.let { Text("新：$it") }
+                                change.before?.let { Text(stringResource(R.string.courses_before, it)) }; change.after?.let { Text(stringResource(R.string.courses_after, it)) }
                             }
                         }
                     }
@@ -202,50 +205,49 @@ private fun SheetAction(label: String, tag: String, enabled: Boolean, onClick: (
 
 @Composable
 private fun ManualFields(form: ManualCourseForm, terms: List<TermSpec>, enabled: Boolean) {
-    SectionTitle("学期")
+    SectionTitle(stringResource(R.string.courses_term))
     if (form.original == null && terms.isNotEmpty()) {
         FormGroup(frosted = true) {
-            PickRow("所属学期", form.existing?.id ?: "新建学期", "manual-term", enabled) { dismiss ->
+            PickRow(stringResource(R.string.courses_assigned_term), form.existing?.id ?: stringResource(R.string.courses_new_term), "manual-term", enabled) { dismiss ->
                 for (term in terms) PickOption(term.id, form.existing == term) { form.existing = term; form.weeks = setOf(1); dismiss() }
-                PickOption("新建学期", form.existing == null) { form.existing = null; form.weeks = setOf(1); dismiss() }
+                PickOption(stringResource(R.string.courses_new_term), form.existing == null) { form.existing = null; form.weeks = setOf(1); dismiss() }
             }
         }
     }
     val term = form.existing
     if (term == null) {
-        Hint("填写校历：首周周一和总周数决定课程的实际日期，作息使用北京时间。")
+        Hint(stringResource(R.string.courses_term_setup_hint))
         TermFields(form.newTerm, enabled, frosted = true) { form.newTerm = it }
-    } else Hint("${term.id} · ${term.firstMonday} 起，共 ${term.weeks} 周 · ${if (term.initial == BellSchedule.SUMMER) "夏令" else "冬令"}作息" +
-        (term.switchDate?.let { " · $it 起切换" } ?: ""))
-    SectionTitle("课程信息")
+    } else Hint(stringResource(R.string.courses_term_summary, term.id, term.firstMonday, term.weeks, stringResource(if (term.initial == BellSchedule.SUMMER) R.string.courses_summer else R.string.courses_winter)) +
+        (term.switchDate?.let { stringResource(R.string.courses_switch_on, it) } ?: ""))
+    SectionTitle(stringResource(R.string.courses_class_info))
     val p = form.pattern
     FormGroup(frosted = true) {
-        ImportField("课程名称", p.title, "manual-title", enabled) { form.pattern = form.pattern.copy(title = it) }
-        ImportField("上课地点（选填）", p.room, "manual-room", enabled) { form.pattern = form.pattern.copy(room = it) }
+        ImportField(stringResource(R.string.courses_class_name), p.title, "manual-title", enabled) { form.pattern = form.pattern.copy(title = it) }
+        ImportField(stringResource(R.string.courses_optional_room), p.room, "manual-room", enabled) { form.pattern = form.pattern.copy(room = it) }
     }
-    SectionTitle("上课时段")
+    SectionTitle(stringResource(R.string.courses_class_time))
     val focus = LocalFocusManager.current
     val count = form.weekCount
-    val displayWeeks = remember(form.weeks) {
-        val selected = form.weeks.sorted()
-        if (selected.size > 8) "已选 ${selected.size} 周" else "第 ${selected.joinToString("、")} 周"
-    }
+    val selected = remember(form.weeks) { form.weeks.sorted() }
+    val displayWeeks = if (selected.size > 8) stringResource(R.string.courses_weeks_count, selected.size)
+        else stringResource(R.string.courses_weeks_list, selected.joinToString(stringResource(R.string.courses_list_separator)))
     val chooseWeeks = enabled && count != null
     FormGroup(frosted = true) {
-        PreferenceRow("上课周", if (count == null) "先填写总周数" else displayWeeks,
+        PreferenceRow(stringResource(R.string.courses_class_weeks), if (count == null) stringResource(R.string.courses_enter_weeks_first) else displayWeeks,
             Modifier.testTag("manual-weeks").alpha(if (chooseWeeks) 1f else .38f), chooseWeeks) {
             if (count != null) { focus.clearFocus(); form.choosingWeeks = form.weeks.filterTo(mutableSetOf()) { it in 1..count } }
         }
-        PickRow("星期", weekday(p.day), "manual-day", enabled) { dismiss ->
+        PickRow(stringResource(R.string.courses_weekday), weekday(p.day), "manual-day", enabled) { dismiss ->
             for (n in 1..7) PickOption(weekday(n), p.day == n, Modifier.testTag("manual-day:$n")) { form.pattern = p.copy(day = n); dismiss() }
         }
-        PickRow("开始节次", "第 ${p.firstPeriod} 节", "manual-first", enabled) { dismiss ->
-            for (n in 1..12) PickOption("第 $n 节", p.firstPeriod == n, Modifier.testTag("manual-first:$n")) {
+        PickRow(stringResource(R.string.courses_first_period), stringResource(R.string.courses_period, p.firstPeriod), "manual-first", enabled) { dismiss ->
+            for (n in 1..12) PickOption(stringResource(R.string.courses_period, n), p.firstPeriod == n, Modifier.testTag("manual-first:$n")) {
                 form.pattern = p.copy(firstPeriod = n, lastPeriod = maxOf(p.lastPeriod, n)); dismiss()
             }
         }
-        PickRow("结束节次", "第 ${p.lastPeriod} 节", "manual-last", enabled) { dismiss ->
-            for (n in p.firstPeriod..12) PickOption("第 $n 节", p.lastPeriod == n, Modifier.testTag("manual-last:$n")) {
+        PickRow(stringResource(R.string.courses_last_period), stringResource(R.string.courses_period, p.lastPeriod), "manual-last", enabled) { dismiss ->
+            for (n in p.firstPeriod..12) PickOption(stringResource(R.string.courses_period, n), p.lastPeriod == n, Modifier.testTag("manual-last:$n")) {
                 form.pattern = p.copy(lastPeriod = n); dismiss()
             }
         }
@@ -278,9 +280,9 @@ private fun WeekSelection(count: Int, chosen: Set<Int>, modifier: Modifier, top:
     Column(modifier.verticalScroll(rememberScrollState()).padding(dockListPadding(top, 0.dp))) {
         FormGroup(frosted = true) {
             Actions {
-                TextButton({ change((1..count).toSet()) }, Modifier.heightIn(min = 48.dp)) { Text("全选") }
-                TextButton({ change((1..count step 2).toSet()) }, Modifier.heightIn(min = 48.dp)) { Text("单周") }
-                TextButton({ change((2..count step 2).toSet()) }, Modifier.heightIn(min = 48.dp), enabled = count >= 2) { Text("双周") }
+                TextButton({ change((1..count).toSet()) }, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.courses_select_all)) }
+                TextButton({ change((1..count step 2).toSet()) }, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.courses_odd_weeks)) }
+                TextButton({ change((2..count step 2).toSet()) }, Modifier.heightIn(min = 48.dp), enabled = count >= 2) { Text(stringResource(R.string.courses_even_weeks)) }
             }
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (n in 1..count) FilterChip(selected = n in chosen, onClick = {

@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.today
 
+import java.util.Locale
 import io.github.nakanomk.stacklife.courses.CourseMeeting
 import io.github.nakanomk.stacklife.courses.ScheduledCourse
 import io.github.nakanomk.stacklife.planner.*
@@ -35,7 +36,8 @@ class DayEventRowsTest {
             val d = PlannerQuery.Day(LocalDate.parse(date), ny)
             val gap = dayEventRows(d, emptyList()).single() as DayEventRow.Gap
             assertEquals(d.startMillis, gap.start); assertEquals(d.endMillis, gap.end)
-            assertEquals("$hours 小时", elapsedLabel(gap.end - gap.start))
+            assertEquals("$hours 小时", elapsedLabel(gap.end - gap.start, Locale.CHINESE))
+            assertEquals("$hours hr", elapsedLabel(gap.end - gap.start, Locale.ENGLISH))
         }
         val skipped = PlannerQuery.Day(LocalDate.parse("2011-12-30"), ZoneId.of("Pacific/Apia"))
         assertTrue(dayEventRows(skipped, emptyList()).isEmpty())
@@ -50,9 +52,10 @@ class DayEventRowsTest {
         val gaps = dayEventRows(d, events).filterIsInstance<DayEventRow.Gap>()
         assertEquals(listOf(DayEventRow.Gap(d.startMillis, early - MINUTE_MS), DayEventRow.Gap(early, late),
             DayEventRow.Gap(late + MINUTE_MS, d.endMillis)), gaps)
-        assertEquals("1 小时", elapsedLabel(late - early))
+        assertEquals("1 小时", elapsedLabel(late - early, Locale.CHINESE))
         assertEquals("01:30 -04:00", clockLabel(early, d)); assertEquals("01:30 -05:00", clockLabel(late, d))
-        assertEquals("1 小时 35 分钟", elapsedLabel(95 * MINUTE_MS))
+        assertEquals("1 小时 35 分钟", elapsedLabel(95 * MINUTE_MS, Locale.CHINESE))
+        assertEquals("1 hr 35 min", elapsedLabel(95 * MINUTE_MS, Locale.ENGLISH))
     }
 
     @Test fun renderingEventRowsDoesNotCompressTheTimeScaleOrItsHitTransform() {

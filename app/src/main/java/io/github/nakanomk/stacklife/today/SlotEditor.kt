@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife.today
 
+import io.github.nakanomk.stacklife.R
+import androidx.compose.ui.res.stringResource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -42,7 +44,7 @@ internal fun DayPlan.editorFor(id: String): SlotEditorKey? {
         ((block.endMillis - block.startMillis) / 60_000).toInt(), revision)
 }
 
-private val endFormat = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm XXX")
+private val endFormat = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm XXX", java.util.Locale.ROOT)
 
 @Composable
 internal fun SlotEditor(
@@ -81,18 +83,18 @@ internal fun SlotEditor(
     BackHandler(enabled = submission.busy) { /* Let the outstanding receipt finish once. */ }
     val editable = !submission.busy
     val validate by rememberUpdatedState(checkSlot)
-    EditorPage(if (original == null) "安排时间" else "调整时段", onBack, AssistantPage.Task(entry.taskId), editable) { top, bottom ->
+    EditorPage(if (original == null) stringResource(R.string.today_schedule) else stringResource(R.string.today_adjust_slot), onBack, AssistantPage.Task(entry.taskId), editable) { top, bottom ->
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, bottom)),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(entry.title, style = MaterialTheme.typography.titleMedium)
-            Text("当地时区 · ${zone.id}", style = MaterialTheme.typography.bodySmall)
-            PreferenceRow("开始日期：$date", modifier = Modifier.testTag("slot:date"), enabled = editable) { pickDate = true }
+            Text(stringResource(R.string.today_zone, zone.id), style = MaterialTheme.typography.bodySmall)
+            PreferenceRow(stringResource(R.string.today_start_date, date), modifier = Modifier.testTag("slot:date"), enabled = editable) { pickDate = true }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                NumberField("开始小时（0–23）", hour, editable, Modifier.weight(1f).testTag("slot:hour")) { hour = it }
-                NumberField("分钟（0–59）", minute, editable, Modifier.weight(1f).testTag("slot:minute")) { minute = it }
+                NumberField(stringResource(R.string.today_start_hour), hour, editable, Modifier.weight(1f).testTag("slot:hour")) { hour = it }
+                NumberField(stringResource(R.string.today_start_minute), minute, editable, Modifier.weight(1f).testTag("slot:minute")) { minute = it }
             }
             if (offsets.size > 1) {
-                SectionTitle("该时刻出现两次，请选偏移")
+                SectionTitle(stringResource(R.string.today_choose_repeated_offset))
                 Column(Modifier.selectableGroup()) {
                     for (o in offsets) {
                         Row(Modifier.fillMaxWidth().selectable(o == offset, editable, Role.RadioButton) { offsetChoice = o.id }
@@ -104,29 +106,29 @@ internal fun SlotEditor(
                     }
                 }
             }
-            NumberField("时长（分钟）", duration, editable, Modifier.fillMaxWidth().testTag("slot:duration")) { duration = it }
+            NumberField(stringResource(R.string.today_duration_minutes), duration, editable, Modifier.fillMaxWidth().testTag("slot:duration")) { duration = it }
             val latestCheck = key(command) {
                 var result by remember { mutableStateOf<String?>(null) }
                 var checked by remember { mutableStateOf(false) }
                 LaunchedEffect(command) { if (command != null) { result = validate(command); checked = true } }
                 when {
-                    h == null || m == null -> "请输入有效的小时和分钟"
-                    offsets.isEmpty() -> "当地时钟跳过了这个时刻，请选择其他时间"
-                    minutes == null -> "时长须为正整数分钟"
-                    !checked -> "正在核对时段…"
+                    h == null || m == null -> stringResource(R.string.today_enter_valid_time)
+                    offsets.isEmpty() -> stringResource(R.string.today_skipped_time)
+                    minutes == null -> stringResource(R.string.today_positive_minutes)
+                    !checked -> stringResource(R.string.today_checking_slot)
                     else -> result
                 }
             }
             if (command != null) {
                 val end = command.start.toInstant().plusSeconds(command.durationMinutes * 60L).atZone(zone)
-                Text("结束：${endFormat.format(end)}", style = MaterialTheme.typography.bodyLarge)
+                Text(stringResource(R.string.today_end_time, endFormat.format(end)), style = MaterialTheme.typography.bodyLarge)
             }
             if (latestCheck != null) Text(latestCheck, Modifier.semantics { liveRegion = LiveRegionMode.Polite })
             Actions {
-                Primary("保存时段", editable && command != null && latestCheck == null) {
+                Primary(stringResource(R.string.today_save_slot), editable && command != null && latestCheck == null) {
                     if (command != null) { clearing = false; submission.send(command) }
                 }
-                if (original != null) Secondary("取消安排", editable) {
+                if (original != null) Secondary(stringResource(R.string.today_unschedule), editable) {
                     clearing = true
                     submission.send(PlannerCommand.SlotClear(entry.taskId, entry.revision))
                 }

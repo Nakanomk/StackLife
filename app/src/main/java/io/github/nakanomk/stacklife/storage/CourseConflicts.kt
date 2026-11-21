@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.storage
 
+import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.courses.MAX_COURSE_FIELD
 import io.github.nakanomk.stacklife.courses.ScheduledCourse
 import io.github.nakanomk.stacklife.planner.DayBlock
@@ -72,7 +73,7 @@ internal fun importConflicts(rows: List<CourseRow>, tasks: List<DayBlock>, touch
                 count += priorTouched.size.toLong()
                 if (included) count += priorOther.size.toLong() + (slots.until - slots.from)
                 if (count > MAX_IMPORT_CONFLICTS) throw InvalidCommand(
-                    "本次课程变更与课程或任务重叠超过 $MAX_IMPORT_CONFLICTS 对，无法逐项核对。请检查重复课表或调整时段后重试。")
+                    uiText({ "These changes create more than $MAX_IMPORT_CONFLICTS overlapping pairs of classes or tasks. Check for duplicate classes or adjust their times and try again." }, { "本次课程变更与课程或任务重叠超过 $MAX_IMPORT_CONFLICTS 对，无法逐项核对。请检查重复课表或调整时段后重试。" }))
             } else {
                 for (other in priorTouched) coursePair(other, row)
                 if (included) {
@@ -103,7 +104,7 @@ internal class CourseOccupancy(rows: List<CourseRow>, tasks: List<DayBlock>) {
                 val count = prior.size.toLong() + (until - i - 1) + (slots.until - slots.from)
                 val names = when {
                     count == 0L -> emptyList()
-                    count > MAX_PARTNER_NAMES -> listOf("共 $count 个重叠的课程或任务，未逐项列出")
+                    count > MAX_PARTNER_NAMES -> listOf(uiText({ "$count overlapping classes or tasks; not listed individually" }, { "共 $count 个重叠的课程或任务，未逐项列出" }))
                     else -> buildList(count.toInt()) {
                         for (other in prior) add(other.label())
                         for (j in i + 1 until until) add(rows[j].label())

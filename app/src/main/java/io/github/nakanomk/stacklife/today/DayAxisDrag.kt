@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.today
 
+import io.github.nakanomk.stacklife.i18n.uiText
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -129,7 +130,7 @@ internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
         move(at)
         val session = pickup ?: return
         if (session.revision != revision) {
-            dropNotice = "日程已更新，请重新拖动。"
+            dropNotice = uiText("The schedule changed. Drag again.", "日程已更新，请重新拖动。")
             return
         }
         val command = candidate ?: return

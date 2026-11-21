@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.graphs
 
+import androidx.compose.ui.res.stringResource
+import io.github.nakanomk.stacklife.R
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -36,7 +39,7 @@ internal fun GraphEditorRoute(model: WorkspaceViewModel, graphId: String, onBack
     var reviewing by rememberSaveable { mutableStateOf(false) }
     var goal by rememberSaveable { mutableStateOf<String?>(null) }
     ReadPanel(state) { detail ->
-        if (detail.graph == null) MissingDetail("流程图", "流程图不存在", onBack)
+        if (detail.graph == null) MissingDetail(stringResource(R.string.ui_graph), stringResource(R.string.ui_graph_missing), onBack)
         else GraphEditor(model, detail, onBack, onGoal = { selected ->
             goal = selected ?: run {
                 val predecessors = detail.edges.mapTo(HashSet()) { it.from }
@@ -82,26 +85,26 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
     val tools: @Composable () -> Unit = {
         ControlGroup(Modifier.horizontalScroll(rememberScrollState())) {
             if (source != null) {
-                Secondary("取消连线") { sourceId = null }
-                Text("${source.title} → 请选择后继", Modifier.padding(horizontal = 8.dp), style = MaterialTheme.typography.labelLarge)
+                Secondary(stringResource(R.string.ui_cancel_link)) { sourceId = null }
+                Text(stringResource(R.string.ui_choose_successor, source.title), Modifier.padding(horizontal = 8.dp), style = MaterialTheme.typography.labelLarge)
             } else {
-                ActionPill("生成拓扑排序", { onGoal(selected?.id) }, Modifier.testTag("graph-goal"),
+                ActionPill(stringResource(R.string.ui_topological_order), { onGoal(selected?.id) }, Modifier.testTag("graph-goal"),
                     enabled = detail.nodes.isNotEmpty() && !submission.busy, prominent = true)
                 if (selected != null) {
                     var menu by remember { mutableStateOf(false) }
                     Box {
-                        ActionPill("节点操作", { menu = true }, Modifier.testTag("graph-node-actions"))
+                        ActionPill(stringResource(R.string.ui_node_actions), { menu = true }, Modifier.testTag("graph-node-actions"))
                         PlannerDropdownMenu(menu, { menu = false }) {
-                            DropdownMenuItem({ Text("从此节点连线") }, { menu = false; linkFrom(selected.id) })
-                            DropdownMenuItem({ Text("移除连线") }, { menu = false; form("edges") },
+                            DropdownMenuItem({ Text(stringResource(R.string.ui_link_from_node)) }, { menu = false; linkFrom(selected.id) })
+                            DropdownMenuItem({ Text(stringResource(R.string.ui_remove_link)) }, { menu = false; form("edges") },
                                 enabled = detail.edges.any { it.from == selected.id || it.to == selected.id })
-                            DropdownMenuItem({ Text("编辑节点") }, { menu = false; form("edit") })
-                            DropdownMenuItem({ Text("移动位置") }, { menu = false; form("move") })
-                            DropdownMenuItem({ Text("删除节点") }, { menu = false; form("remove") })
+                            DropdownMenuItem({ Text(stringResource(R.string.ui_edit_node)) }, { menu = false; form("edit") })
+                            DropdownMenuItem({ Text(stringResource(R.string.ui_move_node)) }, { menu = false; form("move") })
+                            DropdownMenuItem({ Text(stringResource(R.string.ui_delete_node)) }, { menu = false; form("remove") })
                         }
                     }
                 }
-                ActionPill("添加节点", { form("add") }, Modifier.testTag("graph-add"))
+                ActionPill(stringResource(R.string.ui_add_node), { form("add") }, Modifier.testTag("graph-add"))
             }
         }
     }
@@ -109,10 +112,10 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
         RootPane(header = {
             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    ToolbarIcon(io.github.nakanomk.stacklife.R.drawable.ic_arrow_back, "返回", onClick = onBack)
+                    ToolbarIcon(io.github.nakanomk.stacklife.R.drawable.ic_arrow_back, stringResource(R.string.ui_back), onClick = onBack)
                     Text(graph.title, Modifier.weight(1f).semantics { heading() }, maxLines = 1,
                         overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
-                    ActionPill(if (listMode) "画布" else "依赖列表", { listMode = !listMode }, Modifier.testTag("graph-toggle-view"))
+                    ActionPill(if (listMode) stringResource(R.string.ui_canvas) else stringResource(R.string.ui_dependencies), { listMode = !listMode }, Modifier.testTag("graph-toggle-view"))
                 }
                 tools()
             }
@@ -129,16 +132,16 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
         "add" -> NodeForm(model, graph.id, editRevision, null, detail.nodes, ::dismiss)
         "edit" -> if (selected != null) NodeForm(model, graph.id, editRevision, selected, detail.nodes, ::dismiss)
         "move" -> if (selected != null) MoveForm(model, graph.id, editRevision, selected, ::dismiss)
-        "remove" -> if (selected != null) GraphSaveDialog(model, "删除「${selected.title}」？", "删除节点", true,
+        "remove" -> if (selected != null) GraphSaveDialog(model, stringResource(R.string.ui_delete_named, selected.title), stringResource(R.string.ui_delete_node), true,
             command = { PlannerCommand.GraphPatch(graph.id, listOf(GraphEdit.RemoveNode(selected.id)), editRevision) }, onClose = ::dismiss) {
-            Text("一并移除与它相连的依赖，已有栈帧不变。")
+            Text(stringResource(R.string.ui_node_delete_hint))
         }
         "edges" -> if (selected != null) {
             val incident = remember(detail.edges, selected.id) { detail.edges.filter { it.from == selected.id || it.to == selected.id } }
             val titles = remember(detail.nodes) { detail.nodes.associate { it.id to it.title } }
-            PlannerAlertDialog(onDismissRequest = ::dismiss, title = { Text("选择要移除的连线") }, text = {
+            PlannerAlertDialog(onDismissRequest = ::dismiss, title = { Text(stringResource(R.string.ui_choose_link)) }, text = {
                 LazyColumn {
-                    if (incident.isEmpty()) item { Text("没有与此节点相连的依赖") }
+                    if (incident.isEmpty()) item { Text(stringResource(R.string.ui_no_node_links)) }
                     items(incident) { edge ->
                         TextButton(onClick = { edgeFrom = edge.from; edgeTo = edge.to; form("unlink") },
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("unlink-choice:${edge.from}:${edge.to}")) {
@@ -146,11 +149,11 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
                         }
                     }
                 }
-            }, confirmButton = { TextButton(onClick = ::dismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消") } })
+            }, confirmButton = { TextButton(onClick = ::dismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.ui_cancel)) } })
         }
         "unlink" -> {
             val from = detail.nodes.find { it.id == edgeFrom }; val to = detail.nodes.find { it.id == edgeTo }
-            if (from != null && to != null) GraphSaveDialog(model, "移除依赖？", "移除依赖", true,
+            if (from != null && to != null) GraphSaveDialog(model, stringResource(R.string.ui_remove_dependency_question), stringResource(R.string.ui_remove_dependency), true,
                 command = { PlannerCommand.GraphPatch(graph.id, listOf(GraphEdit.RemoveEdge(from.id, to.id)), editRevision) }, onClose = ::dismiss) {
                 Text("${from.title} → ${to.title}")
             }
@@ -166,23 +169,23 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
 private fun GraphDependencies(detail: GraphDetail, selected: String?, onSelect: (String) -> Unit, top: Dp, bottom: Dp, onRemove: (GraphEdge) -> Unit) {
     val byId = remember(detail.nodes) { detail.nodes.associateBy { it.id } }
     LazyColumn(Modifier.fillMaxSize().testTag("graph-list"), contentPadding = dockListPadding(top, bottom), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        item { SectionTitle("节点 · ${detail.nodes.size}") }
+        item { SectionTitle(stringResource(R.string.ui_node_count, detail.nodes.size)) }
         items(detail.nodes, key = { it.id }) { node ->
             Surface(shape = MaterialTheme.shapes.medium,
                 color = if (node.id == selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer) {
                 Column(Modifier.fillMaxWidth().testTag("list-node:${node.id}").selectable(node.id == selected, role = Role.RadioButton) { onSelect(node.id) }
                     .heightIn(min = 52.dp).padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.Center) {
                     Text(node.title, style = MaterialTheme.typography.titleSmall)
-                    Hint("${node.minutes} 分钟" + if (node.notes.isBlank()) "" else " · ${node.notes}")
+                    Hint(stringResource(R.string.ui_minutes_value, node.minutes) + if (node.notes.isBlank()) "" else " · ${node.notes}")
                 }
             }
         }
-        item { SectionTitle("依赖 · ${detail.edges.size}"); if (detail.edges.isEmpty()) Hint("还没有依赖") }
+        item { SectionTitle(stringResource(R.string.ui_dependency_count, detail.edges.size)); if (detail.edges.isEmpty()) Hint(stringResource(R.string.ui_no_dependencies)) }
         items(detail.edges, key = { "edge:${it.from}:${it.to}" }) { edge ->
             val from = byId[edge.from]; val to = byId[edge.to]
             if (from != null && to != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("先做「${from.title}」，再做「${to.title}」", Modifier.weight(1f))
-                TextButton(onClick = { onRemove(edge) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("移除依赖") }
+                Text(stringResource(R.string.ui_dependency_order, from.title, to.title), Modifier.weight(1f))
+                TextButton(onClick = { onRemove(edge) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.ui_remove_dependency)) }
             }
         }
     }

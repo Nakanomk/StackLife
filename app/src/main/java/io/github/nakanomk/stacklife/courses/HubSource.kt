@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.courses
 
+import io.github.nakanomk.stacklife.i18n.uiText
 import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
@@ -35,7 +36,7 @@ private class DocumentStream(input: InputStream) : FilterInputStream(input) {
     private var low = 0x80
     private var high = 0xBF
 
-    private fun invalid(): Nothing = throw SourceProblem("文件须为有效的 UTF-8 JSON")
+    private fun invalid(): Nothing = throw SourceProblem(uiText("The file must contain valid UTF-8 JSON.", "文件须为有效的 UTF-8 JSON"))
     private fun validate(b: Int) {
         if (continuation != 0) {
             if (b !in low..high) invalid()
@@ -59,7 +60,7 @@ private class DocumentStream(input: InputStream) : FilterInputStream(input) {
     }
     private fun count(n: Int) {
         if (n < 0 && continuation != 0) invalid()
-        if (n > left) throw SourceProblem("文件超过 2 MiB，请选择单个学期的原始周数组")
+        if (n > left) throw SourceProblem(uiText("The file exceeds 2 MiB. Select the raw week array for a single term.", "文件超过 2 MiB，请选择单个学期的原始周数组"))
         if (n > 0) left -= n
     }
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
@@ -83,32 +84,32 @@ internal fun readWeekFile(stream: InputStream): JsonArray {
     return try {
         JsonArray(buildList {
             for (row in Json.decodeToSequence<JsonElement>(input, DecodeSequenceMode.ARRAY_WRAPPED)) {
-                if (size >= 2048) throw SourceProblem("周记录过多，请选择单个学期的文件")
+                if (size >= 2048) throw SourceProblem(uiText("Too many week records. Select a file for a single term.", "周记录过多，请选择单个学期的文件"))
                 add(row)
             }
         })
     } catch (_: IllegalArgumentException) {
-        throw SourceProblem("JSON 格式错误，需要 getStudentScheduleByXqh 返回的原始周数组")
+        throw SourceProblem(uiText("Invalid JSON. Select the raw week array returned by getStudentScheduleByXqh.", "JSON 格式错误，需要 getStudentScheduleByXqh 返回的原始周数组"))
     }
 }
 
 private fun parseRows(text: String): JsonArray {
     val value = try { Json.parseToJsonElement(text) } catch (_: IllegalArgumentException) {
-        throw SourceProblem("JSON 格式错误，需要 HUB 原始周数组")
+        throw SourceProblem(uiText("Invalid JSON. Select the raw HUB week array.", "JSON 格式错误，需要 HUB 原始周数组"))
     }
-    return value as? JsonArray ?: throw SourceProblem("不支持此格式，需要 getStudentScheduleByXqh 返回的原始周数组")
+    return value as? JsonArray ?: throw SourceProblem(uiText("Unsupported format. Select the raw week array returned by getStudentScheduleByXqh.", "不支持此格式，需要 getStudentScheduleByXqh 返回的原始周数组"))
 }
 
 /** evaluateJavascript encodes the returned JS string once more. Exceptions never include page content. */
 internal fun decodeHubReply(encoded: String?): JsonArray {
-    if (encoded == null || encoded.length > 6 * 1024 * 1024) throw SourceProblem("网页未返回可读取的单学期课表")
+    if (encoded == null || encoded.length > 6 * 1024 * 1024) throw SourceProblem(uiText("The page did not return a readable single-term timetable.", "网页未返回可读取的单学期课表"))
     val value = try { Json.parseToJsonElement(encoded) as? JsonPrimitive } catch (_: IllegalArgumentException) { null }
-    val inner = value?.takeIf { it.isString }?.content ?: throw SourceProblem("提取失败，页面可能已离开或结构已改变")
+    val inner = value?.takeIf { it.isString }?.content ?: throw SourceProblem(uiText("Extraction failed. The page may have changed or the timetable may have moved.", "提取失败，页面可能已离开或结构已改变"))
     return when (inner) {
-        "\"no_table\"" -> throw SourceProblem("未找到 HUB 总课表：请登录、选好学期并等待加载，或使用原始文件")
-        "\"loading\"" -> throw SourceProblem("课表仍在加载，请稍后重新提取")
-        "\"wrong_route\"" -> throw SourceProblem("仅可在 HUB 总课表页面提取")
-        "\"too_large\"" -> throw SourceProblem("数据超过单学期读取上限")
+        "\"no_table\"" -> throw SourceProblem(uiText("HUB timetable not found. Sign in, select the term and wait for it to load, or use a raw file.", "未找到 HUB 总课表：请登录、选好学期并等待加载，或使用原始文件"))
+        "\"loading\"" -> throw SourceProblem(uiText("The timetable is still loading. Try extracting it again later.", "课表仍在加载，请稍后重新提取"))
+        "\"wrong_route\"" -> throw SourceProblem(uiText("Extraction is only available on the HUB timetable page.", "仅可在 HUB 总课表页面提取"))
+        "\"too_large\"" -> throw SourceProblem(uiText("The data exceeds the limit for a single term.", "数据超过单学期读取上限"))
         else -> parseRows(inner)
     }
 }

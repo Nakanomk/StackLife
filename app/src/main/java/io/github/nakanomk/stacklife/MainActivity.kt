@@ -1,8 +1,10 @@
 package io.github.nakanomk.stacklife
 
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.animation.core.tween
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import io.github.nakanomk.stacklife.i18n.LocalizedActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.SharedTransitionLayout
@@ -47,7 +49,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-class MainActivity : ComponentActivity() {
+class MainActivity : LocalizedActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -212,7 +214,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 }
                 entry<EditTask> { key -> WorkspacePanel(model) { workspace ->
                     val task = workspace.queue.find { it.id == key.id }
-                    if (task == null) MissingDetail("编辑任务", "这项任务已不在队列中。", back)
+                    if (task == null) MissingDetail(stringResource(R.string.ui_edit_task), stringResource(R.string.ui_task_not_queued), back)
                     else TaskEditor(model, back, original = task)
                 } }
                 entry<FrameDetail> { key ->
@@ -256,6 +258,6 @@ private fun WorkspacePanel(model: WorkspaceViewModel, content: @Composable (Work
 internal fun <T> ReadPanel(state: ReadState<T>, content: @Composable (T) -> Unit) {
     if (state is ReadState.Loaded) content(state.value)
     else Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.Center) {
-        if (state == ReadState.Loading) CircularProgressIndicator() else Text("无法读取设备上的日程。数据未被清除。")
+        if (state == ReadState.Loading) CircularProgressIndicator() else Text(stringResource(R.string.ui_read_failed))
     }
 }

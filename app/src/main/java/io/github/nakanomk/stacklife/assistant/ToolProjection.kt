@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.assistant
 
+import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.courses.ScheduledCourse
 import io.github.nakanomk.stacklife.courses.campusZone
 import io.github.nakanomk.stacklife.planner.*
@@ -56,17 +57,17 @@ internal class ToolProjection(private val grant: Disclosure, private val seen: T
         when (query) {
             PlannerQuery.Queue -> section((result as QueueView).tasks) { task(it, zone) }
             is PlannerQuery.Task -> {
-                val t = requireNotNull((result as TaskView).task) { "任务不存在或已不在此范围。" }
+                val t = requireNotNull((result as TaskView).task) { uiText("The task does not exist or is outside this scope.", "任务不存在或已不在此范围。") }
                 section(listOf(t)) { task(it, zone) }
             }
             PlannerQuery.Frames -> section((result as FrameIndex).frames) { f -> buildJsonObject {
                 id("frameId", f.id, seen.frames); put("originalCount", f.originalCount); put("remaining", f.remaining)
-                put("savedAt", Instant.ofEpochMilli(f.savedAtMillis).toString()); if (grant.reasons) field("reason", f.reason)
+                put("savedAt", Instant.ofEpochMilli(f.savedAtMillis).toString()); if (grant.reasons) field("reason", if (f.source == FrameSource.SWAP) swapReason() else f.reason)
             } }
             is PlannerQuery.Frame -> {
-                val f = requireNotNull((result as FrameDetailResult).frame) { "栈帧不存在。" }
+                val f = requireNotNull((result as FrameDetailResult).frame) { uiText("The frame does not exist.", "栈帧不存在。") }
                 id("frameId", f.id, seen.frames); put("remaining", f.remaining)
-                if (grant.reasons) field("reason", f.reason)
+                if (grant.reasons) field("reason", if (f.source == FrameSource.SWAP) swapReason() else f.reason)
                 section(f.items) { item -> buildJsonObject {
                     // History is not a capability to modify a task that has since left this frame.
                     if (item.restorable) id("taskId", item.taskId, seen.tasks)
@@ -89,9 +90,9 @@ internal class ToolProjection(private val grant: Disclosure, private val seen: T
             } }
             is PlannerQuery.Graph -> {
                 val data = result as GraphDetail
-                val graph = requireNotNull(data.graph) { "流程图不存在。" }
+                val graph = requireNotNull(data.graph) { uiText("The graph does not exist.", "流程图不存在。") }
                 val selected = (target as AssistantPage.Graph).nodeId
-                val selectedNode = selected?.let { id -> requireNotNull(data.nodes.find { it.id == id }) { "选中的节点不存在。" } }
+                val selectedNode = selected?.let { id -> requireNotNull(data.nodes.find { it.id == id }) { uiText("The selected node does not exist.", "选中的节点不存在。") } }
                 id("graphId", graph.id, seen.graphs); field("title", graph.title)
                 if (selectedNode != null) id("selectedNodeId", selectedNode.id, seen.nodes)
                 if (nodeOnly) section(listOf(requireNotNull(selectedNode)), ::node) else {
@@ -102,7 +103,7 @@ internal class ToolProjection(private val grant: Disclosure, private val seen: T
             }
             is PlannerQuery.Goal -> {
                 val goal = result as GoalOrder
-                require(goal.error == null && goal.nodes.isNotEmpty()) { "该图中找不到可排序的目标清单。" }
+                require(goal.error == null && goal.nodes.isNotEmpty()) { uiText("No ordered goal list could be found in this graph.", "该图中找不到可排序的目标清单。") }
                 id("graphId", query.graphId, seen.graphs); id("goalId", query.goalId, seen.nodes); section(goal.nodes, ::node)
             }
             PlannerQuery.Terms -> section((result as Terms).terms) { term -> buildJsonObject {
@@ -110,8 +111,8 @@ internal class ToolProjection(private val grant: Disclosure, private val seen: T
             } }
             is PlannerQuery.Week -> {
                 val week = result as CourseWeek
-                val term = requireNotNull(week.term) { "学期不存在。" }
-                require(week.week in 1..term.weeks) { "该周不在所选学期内。" }
+                val term = requireNotNull(week.term) { uiText("The term does not exist.", "学期不存在。") }
+                require(week.week in 1..term.weeks) { uiText("This week is outside the selected term.", "该周不在所选学期内。") }
                 id("termId", term.id, seen.terms); put("week", week.week); put("zone", campusZone.id)
                 section(week.classes) { course(it, campusZone) }
             }
@@ -120,14 +121,14 @@ internal class ToolProjection(private val grant: Disclosure, private val seen: T
                 section(listOf(buildJsonObject { put("group", "workspace"); put("restorePolicy", settings.policy.name) }) +
                     AppearanceGroup.entries.map { group -> buildJsonObject { put("group", group.key); put("values", group.project(settings.appearance)) } }) { it }
             }
-            PlannerQuery.Workspace -> error("不允许通过助理读取整个工作台。")
-            is PlannerQuery.ManualWeeks -> error("手动课程编辑器不属于助理的读取范围。")
+            PlannerQuery.Workspace -> error(uiText("The assistant cannot read the entire workspace.", "不允许通过助理读取整个工作台。"))
+            is PlannerQuery.ManualWeeks -> error(uiText("The manual class editor is outside the assistant's read scope.", "手动课程编辑器不属于助理的读取范围。"))
         }
         put("rows", JsonArray(rows)); put("offset", offset); put("total", count)
         when {
-            offset.toLong() + rows.size < count -> { put("nextOffset", offset + rows.size); put("message", "还有未返回的条目；使用 nextOffset 查询下一页。") }
-            rows.isEmpty() -> put("message", "本页没有条目。")
+            offset.toLong() + rows.size < count -> { put("nextOffset", offset + rows.size); put("message", uiText("More items are available. Query the next page with nextOffset.", "还有未返回的条目；使用 nextOffset 查询下一页。")) }
+            rows.isEmpty() -> put("message", uiText("This page is empty.", "本页没有条目。"))
         }
-        if (clipped) put("textNotice", "超过 384 字符的文本仅提供前缀，不能据此前缀重写原文。")
+        if (clipped) put("textNotice", uiText("Only the prefix of text longer than 384 characters is provided. Do not rewrite the original using this prefix.", "超过 384 字符的文本仅提供前缀，不能据此前缀重写原文。"))
     }
 }

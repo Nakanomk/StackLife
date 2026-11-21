@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.today
 
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,6 +23,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -49,7 +51,7 @@ import kotlinx.coroutines.awaitCancellation
 internal fun DayWithTray(
     plan: DayPlan, drag: AxisDrag?, enabled: Boolean, onEdit: (String) -> Unit, onAdd: () -> Unit,
     top: Dp, clearance: Dp, expanded: Boolean, toggle: () -> Unit, pickup: ((QueueTask) -> Modifier)? = null,
-    content: @Composable (spine: Dp, scrollTail: Dp) -> Unit,
+    content: @Composable (spine: Dp, eventListPadding: Dp) -> Unit,
 ) {
     val appearance = LocalAppearance.current
     val floating = appearance.floatingDayTray
@@ -88,9 +90,6 @@ internal fun DayWithTray(
         val openHeight = minOf(header + body + 8.dp, limit).coerceAtLeast(header)
         val closedHeight = if (floating) taskFabSize else header
         val height = lerp(closedHeight, openHeight, progress)
-        // This is clearance for scrolling the final event above the largest overlay, not
-        // viewport padding. It must not change with the tray animation, even at max scroll.
-        val scrollTail = (bottom - clearance) + maxOf(closedHeight, openHeight) + taskFabSize + taskFabMargin
         // In a short wide window move + around the end pane, not over its rows: clear its
         // side first, then lower the button. Both legs use the same reversible progress.
         val alongside = wide
@@ -102,9 +101,15 @@ internal fun DayWithTray(
         val axisSource = rememberPlannerBackdrop()
         Box(Modifier.fillMaxSize().plannerBackdrop(axisSource)) {
             Box(Modifier.fillMaxSize().padding(bottom = clearance)) {
-                Spacer(Modifier.padding(start = spine - 1.dp, top = top).width(2.dp).fillMaxHeight()
+                val rail = if (drag == null) Modifier.fillMaxHeight() else Modifier.layout { measurable, bounds ->
+                    val visible = (drag.scale.height - drag.scroll.value).coerceIn(0, bounds.maxHeight)
+                    val line = measurable.measure(bounds.copy(minHeight = visible, maxHeight = visible))
+                    layout(line.width, line.height) { line.placeRelative(0, 0) }
+                }
+                Spacer(Modifier.padding(start = spine - 1.dp, top = top).width(2.dp).then(rail)
                     .testTag("day-rail").background(MaterialTheme.colorScheme.outlineVariant))
-                content(spine, scrollTail)
+                val eventListPadding = if (drag == null) bottom - clearance + maxOf(closedHeight, openHeight) + taskFabSize + taskFabMargin else 0.dp
+                content(spine, eventListPadding)
             }
         }
         CompositionLocalProvider(LocalCapsuleBackdrop provides axisSource) {
@@ -141,20 +146,20 @@ private fun QueueTray(
                     contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = header, bottom = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(if (appearance.compact) 2.dp else 4.dp)) {
                     if (tasks.isEmpty()) item {
-                        Text("队列中没有待排任务", Modifier.padding(8.dp), style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.today_tray_empty), Modifier.padding(8.dp), style = MaterialTheme.typography.bodyMedium)
                     }
                     items(tasks, key = { it.id }) { task ->
                         Row(Modifier.fillMaxWidth().testTag("tray:${task.id}").clip(MaterialTheme.shapes.medium)
                             .then(pickup?.invoke(task) ?: Modifier)
-                            .clickable(enabled && expanded, onClickLabel = "安排时间", role = Role.Button) { onEdit(task.id) }
+                            .clickable(enabled && expanded, onClickLabel = stringResource(R.string.today_schedule), role = Role.Button) { onEdit(task.id) }
                             .heightIn(min = 48.dp).padding(horizontal = 8.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(task.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 if (appearance.showNotes && task.notes.isNotBlank()) Text(task.notes, style = MaterialTheme.typography.bodySmall,
                                     maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                val action = if (pickup == null) "点按安排" else "长按拖动"
-                                Text(if (appearance.showDuration) "${task.minutes} 分钟 · $action" else action,
+                                val action = if (pickup == null) stringResource(R.string.today_tap_to_schedule) else stringResource(R.string.today_hold_to_drag)
+                                Text(if (appearance.showDuration) stringResource(R.string.today_tray_duration, task.minutes, action) else action,
                                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Icon(painterResource(R.drawable.ic_schedule), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -176,12 +181,14 @@ private fun QueueTray(
                         else (listState.firstVisibleItemScrollOffset / 12.dp.toPx()).coerceIn(0f, 1f)
                 })
             } else if (!glass && progress > 0f && underHeader) Spacer(bar.background(solid))
+            val queueDescription = stringResource(R.string.today_tray_count, tasks.size)
+            val queueState = if (expanded) stringResource(R.string.today_expanded) else stringResource(R.string.today_collapsed)
             val click = Modifier.testTag("day-tray-toggle").clickable(interactionSource = interaction, indication = null,
-                onClickLabel = if (expanded) "收起待排队列" else "展开待排队列", role = Role.Button, onClick = toggle).semantics {
-                contentDescription = "待排队列，${tasks.size} 项"; stateDescription = if (expanded) "已展开" else "已收起"
+                onClickLabel = if (expanded) stringResource(R.string.today_collapse_queue) else stringResource(R.string.today_expand_queue), role = Role.Button, onClick = toggle).semantics {
+                contentDescription = queueDescription; stateDescription = queueState
             }
             if (floating) Box(bar.then(click)) {
-                if (progress > 0f) Text("待排队列 · ${tasks.size}", Modifier.align(Alignment.CenterStart).padding(start = 16.dp, end = 48.dp)
+                if (progress > 0f) Text(stringResource(R.string.today_tray_title, tasks.size), Modifier.align(Alignment.CenterStart).padding(start = 16.dp, end = 48.dp)
                     .graphicsLayer { alpha = progress }.clearAndSetSemantics {},
                     style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 TrayChevron(progress, Modifier.align(Alignment.CenterEnd).size(lerp(taskFabSize, 48.dp, progress))
@@ -190,7 +197,7 @@ private fun QueueTray(
                 StackLifeSurface(CapsuleScene.CHROME, Modifier.align(Alignment.TopCenter).padding(vertical = 4.dp, horizontal = 12.dp), solid, elevation = 1.dp) {
                     Row(click.heightIn(min = 48.dp).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        Text("待排队列 · ${tasks.size}", Modifier.clearAndSetSemantics {}, style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.today_tray_title, tasks.size), Modifier.clearAndSetSemantics {}, style = MaterialTheme.typography.titleMedium)
                         TrayChevron(progress, Modifier.size(24.dp).indication(interaction, ripple(bounded = false, radius = 24.dp)))
                     }
                 }

@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife
 
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -80,7 +82,7 @@ internal fun RootToolbar(onSettings: () -> Unit, leading: (@Composable () -> Uni
                     horizontalArrangement = Arrangement.Center, content = controls)
             }
         }
-        GlassIcon(R.drawable.ic_settings, "设置", onSettings)
+        GlassIcon(R.drawable.ic_settings, stringResource(R.string.ui_settings), onSettings)
     }
 }
 

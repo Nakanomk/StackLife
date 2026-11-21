@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.storage
 
+import io.github.nakanomk.stacklife.i18n.uiText
 import androidx.room.withTransaction
 import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.graphs.goalOrder
@@ -59,7 +60,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
                         try {
                             GoalOrder(settings.revision, goalOrder(graphs.nodes(query.graphId), graphs.edges(query.graphId), query.goalId))
                         } catch (e: IllegalArgumentException) {
-                            GoalOrder(settings.revision, emptyList(), e.message ?: "无法生成目标顺序")
+                            GoalOrder(settings.revision, emptyList(), e.message ?: uiText("Could not order tasks for this goal", "无法生成目标顺序"))
                         }
                     }
                 }
@@ -111,7 +112,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
         } catch (e: InvalidCommand) {
             return PreviewResult.Rejected(e.message.orEmpty())
         } catch (e: Exception) {
-            return PreviewResult.Rejected("无法读取工作台：${e.localizedMessage ?: e.javaClass.simpleName}")
+            return PreviewResult.Rejected(uiText({ "Could not read the workspace: ${e.localizedMessage ?: e.javaClass.simpleName}" }, { "无法读取工作台：${e.localizedMessage ?: e.javaClass.simpleName}" }))
         }
         val id = UUID.randomUUID().toString()
         pending[id] = proposal
@@ -124,12 +125,12 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
 
     override suspend fun commit(proposalId: String): CommitResult {
         val proposal = pending.remove(proposalId)
-            ?: return CommitResult.Rejected(CommitFailure.UNKNOWN_PROPOSAL, "预览已失效或已使用，请重新预览。")
+            ?: return CommitResult.Rejected(CommitFailure.UNKNOWN_PROPOSAL, uiText("This preview expired or was already used. Preview again.", "预览已失效或已使用，请重新预览。"))
         return try {
             db.withTransaction {
                 val revision = dao.settings()?.revision ?: 0L
                 if (revision != proposal.baseRevision) {
-                    CommitResult.Rejected(CommitFailure.STALE_PREVIEW, "工作台已有变更，请重新预览。")
+                    CommitResult.Rejected(CommitFailure.STALE_PREVIEW, uiText("The workspace has changed. Preview again.", "工作台已有变更，请重新预览。"))
                 } else {
                     proposal.applyTo(dao, courses, graphs)
                     CommitResult.Applied(proposal.settings.revision)
@@ -138,7 +139,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            CommitResult.Rejected(CommitFailure.STORAGE, "未能保存更改：${e.localizedMessage ?: e.javaClass.simpleName}")
+            CommitResult.Rejected(CommitFailure.STORAGE, uiText({ "Could not save changes: ${e.localizedMessage ?: e.javaClass.simpleName}" }, { "未能保存更改：${e.localizedMessage ?: e.javaClass.simpleName}" }))
         }
     }
 }

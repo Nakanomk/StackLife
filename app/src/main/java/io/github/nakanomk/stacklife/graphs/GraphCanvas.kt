@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.graphs
 
+import androidx.compose.ui.res.stringResource
+import io.github.nakanomk.stacklife.R
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -127,7 +130,7 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
                 shape = MaterialTheme.shapes.medium, modifier = Modifier.width(150.dp).onGloballyPositioned { boxes[node.id] = it }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).heightIn(min = 56.dp).testTag("canvas-node:${node.id}")
-                        .clickable(role = Role.Button, onClickLabel = "选择节点") { onSelect(node.id) }
+                        .clickable(role = Role.Button, onClickLabel = stringResource(R.string.ui_select_node)) { onSelect(node.id) }
                         .pointerInput(node.id, scale) {
                             try {
                                 detectDragGestures(onDragStart = {
@@ -145,12 +148,13 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
                             } finally { if (moving?.id == node.id) moving = null }
                         }.padding(start = 12.dp, top = 6.dp, bottom = 6.dp), verticalArrangement = Arrangement.Center) {
                         Text(node.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text("${node.minutes} 分钟", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                        Text(stringResource(R.string.ui_minutes_value, node.minutes), style = MaterialTheme.typography.labelSmall, maxLines = 1)
                     }
                     var handle by remember { mutableStateOf<LayoutCoordinates?>(null) }
+                    val linkDescription = stringResource(R.string.ui_link_to_successor, node.title)
                     Box(Modifier.size(48.dp).testTag("canvas-link:${node.id}").onGloballyPositioned { handle = it }
-                        .semantics { contentDescription = "从「${node.title}」连向后继节点" }
-                        .clickable(role = Role.Button, onClickLabel = "选择后继节点") { onLinkFrom(node.id) }
+                        .semantics { contentDescription = linkDescription }
+                        .clickable(role = Role.Button, onClickLabel = stringResource(R.string.ui_select_successor)) { onLinkFrom(node.id) }
                         .pointerInput(node.id) {
                             fun inCanvas(local: Offset): Offset? {
                                 val origin = handle?.takeIf { it.isAttached } ?: return null
@@ -186,16 +190,16 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
                 }
             }
         }
-        if (nodes.isEmpty()) Text("添加第一个节点", Modifier.align(Alignment.Center), color = colors.onSurfaceVariant)
+        if (nodes.isEmpty()) Text(stringResource(R.string.ui_add_first_node), Modifier.align(Alignment.Center), color = colors.onSurfaceVariant)
     }, foreground = {
         if (nodes.isNotEmpty()) ControlGroup(Modifier.align(Alignment.BottomEnd).padding(4.dp)) {
-            ActionPill("一键整理", {
+            ActionPill(stringResource(R.string.ui_auto_arrange), {
                 val height = boxes.values.maxOfOrNull { if (it.isAttached) it.size.height / scale else 0f } ?: 0f
                 val moves = arrangeGraph(detail, maxOf(56f, height) + 32f)
                 if (moves.isEmpty()) fit()
                 else if (onArrange(moves, detail.revision)) arranged = detail.revision to moves
             }, Modifier.testTag("graph-arrange"))
-            ActionPill("全图", ::fit)
+            ActionPill(stringResource(R.string.ui_fit_graph), ::fit)
         }
     })
 }

@@ -1,6 +1,8 @@
 package io.github.nakanomk.stacklife.assistant
 
-import android.text.format.DateUtils
+import java.util.Date
+import java.text.SimpleDateFormat
+import android.text.format.DateFormat
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -15,6 +17,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -61,37 +64,40 @@ internal fun ConversationHistorySheet(model: AssistantModel, fallback: Assistant
             Column(Modifier.fillMaxWidth().fillMaxHeight(.9f).imePadding().padding(horizontal = 16.dp, vertical = 4.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     if (id != null) IconButton(onClick = back, modifier = Modifier.testTag("assistant-history-back")) {
-                        Icon(painterResource(R.drawable.ic_arrow_back), "返回对话列表")
+                        Icon(painterResource(R.drawable.ic_arrow_back), stringResource(R.string.assistant_back_to_history))
                     }
                     Column(Modifier.weight(1f)) {
-                        Text(if (id == null) "历史对话" else "对话记录", Modifier.semantics { heading() },
+                        Text(if (id == null) stringResource(R.string.assistant_history) else stringResource(R.string.assistant_transcript), Modifier.semantics { heading() },
                             style = MaterialTheme.typography.titleLarge)
-                        Text(if (id == null) "仅保存在本机" else page.scopeName(),
+                        Text(if (id == null) stringResource(R.string.assistant_local_only) else page.scopeName(),
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    if (id == null) TextButton(onClick = back) { Text("关闭") }
-                    else TextButton(onClick = { confirmDelete = true }, modifier = Modifier.testTag("assistant-history-delete")) { Text("删除") }
+                    if (id == null) TextButton(onClick = back) { Text(stringResource(R.string.assistant_close)) }
+                    else TextButton(onClick = { confirmDelete = true }, modifier = Modifier.testTag("assistant-history-delete")) { Text(stringResource(R.string.assistant_delete)) }
                 }
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
                 if (id == null) {
                     val rows = threads
+                    val locale = LocalConfiguration.current.locales[0]
+                    val use24Hour = DateFormat.is24HourFormat(LocalContext.current)
+                    val formatter = remember(locale, use24Hour) {
+                        val pattern = DateFormat.getBestDateTimePattern(locale, if (use24Hour) "yMMMdHm" else "yMMMdhm")
+                        SimpleDateFormat(pattern, locale)
+                    }
                     LazyColumn(Modifier.fillMaxSize().testTag("assistant-history-list"), state = listState) {
                         if (rows == null) item { LinearProgressIndicator() }
                         else if (rows.isEmpty()) item {
-                            Text("暂无对话记录", Modifier.padding(vertical = 16.dp).testTag("assistant-history-empty"),
+                            Text(stringResource(R.string.assistant_empty_history), Modifier.padding(vertical = 16.dp).testTag("assistant-history-empty"),
                                 style = MaterialTheme.typography.bodyLarge)
                         } else items(rows, key = { it.id }) { row ->
-                            val context = LocalContext.current
-                            val date = remember(context, LocalConfiguration.current, row.updatedAtMillis) {
-                                DateUtils.formatDateTime(context, row.updatedAtMillis, DateUtils.FORMAT_SHOW_DATE or
-                                    DateUtils.FORMAT_SHOW_YEAR or DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_ABBREV_MONTH)
-                            }
+                            val date = remember(formatter, row.updatedAtMillis) { formatter.format(Date(row.updatedAtMillis)) }
+                            val scopeName = remember(locale, row.scopeKey, row.scope) { row.displayScope() }
                             Row(Modifier.fillMaxWidth().testTag("assistant-history-thread-${row.id}")
-                                .clickable(role = Role.Button, onClickLabel = "查看对话") { selectedId = row.id }
+                                .clickable(role = Role.Button, onClickLabel = stringResource(R.string.assistant_view_conversation)) { selectedId = row.id }
                                 .heightIn(min = 56.dp).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(row.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-                                    Text("${row.scope} · $date", style = MaterialTheme.typography.bodySmall,
+                                    Text("$scopeName · $date", style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 Icon(painterResource(R.drawable.ic_chevron_right), null)
@@ -112,7 +118,7 @@ internal fun ConversationHistorySheet(model: AssistantModel, fallback: Assistant
                                 Surface(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, shape = MaterialTheme.shapes.small,
                                     color = MaterialTheme.colorScheme.surfaceContainerHighest) {
                                     Column(Modifier.padding(12.dp)) {
-                                        Text("本机记录", style = MaterialTheme.typography.labelLarge)
+                                        Text(stringResource(R.string.assistant_local_record), style = MaterialTheme.typography.labelLarge)
                                         Text(message.text, style = MaterialTheme.typography.bodyMedium)
                                     }
                                 }
@@ -121,7 +127,7 @@ internal fun ConversationHistorySheet(model: AssistantModel, fallback: Assistant
                     }
                     val receiver = (recipient as? ReadState.Loaded)?.value
                     if (receiver != null && selected != null) {
-                        Text("续聊将携带最近的对话文字 → ${receiver.profile.origin} · ${receiver.profile.model}",
+                        Text(stringResource(R.string.assistant_history_recipient, receiver.profile.origin, receiver.profile.model),
                             Modifier.padding(vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         MessageEditor(draft, page.scopeName(), { draft = it }, {
@@ -129,17 +135,17 @@ internal fun ConversationHistorySheet(model: AssistantModel, fallback: Assistant
                         }, tagPrefix = "history-reply")
                     } else if (recipient != ReadState.Loading) {
                         TextButton(onClick = onSettings, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                            Text(if (recipient == ReadState.ReadFailed) "修复服务配置后继续聊" else "配置模型服务以继续聊")
+                            Text(if (recipient == ReadState.ReadFailed) stringResource(R.string.assistant_repair_to_continue) else stringResource(R.string.assistant_configure_to_continue))
                         }
                     }
                 }
             }
         }
         if (id != null && confirmDelete) PlannerAlertDialog(onDismissRequest = { confirmDelete = false },
-            title = { Text("删除这段对话？") }, text = {
-                Text(if (deletionError) "未能删除这段对话，可以重试。" else "将从本机删除这段对话的全部消息，不会撤销已应用的日程更改。")
+            title = { Text(stringResource(R.string.assistant_delete_title)) }, text = {
+                Text(if (deletionError) stringResource(R.string.assistant_delete_failed) else stringResource(R.string.assistant_delete_body))
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("取消") } },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.assistant_cancel)) } },
             confirmButton = {
                 TextButton(modifier = Modifier.testTag("assistant-history-confirm-delete"), onClick = {
                     scope.launch {
@@ -147,7 +153,7 @@ internal fun ConversationHistorySheet(model: AssistantModel, fallback: Assistant
                         catch (e: CancellationException) { throw e }
                         catch (_: Exception) { deletionError = true }
                     }
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.assistant_delete), color = MaterialTheme.colorScheme.error) }
             })
     }
 }

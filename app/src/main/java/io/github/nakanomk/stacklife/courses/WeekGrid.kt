@@ -1,5 +1,11 @@
 package io.github.nakanomk.stacklife.courses
 
+import java.time.format.FormatStyle
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle as DateTextStyle
+import io.github.nakanomk.stacklife.i18n.AppLanguage
+import io.github.nakanomk.stacklife.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -48,7 +54,6 @@ import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 import io.github.nakanomk.stacklife.planner.CourseWeek
 import java.time.LocalDate
 
-private const val weekdays = "一二三四五六日"
 private val courseShape = RoundedCornerShape(8.dp)
 
 // WakeUp's timetable swatches measure H≈7° for rose, C≈30–47, and T≈65–86.
@@ -116,18 +121,20 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, ope
         with(density) { measurer.measure("00:00", style = typography.labelSmall).size.width.toDp() + 8.dp }
     }
     val colors = MaterialTheme.colorScheme
+    val locale = AppLanguage.locale
+    val dateFormat = remember(locale) { DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(locale) }
     var selectedDay by rememberSaveable { mutableIntStateOf(0) }
     if (selectedDay != 0) {
         val day = monday.plusDays(selectedDay - 1L)
         val courses = remember(week.classes, selectedDay) { week.classes.filter { it.meeting.day == selectedDay } }
-        PlannerAlertDialog(onDismissRequest = { selectedDay = 0 }, title = { Text("${day.monthValue}月${day.dayOfMonth}日 · 周${weekdays[selectedDay - 1]}") },
+        PlannerAlertDialog(onDismissRequest = { selectedDay = 0 }, title = { Text(day.format(dateFormat)) },
             text = {
-                if (courses.isEmpty()) Text("当天没有课程") else LazyColumn {
+                if (courses.isEmpty()) Text(stringResource(R.string.courses_no_classes_day)) else LazyColumn {
                     items(courses) { course -> ListItem(headlineContent = { Text(course.meeting.title) },
-                        supportingContent = { Text("${course.meeting.periodLabel()} · ${course.meeting.room.ifBlank { "教室未提供" }}") },
+                        supportingContent = { Text("${course.meeting.periodLabel()} · ${course.meeting.room.ifBlank { stringResource(R.string.courses_no_room) }}") },
                         modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) { selectedDay = 0; open(course) }) }
                 }
-            }, confirmButton = { TextButton(onClick = { selectedDay = 0 }) { Text("关闭") } })
+            }, confirmButton = { TextButton(onClick = { selectedDay = 0 }) { Text(stringResource(R.string.courses_close)) } })
     }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("week-grid")) {
         val dayWidth = ((maxWidth - rail) / 7).coerceAtLeast(0.dp)
@@ -138,15 +145,16 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, ope
                     solid = colors.surface, shape = RoundedCornerShape(0.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.width(rail), contentAlignment = Alignment.Center) {
-                            Text("${monday.monthValue}月", style = typography.labelSmall, maxLines = 1, color = colors.onSurfaceVariant)
+                            Text(monday.month.getDisplayName(DateTextStyle.SHORT, locale), style = typography.labelSmall, maxLines = 1, color = colors.onSurfaceVariant)
                         }
                         for (i in 0..6) {
                             val date = monday.plusDays(i.toLong())
-                            Column(Modifier.width(dayWidth).heightIn(min = 48.dp).clickable(onClickLabel = "查看当天课程", role = Role.Button) { selectedDay = i + 1 }
-                                .semantics { contentDescription = "${date.year}年${date.monthValue}月${date.dayOfMonth}日，周${weekdays[i]}" },
+                            val dateDescription = date.format(dateFormat)
+                            Column(Modifier.width(dayWidth).heightIn(min = 48.dp).clickable(onClickLabel = stringResource(R.string.courses_open_day), role = Role.Button) { selectedDay = i + 1 }
+                                .semantics { contentDescription = dateDescription },
                                 verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                                 val ink = if (date == today) colors.primary else colors.onSurface
-                                Text(if (density.fontScale >= 1.35f) weekdays[i].toString() else "周${weekdays[i]}",
+                                Text(date.dayOfWeek.getDisplayName(if (density.fontScale >= 1.35f) DateTextStyle.NARROW else DateTextStyle.SHORT, locale),
                                     color = ink, style = typography.labelMedium, maxLines = 1)
                                 Text(if (density.fontScale >= 1.35f) "${date.dayOfMonth}" else "${date.monthValue}/${date.dayOfMonth}",
                                     color = if (date == today) ink else colors.onSurfaceVariant, style = typography.labelSmall, maxLines = 1)
@@ -157,9 +165,9 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, ope
             }
         }) { insets ->
             Column(Modifier.fillMaxSize().plannerBackdrop(scrollingPlane).verticalScroll(rememberScrollState()).padding(top = insets.calculateTopPadding())) {
-                if (week.classes.isEmpty()) Text("本周没有课程", Modifier.padding(start = rail, top = 4.dp, bottom = 4.dp),
+                if (week.classes.isEmpty()) Text(stringResource(R.string.courses_no_classes_week), Modifier.padding(start = rail, top = 4.dp, bottom = 4.dp),
                     style = typography.bodySmall, color = colors.onSurfaceVariant)
-                if (changeover != null) Text("${changeover.monthValue}月${changeover.dayOfMonth}日起切换作息，点课程查看实际时间。",
+                if (changeover != null) Text(stringResource(R.string.courses_changeover, changeover.format(dateFormat)),
                     Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = typography.bodySmall, color = colors.onSurfaceVariant)
                 PeriodGrid(term.id, week, periods, showTimes = changeover == null, dayCount = 7,
                     highlightedDay = today.toEpochDay() - monday.toEpochDay(), rail, dayWidth, periodHeight, open)
@@ -227,18 +235,16 @@ private fun PeriodGrid(termId: String, week: CourseWeek, periods: List<PeriodTim
 private fun CourseTile(tile: Tile, swatch: Color, outline: Stroke?, open: ((ScheduledCourse) -> Unit)?, modifier: Modifier) {
     val m = tile.course.meeting
     val typography = MaterialTheme.typography
-    val description = remember(tile.course) {
-        "${m.title}，周${weekdays[m.day - 1]}，${m.periodLabel()}，${m.room.ifBlank { "教室未提供" }}" +
-            if (tile.course.conflicts.isEmpty()) "" else "，时段冲突：${tile.course.conflicts.joinToString("、")}"
-    }
+    val description = stringResource(R.string.courses_tile_description, m.title, weekday(m.day), m.periodLabel(), m.room.ifBlank { stringResource(R.string.courses_no_room) }) +
+        if (tile.course.conflicts.isEmpty()) "" else stringResource(R.string.courses_tile_conflict, tile.course.conflicts.joinToString(stringResource(R.string.courses_list_separator)))
     val interaction = if (open == null) null else remember { MutableInteractionSource() }
     StackLifeSurface(CapsuleScene.COURSE, modifier, solid = swatch, shape = courseShape, tint = swatch, interactionSource = interaction) {
-        val action = if (open == null) Modifier else Modifier.clickable(interactionSource = interaction, role = Role.Button, onClickLabel = "查看固定课程") {
+        val action = if (open == null) Modifier else Modifier.clickable(interactionSource = interaction, role = Role.Button, onClickLabel = stringResource(R.string.courses_view_fixed_class)) {
             open(tile.course)
         }
         Column(Modifier.fillMaxSize().clipToBounds().testTag("grid-course:${tile.index}").then(action)
             .semantics { contentDescription = description }.padding(horizontal = 3.dp, vertical = 4.dp)) {
-            if (tile.course.conflicts.isNotEmpty()) CourseLabel("冲突", typography.labelSmall, 1, outline)
+            if (tile.course.conflicts.isNotEmpty()) CourseLabel(stringResource(R.string.courses_conflict), typography.labelSmall, 1, outline)
             CourseLabel(m.title, typography.labelMedium, 5, outline)
             if (m.room.isNotEmpty()) CourseLabel("@${m.room}", typography.labelSmall, 3, outline)
         }
@@ -248,11 +254,13 @@ private fun CourseTile(tile: Tile, swatch: Color, outline: Stroke?, open: ((Sche
 /** A read-only three-day excerpt; its examples belong to this preview, not to a user's timetable. */
 @Composable
 internal fun CourseTimetablePreview() {
-    val term = remember { TermSpec("外观预览", LocalDate.of(2026, 9, 7), 1, BellSchedule.SUMMER) }
+    val term = remember { TermSpec("appearance-preview", LocalDate.of(2026, 9, 7), 1, BellSchedule.SUMMER) }
     val periods = remember(term) { term.periodsOn(term.firstMonday).take(3) }
-    val week = remember(term) {
-        val physics = term.meeting(1, 1, "大学物理", "A101", 1, 2)
-        val design = term.meeting(1, 2, "设计基础", "B202", 2, 3)
+    val physicsLabel = stringResource(R.string.courses_sample_physics)
+    val designLabel = stringResource(R.string.courses_sample_design)
+    val week = remember(term, physicsLabel, designLabel) {
+        val physics = term.meeting(1, 1, physicsLabel, "A101", 1, 2)
+        val design = term.meeting(1, 2, designLabel, "B202", 2, 3)
         CourseWeek(term, 1, listOf(ScheduledCourse(term.id, "preview", physics), ScheduledCourse(term.id, "preview", design)),
             mapOf(physics.title to 0, design.title to 1))
     }
@@ -265,7 +273,7 @@ internal fun CourseTimetablePreview() {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Spacer(Modifier.width(rail))
                 for (i in 0..2) Box(Modifier.width(dayWidth).padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
-                    Text("周${weekdays[i]}", style = typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(weekday(i + 1), style = typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             PeriodGrid(term.id, week, periods, showTimes = false, dayCount = 3, highlightedDay = 0L, rail, dayWidth, periodHeight)

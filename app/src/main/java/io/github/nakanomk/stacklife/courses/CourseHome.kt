@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.courses
 
+import io.github.nakanomk.stacklife.i18n.uiText
+import io.github.nakanomk.stacklife.i18n.AppLanguage
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
@@ -40,12 +43,10 @@ import io.github.nakanomk.stacklife.planner.PlannerQuery
 import io.github.nakanomk.stacklife.today.CalendarPager
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
-private val campusClock = DateTimeFormatter.ofPattern("HH:mm").withZone(campusZone)
-private val campusDate = DateTimeFormatter.ofPattern("M月d日 E", Locale.CHINESE).withZone(campusZone)
+private val campusClock = DateTimeFormatter.ofPattern("HH:mm", java.util.Locale.ROOT).withZone(campusZone)
 private fun CourseMeeting.timeLabel() = "${campusClock.format(Instant.ofEpochMilli(startMillis))}–${campusClock.format(Instant.ofEpochMilli(endMillis))}"
-internal fun CourseMeeting.periodLabel() = if (firstPeriod == lastPeriod) "第 $firstPeriod 节" else "第 $firstPeriod–$lastPeriod 节"
+internal fun CourseMeeting.periodLabel() = if (firstPeriod == lastPeriod) uiText({ "Period $firstPeriod" }, { "第 $firstPeriod 节" }) else uiText({ "Periods $firstPeriod–$lastPeriod" }, { "第 $firstPeriod–$lastPeriod 节" })
 
 @Composable
 private fun RowScope.WeekPicker(term: TermSpec, selected: Int, pager: PagerState, onWeek: (Int) -> Unit) {
@@ -62,7 +63,7 @@ private fun RowScope.WeekPicker(term: TermSpec, selected: Int, pager: PagerState
         }
     } }
     IconButton(onClick = { onWeek(week - 1) }, enabled = week > 1, modifier = Modifier.testTag("course-prev")) {
-        Icon(painterResource(R.drawable.ic_chevron_left), "上周")
+        Icon(painterResource(R.drawable.ic_chevron_left), stringResource(R.string.courses_previous_week))
     }
     var expanded by remember { mutableStateOf(false) }
     Box(Modifier.weight(1f, fill = false)) {
@@ -71,17 +72,17 @@ private fun RowScope.WeekPicker(term: TermSpec, selected: Int, pager: PagerState
                 Text(term.id, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("第 $week 周", maxLines = 1, style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.courses_week, week), maxLines = 1, style = MaterialTheme.typography.titleSmall)
                     Icon(painterResource(R.drawable.ic_expand_more), null, Modifier.size(16.dp))
                 }
             }
         }
         PlannerDropdownMenu(expanded, { expanded = false }) {
-            for (n in 1..term.weeks) DropdownMenuItem(text = { Text("第 $n 周") }, onClick = { expanded = false; onWeek(n) })
+            for (n in 1..term.weeks) DropdownMenuItem(text = { Text(stringResource(R.string.courses_week, n)) }, onClick = { expanded = false; onWeek(n) })
         }
     }
     IconButton(onClick = { onWeek(week + 1) }, enabled = week < term.weeks, modifier = Modifier.testTag("course-next")) {
-        Icon(painterResource(R.drawable.ic_chevron_right), "下周")
+        Icon(painterResource(R.drawable.ic_chevron_right), stringResource(R.string.courses_next_week))
     }
 }
 
@@ -110,13 +111,13 @@ internal fun CourseHome(
             if (term != null) {
                 var menu by remember { mutableStateOf(false) }
                 Box {
-                    GlassIcon(R.drawable.ic_more_vert, "课表选项", { menu = true }, Modifier.testTag("course-options"))
+                    GlassIcon(R.drawable.ic_more_vert, stringResource(R.string.courses_options), { menu = true }, Modifier.testTag("course-options"))
                     PlannerDropdownMenu(menu, { menu = false }) {
-                        DropdownMenuItem({ Text("添加课程") }, { menu = false; add() }, modifier = Modifier.testTag("course-add"),
+                        DropdownMenuItem({ Text(stringResource(R.string.courses_add)) }, { menu = false; add() }, modifier = Modifier.testTag("course-add"),
                             leadingIcon = { Icon(painterResource(R.drawable.ic_add), null) })
-                        DropdownMenuItem({ Text(if (listMode) "周网格" else "课程列表") },
+                        DropdownMenuItem({ Text(if (listMode) stringResource(R.string.courses_week_grid) else stringResource(R.string.courses_list)) },
                             { menu = false; listMode = !listMode }, modifier = Modifier.testTag("course-view-toggle"))
-                        DropdownMenuItem({ Text("导入课表") }, { menu = false; onImport() }, modifier = Modifier.testTag("course-import"))
+                        DropdownMenuItem({ Text(stringResource(R.string.courses_import)) }, { menu = false; onImport() }, modifier = Modifier.testTag("course-import"))
                         if (terms.size > 1) {
                             HorizontalDivider()
                             for (choice in terms) DropdownMenuItem({ Text(choice.id) }, { menu = false; onTerm(choice) },
@@ -124,24 +125,24 @@ internal fun CourseHome(
                         }
                         if (term.id in catalog.importedIds) {
                             HorizontalDivider()
-                            DropdownMenuItem({ Text("移除本学期 HUB 课表") }, { menu = false; onRemove(term) }, modifier = Modifier.testTag("course-remove"))
+                            DropdownMenuItem({ Text(stringResource(R.string.courses_remove_hub)) }, { menu = false; onRemove(term) }, modifier = Modifier.testTag("course-remove"))
                         }
                     }
                 }
             }
         }) {
             if (term != null && week != null && pager != null) WeekPicker(term, week, pager) { onWeek(term, it) }
-            else TextButton(onClick = onImport, modifier = Modifier.testTag("course-import")) { Text("导入课表") }
+            else TextButton(onClick = onImport, modifier = Modifier.testTag("course-import")) { Text(stringResource(R.string.courses_import)) }
         }
     }) { top, bottom ->
         if (term == null || week == null || pager == null) {
             Column(Modifier.fillMaxSize().padding(top = top, bottom = bottom).verticalScroll(rememberScrollState())
                 .padding(16.dp)) {
-                Text("还没有课表", style = MaterialTheme.typography.titleMedium)
-                ActionPill("添加课程", add, Modifier.padding(top = 12.dp).testTag("course-add"), prominent = true)
-                Text("手动添加第一门课程并设置学期，或从华科 HUB、周数组文件导入。课程也会出现在当天日程。",
+                Text(stringResource(R.string.courses_no_timetable), style = MaterialTheme.typography.titleMedium)
+                ActionPill(stringResource(R.string.courses_add), add, Modifier.padding(top = 12.dp).testTag("course-add"), prominent = true)
+                Text(stringResource(R.string.courses_empty_timetable_hint),
                     Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
-                Text("配置助理后，也可描述课程和上课时间，授权后核对变更。", Modifier.padding(top = 8.dp),
+                Text(stringResource(R.string.courses_assistant_hint), Modifier.padding(top = 8.dp),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else key(term.id) {
@@ -169,7 +170,7 @@ private fun CourseWeekPage(term: TermSpec, week: CourseWeek, listMode: Boolean, 
     if (listMode) LazyColumn(Modifier.fillMaxSize().testTag("course-list"),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = top + 8.dp, bottom = bottom + 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (week.classes.isEmpty()) item { Text("本周没有课程") }
+        if (week.classes.isEmpty()) item { Text(stringResource(R.string.courses_no_classes_week)) }
         itemsIndexed(week.classes, key = { _, c -> c.occurrenceKey() }) { i, course ->
             Surface(onClick = { open(course) }, modifier = Modifier.fillMaxWidth().testTag("week-course:$i"),
                 color = MaterialTheme.colorScheme.surface) {
@@ -193,25 +194,28 @@ private fun ScheduledCourse.occurrenceKey(): String = with(meeting) {
 @Composable
 private fun CourseInfo(course: ScheduledCourse) {
     val m = course.meeting
-    Text("第 ${m.week} 周 · ${campusDate.format(Instant.ofEpochMilli(m.startMillis))} · ${m.periodLabel()}", style = MaterialTheme.typography.bodyMedium)
-    Text("${m.timeLabel()} · 北京时间", style = MaterialTheme.typography.bodyMedium)
-    Text("教室：${m.room.ifBlank { "未提供" }}", style = MaterialTheme.typography.bodyMedium)
-    if (course.conflicts.isNotEmpty()) Text("时段冲突：${course.conflicts.joinToString("、")}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+    val pattern = stringResource(R.string.courses_date_pattern)
+    val locale = AppLanguage.locale
+    val campusDate = remember(pattern, locale) { DateTimeFormatter.ofPattern(pattern, locale).withZone(campusZone) }
+    Text(stringResource(R.string.courses_class_date, m.week, campusDate.format(Instant.ofEpochMilli(m.startMillis)), m.periodLabel()), style = MaterialTheme.typography.bodyMedium)
+    Text(stringResource(R.string.courses_beijing_time, m.timeLabel()), style = MaterialTheme.typography.bodyMedium)
+    Text(stringResource(R.string.courses_room, m.room.ifBlank { stringResource(R.string.courses_not_provided) }), style = MaterialTheme.typography.bodyMedium)
+    if (course.conflicts.isNotEmpty()) Text(stringResource(R.string.courses_conflicts, course.conflicts.joinToString(stringResource(R.string.courses_list_separator))), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
 }
 
 @Composable
 internal fun CourseDetails(course: ScheduledCourse, edit: (() -> Unit)? = null, close: () -> Unit) {
-    PlannerAlertDialog(modifier = Modifier.testTag("course-detail"), onDismissRequest = close, title = { Text("固定课程") },
+    PlannerAlertDialog(modifier = Modifier.testTag("course-detail"), onDismissRequest = close, title = { Text(stringResource(R.string.courses_fixed_class)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(course.meeting.title, style = MaterialTheme.typography.titleLarge)
-                Text("${course.termId} · ${when (course.source) { MANUAL_SOURCE -> "手动添加"; HUST_SOURCE -> "HUB 导入"; else -> "固定课表" }}",
+                Text("${course.termId} · ${when (course.source) { MANUAL_SOURCE -> stringResource(R.string.courses_manual_source); HUST_SOURCE -> stringResource(R.string.courses_hub_source); else -> stringResource(R.string.courses_fixed_timetable) }}",
                     style = MaterialTheme.typography.labelLarge)
                 CourseInfo(course)
                 AssistantComposer(AssistantPage.Week(course.termId, course.meeting.week))
             }
         }, dismissButton = {
             if (edit != null && course.source == MANUAL_SOURCE)
-                TextButton(onClick = edit, modifier = Modifier.heightIn(min = 48.dp).testTag("manual-edit")) { Text("编辑课程") }
-        }, confirmButton = { TextButton(onClick = close) { Text("关闭") } })
+                TextButton(onClick = edit, modifier = Modifier.heightIn(min = 48.dp).testTag("manual-edit")) { Text(stringResource(R.string.courses_edit)) }
+        }, confirmButton = { TextButton(onClick = close) { Text(stringResource(R.string.courses_close)) } })
 }

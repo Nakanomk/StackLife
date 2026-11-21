@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.storage
 
+import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.planner.Appearance
 import io.github.nakanomk.stacklife.planner.AppearanceFields
 import io.github.nakanomk.stacklife.planner.AppearancePatch
@@ -7,6 +8,7 @@ import io.github.nakanomk.stacklife.planner.decodeAppearance
 import io.github.nakanomk.stacklife.planner.encodeAppearance
 import io.github.nakanomk.stacklife.planner.FrameSource
 import io.github.nakanomk.stacklife.planner.frameLabel
+import io.github.nakanomk.stacklife.planner.swapReason
 import io.github.nakanomk.stacklife.planner.PlannerChange
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.RestoreMode
@@ -46,14 +48,14 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     private val initialPositions = HashMap<String, QueuePositionLabel>()
 
     fun plan(commands: List<PlannerCommand>): Proposal {
-        if (commands.isEmpty()) invalid("请至少选择一项更改。")
+        if (commands.isEmpty()) invalid(uiText("Select at least one change.", "请至少选择一项更改。"))
         for (cmd in commands) when (cmd) {
             is PlannerCommand.TaskAdd -> {
                 val row = newTask(cmd.task.title, cmd.task.notes, cmd.task.minutes, cmd.task.ref, frameId = null)
                 edited[row.id] = row
             }
             is PlannerCommand.TaskEdit -> {
-                if (cmd.title == null && cmd.notes == null && cmd.minutes == null) invalid("请选择需要修改的任务字段。")
+                if (cmd.title == null && cmd.notes == null && cmd.minutes == null) invalid(uiText("Select a task field to edit.", "请选择需要修改的任务字段。"))
                 val row = activeTask(cmd.taskId)
                 val minutes = cmd.minutes ?: row.minutes
                 edited[row.id] = row.copy(title = title(cmd.title ?: row.title, minutes), notes = cmd.notes ?: row.notes, minutes = minutes)
@@ -68,12 +70,12 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
                 checkRevision(cmd.expectedRevision)
                 slots.clear(activeTask(cmd.taskId).id, required = true)
             }
-            is PlannerCommand.CourseImport -> courses.replace(reviewed[cmd.draftId] ?: invalid("导入草稿已失效，请重新核对。"))
+            is PlannerCommand.CourseImport -> courses.replace(reviewed[cmd.draftId] ?: invalid(uiText("The import draft expired. Review it again.", "导入草稿已失效，请重新核对。")))
             is PlannerCommand.TermRemove -> courses.remove(cmd.termId)
             is PlannerCommand.ManualCourse -> courses.manual(cmd)
             is PlannerCommand.QueueOrder -> reorder(cmd.taskIds)
             is PlannerCommand.FrameCreate -> {
-                if (cmd.tasks.isEmpty()) invalid("栈帧至少需要一项任务。")
+                if (cmd.tasks.isEmpty()) invalid(uiText("A frame needs at least one task.", "栈帧至少需要一项任务。"))
                 val frame = newFrame(cmd.reason, FrameSource.MANUAL, cmd.ref)
                 populateFrame(frame, cmd.tasks.size) { index ->
                     val input = cmd.tasks[index]
@@ -82,7 +84,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             }
             is PlannerCommand.FramePush -> {
                 val ids = taskIds(cmd.taskIds)
-                if (ids.isEmpty()) invalid("请选择需要压栈的任务。")
+                if (ids.isEmpty()) invalid(uiText("Select the tasks to save in a frame.", "请选择需要压栈的任务。"))
                 saveQueue(newFrame(cmd.reason, FrameSource.PUSH, cmd.ref), ids)
             }
             is PlannerCommand.FrameAddReason -> addReason(cmd)
@@ -91,7 +93,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             is PlannerCommand.EditAppearance -> {
                 val expected = cmd.expected
                 if (expected != null && (if (cmd.patch is AppearanceFields) !cmd.patch.matchesBaseline(expected, originalAppearance)
-                    else expected != originalAppearance)) invalid("外观设置已变更，请按最新设置重新编辑。")
+                    else expected != originalAppearance)) invalid(uiText("Appearance settings have changed. Edit the latest settings instead.", "外观设置已变更，请按最新设置重新编辑。"))
                 appearance = cmd.patch.applyTo(appearance ?: originalAppearance)
             }
             is PlannerCommand.GraphCreate -> {
@@ -100,7 +102,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             }
             is PlannerCommand.GraphPatch -> {
                 checkRevision(cmd.expectedRevision)
-                if (cmd.edits.isEmpty()) invalid("请至少选择一项流程图更改。")
+                if (cmd.edits.isEmpty()) invalid(uiText("Select at least one graph change.", "请至少选择一项流程图更改。"))
                 val graph = graph(cmd.graphId)
                 for (edit in cmd.edits) graph.edit(edit, newNodeRef, resolveNodeRef)
             }
@@ -116,22 +118,22 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     private fun invalid(message: String): Nothing = throw InvalidCommand(message)
 
     private fun checkRevision(expected: Long?) {
-        if (expected != null && expected != base.revision) invalid("日程已有变更，请按最新内容重新预览。")
+        if (expected != null && expected != base.revision) invalid(uiText("The schedule has changed. Preview the latest version.", "日程已有变更，请按最新内容重新预览。"))
     }
 
     private fun newId(ref: String?, kind: Kind): String {
         val id = UUID.randomUUID().toString()
         if (ref != null) {
-            if (ref.isBlank() || ref.startsWith('@') || ref != ref.trim()) invalid("新建引用名不能为空、以 @ 开头或含有首尾空格。")
-            if (bindings.put(ref, Binding(id, kind)) != null) invalid("本批次重复声明了引用：@$ref。")
+            if (ref.isBlank() || ref.startsWith('@') || ref != ref.trim()) invalid(uiText("A new reference must not be blank, start with @, or have leading or trailing spaces.", "新建引用名不能为空、以 @ 开头或含有首尾空格。"))
+            if (bindings.put(ref, Binding(id, kind)) != null) invalid(uiText({ "Reference @$ref is declared twice in this batch." }, { "本批次重复声明了引用：@$ref。" }))
         }
         return id
     }
 
     private fun resolve(raw: String, kind: Kind): String {
         if (!raw.startsWith('@')) return raw
-        val binding = bindings[raw.substring(1)] ?: invalid("引用 $raw 尚未声明。")
-        if (binding.kind != kind) invalid("引用 $raw 的类型与此操作不符。")
+        val binding = bindings[raw.substring(1)] ?: invalid(uiText({ "Reference $raw has not been declared yet." }, { "引用 $raw 尚未声明。" }))
+        if (binding.kind != kind) invalid(uiText({ "Reference $raw has the wrong type for this operation." }, { "引用 $raw 的类型与此操作不符。" }))
         return binding.id
     }
 
@@ -141,10 +143,10 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     private fun graph(raw: String): GraphDraft {
         val id = resolve(raw, Kind.GRAPH)
         val draft = graphs.getOrPut(id) {
-            val stored = graphDao.graph(id) ?: invalid("流程图「$raw」不存在。")
+            val stored = graphDao.graph(id) ?: invalid(uiText({ "Graph “$raw” does not exist." }, { "流程图「$raw」不存在。" }))
             GraphDraft(graphDao, id, stored, stored.title)
         }
-        if (draft.title == null) invalid("流程图「$raw」已移除。")
+        if (draft.title == null) invalid(uiText({ "Graph “$raw” has been removed." }, { "流程图「$raw」已移除。" }))
         return draft
     }
 
@@ -153,28 +155,28 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         val graph = graph(cmd.graphId)
         val ordered = graph.order(resolveNodeRef(cmd.goalId))
         // In the ancestor closure every other vertex precedes the goal.
-        val reason = cmd.reason ?: "为目标〈${ordered.last().title}〉生成"
+        val reason = cmd.reason ?: uiText({ "Generated for goal “${ordered.last().title}”" }, { "为目标〈${ordered.last().title}〉生成" })
         val refs = if (cmd.taskRefs.isEmpty()) null else HashMap<String, String>(cmd.taskRefs.size).apply {
             for ((node, ref) in cmd.taskRefs) if (put(resolveNodeRef(node), ref) != null)
-                invalid("同一个节点「$node」不能重复声明生成任务的引用。")
+                invalid(uiText({ "Node “$node” cannot declare more than one reference to its generated task." }, { "同一个节点「$node」不能重复声明生成任务的引用。" }))
         }
         val frame = newFrame(reason, FrameSource.GRAPH, cmd.ref)
         populateFrame(frame, ordered.size) { index ->
             val node = ordered[index]
             newTask(node.title, node.notes, node.minutes, refs?.remove(node.id), frame.id)
         }
-        if (!refs.isNullOrEmpty()) invalid("节点「${refs.keys.first()}」不属于该目标及其前置清单，不能为它声明任务引用。")
+        if (!refs.isNullOrEmpty()) invalid(uiText({ "Node “${refs.keys.first()}” is not this goal or one of its prerequisites. It cannot declare a task reference." }, { "节点「${refs.keys.first()}」不属于该目标及其前置清单，不能为它声明任务引用。" }))
     }
 
     private fun taskIds(raw: List<String>): Set<String> {
         val result = LinkedHashSet<String>(raw.size)
-        for (id in raw) if (!result.add(resolve(id, Kind.TASK))) invalid("任务不能重复选择。")
+        for (id in raw) if (!result.add(resolve(id, Kind.TASK))) invalid(uiText("Select each task only once.", "任务不能重复选择。"))
         return result
     }
 
     private fun title(raw: String, minutes: Int): String {
-        if (minutes <= 0) invalid("预计时长必须大于零。")
-        return raw.trim().ifEmpty { invalid("任务标题不能为空。") }
+        if (minutes <= 0) invalid(uiText("Estimated duration must be greater than zero.", "预计时长必须大于零。"))
+        return raw.trim().ifEmpty { invalid(uiText("Enter a task title.", "任务标题不能为空。")) }
     }
 
     private fun newTask(raw: String, notes: String, minutes: Int, ref: String?, frameId: String?): TaskRow {
@@ -186,30 +188,30 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
 
     private fun newFrame(reason: String, source: FrameSource, ref: String?): FrameRow {
         val label = reason.trim()
-        if (label.isEmpty() && source != FrameSource.PUSH) invalid("请填写保存栈帧的原因。")
+        if (label.isEmpty() && source != FrameSource.PUSH) invalid(uiText("Enter a reason for saving this frame.", "请填写保存栈帧的原因。"))
         return FrameRow(newId(ref, Kind.FRAME), label, System.currentTimeMillis(), source).also {
-            frames.add(it); frameNames[it.id] = frameLabel(label)
+            frames.add(it); frameNames[it.id] = frameLabel(label, source)
         }
     }
 
     private fun addReason(cmd: PlannerCommand.FrameAddReason) {
         val id = resolve(cmd.frameId, Kind.FRAME)
-        val reason = cmd.reason.trim().ifEmpty { invalid("补充的原因不能为空。") }
+        val reason = cmd.reason.trim().ifEmpty { invalid(uiText("Enter a reason.", "补充的原因不能为空。")) }
         val index = frames.indexOfFirst { it.id == id }
         val frame = if (index >= 0) frames[index] else amendedFrames?.find { it.id == id } ?: dao.frame(id)
-        if (frame == null || frame.source != FrameSource.PUSH) invalid("只能给从队列压入的栈帧补充原因。")
-        if (frame.reason.isNotBlank()) invalid("此栈帧已有原因，未覆盖原内容。")
+        if (frame == null || frame.source != FrameSource.PUSH) invalid(uiText("You can add a reason only to a frame saved from the queue.", "只能给从队列压入的栈帧补充原因。"))
+        if (frame.reason.isNotBlank()) invalid(uiText("This frame already has a reason. It was not overwritten.", "此栈帧已有原因，未覆盖原内容。"))
         val amended = frame.copy(reason = reason)
         if (index >= 0) {
             frames[index] = amended
         } else {
             (amendedFrames ?: ArrayList<FrameRow>().also { amendedFrames = it }).add(amended)
-            change(id, "压栈原因", "未填写", reason, frameLabel(frame.reason))
+            change(id, uiText("Frame reason", "压栈原因"), uiText("Not specified", "未填写"), reason, frameLabel(frame.reason, frame.source))
         }
         frameNames[id] = reason
     }
 
-    private fun frameName(id: String) = frameNames.getOrPut(id) { dao.frame(id)?.let { frameLabel(it.reason) } ?: id }
+    private fun frameName(id: String) = frameNames.getOrPut(id) { dao.frame(id)?.let { frameLabel(it.reason, it.source) } ?: id }
 
     private inline fun populateFrame(frame: FrameRow, count: Int, makeTask: (Int) -> TaskRow) {
         val ids = ArrayList<String>(count)
@@ -249,7 +251,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     }
 
     private fun task(id: String): TaskRow = edited[id] ?: originals[id] ?: run {
-        val row = dao.tasks(listOf(id)).singleOrNull() ?: invalid("所选任务不存在。")
+        val row = dao.tasks(listOf(id)).singleOrNull() ?: invalid(uiText("The selected task does not exist.", "所选任务不存在。"))
         originals[id] = row
         row
     }
@@ -258,7 +260,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         var missing: ArrayList<String>? = null
         fun fetch(batch: ArrayList<String>) {
             val rows = dao.tasks(batch)
-            if (rows.size != batch.size) invalid("部分所选任务已不存在。")
+            if (rows.size != batch.size) invalid(uiText("Some selected tasks no longer exist.", "部分所选任务已不存在。"))
             for (row in rows) originals[row.id] = row
             batch.clear()
         }
@@ -274,7 +276,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
 
     private fun activeTask(raw: String): TaskRow {
         val row = task(resolve(raw, Kind.TASK))
-        if (row.owner != Owner.QUEUE && row.owner != Owner.FRAME) invalid("任务已完成或已移出，不能再修改。")
+        if (row.owner != Owner.QUEUE && row.owner != Owner.FRAME) invalid(uiText("Completed or removed tasks cannot be edited.", "任务已完成或已移出，不能再修改。"))
         return row
     }
 
@@ -288,7 +290,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     private fun reorder(raw: List<String>) {
         val ids = taskIds(raw)
         val queue = queue()
-        if (ids.size != queue.size || queue.any { it !in ids }) invalid("排序必须包含当前队列的全部任务，且不能重复。")
+        if (ids.size != queue.size || queue.any { it !in ids }) invalid(uiText("Include every task in the current queue exactly once.", "排序必须包含当前队列的全部任务，且不能重复。"))
         queue.clear()
         queue.addAll(ids)
     }
@@ -312,7 +314,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
                 queue[kept++] = id
             }
         }
-        if (saved.size != expected) invalid("部分所选任务已不在队列中。")
+        if (saved.size != expected) invalid(uiText("Some selected tasks are no longer in the queue.", "部分所选任务已不在队列中。"))
         queue.subList(kept, queue.size).clear()
         members[frame.id] = saved
     }
@@ -321,30 +323,30 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         val frameId = resolve(cmd.frameId, Kind.FRAME)
         val selected = when (cmd.mode) {
             RestoreMode.ALL -> {
-                if (cmd.taskIds.isNotEmpty()) invalid("全部恢复时不应指定部分任务。")
+                if (cmd.taskIds.isNotEmpty()) invalid(uiText("Do not select individual tasks when restoring a whole frame.", "全部恢复时不应指定部分任务。"))
                 null
             }
             RestoreMode.SELECTED -> taskIds(cmd.taskIds).also {
-                if (it.isEmpty()) invalid("请选择需要恢复的任务。")
+                if (it.isEmpty()) invalid(uiText("Select the tasks to restore.", "请选择需要恢复的任务。"))
             }
         }
         val source = members.getOrPut(frameId) { dao.restorableIds(frameId) }
         val restoring = source.filter { id ->
             (selected == null || id in selected) && (edited[id]?.let { it.frameId == frameId && it.owner == Owner.FRAME } ?: true)
         }
-        if (selected != null && restoring.size != selected.size) invalid("所选任务已不属于此栈帧，无法恢复。")
-        if (restoring.isEmpty()) invalid("此栈帧不存在或已无可恢复的任务。")
+        if (selected != null && restoring.size != selected.size) invalid(uiText("These tasks no longer belong to this frame and cannot be restored.", "所选任务已不属于此栈帧，无法恢复。"))
+        if (restoring.isEmpty()) invalid(uiText("This frame does not exist or has no tasks left to restore.", "此栈帧不存在或已无可恢复的任务。"))
         loadTasks(restoring)
 
         val explanation = when (policy) {
-            RestorePolicy.APPEND -> "按帧内原序追加到队尾"
-            RestorePolicy.PREPEND -> "按帧内原序插入队首"
+            RestorePolicy.APPEND -> uiText("Append to the queue in frame order", "按帧内原序追加到队尾")
+            RestorePolicy.PREPEND -> uiText("Prepend to the queue in frame order", "按帧内原序插入队首")
             RestorePolicy.SWAP -> when {
-                cmd.mode == RestoreMode.SELECTED -> "部分恢复按帧内原序插入队首，不保存当前队列"
-                queue().isEmpty() -> "当前队列为空，直接按帧内原序恢复"
+                cmd.mode == RestoreMode.SELECTED -> uiText("Prepend selected tasks in frame order without saving the current queue", "部分恢复按帧内原序插入队首，不保存当前队列")
+                queue().isEmpty() -> uiText("The queue is empty; restore in frame order", "当前队列为空，直接按帧内原序恢复")
                 else -> {
-                    saveQueue(newFrame("切换栈帧前自动保存", FrameSource.SWAP, null), null)
-                    "整帧切换：先另存当前队列，再按帧内原序恢复"
+                    saveQueue(newFrame(swapReason(), FrameSource.SWAP, null), null)
+                    uiText("Switch frames: save the current queue, then restore in frame order", "整帧切换：先另存当前队列，再按帧内原序恢复")
                 }
             }
         }
@@ -353,7 +355,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             val pos = if (policy == RestorePolicy.APPEND) append(id) else index
             edited[id] = task(id).copy(owner = Owner.QUEUE, frameId = null, queuePosition = pos)
         }
-        changes.add(PlannerChange(frameId, "恢复方式", null, explanation, frameName(frameId)))
+        changes.add(PlannerChange(frameId, uiText("Restore method", "恢复方式"), null, explanation, frameName(frameId)))
     }
 
     private fun finish(): Proposal {
@@ -366,7 +368,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
                 val original = initialPositions.getValue(id)
                 if (original.queuePosition != position) {
                     positions.add(PositionUpdate(id, position))
-                    change(id, "队列位置", original.queuePosition + 1, position + 1, original.title)
+                    change(id, uiText("Queue position", "队列位置"), original.queuePosition + 1, position + 1, original.title)
                 }
             }
         }
@@ -376,34 +378,34 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             val before = originals[id]
             if (before == row) continue
             if (before == null) inserts.add(row) else updates.add(row)
-            change(id, "标题", before?.title, row.title)
-            change(id, "备注", before?.notes?.ifEmpty { null }, row.notes.ifEmpty { null })
-            change(id, "预计分钟", before?.minutes, row.minutes)
-            change(id, "归属", before?.owner?.label(), row.owner.label())
-            if (before?.frameId != row.frameId) change(id, "所属栈帧", before?.frameId?.let(::frameName), row.frameId?.let(::frameName))
-            change(id, "队列位置", before?.queuePosition?.plus(1), row.queuePosition?.plus(1))
+            change(id, uiText("Title", "标题"), before?.title, row.title)
+            change(id, uiText("Notes", "备注"), before?.notes?.ifEmpty { null }, row.notes.ifEmpty { null })
+            change(id, uiText("Estimated minutes", "预计分钟"), before?.minutes, row.minutes)
+            change(id, uiText("Status", "归属"), before?.owner?.label(), row.owner.label())
+            if (before?.frameId != row.frameId) change(id, uiText("Frame", "所属栈帧"), before?.frameId?.let(::frameName), row.frameId?.let(::frameName))
+            change(id, uiText("Queue position", "队列位置"), before?.queuePosition?.plus(1), row.queuePosition?.plus(1))
         }
         for (frame in frames) {
-            change(frame.id, "压栈原因", null, frame.reason.ifBlank { "未填写" }, frameLabel(frame.reason))
-            change(frame.id, "保存时刻", null, Instant.ofEpochMilli(frame.savedAtMillis).atZone(ZoneId.systemDefault()).format(savedTimeFormat))
-            change(frame.id, "栈帧来源", null, when (frame.source) {
-                FrameSource.PUSH -> "从队列保存"
-                FrameSource.MANUAL -> "手动新建"
-                FrameSource.SWAP -> "切换前自动保存"
-                FrameSource.GRAPH -> "从流程图目标生成"
+            change(frame.id, uiText("Frame reason", "压栈原因"), null, frame.reason.ifBlank { uiText("Not specified", "未填写") }, frameLabel(frame.reason, frame.source))
+            change(frame.id, uiText("Saved at", "保存时刻"), null, Instant.ofEpochMilli(frame.savedAtMillis).atZone(ZoneId.systemDefault()).format(savedTimeFormat))
+            change(frame.id, uiText("Frame source", "栈帧来源"), null, when (frame.source) {
+                FrameSource.PUSH -> uiText("Saved from the queue", "从队列保存")
+                FrameSource.MANUAL -> uiText("Created manually", "手动新建")
+                FrameSource.SWAP -> uiText("Saved before switching frames", "切换前自动保存")
+                FrameSource.GRAPH -> uiText("Generated from a graph goal", "从流程图目标生成")
             })
         }
         for (item in items) {
-            change(item.frameId, "原第 ${item.originalPosition + 1} 项", null,
+            change(item.frameId, uiText({ "Original item ${item.originalPosition + 1}" }, { "原第 ${item.originalPosition + 1} 项" }), null,
                 buildString {
-                    append(item.title).append(" · ").append(item.minutes).append(" 分钟")
+                    append(item.title).append(" · ").append(item.minutes).append(uiText(" min", " 分钟"))
                     if (item.scheduledStartMillis != null && item.scheduledEndMillis != null) {
                         append('\n').append(intervalLabel(item.scheduledStartMillis, item.scheduledEndMillis, ZoneId.systemDefault()))
                     }
                     if (item.notes.isNotEmpty()) append('\n').append(item.notes)
                 })
         }
-        if (base.restorePolicy != policy) change("工作台", "恢复策略", base.restorePolicy.label(), policy.label())
+        if (base.restorePolicy != policy) change("工作台", uiText("Restore policy", "恢复策略"), base.restorePolicy.label(), policy.label(), uiText("Workspace", "工作台"))
         val settingsJson = appearance?.let { next ->
             AppearancePatch.changes(originalAppearance, next, changes)
             encodeAppearance(next)
@@ -421,16 +423,16 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     }
 
     private fun Owner.label() = when (this) {
-        Owner.QUEUE -> "队列"
-        Owner.FRAME -> "栈帧"
-        Owner.DONE -> "已完成"
-        Owner.REMOVED -> "已移出"
+        Owner.QUEUE -> uiText("Queue", "队列")
+        Owner.FRAME -> uiText("Frame", "栈帧")
+        Owner.DONE -> uiText("Completed", "已完成")
+        Owner.REMOVED -> uiText("Removed", "已移出")
     }
 
     private fun RestorePolicy.label() = when (this) {
-        RestorePolicy.PREPEND -> "插入队首"
-        RestorePolicy.APPEND -> "追加到队尾"
-        RestorePolicy.SWAP -> "整帧切换"
+        RestorePolicy.PREPEND -> uiText("Add to front", "插入队首")
+        RestorePolicy.APPEND -> uiText("Add to end", "追加到队尾")
+        RestorePolicy.SWAP -> uiText("Switch frames", "整帧切换")
     }
 }
 

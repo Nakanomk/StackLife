@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife.today
 
+import io.github.nakanomk.stacklife.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -43,7 +45,7 @@ import kotlin.math.roundToInt
 @Composable
 internal fun DayAxis(
     drag: AxisDrag, revision: Long, enabled: Boolean, onEdit: (String) -> Unit,
-    send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier, topInset: Dp, scrollTail: Dp, spine: Dp,
+    send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier, topInset: Dp, spine: Dp, endInGutter: Boolean,
 ) {
     val density = LocalDensity.current
     val scale = drag.scale
@@ -52,7 +54,7 @@ internal fun DayAxis(
     val gutter = spine + railWidth / 2
     var selectedEnd by remember(drag, revision) { mutableStateOf<String?>(null) }
     Box(modifier.fillMaxWidth().clipToBounds()) {
-        Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll).padding(top = topInset, bottom = scrollTail)) {
+        Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll).padding(top = topInset)) {
             Box(Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() })) {
                 for (band in scale.bands) for (tick in band.ticks) {
                     Box(Modifier.offset { IntOffset(0, band.top + band.yAt(tick.millis)) }.width(spine - 10.dp)
@@ -95,6 +97,14 @@ internal fun DayAxis(
                     }
                 }
             }
+            val end = remember(scale.day) { clockLabel(scale.day.endMillis, scale.day) }
+            val label = stringResource(R.string.today_end_boundary, end)
+            val compact = endInGutter || scale.groups.lastOrNull()?.end == scale.day.endMillis
+            val clock = remember(scale.day) { clockLabel(scale.day.endMillis, scale.day, includeDate = false) }
+            Text(if (compact) clock else label,
+                Modifier.align(Alignment.BottomStart).padding(start = if (compact) 4.dp else spine + 12.dp)
+                    .testTag("time-day-end").semantics { contentDescription = label },
+                style = hourStyle, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Box(Modifier.fillMaxSize().padding(top = topInset).clipToBounds().testTag("day-drop-area")
             .onGloballyPositioned { drag.viewport = it.boundsInRoot() }) {
@@ -129,13 +139,16 @@ private fun EventRail(
         task == null -> colors.tertiary
         else -> colors.secondary
     }
+    val barDescription = resizable?.let { stringResource(R.string.today_task_bar, it.title) }
+    val handleState = if (selected) stringResource(R.string.today_handle_shown)
+        else stringResource(R.string.today_hold_to_resize)
     val action = if (resizable == null) Modifier else Modifier.testTag("resize-bar:${resizable.taskId}")
-        .combinedClickable(enabled = enabled, role = Role.Button, onLongClickLabel = "显示结束手柄",
-            onLongClick = { select(resizable.taskId) }, onClickLabel = if (selected) "收起结束手柄" else "显示结束手柄",
+        .combinedClickable(enabled = enabled, role = Role.Button, onLongClickLabel = stringResource(R.string.today_show_handle),
+            onLongClick = { select(resizable.taskId) }, onClickLabel = if (selected) stringResource(R.string.today_hide_handle) else stringResource(R.string.today_show_handle),
             onClick = { select(if (selected) null else resizable.taskId) })
         .semantics {
-            contentDescription = "${resizable.title}，时段条"
-            stateDescription = if (selected) "已显示结束手柄" else "长按调整结束时间"
+            contentDescription = barDescription.orEmpty()
+            stateDescription = handleState
         }
     Box(modifier) {
         Spacer(Modifier.fillMaxSize().then(action).drawBehind {
@@ -151,6 +164,7 @@ private fun EventRail(
         if (selected && resizable != null) {
             val source = SlotSource(resizable.taskId, ((resizable.endMillis - resizable.startMillis) / MINUTE_MS).toInt(), resizable.startMillis)
             val endLabel = clockLabel(resizable.endMillis, drag.scale.day)
+            val handleLabel = stringResource(R.string.today_end_handle, resizable.title, endLabel)
             var railX by remember { mutableFloatStateOf(Float.NaN) }
             LaunchedEffect(drag, resizable.taskId, railX) {
                 if (railX.isNaN()) return@LaunchedEffect
@@ -167,8 +181,8 @@ private fun EventRail(
             Spacer(Modifier.align(Alignment.BottomCenter).size(48.dp).testTag("resize-end:${resizable.taskId}")
                 .onGloballyPositioned { railX = it.localToRoot(Offset(it.size.width / 2f, 0f)).x }
                 .endDrag(source, drag, revision, enabled, send)
-                .clickable(enabled, onClickLabel = "精确编辑时间", role = Role.Button) { onEdit(resizable.taskId) }
-                .semantics { contentDescription = "${resizable.title}，结束手柄，$endLabel，上下拖动调整结束时间" }
+                .clickable(enabled, onClickLabel = stringResource(R.string.today_edit_exact_time), role = Role.Button) { onEdit(resizable.taskId) }
+                .semantics { contentDescription = handleLabel }
                 .drawBehind {
                     if (drag.resizeRailX == null || drag.candidate == null) drawEndKnob(size.width / 2, size.height, ink, colors.surface)
                 })
@@ -191,19 +205,19 @@ internal fun BlockCard(
     val scheme = MaterialTheme.colorScheme
     val block = entry.block
     val state = when (block.state) {
-        ScheduledState.QUEUE -> "队列"
-        ScheduledState.FRAME -> "已压栈 · 仍占用时段"
-        ScheduledState.DONE -> "已完成"
+        ScheduledState.QUEUE -> stringResource(R.string.today_queue)
+        ScheduledState.FRAME -> stringResource(R.string.today_stacked_occupied)
+        ScheduledState.DONE -> stringResource(R.string.today_done)
     }
     val range = "${clockLabel(block.startMillis, day)}–${clockLabel(block.endMillis, day)}"
     val editable = block.state != ScheduledState.DONE
     val lines = if (wrap) Int.MAX_VALUE else 1
-    val action = if (!editable) Modifier else move.clickable(enabled, onClickLabel = "编辑时间", role = Role.Button) { onEdit(block.taskId) }
+    val action = if (!editable) Modifier else move.clickable(enabled, onClickLabel = stringResource(R.string.today_edit_time), role = Role.Button) { onEdit(block.taskId) }
     Column(modifier.testTag("block:${block.taskId}").clip(MaterialTheme.shapes.medium).then(action)
         .semantics(mergeDescendants = true) {}.padding(start = 4.dp, end = 4.dp)) {
         Text(range, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = lines, overflow = TextOverflow.Ellipsis)
         Text(block.title, style = MaterialTheme.typography.titleSmall, maxLines = lines, overflow = TextOverflow.Ellipsis)
-        Text(if (entry.conflict) "时段冲突 · $state" else state, style = MaterialTheme.typography.labelMedium,
+        Text(if (entry.conflict) stringResource(R.string.today_conflict_state, state) else state, style = MaterialTheme.typography.labelMedium,
             color = if (entry.conflict) scheme.error else scheme.secondary, maxLines = lines, overflow = TextOverflow.Ellipsis)
     }
 }
@@ -216,11 +230,11 @@ internal fun CourseCard(course: ScheduledCourse, day: PlannerQuery.Day, modifier
     var open by rememberSaveable { mutableStateOf(false) }
     if (open) CourseDetails(course) { open = false }
     Column(modifier.testTag("day-course").clip(MaterialTheme.shapes.medium)
-        .clickable(onClickLabel = "查看固定课程", role = Role.Button) { open = true }.padding(horizontal = 4.dp)) {
+        .clickable(onClickLabel = stringResource(R.string.today_view_class), role = Role.Button) { open = true }.padding(horizontal = 4.dp)) {
         Text("${clockLabel(meeting.startMillis, day)}–${clockLabel(meeting.endMillis, day)}",
             style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = lines, overflow = TextOverflow.Ellipsis)
         Text(meeting.title, style = MaterialTheme.typography.titleSmall, maxLines = lines, overflow = TextOverflow.Ellipsis)
-        Text(if (course.conflicts.isEmpty()) "固定课程" else "时段冲突 · 固定课程",
+        Text(if (course.conflicts.isEmpty()) stringResource(R.string.today_fixed_class) else stringResource(R.string.today_conflicting_class),
             style = MaterialTheme.typography.labelMedium, color = if (course.conflicts.isEmpty()) scheme.tertiary else scheme.error,
             maxLines = lines, overflow = TextOverflow.Ellipsis)
         if (meeting.room.isNotBlank()) Text(meeting.room, style = MaterialTheme.typography.bodySmall, maxLines = lines, overflow = TextOverflow.Ellipsis)
@@ -239,8 +253,9 @@ private fun CurrentLine(drag: AxisDrag, spine: Dp) {
     val top = drag.scale.yAt(millis) - drag.scroll.value
     if (top < 0) return
     val color = MaterialTheme.colorScheme.primary
+    val now = stringResource(R.string.today_now_at, clockLabel(millis, drag.scale.day))
     HorizontalDivider(Modifier.offset { IntOffset(0, top) }.padding(start = spine).testTag("now-line")
-        .semantics { contentDescription = "现在 ${clockLabel(millis, drag.scale.day)}" }, color = color, thickness = 2.dp)
+        .semantics { contentDescription = now }, color = color, thickness = 2.dp)
 }
 
 @Composable
@@ -271,9 +286,9 @@ private fun DropPreview(drag: AxisDrag, gutter: Dp) {
         })
     }
     val status = checked?.error ?: when {
-        checked == null -> "检查时段中"
-        railX != null -> "松手调整结束时间"
-        else -> "松手安排"
+        checked == null -> stringResource(R.string.today_checking)
+        railX != null -> stringResource(R.string.today_release_resize)
+        else -> stringResource(R.string.today_release_schedule)
     }
     Surface(Modifier.fillMaxWidth().padding(start = gutter, end = 4.dp, top = 2.dp).testTag("drop-preview"),
         color = if (checked?.error == null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,

@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.storage
 
+import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.planner.DayBlock
 import io.github.nakanomk.stacklife.planner.ScheduledState
 import io.github.nakanomk.stacklife.planner.PlannerChange
@@ -39,23 +40,23 @@ internal class SlotDraft(private val dao: PlannerDao, private val originalTasks:
     }
 
     fun set(row: TaskRow, cmd: PlannerCommand.SlotSet, editedTasks: Map<String, TaskRow>, courses: CourseDraft) {
-        if (current(row.id) == null && row.owner != Owner.QUEUE) throw InvalidCommand("只能为在队任务新增时段。")
-        if (cmd.durationMinutes <= 0) throw InvalidCommand("排程时长必须大于零。")
+        if (current(row.id) == null && row.owner != Owner.QUEUE) throw InvalidCommand(uiText("Only queued tasks can be scheduled for the first time.", "只能为在队任务新增时段。"))
+        if (cmd.durationMinutes <= 0) throw InvalidCommand(uiText("Scheduled duration must be greater than zero.", "排程时长必须大于零。"))
         val instant = cmd.start.toInstant()
-        if (instant.nano % 1_000_000 != 0) throw InvalidCommand("开始时刻的精度不能小于一毫秒。")
+        if (instant.nano % 1_000_000 != 0) throw InvalidCommand(uiText("Start time cannot be more precise than a millisecond.", "开始时刻的精度不能小于一毫秒。"))
         val slot = try {
             val start = instant.toEpochMilli()
             TimeBlockRow(row.id, start, Math.addExact(start, cmd.durationMinutes.toLong() * 60_000L))
         } catch (_: ArithmeticException) {
-            throw InvalidCommand("安排的起止时间超出可保存范围。")
+            throw InvalidCommand(uiText("This time range is outside the supported dates.", "安排的起止时间超出可保存范围。"))
         }
 
         var conflicts: StringBuilder? = null
         var count = 0L
         fun showExample(): Boolean = ++count <= MAX_PARTNER_NAMES
         fun conflict(title: String, start: Long, end: Long) {
-            val message = conflicts?.append("；") ?: StringBuilder("时段冲突：").also { conflicts = it }
-            message.append('「').append(title).append("」 ").append(intervalLabel(start, end, cmd.start.offset))
+            val message = conflicts?.append(uiText("; ", "；")) ?: StringBuilder(uiText("Scheduling conflict: ", "时段冲突：")).also { conflicts = it }
+            message.append(uiText("“", "「")).append(title).append(uiText("” ", "」 ")).append(intervalLabel(start, end, cmd.start.offset))
         }
         for (block in dao.dayBlocks(slot.startMillis, slot.endMillis)) {
             if (block.taskId != row.id && block.taskId !in replacements && showExample()) {
@@ -63,7 +64,7 @@ internal class SlotDraft(private val dao: PlannerDao, private val originalTasks:
             }
         }
         for (course in courses.intersecting(slot.startMillis, slot.endMillis)) {
-            if (showExample()) conflict("固定课程 · ${course.label()}", course.meeting.startMillis, course.meeting.endMillis)
+            if (showExample()) conflict(uiText({ "Fixed class · ${course.label()}" }, { "固定课程 · ${course.label()}" }), course.meeting.startMillis, course.meeting.endMillis)
         }
         fun checkMoved(moved: TimeBlockRow) {
             if (moved.taskId != row.id && showExample()) {
@@ -74,7 +75,7 @@ internal class SlotDraft(private val dao: PlannerDao, private val originalTasks:
         movedByStart.lowerEntry(slot.startMillis)?.value?.let { if (it.endMillis > slot.startMillis) checkMoved(it) }
         for (moved in movedByStart.subMap(slot.startMillis, true, slot.endMillis, false).values) checkMoved(moved)
         conflicts?.let {
-            if (count > MAX_PARTNER_NAMES) it.append("；另有 ${count - MAX_PARTNER_NAMES} 个冲突未列出")
+            if (count > MAX_PARTNER_NAMES) it.append(uiText({ "; ${count - MAX_PARTNER_NAMES} more conflicts not listed" }, { "；另有 ${count - MAX_PARTNER_NAMES} 个冲突未列出" }))
             throw InvalidCommand(it.toString())
         }
         replace(row.id, slot)
@@ -100,7 +101,7 @@ internal class SlotDraft(private val dao: PlannerDao, private val originalTasks:
 
     fun clear(id: String, required: Boolean) {
         if (current(id) != null) replace(id, null)
-        else if (required) throw InvalidCommand("所选任务没有可取消的时段。")
+        else if (required) throw InvalidCommand(uiText("The selected task has no scheduled time to clear.", "所选任务没有可取消的时段。"))
     }
 
     private fun replace(id: String, slot: TimeBlockRow?) {
@@ -121,7 +122,7 @@ internal class SlotDraft(private val dao: PlannerDao, private val originalTasks:
         for ((id, after) in replacements) {
             if (after == null) deletes.add(id) else writes.add(after)
             val title = (editedTasks[id] ?: originalTasks.getValue(id)).title
-            changes.add(PlannerChange(id, "排程 · $title",
+            changes.add(PlannerChange(id, uiText({ "Schedule · $title" }, { "排程 · $title" }),
                 originals[id]?.let { intervalLabel(it.startMillis, it.endMillis, zone) },
                 after?.let { intervalLabel(it.startMillis, it.endMillis, zone) }, title))
         }

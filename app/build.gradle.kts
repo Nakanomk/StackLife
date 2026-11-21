@@ -25,9 +25,9 @@ android {
         applicationId = "io.github.nakanomk.stacklife"
         minSdk = 26
         targetSdk = 37
-        versionCode = 19
-        versionName = "0.10.4"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = 21
+        versionName = "0.10.6"
+        testInstrumentationRunner = "io.github.nakanomk.stacklife.acceptance.StackLifeTestRunner"
     }
     buildTypes {
         create("preview") {
@@ -47,6 +47,11 @@ android {
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += "release"
         }
+    }
+    testOptions.unitTests.all {
+        // Existing localized-message fixtures use Chinese; resolver tests exercise both languages explicitly.
+        it.systemProperty("user.language", "zh")
+        it.systemProperty("user.country", "CN")
     }
     buildFeatures { compose = true }
     compileOptions {

@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife
 
+import io.github.nakanomk.stacklife.i18n.uiText
+
 import android.database.sqlite.SQLiteException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -61,7 +63,7 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
             is PreviewResult.Rejected -> preview.message
             is PreviewResult.Ready -> if (preview.baseRevision != expectedRevision) {
                 planner.discard(preview.proposalId)
-                "日程已变更，请核对最新顺序后再生成。"
+                uiText("Your schedule changed. Review the new order before generating it again.", "日程已变更，请核对最新顺序后再生成。")
             } else commit(preview.proposalId).also { error -> if (error == null) refs = preview.refs }
         }
     }
@@ -75,7 +77,7 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
             is PreviewResult.Ready -> { planner.discard(preview.proposalId); null }
         }
     } catch (_: SQLiteException) {
-        "无法从设备读取时段，未安排任务"
+        uiText("Could not read time slots. No task was scheduled.", "无法从设备读取时段，未安排任务")
     }
 
     private val errors = Channel<String>(Channel.BUFFERED)
@@ -119,7 +121,7 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
     // A receipt tracks the original write, not a command or proposal to replay after rotation.
     private fun startWrite(notifyOnFailure: Boolean, write: suspend Ticket.() -> String?): String? {
         if (latest?.error?.isCompleted == false) {
-            errors.trySend("上一项更改正在保存")
+            errors.trySend(uiText("The previous change is still being saved.", "上一项更改正在保存"))
             return null
         }
         val ticket = Ticket(UUID.randomUUID().toString())
@@ -127,7 +129,7 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
             val error = try {
                 ticket.write()
             } catch (_: SQLiteException) {
-                "未能保存到设备，本次更改没有应用"
+                uiText("Could not save to this device. No changes were applied.", "未能保存到设备，本次更改没有应用")
             }
             // Ordinary actions report even if their screen is gone; confirmation forms show the receipt inline.
             if (error != null && notifyOnFailure) errors.send(error)
@@ -145,7 +147,7 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
             return SaveOutcome.REJECTED
         }
         // Process death: the transaction may already have committed. Never re-submit the draft.
-        val message = "上次保存的回执不可用，未重新提交。请核对当前结果。"
+        val message = uiText("The last save could not be verified. Check the result before trying again.", "上次保存的回执不可用，未重新提交。请核对当前结果。")
         if (onError != null) onError(message) else errors.send(message)
         return SaveOutcome.INTERRUPTED
     }

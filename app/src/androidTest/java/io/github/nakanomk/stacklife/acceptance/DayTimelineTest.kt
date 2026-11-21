@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.acceptance
 
+import io.github.nakanomk.stacklife.R
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
@@ -41,9 +42,11 @@ import org.junit.runner.RunWith
 
 // An adjacent civil day is precomposed for paging. The merged accessibility tree exposes
 // only the selected axis; scope its unmerged scale marks to that same live node.
-internal fun SemanticsNodeInteractionsProvider.dayTick(label: String): SemanticsNodeInteraction {
+internal fun SemanticsNodeInteractionsProvider.dayTick(label: String): SemanticsNodeInteraction = dayMark("hour:$label")
+
+private fun SemanticsNodeInteractionsProvider.dayMark(tag: String): SemanticsNodeInteraction {
     val axis = onNodeWithTag("day-axis").fetchSemanticsNode().id
-    return onNode(hasTestTag("hour:$label") and hasAnyAncestor(SemanticsMatcher("selected day axis") { it.id == axis }),
+    return onNode(hasTestTag(tag) and hasAnyAncestor(SemanticsMatcher("selected day axis") { it.id == axis }),
         useUnmergedTree = true)
 }
 
@@ -51,7 +54,7 @@ internal fun SemanticsNodeInteractionsProvider.assertFloatingAxisMeetsDock() {
     fun box(tag: String) = onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
     val top = box("assistant-input").top
     val rail = box("day-rail")
-    assertEquals("Painted rail must end at the composer surface", top, rail.bottom, 1f)
+    assertEquals("The time rail fills the viewport up to the assistant, including at maximum scroll", top, rail.bottom, 1f)
     assertEquals(top, box("day-axis").bottom, 1f)
     assertEquals(top, box("day-drop-area").bottom, 1f)
     assertFalse("Opaque queue must not obscure the rail", rail.overlaps(box("day-tray-container")))
@@ -347,6 +350,9 @@ class DayTimelineTest {
         val axis = ui.onNodeWithTag("day-axis")
         fun bounds(tag: String) = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
         // A moving tail inset used to silently clamp scroll only at the very end of a day.
+        // Check an interior time first, regardless of the device clock.
+        ui.dayTick("12:00").performScrollTo()
+        assertEquals(bounds("assistant-input").top, bounds("day-rail").bottom, 1f)
         axis.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
         fun geometry(): List<Any> {
             val scroll = axis.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
@@ -358,13 +364,18 @@ class DayTimelineTest {
         fun assertPaint() {
             ui.assertFloatingAxisMeetsDock()
             val rail = bounds("day-rail")
+            val end = ui.dayMark("time-day-end").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertEquals("Midnight is the final visible instant", end.bottom, rail.bottom, 1f)
+            assertEquals("No scrollable space between midnight and the assistant", end.bottom, bounds("assistant-input").top, 1f)
             val pixels = ui.onRoot().captureToImage().toPixelMap()
             val x = rail.center.x.toInt()
             val adjacent = rail.left.toInt() - 3
             for (rise in listOf(1, 4, 8)) {
                 val y = rail.bottom.toInt() - rise
-                assertNotEquals("Empty day rail disappeared at $x,$y", pixels[adjacent, y], pixels[x, y])
+                assertNotEquals("Day rail disappeared before midnight at $x,$y", pixels[adjacent, y], pixels[x, y])
             }
+            val scroll = axis.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+            assertEquals("There must be no scroll range beyond this boundary", scroll.maxValue(), scroll.value(), 0f)
         }
         assertPaint()
         ui.mainClock.autoAdvance = false
@@ -389,6 +400,44 @@ class DayTimelineTest {
     private fun selectDayView(mode: String) {
         await(hasTestTag("day-view")).performClick()
         await(hasTestTag("day-view-$mode")).performClick()
+        val label = ui.activity.getString(if (mode == "events") R.string.today_events else R.string.today_time)
+        await(hasTestTag("day-view")).assert(hasStateDescription(label))
+            .assertContentDescriptionEquals(ui.activity.getString(R.string.today_switch_view))
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Text))
+            .assertWidthIsEqualTo(48.dp).assertHeightIsEqualTo(48.dp)
+    }
+
+    @Test fun midnightMeetsAssistantAndLastTaskIsReachableWithoutScrollingIntoTomorrow() {
+        runBlocking {
+            store.apply(TaskAdd(TaskInput("Late class", ref = "last")), SlotSet("@last", at(23, 30), 30),
+                TaskAdd(TaskInput("Unscheduled task")))
+        }
+        val before = readDay()
+        show()
+        val axis = ui.onNodeWithTag("day-axis")
+        axis.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
+        fun bounds(tag: String) = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        val end = ui.dayMark("time-day-end").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val rail = bounds("day-rail")
+        assertEquals(end.bottom, rail.bottom, 1f)
+        assertEquals(end.bottom, bounds("assistant-input").top, 1f)
+        assertEquals("The 23:30–00:00 task ends at the same boundary", end.bottom, bounds("block:${before.blocks.single().taskId}").bottom, 1f)
+        val source = bounds("tray:${before.tray.single().id}").center
+        val dock = bounds("assistant-input").center
+        for (cancelGesture in listOf(true, false)) {
+            pickup(source, dock)
+            ui.onNodeWithTag("drop-preview").assertDoesNotExist()
+            ui.onRoot().performTouchInput { if (cancelGesture) cancel() else up() }
+            assertEquals(before, readDay())
+        }
+        selectDayView("events")
+        assertEquals(bounds("assistant-input").top, bounds("day-rail").bottom, 1f)
+        selectDayView("time")
+        assertEquals(end, ui.dayMark("time-day-end").fetchSemanticsNode().boundsInRoot)
+        assertEquals(rail, bounds("day-rail"))
+        ui.onNodeWithTag("day-tray-toggle").performClick()
+        ui.onNodeWithTag("block:${before.blocks.single().taskId}").performTouchInput { click() }
+        await(hasTestTag("slot:hour")).assertIsDisplayed()
     }
 
     @Test fun eventViewCompressesFreeTimeAndAddsOnlyOneScheduledTaskOnConfirmation() {
@@ -507,7 +556,8 @@ class DayTimelineTest {
         toggle.assertIsFocused()
         ui.onNodeWithTag("day-axis").performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
         val tick = ui.dayTick("23:45").fetchSemanticsNode().boundsInRoot
-        assertTrue(tick.height > 0f && tick.bottom < fab.top)
+        assertTrue(tick.height > 0f && !tick.overlaps(fab) && !tick.overlaps(ball))
+        assertEquals(box("assistant-input").top, ui.dayMark("time-day-end").fetchSemanticsNode().boundsInRoot.bottom, 1f)
     }
 
     @Test fun dragFromTrayThenMoveSameBlockAndCancelInEditor() {

@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.graphs
 
+import androidx.compose.ui.res.stringResource
+import io.github.nakanomk.stacklife.R
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,13 +31,13 @@ internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Uni
     var remove by rememberSaveable { mutableStateOf<String?>(null) }
     ReadPanel(state) { list ->
         RootPane(header = { RootToolbar(onSettings) {
-            TextButton(onClick = { creating = true }) { Text("新建流程图") }
+            TextButton(onClick = { creating = true }) { Text(stringResource(R.string.ui_new_graph)) }
         } }) { top, bottom ->
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = listSpacing,
                     contentPadding = dockListPadding(top, bottom)) {
                     if (list.graphs.isEmpty()) item {
-                        SectionTitle("还没有流程图")
-                        Hint("把目标拆成节点，用箭头连接前置任务。")
+                        SectionTitle(stringResource(R.string.ui_no_graphs))
+                        Hint(stringResource(R.string.ui_graph_empty_hint))
                     }
                     items(list.graphs, key = { it.id }) { graph ->
                         Surface(color = MaterialTheme.colorScheme.surface) {
@@ -45,10 +48,10 @@ internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Uni
                                 }
                                 var menu by remember { mutableStateOf(false) }
                                 Box {
-                                    ToolbarIcon(io.github.nakanomk.stacklife.R.drawable.ic_more_vert, "管理") { menu = true }
+                                    ToolbarIcon(io.github.nakanomk.stacklife.R.drawable.ic_more_vert, stringResource(R.string.ui_manage)) { menu = true }
                                     PlannerDropdownMenu(menu, { menu = false }) {
-                                        DropdownMenuItem({ Text("重命名") }, { menu = false; rename = graph.id })
-                                        DropdownMenuItem({ Text("删除流程图") }, { menu = false; remove = graph.id })
+                                        DropdownMenuItem({ Text(stringResource(R.string.ui_rename)) }, { menu = false; rename = graph.id })
+                                        DropdownMenuItem({ Text(stringResource(R.string.ui_delete_graph)) }, { menu = false; remove = graph.id })
                                     }
                                 }
                             }
@@ -59,18 +62,18 @@ internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Uni
         val renamed = list.graphs.find { it.id == rename }
         if (creating || renamed != null) key(renamed?.id) {
             var title by rememberSaveable { mutableStateOf(renamed?.title.orEmpty()) }
-            GraphSaveDialog(model, if (renamed == null) "新建流程图" else "重命名流程图", "保存", title.isNotBlank(),
+            GraphSaveDialog(model, if (renamed == null) stringResource(R.string.ui_new_graph) else stringResource(R.string.ui_rename_graph), stringResource(R.string.ui_save), title.isNotBlank(),
                 command = { if (renamed == null) PlannerCommand.GraphCreate(title)
                     else PlannerCommand.GraphPatch(renamed.id, listOf(GraphEdit.Rename(title))) },
                 onClose = { creating = false; rename = null }) {
                 TextField(title, { title = it }, Modifier.fillMaxWidth().testTag("graph-title"), colors = lineFieldColors(),
-                    label = { Text("流程图名称") }, singleLine = true)
+                    label = { Text(stringResource(R.string.ui_graph_name)) }, singleLine = true)
             }
         }
         list.graphs.find { it.id == remove }?.let { graph ->
-            GraphSaveDialog(model, "删除「${graph.title}」？", "删除流程图", true,
+            GraphSaveDialog(model, stringResource(R.string.ui_delete_named, graph.title), stringResource(R.string.ui_delete_graph), true,
                 command = { PlannerCommand.GraphRemove(graph.id) }, onClose = { remove = null }) {
-                Text("节点和依赖一起删除，已经生成的栈帧不受影响。")
+                Text(stringResource(R.string.ui_graph_delete_hint))
             }
         }
     }

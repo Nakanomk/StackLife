@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife.courses
 
+import io.github.nakanomk.stacklife.R
+import androidx.compose.ui.res.stringResource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -58,16 +60,16 @@ internal fun RemoveTermReview(id: String, model: WorkspaceViewModel, onBack: () 
         }
     }
     BackHandler(enabled = saving) { /* Do not replay or cancel an accepted removal on Back. */ }
-    EditorPage("移除学期课表", cancel, AssistantPage.Week(id, 1), backEnabled = !saving, footer = {
+    EditorPage(stringResource(R.string.courses_remove_term), cancel, AssistantPage.Week(id, 1), backEnabled = !saving, footer = {
         Actions {
-            Secondary("取消", !saving, cancel)
-            if (ready != null || saving) Primary("确认移除", !saving) {
+            Secondary(stringResource(R.string.courses_cancel), !saving, cancel)
+            if (ready != null || saving) Primary(stringResource(R.string.courses_confirm_remove), !saving) {
                 if (ready != null) submission.submit { model.confirmProposal(ready.proposalId) }
-            } else if (preview is PreviewResult.Rejected) Secondary("重新预览") { preview = null; version++ }
+            } else if (preview is PreviewResult.Rejected) Secondary(stringResource(R.string.courses_preview_again)) { preview = null; version++ }
         }
     }) { top, bottom ->
         LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
-            item { Text(id, style = MaterialTheme.typography.titleLarge); Hint("仅移除本学期的华科课程。队列、预约和其他学期不动。") }
+            item { Text(id, style = MaterialTheme.typography.titleLarge); Hint(stringResource(R.string.courses_remove_term_hint)) }
             when (val result = preview) {
                 null -> item { CircularProgressIndicator() }
                 is PreviewResult.Rejected -> item { Text(result.message) }

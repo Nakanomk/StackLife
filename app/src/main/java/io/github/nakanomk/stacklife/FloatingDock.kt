@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife
 
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -109,7 +111,8 @@ private fun DockedNavigation(tabs: List<Destination>, active: String, onSelect: 
     val glass = LocalCapsuleBackdrop.current != null && LocalAppearance.current.navGlass
     StackLifeSurface(CapsuleScene.NAVIGATION, Modifier.fillMaxWidth(), colors.surfaceContainer,
         shape = androidx.compose.foundation.shape.RoundedCornerShape(0.dp)) {
-        NavigationBar(Modifier.fillMaxWidth().testTag("navigation-capsule").semantics { stateDescription = "贴底导航" },
+        val description = stringResource(R.string.ui_bottom_nav)
+        NavigationBar(Modifier.fillMaxWidth().testTag("navigation-capsule").semantics { stateDescription = description },
             windowInsets = WindowInsets(0), containerColor = if (glass) Color.Transparent else colors.surfaceContainer) {
             for (tab in tabs) key(tab.key) {
                 NavigationBarItem(selected = tab.key == active, onClick = { onSelect(tab.key) },

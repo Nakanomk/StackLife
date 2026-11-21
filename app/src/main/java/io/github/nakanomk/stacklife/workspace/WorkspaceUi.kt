@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife.workspace
 
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.indication
@@ -34,6 +36,7 @@ import io.github.nakanomk.stacklife.GlassIcon
 import io.github.nakanomk.stacklife.LocalRootBottom
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.R
+import io.github.nakanomk.stacklife.i18n.AppLanguage
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.planner.NavStyle
 import io.github.nakanomk.stacklife.planner.PlannerCommand
@@ -143,7 +146,7 @@ internal fun FormGroup(modifier: Modifier = Modifier, frosted: Boolean = false, 
 internal fun PageTitle(title: String, back: () -> Unit, backEnabled: Boolean = true) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        GlassIcon(R.drawable.ic_arrow_back, "返回", back, enabled = backEnabled)
+        GlassIcon(R.drawable.ic_arrow_back, stringResource(R.string.ui_back), back, enabled = backEnabled)
         Text(title, Modifier.weight(1f).semantics { heading() }, maxLines = 1, overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.width(48.dp))
@@ -248,14 +251,20 @@ internal fun CheckRow(label: String, checked: Boolean, enabled: Boolean = true, 
 
 internal fun List<String>.toggle(id: String): List<String> = if (id in this) this - id else this + id
 
-private val dateTimeFormat = DateTimeFormatter.ofPattern("uuuu年M月d日 HH:mm", Locale.CHINA)
-private val shortDateTime = DateTimeFormatter.ofPattern("M月d日 HH:mm", Locale.CHINA)
-private val shortClock = DateTimeFormatter.ofPattern("HH:mm", Locale.CHINA)
-internal fun savedTime(millis: Long): String = dateTimeFormat.format(Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()))
+private val fullZh = DateTimeFormatter.ofPattern("uuuu年M月d日 HH:mm", Locale.CHINA)
+private val shortZh = DateTimeFormatter.ofPattern("M月d日 HH:mm", Locale.CHINA)
+private val fullEn = DateTimeFormatter.ofPattern("MMM d, uuuu HH:mm", Locale.ENGLISH)
+private val shortEn = DateTimeFormatter.ofPattern("MMM d HH:mm", Locale.ENGLISH)
+private val shortClock = DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT)
+internal fun savedTime(millis: Long): String {
+    val formatter = if (AppLanguage.locale.language == "zh") fullZh else fullEn
+    return formatter.format(Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()))
+}
 internal fun scheduledRange(start: Long, end: Long): String {
     val zone = ZoneId.systemDefault()
     val from = Instant.ofEpochMilli(start).atZone(zone)
     val to = Instant.ofEpochMilli(end).atZone(zone)
+    val shortDateTime = if (AppLanguage.locale.language == "zh") shortZh else shortEn
     return "${from.format(shortDateTime)}–${to.format(if (from.toLocalDate() == to.toLocalDate()) shortClock else shortDateTime)}"
 }
 

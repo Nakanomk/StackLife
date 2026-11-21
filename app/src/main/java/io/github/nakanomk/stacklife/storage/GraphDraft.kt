@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.storage
 
+import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.graphs.GoalDag
 import io.github.nakanomk.stacklife.planner.GraphEdge
 import io.github.nakanomk.stacklife.planner.GraphEdit
@@ -46,7 +47,7 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
                 val label = nodeTitle(edit.title, edit.minutes)
                 checkPosition(edit.x, edit.y)
                 val last = lastOrder ?: (nodes.values.maxOfOrNull { it.creationOrder } ?: -1L)
-                if (last == Long.MAX_VALUE) throw InvalidCommand("流程图的节点创建序号已用尽。")
+                if (last == Long.MAX_VALUE) throw InvalidCommand(uiText("The graph has run out of node creation numbers.", "流程图的节点创建序号已用尽。"))
                 lastOrder = last + 1
                 val node = GraphNode(newNodeId(edit.ref), label, edit.notes, edit.minutes, last + 1, edit.x, edit.y)
                 put(node)
@@ -54,7 +55,7 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
             }
             is GraphEdit.EditNode -> {
                 val old = node(resolveNode(edit.nodeId))
-                if (edit.title == null && edit.notes == null && edit.minutes == null) throw InvalidCommand("请选择需要修改的节点字段。")
+                if (edit.title == null && edit.notes == null && edit.minutes == null) throw InvalidCommand(uiText("Select a node field to edit.", "请选择需要修改的节点字段。"))
                 val minutes = edit.minutes ?: old.minutes
                 put(old.copy(title = nodeTitle(edit.title ?: old.title, minutes), notes = edit.notes ?: old.notes, minutes = minutes))
             }
@@ -93,18 +94,19 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
         if (edgeChanges.remove(edge) == null) edgeChanges[edge] = added
     }
 
-    private fun node(nodeId: String): GraphNode = nodes[nodeId] ?: throw InvalidCommand("节点「$nodeId」不在流程图「$title」中。")
+    private fun node(nodeId: String): GraphNode = nodes[nodeId] ?: throw InvalidCommand(uiText({ "Node “$nodeId” is not in graph “$title”." }, { "节点「$nodeId」不在流程图「$title」中。" }))
     private fun oldNode(nodeId: String): GraphNode? = if (nodeId in before) before[nodeId] else nodes[nodeId]
 
     fun finish(changes: MutableList<PlannerChange>): GraphWrites? {
         val next = title
         val oldTitle = original?.title
-        val graphLabel = "流程图「${next ?: oldTitle ?: return null}」"
-        if (oldTitle != next) changes.add(PlannerChange(id, "流程图名称", oldTitle, next, graphLabel))
+        val name = next ?: oldTitle ?: return null
+        val graphLabel = uiText({ "Graph “$name”" }, { "流程图「$name」" })
+        if (oldTitle != next) changes.add(PlannerChange(id, uiText("Graph name", "流程图名称"), oldTitle, next, graphLabel))
         if (next == null) {
             if (original == null) return null
             for (node in initialNodes) nodeChanges(changes, graphLabel, node, null)
-            for (edge in initialEdges) changes.add(PlannerChange(id, "移除依赖", oldLabel(edge), null, graphLabel))
+            for (edge in initialEdges) changes.add(PlannerChange(id, uiText("Remove dependency", "移除依赖"), oldLabel(edge), null, graphLabel))
             return GraphWrites(id, remove = true, graph = null)
         }
         val graph = if (oldTitle == next) null else GraphRow(id, next)
@@ -123,11 +125,11 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
         for ((edge, added) in edgeChanges) {
             if (added) {
                 addedEdges.add(GraphEdgeRow(id, edge.from, edge.to))
-                changes.add(PlannerChange(id, "添加依赖", null, "${node(edge.from).title} → ${node(edge.to).title}", graphLabel))
+                changes.add(PlannerChange(id, uiText("Add dependency", "添加依赖"), null, "${node(edge.from).title} → ${node(edge.to).title}", graphLabel))
             } else {
                 // Node deletion already cascades to its incident edges.
                 if (edge.from in nodes && edge.to in nodes) removedEdges.add(GraphEdgeRow(id, edge.from, edge.to))
-                changes.add(PlannerChange(id, "移除依赖", oldLabel(edge), null, graphLabel))
+                changes.add(PlannerChange(id, uiText("Remove dependency", "移除依赖"), oldLabel(edge), null, graphLabel))
             }
         }
         if (graph == null && writes.isEmpty() && deletes.isEmpty() && edgeChanges.isEmpty()) return null
@@ -138,23 +140,23 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
 
     private fun nodeChanges(changes: MutableList<PlannerChange>, graphLabel: String, old: GraphNode?, next: GraphNode?) {
         val node = next ?: requireNotNull(old)
-        val label = "$graphLabel · 节点「${node.title}」"
+        val label = uiText({ "$graphLabel · Node “${node.title}”" }, { "$graphLabel · 节点「${node.title}」" })
         fun change(field: String, a: Any?, b: Any?) {
             if (a != b) changes.add(PlannerChange(node.id, field, a?.toString(), b?.toString(), label))
         }
-        change("标题", old?.title, next?.title)
-        change("备注", old?.notes?.ifEmpty { null }, next?.notes?.ifEmpty { null })
-        change("预计分钟", old?.minutes, next?.minutes)
-        if (old?.x != next?.x || old?.y != next?.y) change("画布位置", old?.let { "(${it.x}, ${it.y})" }, next?.let { "(${it.x}, ${it.y})" })
+        change(uiText("Title", "标题"), old?.title, next?.title)
+        change(uiText("Notes", "备注"), old?.notes?.ifEmpty { null }, next?.notes?.ifEmpty { null })
+        change(uiText("Estimated minutes", "预计分钟"), old?.minutes, next?.minutes)
+        if (old?.x != next?.x || old?.y != next?.y) change(uiText("Canvas position", "画布位置"), old?.let { "(${it.x}, ${it.y})" }, next?.let { "(${it.x}, ${it.y})" })
     }
 
-    private fun graphTitle(raw: String) = raw.trim().ifEmpty { throw InvalidCommand("流程图名称不能为空。") }
+    private fun graphTitle(raw: String) = raw.trim().ifEmpty { throw InvalidCommand(uiText("Enter a graph name.", "流程图名称不能为空。")) }
     private fun nodeTitle(raw: String, minutes: Int): String {
-        if (minutes <= 0) throw InvalidCommand("节点「$raw」的预计时长必须大于零。")
-        return raw.trim().ifEmpty { throw InvalidCommand("节点标题不能为空。") }
+        if (minutes <= 0) throw InvalidCommand(uiText({ "The estimated duration for node “$raw” must be greater than zero." }, { "节点「$raw」的预计时长必须大于零。" }))
+        return raw.trim().ifEmpty { throw InvalidCommand(uiText("Enter a node title.", "节点标题不能为空。")) }
     }
     private fun checkPosition(x: Float, y: Float) {
-        if (!x.isFinite() || !y.isFinite()) throw InvalidCommand("节点坐标必须是有限数值：($x, $y)。")
+        if (!x.isFinite() || !y.isFinite()) throw InvalidCommand(uiText({ "Node coordinates must be finite: ($x, $y)." }, { "节点坐标必须是有限数值：($x, $y)。" }))
     }
     private inline fun <T> checkedTopology(action: () -> T): T = try { action() }
         catch (e: IllegalArgumentException) { throw InvalidCommand(requireNotNull(e.message)) }

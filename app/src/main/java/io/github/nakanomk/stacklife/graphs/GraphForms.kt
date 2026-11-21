@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.graphs
 
+import androidx.compose.ui.res.stringResource
+import io.github.nakanomk.stacklife.R
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -30,7 +33,7 @@ internal fun GraphSaveDialog(model: WorkspaceViewModel, title: String, confirm: 
     }, confirmButton = {
         TextButton(enabled = valid && !submission.busy, onClick = { submission.send(command()) },
             modifier = Modifier.heightIn(min = 48.dp).testTag("graph-save")) { Text(confirm) }
-    }, dismissButton = { TextButton(onClick = onClose, enabled = !submission.busy, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消") } })
+    }, dismissButton = { TextButton(onClick = onClose, enabled = !submission.busy, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.ui_cancel)) } })
 }
 
 // Two default columns. Reuse vacated cells, including when other cards have been dragged nearby.
@@ -54,7 +57,7 @@ internal fun NodeForm(model: WorkspaceViewModel, graphId: String, revision: Long
     var notes by rememberSaveable { mutableStateOf(node?.notes.orEmpty()) }
     var minutes by rememberSaveable { mutableStateOf(node?.minutes?.toString().orEmpty()) }
     val duration = if (minutes.isBlank()) 30 else minutes.toIntOrNull()
-    GraphSaveDialog(model, if (node == null) "添加节点" else "编辑节点", "保存节点", title.isNotBlank() && (duration ?: 0) > 0,
+    GraphSaveDialog(model, if (node == null) stringResource(R.string.ui_add_node) else stringResource(R.string.ui_edit_node), stringResource(R.string.ui_save_node), title.isNotBlank() && (duration ?: 0) > 0,
         command = {
             val edit = if (node == null) {
                 val cell = firstVacantCell(nodes)
@@ -62,10 +65,10 @@ internal fun NodeForm(model: WorkspaceViewModel, graphId: String, revision: Long
             } else GraphEdit.EditNode(node.id, title, notes, checkNotNull(duration))
             PlannerCommand.GraphPatch(graphId, listOf(edit), revision)
         }, onClose = onClose) {
-        TextField(title, { title = it }, Modifier.fillMaxWidth().testTag("node-title"), colors = lineFieldColors(), singleLine = true, label = { Text("节点标题") })
-        TextField(notes, { notes = it }, Modifier.fillMaxWidth().testTag("node-notes"), colors = lineFieldColors(), maxLines = 4, label = { Text("备注（选填）") })
+        TextField(title, { title = it }, Modifier.fillMaxWidth().testTag("node-title"), colors = lineFieldColors(), singleLine = true, label = { Text(stringResource(R.string.ui_node_title)) })
+        TextField(notes, { notes = it }, Modifier.fillMaxWidth().testTag("node-notes"), colors = lineFieldColors(), maxLines = 4, label = { Text(stringResource(R.string.ui_optional_notes)) })
         TextField(minutes, { minutes = it }, Modifier.fillMaxWidth().testTag("node-minutes"), colors = lineFieldColors(), singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), label = { Text("预计分钟") }, placeholder = { Text("30") })
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), label = { Text(stringResource(R.string.ui_estimated_minutes)) }, placeholder = { Text("30") })
     }
 }
 
@@ -74,10 +77,10 @@ internal fun MoveForm(model: WorkspaceViewModel, graphId: String, revision: Long
     var left by rememberSaveable { mutableStateOf(node.x.toString()) }
     var top by rememberSaveable { mutableStateOf(node.y.toString()) }
     val x = left.toFloatOrNull()?.takeIf { it.isFinite() }; val y = top.toFloatOrNull()?.takeIf { it.isFinite() }
-    GraphSaveDialog(model, "移动「${node.title}」", "保存位置", x != null && y != null, command = {
+    GraphSaveDialog(model, stringResource(R.string.ui_move_named, node.title), stringResource(R.string.ui_save_position), x != null && y != null, command = {
         PlannerCommand.GraphPatch(graphId, listOf(GraphEdit.MoveNode(node.id, checkNotNull(x), checkNotNull(y))), revision)
     }, onClose = onClose) {
-        TextField(left, { left = it }, colors = lineFieldColors(), singleLine = true, label = { Text("横坐标（dp）") })
-        TextField(top, { top = it }, colors = lineFieldColors(), singleLine = true, label = { Text("纵坐标（dp）") })
+        TextField(left, { left = it }, colors = lineFieldColors(), singleLine = true, label = { Text(stringResource(R.string.ui_position_x)) })
+        TextField(top, { top = it }, colors = lineFieldColors(), singleLine = true, label = { Text(stringResource(R.string.ui_position_y)) })
     }
 }

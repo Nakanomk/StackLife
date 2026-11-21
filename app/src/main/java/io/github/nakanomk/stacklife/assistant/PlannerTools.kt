@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.assistant
 
+import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.courses.BellSchedule
 import io.github.nakanomk.stacklife.courses.CoursePattern
@@ -33,7 +34,7 @@ internal class PlannerTools(private val api: PlannerApi, val page: AssistantPage
             "week" -> AssistantPage.Week(arguments.string("termId"), arguments.int("week"))
             "day" -> AssistantPage.Day(date(arguments.string("date")), zone)
             "settings" -> AssistantPage.Settings
-            else -> throw IllegalArgumentException("不支持的查询。")
+            else -> throw IllegalArgumentException(uiText("Unsupported query.", "不支持的查询。"))
         }
         val area = when (target) {
             is AssistantPage.Day -> ReadArea.DAY
@@ -43,7 +44,7 @@ internal class PlannerTools(private val api: PlannerApi, val page: AssistantPage
             AssistantPage.Settings -> ReadArea.SETTINGS
         }
         val withinGraph = target is AssistantPage.Graph && page is AssistantPage.Graph && page.id == target.id
-        require(target == page || withinGraph || area in disclosure.extra) { "此查询超出当前页面；请由用户先授权相应范围。" }
+        require(target == page || withinGraph || area in disclosure.extra) { uiText("This query is outside the current page. The user must authorize that scope first.", "此查询超出当前页面；请由用户先授权相应范围。") }
         if (target is AssistantPage.CourseDraft) return buildJsonObject {
             put("draftId", target.draftId); put("termId", target.termId)
         }
@@ -58,7 +59,7 @@ internal class PlannerTools(private val api: PlannerApi, val page: AssistantPage
             AssistantPage.Terms -> PlannerQuery.Terms
             is AssistantPage.Week -> PlannerQuery.Week(target.termId, target.week)
             AssistantPage.Settings -> PlannerQuery.Settings
-            is AssistantPage.CourseDraft -> error("草稿只提供本地 ID。")
+            is AssistantPage.CourseDraft -> error(uiText("Drafts provide only a local ID.", "草稿只提供本地 ID。"))
         }
         val data = api.observe(read).first()
         return ToolProjection(disclosure, seen, arguments.optInt("offset") ?: 0, arguments.optInt("limit") ?: TOOL_PAGE_SIZE)
@@ -88,7 +89,7 @@ internal class PlannerTools(private val api: PlannerApi, val page: AssistantPage
             "frame_restore" -> {
                 val mode = if (o.string("mode") == "all") RestoreMode.ALL else RestoreMode.SELECTED
                 val selection = if ("taskIds" in o) taskIds() else emptyList()
-                require((mode == RestoreMode.ALL) == selection.isEmpty()) { "整帧恢复不能指定任务；选择恢复需要非空 taskIds。" }
+                require((mode == RestoreMode.ALL) == selection.isEmpty()) { uiText("Restoring a whole frame cannot specify tasks. A partial restore needs nonempty taskIds.", "整帧恢复不能指定任务；选择恢复需要非空 taskIds。") }
                 PlannerCommand.FrameRestore(seen.frame(o.string("frameId")), mode, selection)
             }
             "graph_create" -> PlannerCommand.GraphCreate(o.string("title"), ref)
@@ -98,26 +99,26 @@ internal class PlannerTools(private val api: PlannerApi, val page: AssistantPage
                 o["taskRefs"]?.jsonObject?.entries?.associate { (node, alias) -> seen.node(node) to alias.jsonPrimitive.content }.orEmpty())
             "slot_set" -> {
                 val start = try { OffsetDateTime.parse(o.string("start")) } catch (_: DateTimeParseException) {
-                    throw IllegalArgumentException("开始时间必须为带 UTC 偏移量的 ISO 日期时间。")
+                    throw IllegalArgumentException(uiText("The start time must be an ISO date-time with a UTC offset.", "开始时间必须为带 UTC 偏移量的 ISO 日期时间。"))
                 }
-                require(start.year in 1..9999) { "排程日期年份超出范围。" }
+                require(start.year in 1..9999) { uiText("The scheduled year is outside the supported range.", "排程日期年份超出范围。") }
                 PlannerCommand.SlotSet(taskId(), start, o.int("durationMinutes"))
             }
             "slot_clear" -> PlannerCommand.SlotClear(taskId())
             "course_import" -> {
                 val id = o.string("draftId")
-                require(page is AssistantPage.CourseDraft && page.draftId == id) { "只能使用当前已由用户核对的导入草稿。" }
+                require(page is AssistantPage.CourseDraft && page.draftId == id) { uiText("Only the current import draft reviewed by the user can be used.", "只能使用当前已由用户核对的导入草稿。") }
                 PlannerCommand.CourseImport(id)
             }
             "term_remove" -> PlannerCommand.TermRemove(seen.term(o.string("termId")))
             "manual_course_add" -> {
-                require(disclosure.courseDetails) { "请先授权课程名称与地点，或在课表中手动添加。" }
+                require(disclosure.courseDetails) { uiText("Authorize class names and locations first, or add the class manually in the timetable.", "请先授权课程名称与地点，或在课表中手动添加。") }
                 val id = o.string("termId")
                 val weeks = o.getValue("weeks").jsonArray.mapTo(mutableSetOf()) { it.jsonPrimitive.int }
                 val newTerm = o["newTerm"]?.jsonObject
                 val sameWeek = page is AssistantPage.Week && page.termId == id && weeks.singleOrNull() == page.week
                 require(ReadArea.COURSES in disclosure.extra || (newTerm == null && sameWeek) ||
-                    (newTerm != null && page == AssistantPage.Terms)) { "请先授权其他学期与周课表，或仅添加本周的课程。" }
+                    (newTerm != null && page == AssistantPage.Terms)) { uiText("Authorize other terms and weekly timetables first, or add classes only for this week.", "请先授权其他学期与周课表，或仅添加本周的课程。") }
                 val term = newTerm?.let {
                     TermSpec(id, date(it.string("firstMonday")), it.int("totalWeeks"), BellSchedule.valueOf(it.string("initial")),
                         it.optString("switchDate")?.let(::date))
@@ -133,7 +134,7 @@ internal class PlannerTools(private val api: PlannerApi, val page: AssistantPage
                 else PlannerCommand.EditAppearance(AppearanceFields(AppearanceGroup.entries.first { it.key == o.string("group") },
                     if (reset) null else o.getValue("values").jsonObject))
             }
-            else -> throw IllegalArgumentException("不支持的写提案。")
+            else -> throw IllegalArgumentException(uiText("Unsupported write proposal.", "不支持的写提案。"))
         }
     }
 
@@ -146,13 +147,13 @@ internal class PlannerTools(private val api: PlannerApi, val page: AssistantPage
         "remove_node" -> GraphEdit.RemoveNode(seen.node(o.string("nodeId")))
         "add_edge" -> GraphEdit.AddEdge(seen.node(o.string("from")), seen.node(o.string("to")))
         "remove_edge" -> GraphEdit.RemoveEdge(seen.node(o.string("from")), seen.node(o.string("to")))
-        else -> throw IllegalArgumentException("不支持的流程图编辑。")
+        else -> throw IllegalArgumentException(uiText("Unsupported graph edit.", "不支持的流程图编辑。"))
     }
 }
 
 private fun date(value: String): LocalDate {
-    val date = try { LocalDate.parse(value) } catch (_: DateTimeParseException) { throw IllegalArgumentException("日期须为有效的 YYYY-MM-DD。") }
-    require(date.year in 1..9999) { "日期年份超出范围。" }; return date
+    val date = try { LocalDate.parse(value) } catch (_: DateTimeParseException) { throw IllegalArgumentException(uiText("Enter a valid date in YYYY-MM-DD format.", "日期须为有效的 YYYY-MM-DD。")) }
+    require(date.year in 1..9999) { uiText("The year is outside the supported range.", "日期年份超出范围。") }; return date
 }
 private fun JsonObject.string(key: String) = getValue(key).jsonPrimitive.content
 private fun JsonObject.optString(key: String) = this[key]?.jsonPrimitive?.content
@@ -178,7 +179,7 @@ internal class ToolIds(page: AssistantPage) {
         }
     }
     private fun check(id: String, allowed: Set<String>, allowAlias: Boolean = true): String {
-        require(id in allowed || (allowAlias && id.startsWith('@'))) { "提案引用了本轮未获准且未披露的实体；请先获授权并查询。" }
+        require(id in allowed || (allowAlias && id.startsWith('@'))) { uiText("This proposal references an entity that has not been authorized and disclosed this turn. Obtain permission and query it first.", "提案引用了本轮未获准且未披露的实体；请先获授权并查询。") }
         return id
     }
     fun task(id: String) = check(id, tasks)

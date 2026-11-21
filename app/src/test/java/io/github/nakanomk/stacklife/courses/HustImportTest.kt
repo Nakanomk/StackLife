@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife.courses
 
+import io.github.nakanomk.stacklife.i18n.AppLanguage
+import java.util.Locale
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.time.Instant
@@ -43,6 +45,30 @@ class HustImportTest {
         assertEquals(listOf("2026-09-07T14:30", "2026-09-21T14:30", "2026-11-02T14:00"), classes.map { at(it.startMillis) })
         assertEquals(listOf("2026-09-07T16:05", "2026-09-21T16:05", "2026-11-02T15:35"), classes.map { at(it.endMillis) })
         assertEquals(classes, importer.parse(rows, term).resolve(decisions))
+    }
+
+    @Test fun languageChangesIssueLabelsButNotSourceCoordinatesOrClassNames() {
+        val previous = AppLanguage.locale
+        try {
+            val rows = raw("[${week(1, item("A", "1", "保留原名"), item("B", "实践", "Original name"))}]")
+            AppLanguage.update(listOf(Locale.ENGLISH))
+            val english = HustCourseImporter.parse(rows, term)
+            val issue = english.issues.single()
+            assertEquals("Row 1 · Mon · Item 2", issue.label)
+            assertEquals("JC must be a single period or an ascending range within 1–12.", issue.reason)
+            val decisions = mapOf(issue.position to IssueDecision.Correct(issue.fields!!.copy(period = "2")))
+            val expected = english.resolve(decisions)
+            AppLanguage.update(listOf(Locale.SIMPLIFIED_CHINESE))
+            val chinese = HustCourseImporter.parse(rows, term)
+            val same = chinese.issues.single()
+            assertEquals("第 1 行 · 周一 · 第 2 项", same.label)
+            assertEquals("JC 节次须为 1–12 中的单节或正序区间", same.reason)
+            assertEquals(issue.position, same.position)
+            assertEquals(expected, chinese.resolve(decisions))
+            assertEquals(listOf("保留原名", "Original name"), expected.map { it.title })
+        } finally {
+            AppLanguage.update(listOf(previous))
+        }
     }
 
     @Test fun correctionIsExplicitAndEmptyCannotReplace() {

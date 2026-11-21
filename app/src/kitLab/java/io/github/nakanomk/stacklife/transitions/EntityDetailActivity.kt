@@ -2,7 +2,7 @@ package io.github.nakanomk.stacklife.transitions
 
 import android.database.sqlite.SQLiteException
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import io.github.nakanomk.stacklife.i18n.LocalizedActivity
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -15,7 +15,7 @@ import io.github.nakanomk.stacklife.planner.Workspace
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-internal class EntityDetailActivity : ComponentActivity() {
+internal class EntityDetailActivity : LocalizedActivity() {
     private var detail: DetailTarget? = null
     private var leaving = false
 

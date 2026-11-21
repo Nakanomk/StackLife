@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.appearance
 
+import androidx.compose.ui.res.stringResource
+import io.github.nakanomk.stacklife.R
+
 import android.os.Build
 import androidx.annotation.RequiresApi
 
@@ -131,8 +134,9 @@ internal fun StackLifeSurface(scene: CapsuleScene, modifier: Modifier, solid: Co
         else -> true
     } }
     val nestedShell = scene == CapsuleScene.PANEL || scene == CapsuleScene.TRAY || scene == CapsuleScene.CHROME || scene == CapsuleScene.NAVIGATION
-    val semantics = if (scene == CapsuleScene.NAVIGATION || scene == CapsuleScene.ASSISTANT) Modifier.semantics {
-        stateDescription = if (source == null) "实色胶囊" else "折射胶囊"
+    val semantics = if (scene == CapsuleScene.NAVIGATION || scene == CapsuleScene.ASSISTANT) {
+        val description = stringResource(if (source == null) R.string.ui_solid_capsule else R.string.ui_glass_capsule)
+        Modifier.semantics { stateDescription = description }
     } else Modifier
     if (Build.VERSION.SDK_INT < 33 || source == null) {
         Surface(modifier.then(semantics), shape = shape, color = solid, contentColor = LocalContentColor.current,

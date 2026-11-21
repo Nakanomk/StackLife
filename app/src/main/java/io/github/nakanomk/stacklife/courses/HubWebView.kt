@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.courses
 
+import io.github.nakanomk.stacklife.R
+import androidx.compose.ui.res.stringResource
+import io.github.nakanomk.stacklife.i18n.uiText
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -157,7 +160,7 @@ internal class HubSession(private val context: Context) {
                 }
                 if (r.isForMainFrame && page === current) {
                     page.appLink = externalAppUri(r.url)
-                    if (page.appLink == null) page.error = "无法打开此链接"
+                    if (page.appLink == null) page.error = uiText("Cannot open this link.", "无法打开此链接")
                     else if (r.hasGesture()) openAppLink()
                 }
                 return true
@@ -187,20 +190,20 @@ internal class HubSession(private val context: Context) {
 
             override fun onReceivedError(v: WebView, r: WebResourceRequest, error: WebResourceError) {
                 if (r.isForMainFrame) page.fail(when (error.errorCode) {
-                    ERROR_HOST_LOOKUP, ERROR_CONNECT -> "无法连接网站"
-                    ERROR_TIMEOUT -> "连接超时"
-                    ERROR_FAILED_SSL_HANDSHAKE -> "安全连接失败"
-                    else -> "网页加载失败"
+                    ERROR_HOST_LOOKUP, ERROR_CONNECT -> uiText("Cannot connect to the website.", "无法连接网站")
+                    ERROR_TIMEOUT -> uiText("Connection timed out.", "连接超时")
+                    ERROR_FAILED_SSL_HANDSHAKE -> uiText("Secure connection failed.", "安全连接失败")
+                    else -> uiText("Page failed to load.", "网页加载失败")
                 })
             }
 
             override fun onReceivedHttpError(v: WebView, r: WebResourceRequest, error: WebResourceResponse) {
-                if (r.isForMainFrame) page.fail("网页返回 HTTP ${error.statusCode}")
+                if (r.isForMainFrame) page.fail(uiText({ "The page returned HTTP ${error.statusCode}." }, { "网页返回 HTTP ${error.statusCode}" }))
             }
 
             override fun onRenderProcessGone(v: WebView, detail: RenderProcessGoneDetail): Boolean {
                 if (!closed && page in windows) {
-                    current.fail("网页进程已停止，请重新打开")
+                    current.fail(uiText("The web page stopped. Open it again.", "网页进程已停止，请重新打开"))
                     endSession(rendererGone = true)
                     HubSiteData.wipe {}
                 }
@@ -227,8 +230,8 @@ internal class HubSession(private val context: Context) {
         current.appLink = null
         val intent = Intent(Intent.ACTION_VIEW, link).addCategory(Intent.CATEGORY_BROWSABLE)
         try { context.startActivity(intent) }
-        catch (_: ActivityNotFoundException) { message = "未安装可打开此链接的应用" }
-        catch (_: SecurityException) { message = "系统未允许打开此链接" }
+        catch (_: ActivityNotFoundException) { message = uiText("No app is installed to open this link.", "未安装可打开此链接的应用") }
+        catch (_: SecurityException) { message = uiText("The system did not allow this link to open.", "系统未允许打开此链接") }
     }
 
     private fun closePopup(page: Page) {
@@ -303,7 +306,7 @@ internal class HubSession(private val context: Context) {
         val url = if (closed) null else page.web.url
         fun checkPage() {
             if (!canExtract || page !== current || epoch != page.generation || page.web.url != url || !isScheduleRoute(url))
-                throw SourceProblem("页面或学期已改变，请在总课表重新提取")
+                throw SourceProblem(uiText("The page or term changed. Extract again from the timetable.", "页面或学期已改变，请在总课表重新提取"))
         }
         checkPage()
         val script = withContext(Dispatchers.IO) { context.assets.open("importers/hust-hub.js").bufferedReader().use { it.readText() } }
@@ -316,7 +319,7 @@ internal class HubSession(private val context: Context) {
             val reply = evaluate(false)
             val rows = withContext(Dispatchers.Default) { decodeHubReply(reply) }
             checkPage()
-            if (evaluate(true) != "true") throw SourceProblem("页面或学期已改变，请等待加载完成后重新提取")
+            if (evaluate(true) != "true") throw SourceProblem(uiText("The page or term changed. Wait for it to load, then extract again.", "页面或学期已改变，请等待加载完成后重新提取"))
             checkPage()
             rows
         }
@@ -347,10 +350,10 @@ internal fun HubWebView(onRows: (JsonArray) -> Unit, onBack: () -> Unit, onFile:
     BackHandler(onBack = ::back)
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(enabled = !leaving, onClick = ::back) { Text("返回") }
+            TextButton(enabled = !leaving, onClick = ::back) { Text(stringResource(R.string.courses_back)) }
             Text(session?.host.orEmpty(), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.StartEllipsis)
             TextButton(enabled = session?.started == true && !session.closed && !leaving,
-                onClick = { session?.openSchedule() }) { Text("总课表") }
+                onClick = { session?.openSchedule() }) { Text(stringResource(R.string.courses_hub_timetable)) }
             Button(enabled = session?.canExtract == true && !extracting && !leaving, onClick = {
                 if (session == null || extracting || leaving) return@Button
                 extracting = true
@@ -358,21 +361,21 @@ internal fun HubWebView(onRows: (JsonArray) -> Unit, onBack: () -> Unit, onFile:
                     try {
                         val data = session.extract()
                         if (!leaving) leave { onRows(data) }
-                    } catch (_: TimeoutCancellationException) { session.message = "提取超时，请稍后重试" }
+                    } catch (_: TimeoutCancellationException) { session.message = uiText("Extraction timed out. Try again later.", "提取超时，请稍后重试") }
                     catch (e: SourceProblem) { session.message = e.message.orEmpty() }
-                    catch (_: IOException) { session.message = "提取失败" }
+                    catch (_: IOException) { session.message = uiText("Extraction failed.", "提取失败") }
                     finally { extracting = false }
                 }
-            }, modifier = Modifier.testTag("hubExtract")) { Text(if (extracting) "提取中" else "提取") }
+            }, modifier = Modifier.testTag("hubExtract")) { Text(if (extracting) stringResource(R.string.courses_extracting) else stringResource(R.string.courses_extract)) }
         }
         if (session?.hasAppLink == true) {
-            TextButton(onClick = session::openAppLink) { Text("打开验证应用") }
+            TextButton(onClick = session::openAppLink) { Text(stringResource(R.string.courses_open_auth)) }
         }
-        val problem = if (session == null) "设备 WebView 不可用" else session.message
+        val problem = if (session == null) stringResource(R.string.courses_webview_unavailable) else session.message
         if (problem != null) {
             Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(problem, Modifier.weight(1f))
-                TextButton(enabled = !leaving, onClick = { leave(onFile) }, modifier = Modifier.testTag("hubUseFile")) { Text("改用文件") }
+                TextButton(enabled = !leaving, onClick = { leave(onFile) }, modifier = Modifier.testTag("hubUseFile")) { Text(stringResource(R.string.courses_use_file)) }
             }
         }
         if (session != null && !session.closed) {

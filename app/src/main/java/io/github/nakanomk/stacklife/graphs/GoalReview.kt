@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.graphs
 
+import androidx.compose.ui.res.stringResource
+import io.github.nakanomk.stacklife.R
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,6 +30,7 @@ import io.github.nakanomk.stacklife.workspace.*
 @Composable
 internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: ReadState<GraphDetail>,
     goalId: String?, onGoal: (String) -> Unit, onClose: () -> Unit, onFrame: (String) -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val detail = (graphState as? ReadState.Loaded)?.value
     val goal = detail?.nodes?.find { it.id == goalId }
     val read = key(goalId) {
@@ -40,7 +44,7 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
         if (reviewedRevision == null) reviewedRevision = order?.revision
     }
     var reasonOverride by rememberSaveable(goalId) { mutableStateOf<String?>(null) }
-    val reason = reasonOverride ?: goal?.let { "为目标〈${it.title}〉生成" }.orEmpty()
+    val reason = reasonOverride ?: goal?.let { stringResource(R.string.ui_goal_reason, it.title) }.orEmpty()
     var ticket by rememberSaveable { mutableStateOf<String?>(null) }
     var savingFrame by rememberSaveable { mutableStateOf(false) }
     var failure by rememberSaveable(goalId) { mutableStateOf<String?>(null) }
@@ -53,8 +57,8 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
         if (result == SaveOutcome.APPLIED) {
             if (savingFrame) {
                 val frame = model.reviewedRef(id, "frame")
-                if (frame != null) currentOnFrame(frame) else receipt = "已存为栈帧，可在工作台查看。"
-            } else receipt = "已按此顺序加入队尾。"
+                if (frame != null) currentOnFrame(frame) else receipt = context.getString(R.string.ui_frame_saved)
+            } else receipt = context.getString(R.string.ui_queue_appended)
         }
         ticket = null
     }
@@ -75,12 +79,12 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
         LazyColumn(Modifier.fillMaxWidth().imePadding().testTag("goal-order"), state = list, contentPadding = dockListPadding(top, 0.dp),
             verticalArrangement = listSpacing) {
             when {
-                receipt != null -> item { SectionTitle(checkNotNull(receipt)); Secondary("完成", onClick = onClose) }
+                receipt != null -> item { SectionTitle(checkNotNull(receipt)); Secondary(stringResource(R.string.ui_done), onClick = onClose) }
                 graphState == ReadState.Loading -> item { CircularProgressIndicator() }
-                detail?.graph == null -> item { Text(if (graphState == ReadState.ReadFailed) "未能读取流程图" else "流程图不存在") }
-                detail.nodes.isEmpty() -> item { Hint("先添加节点，再选择目标。") }
+                detail?.graph == null -> item { Text(if (graphState == ReadState.ReadFailed) stringResource(R.string.ui_graph_read_failed) else stringResource(R.string.ui_graph_missing)) }
+                detail.nodes.isEmpty() -> item { Hint(stringResource(R.string.ui_add_nodes_first)) }
                 choosing || goal == null -> {
-                    item { SectionTitle("选择目标节点"); Hint("只排列这个目标及其所有前置节点。") }
+                    item { SectionTitle(stringResource(R.string.ui_choose_goal)); Hint(stringResource(R.string.ui_goal_prereqs)) }
                     items(detail.nodes, key = { it.id }) { node ->
                         Row(Modifier.fillMaxWidth().testTag("goal-choice:${node.id}")
                             .selectable(node.id == goalId, enabled = !busy, role = Role.RadioButton) {
@@ -92,39 +96,39 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
                     }
                 }
                 else -> {
-                    item { PreferenceRow("目标：${goal.title}", "更换", enabled = !busy, onClick = { choosing = true }) }
+                    item { PreferenceRow(stringResource(R.string.ui_goal_value, goal.title), stringResource(R.string.ui_change), enabled = !busy, onClick = { choosing = true }) }
                     when {
                         read == ReadState.Loading -> item { CircularProgressIndicator() }
-                        order == null || order.error != null -> item { Text(order?.error ?: "未能读取目标顺序") }
+                        order == null || order.error != null -> item { Text(order?.error ?: stringResource(R.string.ui_order_read_failed)) }
                         else -> {
-                            item { SectionTitle("执行顺序 · ${order.nodes.size} 项") }
+                            item { SectionTitle(stringResource(R.string.ui_execution_order, order.nodes.size)) }
                             itemsIndexed(order.nodes, key = { _, node -> node.id }) { index, node ->
                                 Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("goal-item:$index")) {
                                     Text("${index + 1}. ${node.title}", style = MaterialTheme.typography.bodyLarge)
-                                    Hint("${node.minutes} 分钟" + if (node.notes.isBlank()) "" else " · ${node.notes}")
+                                    Hint(stringResource(R.string.ui_minutes_value, node.minutes) + if (node.notes.isBlank()) "" else " · ${node.notes}")
                                 }
                             }
                             item {
                                 HorizontalDivider()
                                 TextField(reason, { reasonOverride = it }, colors = lineFieldColors(), enabled = !busy,
                                     modifier = Modifier.fillMaxWidth().testTag("graph-frame-reason"),
-                                    label = { Text("栈帧原因（仅存为栈帧时使用）") }, maxLines = 4)
+                                    label = { Text(stringResource(R.string.ui_frame_reason_only)) }, maxLines = 4)
                             }
                             item {
                                 val changed = reviewedRevision != null && reviewedRevision != order.revision
                                 if (!busy && (failure != null || changed)) {
-                                    Text(failure ?: "数据已更新，请重新核对顺序。", color = MaterialTheme.colorScheme.error)
-                                    Secondary("重新预览", detail.revision == order.revision) {
+                                    Text(failure ?: stringResource(R.string.ui_data_changed), color = MaterialTheme.colorScheme.error)
+                                    Secondary(stringResource(R.string.ui_preview_again), detail.revision == order.revision) {
                                         reviewedRevision = order.revision; failure = null; list.requestScrollToItem(0)
                                     }
                                 } else {
-                                    Hint("加入队列会追加到现有队尾；存为栈帧不动队列。")
+                                    Hint(stringResource(R.string.ui_generation_hint))
                                     val enabled = !busy && reviewedRevision == order.revision && detail.revision == order.revision
                                     Actions {
-                                        ActionPill("加入队列", { save(order, false) }, Modifier.testTag("graph-append"), enabled, prominent = true)
-                                        ActionPill("存为栈帧", { save(order, true) }, Modifier.testTag("graph-generate"), enabled && reason.isNotBlank())
+                                        ActionPill(stringResource(R.string.ui_add_to_queue), { save(order, false) }, Modifier.testTag("graph-append"), enabled, prominent = true)
+                                        ActionPill(stringResource(R.string.ui_save_as_frame), { save(order, true) }, Modifier.testTag("graph-generate"), enabled && reason.isNotBlank())
                                     }
-                                    if (busy) Text("正在保存…")
+                                    if (busy) Text(stringResource(R.string.ui_saving))
                                 }
                             }
                         }
@@ -135,7 +139,7 @@ internal fun GoalReview(model: WorkspaceViewModel, graphId: String, graphState: 
     }
     PlannerModalBottomSheet(onDismissRequest = { if (ticket == null) onClose() }, sheetState = sheet) {
         Box(Modifier.fillMaxWidth().fillMaxHeight(.88f)) {
-            RootPane(header = { PageTitle("生成拓扑排序", back = onClose, backEnabled = !busy) }) { top, _ -> body(top) }
+            RootPane(header = { PageTitle(stringResource(R.string.ui_topological_order), back = onClose, backEnabled = !busy) }) { top, _ -> body(top) }
         }
     }
 }

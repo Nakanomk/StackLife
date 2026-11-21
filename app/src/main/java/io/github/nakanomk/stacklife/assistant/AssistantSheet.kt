@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -58,7 +59,7 @@ internal fun AssistantComposer(page: AssistantPage, persistentRoot: Boolean = fa
 
 @Composable
 internal fun AssistantComposer(target: () -> AssistantPage) {
-    ScopedComposer("课表导入", null, null, target)
+    ScopedComposer(stringResource(R.string.assistant_import_scope), null, null, target)
 }
 
 @Composable
@@ -76,7 +77,7 @@ private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: As
     val openHistory = LocalOpenChatHistory.current
     MessageEditor(if (active && ui.composerId == id) ui.draft else "", origin?.scopeName() ?: scope,
         { model.editLocal(id, it, page) }, { model.submitLocal(id, target) },
-        origin?.takeIf { page != null && privateScope == null }?.let { "草稿范围：${it.scopeName()}" }, active, surface,
+        origin?.takeIf { page != null && privateScope == null }?.let { stringResource(R.string.assistant_draft_scope, it.scopeName()) }, active, surface,
         openHistory = { openHistory(page ?: AssistantPage.Terms) })
 }
 
@@ -93,6 +94,7 @@ internal fun MessageEditor(text: String, scope: String, onChange: (String) -> Un
         colors.surface.luminance() < .5f -> BorderStroke(1.dp, colors.outline)
         else -> null
     }
+    val fieldDescription = stringResource(R.string.assistant_message_field, scope)
     val enabled = active && text.isSendable()
     fun submit() {
         if (!enabled) return
@@ -105,12 +107,12 @@ internal fun MessageEditor(text: String, scope: String, onChange: (String) -> Un
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (openHistory != null) IconButton(onClick = { keyboard?.hide(); openHistory() }, enabled = active,
                 modifier = Modifier.size(48.dp).testTag("assistant-history")) {
-                Icon(painterResource(R.drawable.ic_history), "历史对话", tint = colors.onSurfaceVariant)
+                Icon(painterResource(R.drawable.ic_history), stringResource(R.string.assistant_history), tint = colors.onSurfaceVariant)
             } else Spacer(Modifier.width(16.dp))
             CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
                 BasicTextField(value = text, onValueChange = onChange, singleLine = true, enabled = active,
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("$tagPrefix-input")
-                        .semantics { contentDescription = "$scope · 助理消息" }
+                        .semantics { contentDescription = fieldDescription }
                         .onFocusChanged { editing = it.isFocused }
                         .onPreviewKeyEvent {
                             if (it.key != Key.Enter && it.key != Key.NumPadEnter) false
@@ -124,14 +126,14 @@ internal fun MessageEditor(text: String, scope: String, onChange: (String) -> Un
                         if (originHint != null) Text(originHint, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Box(contentAlignment = Alignment.CenterStart) {
-                            if (text.isEmpty()) Text("给日程助理发消息", style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
+                            if (text.isEmpty()) Text(stringResource(R.string.assistant_message_placeholder), style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
                             field()
                         }
                     } })
             }
             IconButton(onClick = ::submit, enabled = enabled, modifier = Modifier.size(48.dp).testTag("$tagPrefix-send"),
                 colors = IconButtonDefaults.iconButtonColors(contentColor = colors.primary)) {
-                Icon(painterResource(R.drawable.ic_assistant_send), contentDescription = "发送消息")
+                Icon(painterResource(R.drawable.ic_assistant_send), contentDescription = stringResource(R.string.assistant_send))
             }
         }
     }
@@ -156,12 +158,14 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
         else -> NoticeLevel.INFO
     }
     val help = ui.message ?: when {
-        ui.work == AssistantWork.LOADING -> "正在读取本机服务配置，尚未联网。"
-        service == null -> "手动日程可离线使用。配置模型服务后再发送，草稿留在本机。"
-        ready != null -> "以下差异由本机计算；应用只提交这一份提案，放弃不会写入。"
-        else -> "点发送即发往当前服务。默认只开放当前页面；课程只披露忙碌时段。对话保存在本机，查看历史不会联网。"
+        ui.work == AssistantWork.LOADING -> stringResource(R.string.assistant_loading_settings)
+        service == null -> stringResource(R.string.assistant_offline_help)
+        ready != null -> stringResource(R.string.assistant_proposal_help)
+        else -> stringResource(R.string.assistant_privacy_help)
     }
     var noticeOpen by remember(page) { mutableStateOf(false) }
+    val noticeDescription = stringResource(R.string.assistant_notice_description, severity.label)
+    val noticeState = stringResource(if (noticeOpen) R.string.assistant_expanded else R.string.assistant_collapsed)
     val canChangeGrant = service != null && ready == null && !ui.reviewAgain && !ui.importRequested && ui.work == AssistantWork.IDLE
     val dark = MaterialTheme.colorScheme.surface.luminance() < .5f
     val tint = when (severity) {
@@ -190,14 +194,14 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
             .imePadding().padding(horizontal = 16.dp, vertical = 4.dp).testTag("assistant-sheet")) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("${page.label}助理", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.assistant_page_title, page.label), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(page.scopeName(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 IconButton(onClick = { noticeOpen = !noticeOpen }, modifier = Modifier.size(48.dp).testTag("assistant-notice")
                     .semantics {
-                        contentDescription = "${severity.label}与说明"
-                        stateDescription = if (noticeOpen) "已展开" else "已收起"
+                        contentDescription = noticeDescription
+                        stateDescription = noticeState
                     }) {
                     Surface(shape = CircleShape, color = tint, contentColor = ink) {
                         Box(Modifier.sizeIn(minWidth = 28.dp, minHeight = 28.dp).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
@@ -207,9 +211,9 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
                 }
                 if (!compact && !needsHeight) IconButton(onClick = { expanded = !expanded }) {
                     Icon(painterResource(if (expanded) R.drawable.ic_expand_more else R.drawable.ic_expand_less),
-                        contentDescription = if (expanded) "收起对话" else "展开对话")
+                        contentDescription = if (expanded) stringResource(R.string.assistant_collapse) else stringResource(R.string.assistant_expand))
                 }
-                TextButton(onClick = model::close, enabled = ui.work != AssistantWork.COMMIT) { Text("关闭") }
+                TextButton(onClick = model::close, enabled = ui.work != AssistantWork.COMMIT) { Text(stringResource(R.string.assistant_close)) }
             }
             if (service != null) Text("${service.origin} · ${service.model}", style = MaterialTheme.typography.labelMedium,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -225,7 +229,7 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
                             if (service != null) {
                                 Text(grantSummary(ui.grant), style = MaterialTheme.typography.bodyMedium)
                                 if (canChangeGrant) TextButton(onClick = { options = !options }) {
-                                    Text(if (options) "收起数据范围" else "调整数据范围")
+                                    Text(if (options) stringResource(R.string.assistant_hide_scope) else stringResource(R.string.assistant_edit_scope))
                                 }
                             }
                         }
@@ -234,23 +238,23 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
                 if (noticeOpen && options && canChangeGrant) {
                     items(ReadArea.entries) { area -> CheckRow(area.label, area in ui.grant.extra) { model.setGrant(ui.grant.copy(extra =
                         if (area in ui.grant.extra) ui.grant.extra - area else ui.grant.extra + area)) } }
-                    item { CheckRow("发送任务及节点备注", ui.grant.notes) { model.setGrant(ui.grant.copy(notes = !ui.grant.notes)) }
-                        CheckRow("发送栈帧原因", ui.grant.reasons) { model.setGrant(ui.grant.copy(reasons = !ui.grant.reasons)) }
-                        CheckRow("发送课程名与地点", ui.grant.courseDetails) { model.setGrant(ui.grant.copy(courseDetails = !ui.grant.courseDetails)) } }
+                    item { CheckRow(stringResource(R.string.assistant_share_notes), ui.grant.notes) { model.setGrant(ui.grant.copy(notes = !ui.grant.notes)) }
+                        CheckRow(stringResource(R.string.assistant_share_reasons), ui.grant.reasons) { model.setGrant(ui.grant.copy(reasons = !ui.grant.reasons)) }
+                        CheckRow(stringResource(R.string.assistant_share_classes), ui.grant.courseDetails) { model.setGrant(ui.grant.copy(courseDetails = !ui.grant.courseDetails)) } }
                 }
                 when {
                     ui.work == AssistantWork.LOADING -> item { LinearProgressIndicator() }
-                    service == null -> item { Text("尚未连接模型服务", style = MaterialTheme.typography.titleMedium) }
+                    service == null -> item { Text(stringResource(R.string.assistant_not_connected), style = MaterialTheme.typography.titleMedium) }
                     ready != null -> {
-                        item { Text("变更预览 · 尚未写入", style = MaterialTheme.typography.titleMedium) }
+                        item { Text(stringResource(R.string.assistant_preview), style = MaterialTheme.typography.titleMedium) }
                         groups.forEach { (id, changes) ->
-                            item(key = "head:$id") { Text(changeTitle(id, changes), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium) }
-                            items(changes) { change -> Text("${change.field}：${change.before ?: "无"} → ${change.after ?: "无"}", style = MaterialTheme.typography.bodyMedium) }
+                            item(key = "head:$id") { Text(changes.firstNotNullOfOrNull { it.entityLabel } ?: id, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium) }
+                            items(changes) { change -> Text(stringResource(R.string.assistant_change, change.field, change.before ?: stringResource(R.string.assistant_none), change.after ?: stringResource(R.string.assistant_none)), style = MaterialTheme.typography.bodyMedium) }
                         }
                     }
                     else -> {
                         items(ui.lines) { ChatBubble(it) }
-                        if (ui.lines.isEmpty()) item { Hint("可以询问当前日程，也可以描述想做的更改。") }
+                        if (ui.lines.isEmpty()) item { Hint(stringResource(R.string.assistant_empty_hint)) }
                     }
                 }
             }
@@ -263,20 +267,20 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
             }
             when {
                 ui.work == AssistantWork.LOADING -> Unit
-                service == null -> ActionPill("配置模型服务", { model.leaveForConfiguration(); onSettings() }, prominent = true)
-                ui.work == AssistantWork.COMMIT -> Text("正在保存已确认的更改…")
+                service == null -> ActionPill(stringResource(R.string.assistant_configure_service), { model.leaveForConfiguration(); onSettings() }, prominent = true)
+                ui.work == AssistantWork.COMMIT -> Text(stringResource(R.string.assistant_saving))
                 ui.work == AssistantWork.REQUEST -> Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CircularProgressIndicator(Modifier.size(20.dp))
-                    Text("正在处理请求…", Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                    TextButton(onClick = model::cancel) { Text("取消请求") }
+                    Text(stringResource(R.string.assistant_processing), Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    TextButton(onClick = model::cancel) { Text(stringResource(R.string.assistant_cancel_request)) }
                 }
                 ready != null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionPill("放弃提案", model::cancel)
-                    ActionPill("应用这些更改", { model.apply(ready.proposalId) }, Modifier.testTag("assistant-apply"), prominent = true)
+                    ActionPill(stringResource(R.string.assistant_discard), model::cancel)
+                    ActionPill(stringResource(R.string.assistant_apply), { model.apply(ready.proposalId) }, Modifier.testTag("assistant-apply"), prominent = true)
                 }
-                ui.reviewAgain -> Row { ActionPill("放弃提案", model::cancel); ActionPill("重新预览", model::refreshProposal, prominent = true) }
-                ui.importRequested -> Row { ActionPill("取消", model::cancel); ActionPill("打开本地课表导入器", { model.close(); onImport() }, prominent = true) }
+                ui.reviewAgain -> Row { ActionPill(stringResource(R.string.assistant_discard), model::cancel); ActionPill(stringResource(R.string.assistant_preview_again), model::refreshProposal, prominent = true) }
+                ui.importRequested -> Row { ActionPill(stringResource(R.string.assistant_cancel), model::cancel); ActionPill(stringResource(R.string.assistant_open_importer), { model.close(); onImport() }, prominent = true) }
                 else -> MessageEditor(ui.draft, page.scopeName(), model::editMessage, model::send, openHistory = { openHistory(page) })
             }
         }
@@ -284,7 +288,7 @@ internal fun AssistantSheet(model: AssistantModel, onSettings: () -> Unit, onImp
 }
 
 @Composable
-internal fun ChatBubble(line: ChatLine, author: String = if (line.user) "你" else "模型答复") {
+internal fun ChatBubble(line: ChatLine, author: String = if (line.user) stringResource(R.string.assistant_user) else stringResource(R.string.assistant_model_reply)) {
     val colors = MaterialTheme.colorScheme
     Row(Modifier.fillMaxWidth().padding(start = if (line.user) 40.dp else 0.dp, end = if (line.user) 0.dp else 40.dp),
         horizontalArrangement = if (line.user) Arrangement.End else Arrangement.Start) {
@@ -296,14 +300,18 @@ internal fun ChatBubble(line: ChatLine, author: String = if (line.user) "你" el
     }
 }
 
-private fun grantSummary(grant: Disclosure) = buildString {
-    append("范围：当前页面"); for (area in grant.extra) append("、${area.label}")
-    append("。额外字段：")
-    append(listOfNotNull("备注".takeIf { grant.notes }, "栈帧原因".takeIf { grant.reasons }, "课程名与地点".takeIf { grant.courseDetails }).joinToString("、").ifEmpty { "无" })
-}
-
-private fun changeTitle(id: String, changes: List<PlannerChange>): String {
-    return changes.firstNotNullOfOrNull { it.entityLabel }
-        ?: changes.firstOrNull { it.field == "标题" || it.field == "流程图名称" || it.field == "压栈原因" }?.let { it.after ?: it.before }
-        ?: id
+@Composable
+private fun grantSummary(grant: Disclosure): String {
+    val separator = stringResource(R.string.assistant_list_separator)
+    val areas = buildList {
+        add(stringResource(R.string.assistant_current_page))
+        for (area in grant.extra) add(area.label)
+    }
+    val fields = buildList {
+        if (grant.notes) add(stringResource(R.string.assistant_notes))
+        if (grant.reasons) add(stringResource(R.string.assistant_reasons))
+        if (grant.courseDetails) add(stringResource(R.string.assistant_classes))
+    }
+    return stringResource(R.string.assistant_scope_summary, areas.joinToString(separator),
+        if (fields.isEmpty()) stringResource(R.string.assistant_none) else fields.joinToString(separator))
 }

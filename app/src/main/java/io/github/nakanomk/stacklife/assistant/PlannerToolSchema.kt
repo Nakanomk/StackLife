@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.assistant
 
+import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.planner.AppearanceGroup
 import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.planner.NavStyle
@@ -10,7 +11,7 @@ import kotlinx.serialization.json.*
 // The same shapes advertised to the service check its untrusted arguments locally.
 private sealed class Shape {
     abstract val schema: JsonObject
-    abstract fun check(value: JsonElement, field: String = "工具参数")
+    abstract fun check(value: JsonElement, field: String = uiText("Tool arguments", "工具参数"))
 }
 
 private fun badArguments(message: String): Nothing = throw IllegalArgumentException(message)
@@ -18,7 +19,7 @@ private fun strings(values: Collection<String>) = JsonArray(values.map(::JsonPri
 private class Scalar(private val type: String, private val accepts: (JsonPrimitive) -> Boolean, extras: JsonObjectBuilder.() -> Unit = {}) : Shape() {
     override val schema = buildJsonObject { put("type", type); extras() }
     override fun check(value: JsonElement, field: String) {
-        if (value !is JsonPrimitive || value === JsonNull || !accepts(value)) badArguments("$field 不是允许的 $type 值。")
+        if (value !is JsonPrimitive || value === JsonNull || !accepts(value)) badArguments(uiText({ "$field is not an allowed $type value." }, { "$field 不是允许的 $type 值。" }))
     }
 }
 private val text = Scalar("string", { it.isString && it.content.length <= 8192 }) { put("maxLength", 8192) }
@@ -32,14 +33,14 @@ private fun positiveRange(min: Int, max: Int) = Scalar("integer", { !it.isString
 private class Items(private val item: Shape, private val min: Int = 1, private val max: Int = 128) : Shape() {
     override val schema = buildJsonObject { put("type", "array"); put("items", item.schema); put("minItems", min); put("maxItems", max) }
     override fun check(value: JsonElement, field: String) {
-        if (value !is JsonArray || value.size !in min..max) badArguments("$field 需要含 $min–$max 项的数组。")
+        if (value !is JsonArray || value.size !in min..max) badArguments(uiText({ "$field must be an array of $min–$max items." }, { "$field 需要含 $min–$max 项的数组。" }))
         for (entry in value) item.check(entry, field)
     }
 }
 private object TaskRefs : Shape() {
     override val schema = buildJsonObject { put("type", "object"); put("additionalProperties", text.schema); put("maxProperties", 128) }
     override fun check(value: JsonElement, field: String) {
-        if (value !is JsonObject || value.size > 128) badArguments("$field 需要至多 128 项的节点到任务别名映射。")
+        if (value !is JsonObject || value.size > 128) badArguments(uiText({ "$field must map at most 128 nodes to task aliases." }, { "$field 需要至多 128 项的节点到任务别名映射。" }))
         for (alias in value.values) text.check(alias, field)
     }
 }
@@ -51,16 +52,16 @@ private class Record(vararg fields: Pair<String, Shape>) : Shape() {
         put("properties", JsonObject(properties.mapValues { it.value.schema }))
     }
     override fun check(value: JsonElement, field: String) {
-        if (value !is JsonObject) badArguments("$field 必须是对象。")
-        for (name in required) if (name !in value) badArguments("$field 缺少必填字段 $name。")
-        for ((k, v) in value) (properties[k] ?: badArguments("$field 含有此操作未声明的字段。")).check(v, k)
+        if (value !is JsonObject) badArguments(uiText({ "$field must be an object." }, { "$field 必须是对象。" }))
+        for (name in required) if (name !in value) badArguments(uiText({ "$field is missing required field $name." }, { "$field 缺少必填字段 $name。" }))
+        for ((k, v) in value) (properties[k] ?: badArguments(uiText({ "$field contains a field not declared by this operation." }, { "$field 含有此操作未声明的字段。" }))).check(v, k)
     }
 }
 private class Variants(val options: Map<String, Shape>, private val selector: String = "kind") : Shape() {
     override val schema = buildJsonObject { put("type", "object"); put("anyOf", JsonArray(options.values.map { it.schema })) }
     override fun check(value: JsonElement, field: String) {
         val kind = ((value as? JsonObject)?.get(selector) as? JsonPrimitive)?.content
-        (options[kind] ?: badArguments("$field 缺少可识别的 $selector。")).check(value, field)
+        (options[kind] ?: badArguments(uiText({ "$field needs a recognized $selector." }, { "$field 缺少可识别的 $selector。" }))).check(value, field)
     }
 }
 private fun variant(kind: String, vararg fields: Pair<String, Shape>) = kind to Record("kind" to choices(kind), *fields)

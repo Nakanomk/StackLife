@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife
 
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.padding
@@ -36,7 +38,7 @@ internal fun TaskAddButton(onAdd: () -> Unit, modifier: Modifier) {
     StackLifeSurface(CapsuleScene.ACTION, modifier.size(taskFabSize),
         solid = colors.primaryContainer, elevation = 3.dp, interactionSource = interaction) {
         IconButton(onClick = onAdd, modifier = Modifier.size(taskFabSize).testTag("add-task"), interactionSource = interaction) {
-            Icon(painterResource(R.drawable.ic_add), "新增任务", tint = ink)
+            Icon(painterResource(R.drawable.ic_add), stringResource(R.string.ui_add_task), tint = ink)
         }
     }
 }
