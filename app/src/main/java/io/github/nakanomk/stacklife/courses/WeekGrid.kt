@@ -2,6 +2,7 @@ package io.github.nakanomk.stacklife.courses
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,7 +23,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -35,6 +35,8 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.materialkolor.hct.Hct
+import com.materialkolor.ktx.toColor
 import io.github.nakanomk.stacklife.appearance.CapsuleScene
 import io.github.nakanomk.stacklife.appearance.GlassBacking
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
@@ -46,21 +48,13 @@ import java.time.LocalDate
 private const val weekdays = "一二三四五六日"
 private val courseShape = RoundedCornerShape(8.dp)
 
-private val coursePalette = longArrayOf(
-    0xFFFA8EA5, 0xFFF79B84, 0xFFF3C383, 0xFFE5DB79,
-    0xFF8AE8D8, 0xFF74A3D1, 0xFF8DB5FA, 0xFFCFBAFD,
-)
-
+// WakeUp's timetable swatches measure H≈7° for rose, C≈30–47, and T≈65–86.
+// Step around the hue wheel rather than blending RGB swatches through gray.
 internal fun courseColor(term: String, index: Int): Color {
-    val size = coursePalette.size
-    val start = Math.floorMod(term.hashCode(), 360) * size / 360
-    val slot = (start + index % size * 3) % size
-    val color = Color(coursePalette[slot])
-    val cycle = index / size
-    if (cycle == 0) return color
-    // Bisect each gap at .5, then .25 and .75, for terms with more courses than swatches.
-    val level = Integer.highestOneBit(cycle)
-    return lerp(color, Color(coursePalette[(slot + 1) % size]), (cycle - level + .5f) / level)
+    val startHue = 7.0 + Math.floorMod(term.hashCode(), 8) * 45.0
+    val hue = (startHue + index * 137.507764) % 360.0 // Golden angle: no palette wrap at eight courses.
+    val tone = 71.0 + (index % 4) * 4.0
+    return Hct.from(hue, 39.0, tone).toColor()
 }
 
 @Composable
@@ -171,8 +165,8 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, ope
 private fun PeriodGrid(termId: String, week: CourseWeek, periods: List<PeriodTime>, showTimes: Boolean, dayCount: Int,
     highlightedDay: Long, rail: Dp, dayWidth: Dp, periodHeight: Dp, open: ((ScheduledCourse) -> Unit)? = null) {
     val arrangement = remember(week.classes) { tiles(week.classes) }
-    val pigments = remember(arrangement, termId, week.colorIndices) {
-        arrangement.map { courseColor(termId, week.colorIndices.getValue(it.course.meeting.title)) }
+    val pigments = remember(termId, week.colorIndices) {
+        week.colorIndices.mapValues { (_, index) -> courseColor(termId, index) }
     }
     val colors = MaterialTheme.colorScheme
     val typography = MaterialTheme.typography
@@ -210,11 +204,10 @@ private fun PeriodGrid(termId: String, week: CourseWeek, periods: List<PeriodTim
             }
         }
     }, foreground = {
-        for (j in arrangement.indices) {
-            val tile = arrangement[j]
+        for (tile in arrangement) {
             val m = tile.course.meeting
             val w = dayWidth / tile.lanes
-            CourseTile(tile, pigments[j], outline, open,
+            CourseTile(tile, pigments.getValue(m.title), outline, open,
                 Modifier.offset(x = rail + dayWidth * (m.day - 1) + w * tile.lane, y = periodHeight * (m.firstPeriod - 1))
                     .size(w, periodHeight * (m.lastPeriod - m.firstPeriod + 1)).padding(1.dp))
         }
@@ -229,8 +222,9 @@ private fun CourseTile(tile: Tile, swatch: Color, outline: Stroke?, open: ((Sche
         "${m.title}，周${weekdays[m.day - 1]}，${m.periodLabel()}，${m.room.ifBlank { "教室未提供" }}" +
             if (tile.course.conflicts.isEmpty()) "" else "，时段冲突：${tile.course.conflicts.joinToString("、")}"
     }
-    StackLifeSurface(CapsuleScene.COURSE, modifier, solid = swatch, shape = courseShape, tint = swatch) {
-        val action = if (open == null) Modifier else Modifier.clickable(role = Role.Button, onClickLabel = "查看固定课程") {
+    val interaction = if (open == null) null else remember { MutableInteractionSource() }
+    StackLifeSurface(CapsuleScene.COURSE, modifier, solid = swatch, shape = courseShape, tint = swatch, interactionSource = interaction) {
+        val action = if (open == null) Modifier else Modifier.clickable(interactionSource = interaction, role = Role.Button, onClickLabel = "查看固定课程") {
             open(tile.course)
         }
         Column(Modifier.fillMaxSize().clipToBounds().testTag("grid-course:${tile.index}").then(action)

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.geometry.Offset
@@ -22,6 +23,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -49,7 +51,7 @@ private class Scrub {
 
 @Composable
 internal fun SegmentTrack(position: State<Float>, count: Int, ink: Color, onSelect: (Int) -> Unit,
-    modifier: Modifier = Modifier, enabled: Boolean = true, compact: Boolean = true, content: @Composable (highlighted: Int) -> Unit) {
+    modifier: Modifier = Modifier, enabled: Boolean = true, navigationInset: Dp? = null, content: @Composable (highlighted: Int) -> Unit) {
     val scrub = remember(count) { Scrub() }
     val select = rememberUpdatedState(onSelect)
     val page = rememberUpdatedState(position)
@@ -115,12 +117,26 @@ internal fun SegmentTrack(position: State<Float>, count: Int, ink: Color, onSele
             } finally { scrub.held = false }
         }
     }
-    Box(modifier.then(input)) {
+    val track = if (navigationInset == null) modifier else modifier.padding(navigationInset)
+    Box(track.then(input)) {
         BoxWithConstraints(Modifier.matchParentSize()) {
             val width = constraints.maxWidth.toFloat() / count
-            val shape = Modifier.offset { IntOffset((width * slot.value).roundToInt(), 0) }.fillMaxWidth(1f / count).fillMaxHeight()
+            val slotWidth = maxWidth / count
+            // Fit the lens, not the hit target, when a wrapped caption makes a slot taller than wide.
+            val rest = if (navigationInset != null && slotWidth < maxHeight) slotWidth / 1.35f else maxHeight
+            val shape = Modifier.align(Alignment.CenterStart).offset { IntOffset((width * slot.value).roundToInt(), 0) }
+                .fillMaxWidth(1f / count).height(rest)
             if (shell == null) Spacer(shape.background(ink, CircleShape))
-            else SelectionLens(shell, slot, count, contact, scrub, moving, compact, shape)
+            else {
+                // BiliPai's 64/56/78dp shell/rest/press reference, capped even when the text grows.
+                val pressedScale = when {
+                    navigationInset == null -> 78f / 56f
+                    rest == 0.dp -> 1f
+                    else -> (minOf(78.dp, (maxHeight + navigationInset * 2) * (78f / 64f)) / rest).coerceAtLeast(1f)
+                }
+                SelectionLens(shell, slot, count, contact, scrub, moving, navigationInset == null,
+                    pressedScale, minOf(rest / 56.dp, 1f), shape)
+            }
         }
         val highlighted by remember(slot) { derivedStateOf { slot.value.roundToInt() } }
         content(highlighted)
@@ -129,7 +145,7 @@ internal fun SegmentTrack(position: State<Float>, count: Int, ink: Color, onSele
 
 @Composable
 private fun SelectionLens(backdrop: Backdrop, slot: State<Float>, count: Int, contact: State<Float>, scrub: Scrub,
-    moving: Boolean, compact: Boolean, modifier: Modifier) {
+    moving: Boolean, compact: Boolean, pressedScale: Float, opticalScale: Float, modifier: Modifier) {
     val light = rememberGlassEdge(90)
     val idle = if (MaterialTheme.colorScheme.surface.luminance() < .5f) Color.White else Color.Black
     val speed = remember { Animatable(0f) }
@@ -145,11 +161,11 @@ private fun SelectionLens(backdrop: Backdrop, slot: State<Float>, count: Int, co
     val pressure = remember(contact, slot, moving) { derivedStateOf {
         if (!moving) 0f else max(contact.value, sin(PI * (slot.value % 1f)).toFloat()).coerceIn(0f, 1f)
     } }
-    val verticalScale = remember(pressure, speed) { derivedStateOf {
-        (1f + (78f / 56f - 1f) * pressure.value) * (1f - (.25f * speed.value).coerceIn(-.2f, .2f))
+    val verticalScale = remember(pressure, speed, pressedScale) { derivedStateOf {
+        (1f + (pressedScale - 1f) * pressure.value) * (1f - (.25f * speed.value).coerceIn(-.2f, .2f))
     } }
     Spacer(modifier.drawBackdrop(backdrop, shape = { CircleShape }, effects = {
-        val reach = (size.height / 56.dp.toPx()).coerceAtMost(1f) * pressure.value
+        val reach = opticalScale * pressure.value
         if (reach > 0f) {
             val sy = verticalScale.value
             val gap = ((size.height * sy - (size.height + 8.dp.toPx())) / (2f * sy)).coerceAtLeast(0f)
@@ -157,7 +173,7 @@ private fun SelectionLens(backdrop: Backdrop, slot: State<Float>, count: Int, co
         }
     }, layerBlock = {
         val p = pressure.value
-        scaleX = (1f + (78f / 56f - 1f) * p) / (1f - (.75f * speed.value).coerceIn(-.2f, .2f))
+        scaleX = (1f + (pressedScale - 1f) * p) / (1f - (.75f * speed.value).coerceIn(-.2f, .2f))
         scaleY = verticalScale.value
         val short = size.minDimension.coerceAtLeast(1f)
         translationX = short * tanh(.05f * scrub.drag.x / short) * contact.value
@@ -167,5 +183,5 @@ private fun SelectionLens(backdrop: Backdrop, slot: State<Float>, count: Int, co
         drawRect(idle, alpha = .10f * (1f - p))
         drawRect(Color.Black, alpha = .03f * p)
     }, onDrawFront = { if (pressure.value > 0f) drawEdgeStroke(CircleShape, light.value, pressure.value) })
-        .innerShadow(CircleShape) { radius = 8.dp.toPx() * pressure.value; color = Color.Black; alpha = .15f * pressure.value })
+        .innerShadow(CircleShape) { radius = 8.dp.toPx() * opticalScale * pressure.value; color = Color.Black; alpha = .15f * pressure.value })
 }

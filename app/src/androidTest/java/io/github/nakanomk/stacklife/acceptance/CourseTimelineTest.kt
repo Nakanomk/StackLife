@@ -1,12 +1,13 @@
 package io.github.nakanomk.stacklife.acceptance
 
-import androidx.compose.ui.graphics.luminance
+import com.materialkolor.ktx.toHct
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.planner.PlannerCommand.*
 import java.time.*
+import kotlin.math.abs
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -55,14 +56,20 @@ class CourseTimelineTest {
     }
 
     @Test fun largeCourseCatalogStaysDistinctWithoutDarkOrFluorescentTiles() {
-        val colors = (0 until 32).map { courseColor(term.id, it) }
-        assertEquals("Large terms must not recycle the first eight colors", colors.size, colors.distinct().size)
-        for (color in colors) {
-            val peak = maxOf(color.red, color.green, color.blue)
-            val saturation = (peak - minOf(color.red, color.green, color.blue)) / peak
-            assertTrue("Dark or glaring tile: $color", color.luminance() in 0.30f..0.72f)
-            assertTrue("Gray or fluorescent tile: $color", saturation in 0.20f..0.55f)
+        val swatches = (0 until 32).map { courseColor(term.id, it).toHct() }
+        for ((i, swatch) in swatches.withIndex()) {
+            assertTrue("Dark or glaring tile $i: $swatch", swatch.tone in 69.0..85.0)
+            assertTrue("Gray or fluorescent tile $i: $swatch", swatch.chroma in 24.0..48.0)
+            for (j in 0 until i) {
+                val other = swatches[j]
+                val delta = abs(swatch.hue - other.hue)
+                assertTrue("Courses $i and $j differ in neither hue nor lightness: $swatch, $other",
+                    minOf(delta, 360.0 - delta) > 12.0 || abs(swatch.tone - other.tone) > 3.0)
+            }
         }
+        val hues = swatches.take(8).map { it.hue }.sorted()
+        assertTrue("An ordinary term should span warm and cool families: $hues",
+            (hues + (hues.first() + 360)).zipWithNext().all { (a, b) -> b - a < 75 })
     }
 
     @Test fun rawFileReimportAndRemovalAreScopedToTheTermAndSource() = runBlocking {

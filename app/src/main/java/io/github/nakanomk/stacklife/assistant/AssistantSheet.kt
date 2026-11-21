@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.assistant
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,6 +15,7 @@ import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.SolidColor
@@ -84,6 +86,12 @@ private fun MessageEditor(text: String, scope: String, onChange: (String) -> Uni
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val haptics = LocalHapticFeedback.current
+    var editing by remember { mutableStateOf(false) }
+    val edge = when {
+        editing -> Modifier.border(1.5.dp, colors.primary, CircleShape)
+        colors.surface.luminance() < .5f -> Modifier.border(1.dp, colors.outline, CircleShape)
+        else -> Modifier
+    }
     val enabled = active && text.isSendable()
     fun submit() {
         if (!enabled) return
@@ -92,11 +100,12 @@ private fun MessageEditor(text: String, scope: String, onChange: (String) -> Uni
         haptics.performHapticFeedback(HapticFeedbackType.VirtualKey)
         onSend()
     }
-    Row(Modifier.fillMaxWidth().padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().then(edge).padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
             BasicTextField(value = text, onValueChange = onChange, singleLine = true, enabled = active,
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("assistant-input")
                     .semantics { contentDescription = "$scope · 助理消息" }
+                    .onFocusChanged { editing = it.isFocused }
                     .onPreviewKeyEvent {
                         if (it.key != Key.Enter && it.key != Key.NumPadEnter) false
                         else { if (it.type == KeyEventType.KeyUp) submit(); true }

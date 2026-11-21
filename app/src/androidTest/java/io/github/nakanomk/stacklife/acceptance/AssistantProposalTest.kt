@@ -11,6 +11,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.activity.compose.setContent
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
@@ -165,6 +167,33 @@ class AssistantProposalTest {
         tag("assistant-consent")
         assertEquals(prompt, assistant.state.value.draft)
         assertEquals(0, server.requestCount)
+    }
+
+    @Test fun darkComposerBoundaryStaysVisibleOnThePageAndInTheConversation() {
+        val dark = Appearance(theme = ThemeMode.DARK, palette = PaletteMode.SEED)
+        val optical = tag("navigation-capsule").fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "折射胶囊"
+        for (scene in listOf("page", "chat")) {
+            if (scene == "chat") {
+                server.enqueue(MockResponse(body = """{"choices":[{"message":{"role":"assistant","content":"收到"},"finish_reason":"stop"}]}"""))
+                startTurn("查看今天")
+                await(hasText("收到"))
+            }
+            for (glass in listOf(false, true)) {
+                runBlocking { store.apply(PlannerCommand.EditAppearance(AppearancePatch.Replace(dark.copy(assistantGlass = glass)))) }
+                val material = if (glass && optical) "折射胶囊" else "实色胶囊"
+                val shell = await(hasStateDescription(material) and hasAnyDescendant(hasTestTag("assistant-input")))
+                val pixels = shell.captureToImage().toPixelMap()
+                for (column in 1..3) for (top in listOf(true, false)) {
+                    val x = pixels.width * column / 4
+                    fun luminance(inset: Int) = pixels[x, if (top) inset else pixels.height - 1 - inset].luminance()
+                    val fill = luminance(pixels.height / 8)
+                    val edge = (0..pixels.height / 20).maxOf { luminance(it) }
+                    val contrast = (edge + .05f) / (fill + .05f)
+                    assertTrue("$scene $material: boundary against dark fill at x=$x, top=$top was $contrast:1", contrast >= 3f)
+                }
+                capture("assistant-dark-$scene-${if (glass) "glass" else "solid"}.png")
+            }
+        }
     }
 
     @Test fun changingRootTabsKeepsFocusAndBindsTheDraftToTheOriginalDateUntilConsent() {

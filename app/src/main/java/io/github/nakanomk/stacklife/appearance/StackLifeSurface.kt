@@ -3,7 +3,10 @@ package io.github.nakanomk.stacklife.appearance
 import android.os.Build
 import androidx.annotation.RequiresApi
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -60,8 +63,7 @@ internal fun rememberGlassEdge(rotation: Int): State<EdgeStroke> {
         val r = Math.toRadians((angle.intValue + rotation).toDouble())
         val x = cos(r).toFloat()
         val y = sin(r).toFloat()
-        dockEdge.copy(primary = dockEdge.primary.copy(x = .5f + x, y = .7f + y),
-            secondary = dockEdge.secondary.copy(x = .5f - x, y = .7f - y))
+        dockEdge.copy(primary = dockEdge.primary.copy(x = .5f + x, y = .7f + y))
     } }
 }
 
@@ -136,7 +138,16 @@ internal fun StackLifeSurface(scene: CapsuleScene, modifier: Modifier, solid: Co
     val floating = scene == CapsuleScene.CHROME || (scene == CapsuleScene.NAVIGATION && shape == CircleShape)
     val elastic = LocalMotionEnabled.current && !LocalParentShell.current &&
         (floating || (scene == CapsuleScene.ACTION && interactionSource != null))
-    OpticalSurface(scene, modifier.then(semantics), source, nestedShell, shape, tint, floating, elastic, content)
+    val courseContact = if (scene == CapsuleScene.COURSE && interactionSource != null && LocalMotionEnabled.current) {
+        val pressed by interactionSource.collectIsPressedAsState()
+        val contact = animateFloatAsState(if (pressed) 1f else 0f, spring(.8f, 550f), label = "course contact")
+        Modifier.graphicsLayer {
+            val scale = 1f + contact.value * 16.dp.toPx() / size.maxDimension.coerceAtLeast(1f)
+            scaleX = scale
+            scaleY = scale
+        }
+    } else Modifier
+    OpticalSurface(scene, modifier.then(semantics).then(courseContact), source, nestedShell, shape, tint, floating, elastic, content)
 }
 
 @RequiresApi(33)
@@ -157,7 +168,7 @@ private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Back
     val wash = when {
         course -> tint.copy(alpha = .88f)
         panel -> base.copy(alpha = if (dark) .63f else .70f)
-        input -> base.copy(alpha = .54f)
+        input -> (if (dark) MaterialTheme.colorScheme.surfaceContainerHigh else base).copy(alpha = .54f)
         else -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .40f)
     }
     val blend = if (!course) BlendMode.SrcOver else if (dark) BlendMode.Screen else BlendMode.Multiply
@@ -167,21 +178,22 @@ private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Back
         CapsuleScene.PANEL -> 24.dp
         else -> 4.dp
     }
-    val chromeDepth = if (panel) 12.dp else 24.dp
-    val specular = if (hasLens && !panel && !course) rememberGlassEdge(-45) else null
-    val shadow = if (inline || course) Modifier else Modifier.dropShadow(shape,
-        remember(dark) { Shadow(radius = 10.dp, color = Color.Black, alpha = if (dark) .20f else .10f) })
+    val specular = if (hasLens && !panel) rememberGlassEdge(-45) else null
+    val shadow = if (inline) Modifier else Modifier.dropShadow(shape,
+        remember(dark, course) { Shadow(radius = if (course) 4.dp else 10.dp, color = Color.Black, alpha = if (dark) .20f else .10f) })
     val material = Modifier.drawBackdrop(source, shape = { shape }, layerBlock = transform, effects = {
         if (!inline) {
-            // A timetable cell is a flat sheet over registered period rules, not a dock droplet.
-            // Keep a clear centre even in a skinny collision lane. A radial depth normal
-            // would pull those rules vertically along the entire length of its side walls.
-            val band = if (course) minOf(2.dp.toPx(), size.minDimension / 8f) else chromeDepth.toPx()
-            val reach = if (course) band * .375f else band
-            if (hasLens) padding = maxOf(padding, reach)
             colorControls(saturation = 1.5f)
-            blur(blurDp.toPx())
-            if (hasLens && band > 0f) dockLens(band, reach, depth = false, dispersion = 0f)
+            if (hasLens) {
+                val depth = when {
+                    course -> 24.dp.toPx()
+                    panel -> 12.dp.toPx()
+                    else -> 24.dp.toPx() * dockGeometryScale(size.height)
+                }
+                padding = maxOf(padding, depth)
+                blur(blurDp.toPx())
+                dockLens(depth, depth, depth = course, dispersion = 0f)
+            } else blur(blurDp.toPx())
         }
     }, onDrawSurface = {
         if (tint.isSpecified && !course) {
@@ -190,7 +202,7 @@ private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Back
         }
         drawRect(wash, blendMode = blend)
     }, onDrawFront = if (specular == null) null else {
-        { drawEdgeStroke(shape, specular.value, .75f) }
+        { drawEdgeStroke(shape, specular.value, .75f * dockGeometryScale(size.minDimension)) }
     })
     val receiver = if (touch == null) modifier else modifier.observeGlassTouch(touch, ownsScrub = floating)
     Box(receiver, propagateMinConstraints = true) {
@@ -207,3 +219,5 @@ private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Back
         }
     }
 }
+
+private fun Density.dockGeometryScale(pixels: Float): Float = (pixels / 64.dp.toPx()).coerceIn(0f, 1f)

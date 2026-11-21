@@ -6,11 +6,11 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toPixelMap
@@ -25,7 +25,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.StackLifeApp
 import io.github.nakanomk.stacklife.StackLifeTheme
 import io.github.nakanomk.stacklife.WorkspaceViewModel
-import io.github.nakanomk.stacklife.appearance.LocalAppearance
+import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
 import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
 import io.github.nakanomk.stacklife.courses.*
@@ -61,10 +61,14 @@ class CourseTimelineGestureTest {
         val term = TermSpec("Studio-7", LocalDate.of(2026, 11, 16), 1, BellSchedule.SUMMER)
         val course = ScheduledCourse(term.id, HUST_SOURCE, term.meeting(1, 1, "物理", "A", 1, 2), listOf("预约"))
         val week = CourseWeek(term, 1, listOf(course), mapOf("物理" to 0))
-        val settings = mutableStateOf(Appearance())
-        ui.setContent { MaterialTheme { CompositionLocalProvider(LocalAppearance provides settings.value) {
-            WeekGrid(term, week, 0.dp, 0.dp) {}
-        } } }
+        val settings = mutableStateOf(Appearance(theme = ThemeMode.LIGHT, glass = false))
+        ui.setContent { StackLifeTheme(settings.value) { WeekGrid(term, week, 0.dp, 0.dp) {} } }
+        for (mode in listOf(ThemeMode.LIGHT, ThemeMode.DARK)) {
+            ui.runOnIdle { settings.value = settings.value.copy(theme = mode) }
+            val tile = ui.onNodeWithTag("grid-course:0").captureToImage().toPixelMap()
+            assertEquals("Theme must not recolor the course", courseColor(term.id, 0).toArgb(),
+                tile[tile.width / 2, tile.height * 7 / 8].toArgb())
+        }
         for (edged in listOf(true, false)) {
             ui.runOnIdle { settings.value = settings.value.copy(courseTextOutline = edged) }
             for (label in listOf("物理", "@A", "冲突")) assertCourseInk(label, edged)
@@ -122,23 +126,23 @@ class CourseTimelineGestureTest {
         assertTrue("The solid fallback must completely cover the period rule (ΔL=$solid)", solid < .008f)
     }
 
-    @Test fun longCourseCapsAndRulesStayRegisteredAtRestPressedAndScrolled() {
+    @Test fun realPeriodRulesCurveInsideTallLensesAndRespondToPressAndScroll() {
         val term = TermSpec("Studio-7", LocalDate.of(2026, 9, 7), 1, BellSchedule.SUMMER)
         fun tile(day: Int, name: String, first: Int, last: Int) =
             ScheduledCourse(term.id, HUST_SOURCE, term.meeting(1, day, name, "", first, last))
-        // Short, left-aligned names leave a text-free vertical strip even in the half-width lanes.
+        // Short names leave the interior rules clear, even in the half-width collision lanes.
         val classes = listOf(tile(1, "L", 1, 12), tile(2, "I", 2, 7), tile(2, "J", 2, 7),
             tile(3, "T", 2, 5), tile(3, "U", 1, 1), tile(3, "V", 6, 6))
         val week = CourseWeek(term, 1, classes, classes.mapIndexed { i, c -> c.meeting.title to i }.toMap())
         val appearance = Appearance(theme = ThemeMode.LIGHT, palette = PaletteMode.SEED)
         var available = false
-        var opened: ScheduledCourse? = null
+        val opened = mutableListOf<ScheduledCourse>()
         ui.setContent {
             StackLifeTheme(appearance) {
                 available = glassUnavailableReason(appearance) == null
-                CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
+                CompositionLocalProvider(LocalPlannerGlassAllowed provides true, LocalMotionEnabled provides true) {
                     Box(Modifier.wrapContentHeight(Alignment.Top).height(420.dp)) {
-                        WeekGrid(term, week, 0.dp, 24.dp) { opened = it }
+                        WeekGrid(term, week, 0.dp, 24.dp) { opened.add(it) }
                     }
                 }
             }
@@ -162,84 +166,71 @@ class CourseTimelineGestureTest {
             val ink = Color(frame.getPixel(touchX, touchY))
             maxOf(ink.red, ink.green, ink.blue) - minOf(ink.red, ink.green, ink.blue) > .12f
         }
+        val upperRule = (four.top - gap + row).roundToInt()
+        fun lum(image: Bitmap, x: Int, y: Int) = Color(image.getPixel(x, y)).luminance()
+        // Follow the darkest part of each transmitted line, not the expected shader's pixels.
+        // The search window is narrower than half the distance to an adjacent period.
+        val reach = (row * .34f).roundToInt()
+        fun lineAt(image: Bitmap, x: Int, y: Int): Int {
+            val line = (y - reach..y + reach).minBy { lum(image, x, it) }
+            val contrast = minOf(lum(image, x, y - reach), lum(image, x, y + reach)) - lum(image, x, line)
+            assertTrue("No visible period line at ($x,$y): ΔL=$contrast", contrast > .012f)
+            return line
+        }
+        fun profile(image: Bitmap, tile: Rect, y: Int): List<Int> =
+            listOf(tile.left + tile.width() / 8, tile.centerX(), tile.right - tile.width() / 8 - 1)
+                .map { x -> lineAt(image, x, y) }
+        fun assertArc(image: Bitmap, tile: Rect, y: Int, upper: Boolean) {
+            val source = lineAt(image, gridX, y)
+            val (left, center, right) = profile(image, tile, y)
+            assertTrue("The curve must continue the real grid: center=$center, empty day=$source",
+                abs(center - source) <= 2 * dp)
+            val sign = if (upper) 1 else -1
+            assertTrue("Both sides of the period line should curve toward the nearest cap: $left, $center, $right",
+                sign * (center - left) > dp && sign * (center - right) > dp)
+        }
         try {
             course(3).performTouchInput { down(percentOffset(.5f, .625f)); advanceEventTime(350) }
             ui.mainClock.advanceTimeBy(400)
             val pressed = try {
-                opticalFrame("pressed") { it.getPixel(touchX, touchY) != rest.getPixel(touchX, touchY) }
-            } finally { course(3).performTouchInput { up() } }
-            try {
-                ui.onNode(hasScrollAction() and hasAnyAncestor(hasTestTag("week-grid")))
-                    .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 12 * row) }
-                ui.waitForIdle()
-                val lower = bounds(0); val lowerLane = bounds(1)
-                val scrolled = opticalFrame("scrolled") { frame ->
-                    // The area below the registered closing cap is now the trailing spacer.
-                    val inside = Color(frame.getPixel(lower.centerX(), lower.bottom - (8 * dp).roundToInt()))
-                    val outside = Color(frame.getPixel(lower.centerX(), lower.bottom + (8 * dp).roundToInt()))
-                    abs(inside.luminance() - outside.luminance()) > .05f
-                }
-                try {
-                    // Collect all three captures before comparing so the identical test APK can
-                    // also preserve the failing 0.9.0 rendering, not just the first failure.
-                    assertEquals(classes[3], opened)
-                    assertTrue(lower.top < long.top - row)
-                    fun lum(image: Bitmap, x: Int, y: Int) = Color(image.getPixel(x, y)).luminance()
-                    fun cap(image: Bitmap, tile: Rect, top: Boolean) {
-                        val edge = if (top) tile.top else tile.bottom - 1
-                        val sign = if (top) 1 else -1
-                        val end = (row * .55f).roundToInt()
-                        // Beyond the corner and 2dp optical rim, no source rule exists in
-                        // this half-period. Check individual pixels, not an average hiding an arc.
-                        val margin = (3 * dp).roundToInt()
-                        for (x in tile.left + margin until tile.right - margin) {
-                            val body = lum(image, x, edge + sign * end)
-                            for (d in (4 * dp).roundToInt() until end) {
-                                // Only the real label occupies the upper left of the first row.
-                                if (top && d < 24 * dp && x < tile.left + 13 * dp) continue
-                                val l = lum(image, x, edge + sign * d)
-                                if (body - l >= .023f) throw AssertionError("Extra stroke at cap ($x,${edge + sign * d}), ΔL=${body - l}")
+                ui.runOnIdle { assertTrue("Holding must not open the course", opened.isEmpty()) }
+                opticalFrame("pressed") { frame ->
+                    frame.getPixel(touchX, touchY) != rest.getPixel(touchX, touchY) ||
+                        (four.left + four.width() / 8 until four.right step gap.coerceAtLeast(1)).any { x ->
+                            (upperRule - reach..upperRule + reach step gap.coerceAtLeast(1)).any { y ->
+                                frame.getPixel(x, y) != rest.getPixel(x, y)
                             }
                         }
-                    }
-                    fun rule(image: Bitmap, tile: Rect, y: Int) {
-                        val radius = (3 * dp).roundToInt()
-                        fun darkest(x: Int) = (y - radius..y + radius).minBy { lum(image, x, it) }
-                        val source = darkest(gridX)
-                        for (x in listOf(tile.left + radius, tile.centerX(), tile.right - radius - 1)) {
-                            val line = darkest(x)
-                            assertTrue("Lost period rule at ($x,$y)", lum(image, x, y + 2 * radius) - lum(image, x, line) > .02f)
-                            assertTrue("Bent period rule at $x: $line vs source $source", abs(line - source) <= gap + 1)
-                        }
-                    }
-                    fun boundary(image: Bitmap, tile: Rect, top: Boolean) {
-                        val dir = if (top) 1 else -1
-                        val y = if (top) tile.top - gap else tile.bottom + gap
-                        val gapRows = if (top) y until tile.top else tile.bottom until y
-                        // The first and closing strokes belong to the grid, not the tile rim.
-                        // Across the unpainted gap their pixels must match the empty day.
-                        val sourceY = gapRows.minBy { lum(image, gridX, it) }
-                        val source = lum(image, gridX, sourceY)
-                        assertTrue("Missing source boundary at ($gridX,$y)", lum(image, gridX, y + dir * 5 * gap) - source > .025f)
-                        assertTrue("Course covers source boundary at ($gridX,$sourceY)", abs(lum(image, tile.centerX(), sourceY) - source) < .025f)
-                    }
-                    cap(rest, long, true); cap(rest, lane, true); cap(rest, four, false)
-                    cap(pressed, four, true); cap(pressed, four, false)
-                    cap(scrolled, lowerLane, false); cap(scrolled, lower, false)
-                    boundary(rest, long, true); boundary(scrolled, lower, false)
-                    rule(rest, long, (long.top - gap + 3 * row).roundToInt())
-                    rule(rest, lane, (lane.top - gap + 2 * row).roundToInt())
-                    rule(pressed, four, (four.top - gap + row).roundToInt())
-                    rule(scrolled, lower, (lower.bottom + gap - row).roundToInt())
-                    // Actual classes immediately above and below the pressed tile: neither
-                    // their pigment nor the separating rule may change under a held pointer.
-                    for (edge in listOf(four.top - 1, four.bottom)) {
-                        val dir = if (edge < four.top) -1 else 1
-                        for (d in 0..(7 * dp).roundToInt()) for (x in four.centerX() until four.right - 4 * gap) {
-                            val y = edge + dir * d
-                            if (abs(lum(rest, x, y) - lum(pressed, x, y)) >= .012f) throw AssertionError("Press escaped its cell at ($x,$y)")
-                        }
-                    }
+                }
+            } finally { course(3).performTouchInput { up() } }
+            try {
+                val grid = ui.onNodeWithTag("week-grid")
+                val gridNode = grid.fetchSemanticsNode()
+                val x = long.centerX() - ui.runOnIdle { gridNode.positionOnScreen.x }
+                grid.performTouchInput { swipe(Offset(x, height * .94f), Offset(x, height * .15f), durationMillis = 360) }
+                ui.waitForIdle()
+                assertTrue("Dragging from a course must scroll the grid", bounds(0).top < long.top - row)
+                // Reveal the closing periods even when a small viewport needs another swipe.
+                ui.onNode(hasScrollAction() and hasAnyAncestor(hasTestTag("week-grid")))
+                    .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 12 * row) }
+                val lower = bounds(0)
+                val scrolled = opticalFrame("scrolled") { frame ->
+                    val inside = lum(frame, lower.centerX(), lower.bottom - (8 * dp).roundToInt())
+                    val outside = lum(frame, lower.centerX(), lower.bottom + (8 * dp).roundToInt())
+                    abs(inside - outside) > .05f
+                }
+                try {
+                    assertEquals("A tap opens once; dragging another course does not", listOf(classes[3]), opened)
+                    assertArc(rest, long, (long.top - gap + 3 * row).roundToInt(), upper = true)
+                    assertArc(rest, lane, (lane.top - gap + 2 * row).roundToInt(), upper = true)
+                    assertArc(rest, four, upperRule, upper = true)
+                    assertArc(scrolled, lower, (lower.bottom + gap - row).roundToInt(), upper = false)
+                    val atRest = profile(rest, four, upperRule)
+                    val held = profile(pressed, four, upperRule)
+                    assertTrue("Press must move the transmitted rule, not merely tint it: $atRest → $held",
+                        atRest.indices.count { abs(atRest[it] - held[it]) > dp } >= 2)
+                    assertTrue("Press must not move the source grid outside the course",
+                        abs(lineAt(rest, gridX, upperRule) - lineAt(pressed, gridX, upperRule)) <= dp)
                 } finally { scrolled.recycle() }
             } finally { pressed.recycle() }
         } finally { rest.recycle() }

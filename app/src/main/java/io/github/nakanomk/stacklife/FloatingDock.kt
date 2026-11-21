@@ -125,17 +125,17 @@ private fun DestinationCapsule(tabs: List<Destination>, active: String, slot: St
     StackLifeSurface(CapsuleScene.NAVIGATION, Modifier.fillMaxWidth().testTag("navigation-capsule"),
         solid = colors.surfaceContainerLow, elevation = 2.dp) {
         SegmentTrack(slot, tabs.size, colors.secondaryContainer, { onSelect(tabs[it].key) },
-            Modifier.fillMaxWidth().padding(4.dp), compact = false) { highlighted ->
-            Row(Modifier.fillMaxWidth().selectableGroup()) {
+            Modifier.fillMaxWidth(), navigationInset = 4.dp) { highlighted ->
+            Row(Modifier.fillMaxWidth().selectableGroup(), verticalAlignment = Alignment.CenterVertically) {
                 for (index in tabs.indices) key(tabs[index].key) {
                     val tab = tabs[index]
                     val ink = if (highlighted == index) colors.primary else colors.onSurfaceVariant
                     Column(Modifier.weight(1f).clip(CircleShape)
                         .testTag("nav:${tab.key}").selectable(active == tab.key, role = Role.Tab) { onSelect(tab.key) }
-                        .heightIn(min = 56.dp).padding(vertical = 2.dp),
+                        .heightIn(min = 48.dp).padding(vertical = 2.dp),
                         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                         DockIcon(tab.key, ink)
-                        Text(tab.label, color = ink, style = MaterialTheme.typography.labelSmall)
+                        Text(tab.label, color = ink, style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
