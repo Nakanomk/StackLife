@@ -40,6 +40,8 @@ import io.github.nakanomk.stacklife.courses.ScheduledCourse
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.PlannerQuery
 import io.github.nakanomk.stacklife.planner.ScheduledState
+import io.github.nakanomk.stacklife.planner.CourseOccurrenceId
+import androidx.compose.ui.text.style.TextDecoration
 import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
@@ -47,7 +49,7 @@ import kotlin.math.roundToInt
 @Composable
 internal fun DayAxis(
     drag: AxisDrag, revision: Long, enabled: Boolean, onEdit: (String) -> Unit,
-    send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier, topInset: Dp, spine: Dp, endInGutter: Boolean,
+    send: (PlannerCommand.SlotSet) -> Unit, complete: (PlannerCommand) -> Unit, modifier: Modifier, topInset: Dp, spine: Dp, endInGutter: Boolean,
 ) {
     val density = LocalDensity.current
     val scale = drag.scale
@@ -71,7 +73,7 @@ internal fun DayAxis(
                     BoxWithConstraints(Modifier.offset { IntOffset(0, top) }.fillMaxWidth().padding(start = gutter - railWidth, end = 8.dp)
                         .height(with(density) { (scale.yAt(group.end) - top).toDp() })) {
                         val width = maxWidth / group.lanes.size
-                        val minimumLane = railWidth + 112.dp
+                        val minimumLane = railWidth + 152.dp
                         val overflow = group.lanes.size > 1 && width < minimumLane
                         Row(if (overflow) Modifier.horizontalScroll(rememberScrollState()) else Modifier) {
                             for (lane in group.lanes) Box(Modifier.width(if (overflow) minimumLane else width).fillMaxHeight()) {
@@ -82,16 +84,11 @@ internal fun DayAxis(
                                     Row(bounds) {
                                         EventRail(entry, selectedEnd, { selectedEnd = it }, drag, revision, enabled, onEdit, send,
                                             Modifier.width(railWidth).fillMaxHeight())
-                                        when (entry) {
-                                            is AxisEntry.Task -> {
-                                                val block = entry.block
-                                                BlockCard(entry, scale.day, enabled, onEdit, Modifier.fillMaxSize(),
-                                                    Modifier.slotDrag(SlotSource(block.taskId,
-                                                        ((block.endMillis - block.startMillis) / MINUTE_MS).toInt(), block.startMillis),
-                                                        drag, revision, enabled, send))
-                                            }
-                                            is AxisEntry.Course -> CourseCard(entry.course, scale.day, Modifier.fillMaxSize())
-                                        }
+                                        val block = (entry as? AxisEntry.Task)?.block
+                                        val move = if (block == null || entry.completed) Modifier else Modifier.slotDrag(
+                                            SlotSource(block.taskId, ((block.endMillis - block.startMillis) / MINUTE_MS).toInt(), block.startMillis),
+                                            drag, revision, enabled, send)
+                                        AgendaEventCard(entry, scale.day, revision, enabled, onEdit, complete, Modifier.fillMaxSize(), move)
                                     }
                                 }
                             }
@@ -201,6 +198,31 @@ private fun DrawScope.drawEndKnob(x: Float, endY: Float, ink: Color, centerColor
 }
 
 @Composable
+internal fun AgendaEventCard(entry: AxisEntry, day: PlannerQuery.Day, revision: Long, enabled: Boolean, onEdit: (String) -> Unit,
+    complete: (PlannerCommand) -> Unit, modifier: Modifier, move: Modifier = Modifier, wrap: Boolean = false) {
+    Row(modifier) {
+        val body = Modifier.weight(1f).then(if (wrap) Modifier else Modifier.fillMaxHeight())
+        when (entry) {
+            is AxisEntry.Task -> BlockCard(entry, day, enabled, onEdit, body, move, wrap)
+            is AxisEntry.Course -> CourseCard(entry.course, day, body, wrap, entry.completed)
+            is AxisEntry.Routine -> Column(body.padding(start = 4.dp)) {
+                Text(clockLabel(entry.startMillis, day), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(entry.title, style = MaterialTheme.typography.titleSmall, textDecoration = if (entry.completed) TextDecoration.LineThrough else null)
+            }
+        }
+        val description = stringResource(if (entry.completed) R.string.agenda_reopen else R.string.agenda_complete, entry.title)
+        Checkbox(checked = entry.completed, enabled = enabled, modifier = Modifier.size(48.dp).semantics { contentDescription = description },
+            onCheckedChange = { checked -> complete(when (entry) {
+                is AxisEntry.Task -> PlannerCommand.SetScheduledCompletion(entry.block.taskId, checked, revision)
+                is AxisEntry.Course -> with(entry.course) {
+                    PlannerCommand.SetCourseCompletion(CourseOccurrenceId.of(termId, source, meeting), checked, revision)
+                }
+                is AxisEntry.Routine -> PlannerCommand.SetRoutineCompletion(entry.event.kind, entry.event.date, checked, revision)
+            }) })
+    }
+}
+
+@Composable
 internal fun BlockCard(
     entry: AxisEntry.Task, day: PlannerQuery.Day, enabled: Boolean, onEdit: (String) -> Unit,
     modifier: Modifier, move: Modifier = Modifier, wrap: Boolean = false,
@@ -224,14 +246,15 @@ internal fun BlockCard(
     Column(modifier.testTag("block:${block.taskId}").clip(MaterialTheme.shapes.medium).then(action)
         .semantics(mergeDescendants = true) {}.padding(start = 4.dp, end = 4.dp)) {
         Text(range, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = lines, overflow = TextOverflow.Ellipsis)
-        Text(block.title, style = MaterialTheme.typography.titleSmall, maxLines = lines, overflow = TextOverflow.Ellipsis)
+        Text(block.title, style = MaterialTheme.typography.titleSmall, textDecoration = if (entry.completed) TextDecoration.LineThrough else null,
+            maxLines = lines, overflow = TextOverflow.Ellipsis)
         Text(if (entry.conflict) stringResource(R.string.today_conflict_state, state) else state, style = MaterialTheme.typography.labelMedium,
             color = if (entry.conflict) scheme.error else scheme.secondary, maxLines = lines, overflow = TextOverflow.Ellipsis)
     }
 }
 
 @Composable
-internal fun CourseCard(course: ScheduledCourse, day: PlannerQuery.Day, modifier: Modifier, wrap: Boolean = false) {
+private fun CourseCard(course: ScheduledCourse, day: PlannerQuery.Day, modifier: Modifier, wrap: Boolean, completed: Boolean) {
     val meeting = course.meeting
     val scheme = MaterialTheme.colorScheme
     val lines = if (wrap) Int.MAX_VALUE else 1
@@ -241,7 +264,8 @@ internal fun CourseCard(course: ScheduledCourse, day: PlannerQuery.Day, modifier
         .clickable(onClickLabel = stringResource(R.string.today_view_class), role = Role.Button) { open = true }.padding(horizontal = 4.dp)) {
         Text("${clockLabel(meeting.startMillis, day)}–${clockLabel(meeting.endMillis, day)}",
             style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = lines, overflow = TextOverflow.Ellipsis)
-        Text(meeting.title, style = MaterialTheme.typography.titleSmall, maxLines = lines, overflow = TextOverflow.Ellipsis)
+        Text(meeting.title, style = MaterialTheme.typography.titleSmall, textDecoration = if (completed) TextDecoration.LineThrough else null,
+            maxLines = lines, overflow = TextOverflow.Ellipsis)
         Text(if (course.conflicts.isEmpty()) stringResource(R.string.today_fixed_class) else stringResource(R.string.today_conflicting_class),
             style = MaterialTheme.typography.labelMedium, color = if (course.conflicts.isEmpty()) scheme.tertiary else scheme.error,
             maxLines = lines, overflow = TextOverflow.Ellipsis)

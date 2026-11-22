@@ -1,9 +1,10 @@
 package io.github.nakanomk.stacklife.courses
 
+import androidx.compose.runtime.Composable
+import io.github.nakanomk.stacklife.R
+import io.github.nakanomk.stacklife.WorkspaceViewModel
+import java.time.ZoneId
 import io.github.nakanomk.stacklife.i18n.uiText
-import io.github.nakanomk.stacklife.i18n.AppLanguage
-import java.time.format.TextStyle
-import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
 import kotlinx.serialization.json.JsonArray
@@ -22,18 +23,22 @@ private val summer = morning + periods("14:30–15:15", "15:20–16:05", "16:25�
 private val winter = morning + periods("14:00–14:45", "14:50–15:35", "15:55–16:40", "16:45–17:30",
     "18:30–19:15", "19:20–20:05", "20:15–21:00", "21:05–21:50")
 
-fun TermSpec.periodsOn(date: LocalDate): List<PeriodTime> =
-    if ((initial == BellSchedule.SUMMER) xor (switchDate != null && !date.isBefore(switchDate))) summer else winter
+const val HUST_SOURCE = "hust-hub"
 
-interface CourseImporter {
-    val id: String
-    fun parse(rows: JsonArray, term: TermSpec): ImportDraft
+private object HustCalendar : CourseCalendar {
+    override val zone: ZoneId = ZoneId.of("Asia/Shanghai")
+    override fun scheduleDescription(term: TermSpec): String = with(term) {
+        (if (initial == BellSchedule.SUMMER) uiText("Summer schedule", "夏令作息") else uiText("Winter schedule", "冬令作息")) +
+            (switchDate?.let { uiText({ ", switching on $it" }, { "，$it 起切换" }) } ?: "")
+    }
+    override fun periods(term: TermSpec, date: LocalDate): List<PeriodTime> = with(term) {
+        if ((initial == BellSchedule.SUMMER) xor (switchDate != null && !date.isBefore(switchDate))) summer else winter
+    }
 }
 
 private val periodPattern = Regex("([0-9]{1,2})(?:\\s*[-–—]\\s*([0-9]{1,2}))?")
 private val weekPattern = Regex("[0-9]{1,2}")
 private val dayKeys = listOf("MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY")
-internal fun weekday(day: Int) = DayOfWeek.of(day).getDisplayName(TextStyle.SHORT, AppLanguage.locale)
 
 // Quoted and unquoted integers are found in HUB exports. Names and rooms must be strings.
 private fun JsonElement?.numberText() = (this as? JsonPrimitive)?.takeUnless { it === JsonNull }?.content.orEmpty()
@@ -85,11 +90,11 @@ sealed interface IssueDecision {
     data class Correct(val fields: CourseFields) : IssueDecision
 }
 
-class ImportDraft internal constructor(val term: TermSpec, private val valid: Set<Occurrence>, val issues: List<ImportIssue>) {
+internal class ImportDraft(val provider: SchoolImportProvider, val term: TermSpec, private val valid: Set<Occurrence>, val issues: List<ImportIssue>) {
     val validCount: Int get() = valid.size
 
     /** The only path to meetings: a decision for each source problem, and at least one actual class. */
-    fun resolve(decisions: Map<String, IssueDecision>): List<CourseMeeting> {
+    fun resolve(decisions: Map<String, IssueDecision>): ReviewedTimetable {
         require(decisions.size == issues.size) { uiText("Correct or explicitly exclude every flagged entry.", "须逐项修正或明确排除所有待修正项") }
         val all = valid.toMutableSet()
         for (issue in issues) when (val decision = decisions[issue.position]) {
@@ -102,15 +107,21 @@ class ImportDraft internal constructor(val term: TermSpec, private val valid: Se
             }
         }
         require(all.isNotEmpty()) { uiText("There are no valid classes. The existing timetable cannot be replaced.", "没有有效课程，不能覆盖已有课表") }
-        return all.sortedWith(compareBy(Occurrence::week, Occurrence::day, Occurrence::first, Occurrence::last,
-            Occurrence::title, Occurrence::room)).map { term.meeting(it.week, it.day, it.title, it.room, it.first, it.last) }
+        val meetings = all.sortedWith(compareBy(Occurrence::week, Occurrence::day, Occurrence::first, Occurrence::last,
+            Occurrence::title, Occurrence::room)).map { term.meeting(it.week, it.day, it.title, it.room, it.first, it.last, provider.calendar) }
+        return ReviewedTimetable(provider.id, term, meetings)
     }
 }
 
-object HustCourseImporter : CourseImporter {
+internal object HustCourseImporter : SchoolImportProvider {
     override val id = HUST_SOURCE
+    override val label = R.string.courses_hub_source
+    override val help = R.string.courses_hub_help
+    override val calendar: CourseCalendar = HustCalendar
+    @Composable override fun Import(model: WorkspaceViewModel, onBack: () -> Unit, onImported: (String) -> Unit) =
+        HustImportScreen(model, onBack, onImported)
 
-    override fun parse(rows: JsonArray, term: TermSpec): ImportDraft {
+    fun parse(rows: JsonArray, term: TermSpec): ImportDraft {
         term.problem()?.let { throw IllegalArgumentException(it) }
         require(rows.size <= 2048) { uiText("Too many week records. Select data for a single term.", "周记录过多，请选择单个学期的数据") }
         var records = 0
@@ -153,6 +164,6 @@ object HustCourseImporter : CourseImporter {
             if (empty && (!weekPattern.matches(week.trim()) || week.trim().toInt() !in 1..term.weeks))
                 issues += ImportIssue(rowNumber, null, null, uiText("The ZC value of the empty week record falls outside the term.", "空周记录的 ZC 超出本学期范围"), null)
         }
-        return ImportDraft(term, valid, issues)
+        return ImportDraft(this, term, valid, issues)
     }
 }

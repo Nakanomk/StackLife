@@ -36,4 +36,25 @@ class HelpAboutScreenTest {
         ui.runOnIdle { context.onBackPressedDispatcher.onBackPressed() }
         ui.onNodeWithTag("license:$file").assertIsDisplayed()
     }
+
+    @Test fun projectLicenseReturnsToItsActualLauncherAndEachAboutChildReturnsHome() {
+        ui.setContent { StackLifeTheme(Appearance()) { HelpAboutScreen {} } }
+        fun await(tag: String) {
+            ui.waitUntil(8_000) { ui.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
+        }
+        fun back() = ui.runOnIdle { ui.activity.onBackPressedDispatcher.onBackPressed() }
+        for (tag in listOf("about-help", "about-diagnostics", "about-build", "about-licenses")) {
+            await(tag); ui.onNodeWithTag(tag).performScrollTo().performClick()
+            if (tag == "about-build" || tag == "about-licenses") {
+                val origin = if (tag == "about-build") "about-project-license" else "license:StackLife-GPL-3.0-or-later.txt"
+                await(origin); ui.onNodeWithTag(origin).performScrollTo().performClick()
+                ui.waitUntil(8_000) { ui.onAllNodes(hasText("GNU GENERAL PUBLIC LICENSE", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+                back(); await(origin); ui.onNodeWithTag(origin).assertIsDisplayed()
+            } else {
+                val title = ui.activity.getString(if (tag == "about-help") R.string.about_help_workspace else R.string.about_frames)
+                ui.waitUntil(8_000) { ui.onAllNodesWithText(title).fetchSemanticsNodes().isNotEmpty() }
+            }
+            back(); await(tag); ui.onNodeWithTag(tag).assertIsDisplayed()
+        }
+    }
 }

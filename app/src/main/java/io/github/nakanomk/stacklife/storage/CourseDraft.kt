@@ -2,11 +2,13 @@ package io.github.nakanomk.stacklife.storage
 
 import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.courses.*
+import io.github.nakanomk.stacklife.planner.CourseOccurrenceId
+import java.time.ZoneId
 import io.github.nakanomk.stacklife.planner.DayBlock
 import io.github.nakanomk.stacklife.planner.PlannerChange
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 
-internal data class ReviewedCourses(val term: TermSpec, val meetings: List<CourseMeeting>)
+internal data class ReviewedCourses(val term: TermSpec, val meetings: List<CourseMeeting>, val source: String, val calendar: CourseCalendar?)
 private data class TermContents(val term: TermRow, val rows: Set<CourseRow>)
 internal class CourseWrites(val termId: String, val source: String, val removeTerm: Boolean, val term: TermRow?,
     val removed: List<CourseRow>, val added: List<CourseRow>) {
@@ -19,10 +21,9 @@ internal class CourseWrites(val termId: String, val source: String, val removeTe
 }
 
 private class SourceDraft(val source: String, private val dao: CourseDao) {
+    var calendar: CourseCalendar? = calendarFor(source)
     val original = mutableMapOf<String, TermContents?>()
     val current = linkedMapOf<String, TermContents?>()
-    fun spec(id: String): TermSpec? =
-        (if (id in current) current[id]?.term else dao.term(id, source))?.spec()
     fun load(id: String): TermContents? {
         if (id in current) return current[id]
         if (id !in original) original[id] = dao.term(id, source)?.let { TermContents(it, dao.meetings(id, source).toSet()) }
@@ -32,44 +33,69 @@ private class SourceDraft(val source: String, private val dao: CourseDao) {
 
 private fun TermSpec.row(source: String) = TermRow(id, source, firstMonday.toEpochDay(), weeks, initial, switchDate?.toEpochDay())
 
-/** Source-specific overlays: HUB may replace its collection; manual edits only replace one exact pattern. */
+/** Each import replaces exactly one (source, term); manual edits replace only one pattern. */
 internal class CourseDraft(private val dao: CourseDao) {
     private val sources = mutableMapOf<String, SourceDraft>()
     private fun source(name: String) = sources.getOrPut(name) { SourceDraft(name, dao) }
-    private fun termSpec(id: String, name: String): TermSpec? {
-        val overlay = sources[name]
-        return if (overlay != null) overlay.spec(id) else dao.term(id, name)?.spec()
+    private fun calendar(name: String) = sources[name]?.calendar ?: calendarFor(name)
+    private fun zone(name: String) = calendar(name)?.zone ?: ZoneId.systemDefault()
+    private fun CourseRow.summary(): String {
+        val zone = zone(source)
+        return uiText({ "${label()} · Week ${meeting.week} · Periods ${meeting.firstPeriod}–${meeting.lastPeriod} · " },
+            { "${label()} · 第${meeting.week}周 · 第${meeting.firstPeriod}–${meeting.lastPeriod}节 · " }) +
+            "${intervalLabel(meeting.startMillis, meeting.endMillis, zone)} (${zone.id})"
+    }
+    private fun otherTerm(id: String, except: String): TermSpec? {
+        for ((name, overlay) in sources) if (name != except) overlay.current[id]?.let { return it.term.spec() }
+        return dao.terms(id).firstOrNull { it.source != except && sources[it.source]?.current?.containsKey(id) != true }?.spec()
+    }
+    fun contains(key: CourseOccurrenceId, stored: () -> Boolean): Boolean {
+        val overlay = sources[key.source]?.current ?: return stored()
+        if (key.termId !in overlay) return stored()
+        return overlay[key.termId]?.rows?.any { key == CourseOccurrenceId.of(it.termId, it.source, it.meeting) } == true
     }
     fun replace(draft: ReviewedCourses) {
         val spec = draft.term
+        val calendar = draft.calendar
+        if (draft.source == MANUAL_SOURCE || calendar == null)
+            throw InvalidCommand(uiText("The import source is not registered.", "未登记此课表导入来源。"))
         spec.problem()?.let { throw InvalidCommand(it) }
         if (draft.meetings.isEmpty()) throw InvalidCommand(uiText("No valid classes. Your existing timetable was not replaced.", "没有有效课程。现有课表未被替换。"))
-        val manualTerm = termSpec(spec.id, MANUAL_SOURCE)
-        if (manualTerm != null && manualTerm != spec)
-            throw InvalidCommand(uiText("This term already has manual classes with a different start date, length, or bell schedule. Use the existing term settings or a different term name.", "同名学期已有手动课程，首周、总周数或作息不同。请沿用原学期设置，或使用另一个学期名称。"))
+        val other = otherTerm(spec.id, draft.source)
+        if (other != null && other != spec)
+            throw InvalidCommand(uiText("Another timetable already uses this term with different calendar settings. Use its settings or a different term name.", "同名学期已有其他课表使用不同校历。请沿用原学期设置，或使用另一个学期名称。"))
         val meetings = LinkedHashSet<CourseRow>(draft.meetings.size)
         for (c in draft.meetings) {
             courseFieldProblem(c.title, c.room)?.let { throw InvalidCommand(uiText({ "Week ${c.week}, day ${c.day}, period ${c.firstPeriod}: $it" }, { "第 ${c.week} 周、星期 ${c.day} 第 ${c.firstPeriod} 节：$it" })) }
-            if (c.week !in 1..spec.weeks || c.day !in 1..7 || c.firstPeriod !in 1..12 || c.lastPeriod !in c.firstPeriod..12)
-                throw InvalidCommand(uiText("Check the class name, week, and periods.", "课程的名称、周次或节次无效，请重新核对。"))
-            if (c != spec.meeting(c.week, c.day, c.title, c.room, c.firstPeriod, c.lastPeriod))
+            if (c != calendar.meetingOrNull(spec, c.week, c.day, c.title, c.room, c.firstPeriod, c.lastPeriod) || c.startMillis >= c.endMillis)
                 throw InvalidCommand(uiText("Class times do not match the confirmed bell schedule.", "课时与已确认的学期作息不一致。"))
-            meetings.add(CourseRow(spec.id, HUST_SOURCE, c))
+            meetings.add(CourseRow(spec.id, draft.source, c))
         }
-        val hub = source(HUST_SOURCE)
-        hub.load(spec.id)
-        hub.current[spec.id] = TermContents(spec.row(HUST_SOURCE), meetings)
+        val imported = source(draft.source)
+        imported.calendar = calendar
+        imported.load(spec.id)
+        imported.current[spec.id] = TermContents(spec.row(draft.source), meetings)
     }
-    fun remove(id: String) {
-        val hub = source(HUST_SOURCE)
-        if (hub.load(id) == null) throw InvalidCommand(uiText("The selected term has no HUST timetable to remove.", "所选学期没有可移除的华科课表。"))
-        hub.current[id] = null
+    fun remove(id: String, requested: String?) {
+        val name = requested ?: run {
+            val imported = mutableSetOf<String>()
+            for (term in dao.terms(id)) if (term.source != MANUAL_SOURCE) imported.add(term.source)
+            for ((name, overlay) in sources) if (name != MANUAL_SOURCE && id in overlay.current) {
+                if (overlay.current[id] == null) imported.remove(name) else imported.add(name)
+            }
+            imported.singleOrNull() ?: throw InvalidCommand(if (imported.isEmpty()) uiText("This term has no imported timetable.", "此学期没有已导入的课表。")
+                else uiText("Select which school timetable to remove. No classes were removed.", "此学期有多个来源，请选择要移除的学校课表。未删除课程。"))
+        }
+        if (name == MANUAL_SOURCE) throw InvalidCommand(uiText("Remove manual classes individually.", "请逐门移除手动课程。"))
+        val imported = source(name)
+        if (imported.load(id) == null) throw InvalidCommand(uiText("This term no longer contains the selected timetable.", "所选学期已没有此来源的课表。"))
+        imported.current[id] = null
     }
     fun manual(cmd: PlannerCommand.ManualCourse) {
         val id = cmd.termId
         val manual = source(MANUAL_SOURCE)
         val previous = manual.load(id)
-        val existing = previous?.term?.spec() ?: termSpec(id, HUST_SOURCE)
+        val existing = previous?.term?.spec() ?: otherTerm(id, MANUAL_SOURCE)
         val term = cmd.createTerm?.also {
             if (existing != null || cmd.before != null || id != it.id)
                 throw InvalidCommand(uiText("A new term cannot overwrite an existing timetable. Select the existing term or use another name.", "不能用新学期覆盖已有课表，请选择已有学期或使用其他名称。"))
@@ -89,13 +115,14 @@ internal class CourseDraft(private val dao: CourseDao) {
             if (p.title.isBlank()) throw InvalidCommand(uiText("Enter a class name.", "请填写课程名称。"))
             if (p.title.length > MAX_COURSE_FIELD || p.room.length > MAX_COURSE_FIELD)
                 throw InvalidCommand(uiText({ "Class names and locations must each be at most $MAX_COURSE_FIELD characters." }, { "课程名称和地点各不能超过 $MAX_COURSE_FIELD 个字符。" }))
-            if (after.weeks.isEmpty() || after.weeks.any { it !in 1..term.weeks } || p.day !in 1..7 ||
-                p.firstPeriod !in 1..12 || p.lastPeriod !in p.firstPeriod..12)
-                throw InvalidCommand(uiText("Select weeks within the term, a weekday, and valid start and end periods.", "请选择学期内的上课周、星期和有效的起止节次。"))
+            if (after.weeks.isEmpty()) throw InvalidCommand(uiText("Select at least one week.", "请至少选择一个上课周。"))
             if (rows.any { p.matches(it.meeting) })
                 throw InvalidCommand(uiText("A manual class with this name, location, and periods already exists. Edit its weeks instead.", "已有相同名称、地点和节次的手动课程。请打开原课程编辑上课周。"))
-            for (w in after.weeks.sorted()) rows.add(CourseRow(id, MANUAL_SOURCE,
-                term.meeting(w, p.day, p.title, p.room, p.firstPeriod, p.lastPeriod)))
+            for (w in after.weeks.sorted()) {
+                val meeting = SchoolImports.default.calendar.meetingOrNull(term, w, p.day, p.title, p.room, p.firstPeriod, p.lastPeriod)
+                    ?: throw InvalidCommand(uiText("Select weeks within the term, a weekday, and valid start and end periods.", "请选择学期内的上课周、星期和有效的起止节次。"))
+                rows.add(CourseRow(id, MANUAL_SOURCE, meeting))
+            }
         }
         manual.current[id] = if (rows.isEmpty()) null else TermContents(term.row(MANUAL_SOURCE), rows)
     }
@@ -115,7 +142,7 @@ internal class CourseDraft(private val dao: CourseDao) {
         var from = Long.MAX_VALUE; var until = Long.MIN_VALUE
         fun touched(row: CourseRow): Boolean {
             val src = sources[row.source] ?: return false
-            return row.termId in src.current && (src.source == HUST_SOURCE || src.original[row.termId]?.rows?.contains(row) != true)
+            return row.termId in src.current && (src.source != MANUAL_SOURCE || src.original[row.termId]?.rows?.contains(row) != true)
         }
         for (s in sources.values) for (contents in s.current.values) if (contents != null) for (row in contents.rows) {
             if (touched(row)) { from = minOf(from, row.meeting.startMillis); until = maxOf(until, row.meeting.endMillis) }
@@ -126,15 +153,15 @@ internal class CourseDraft(private val dao: CourseDao) {
             }
             importConflicts(intersecting(from, until), tasks(from, until), ::touched,
                 { a, b -> warn(a, b.summary()) },
-                { c, t -> warn(c, "${t.title.diagnosticText()} ${intervalLabel(t.startMillis, t.endMillis, campusZone)}") })
+                { c, t -> warn(c, "${t.title.diagnosticText()} ${intervalLabel(t.startMillis, t.endMillis, zone(c.source))}") })
         }
         for (s in sources.values) for ((id, next) in s.current) {
             val old = s.original[id]
             val was = old?.rows.orEmpty(); val now = next?.rows.orEmpty()
             val removed = was.filterNot { it in now }; val added = now.filterNot { it in was }
             if (old?.term != next?.term) {
-                val label = if (s.source == HUST_SOURCE) uiText("Term", "学期") else uiText("Manual timetable", "手动课表")
-                changes.add(PlannerChange(id, "$label · $id", old?.term?.spec()?.summary(), next?.term?.spec()?.summary()))
+                val label = if (s.source == MANUAL_SOURCE) uiText("Manual timetable", "手动课表") else s.source
+                changes.add(PlannerChange(id, "$label · $id", old?.term?.spec()?.calendarSummary(s.calendar), next?.term?.spec()?.calendarSummary(s.calendar)))
             }
             for (row in removed) changes.add(PlannerChange(id, uiText({ "Remove class · ${row.meeting.title}" }, { "移除课程 · ${row.meeting.title}" }), row.summary(), null))
             for (row in added) changes.add(PlannerChange(id, uiText({ "Add class · ${row.meeting.title}" }, { "新增课程 · ${row.meeting.title}" }), null, row.summary()))
@@ -145,8 +172,3 @@ internal class CourseDraft(private val dao: CourseDao) {
         return writes
     }
 }
-
-private fun CourseRow.summary() = uiText({ "${label()} · Week ${meeting.week} · Periods ${meeting.firstPeriod}–${meeting.lastPeriod} · " }, { "${label()} · 第${meeting.week}周 · 第${meeting.firstPeriod}–${meeting.lastPeriod}节 · " }) +
-    intervalLabel(meeting.startMillis, meeting.endMillis, campusZone)
-private fun TermSpec.summary() = uiText({ "Starts $firstMonday, $weeks weeks, ${if (initial == BellSchedule.SUMMER) "summer" else "winter"} schedule" }, { "$firstMonday 起，$weeks 周，${if (initial == BellSchedule.SUMMER) "夏令" else "冬令"}作息" }) +
-    (switchDate?.let { uiText({ ", switching on $it" }, { "，$it 起切换" }) } ?: "")

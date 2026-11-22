@@ -51,8 +51,7 @@ import io.github.nakanomk.stacklife.transitions.routeOrigin
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 
-private val campusClock = DateTimeFormatter.ofPattern("HH:mm", java.util.Locale.ROOT).withZone(campusZone)
-private fun CourseMeeting.timeLabel() = "${campusClock.format(Instant.ofEpochMilli(startMillis))}–${campusClock.format(Instant.ofEpochMilli(endMillis))}"
+private val courseClock = DateTimeFormatter.ofPattern("HH:mm", java.util.Locale.ROOT)
 internal fun CourseMeeting.periodLabel() = if (firstPeriod == lastPeriod) uiText({ "Period $firstPeriod" }, { "第 $firstPeriod 节" }) else uiText({ "Periods $firstPeriod–$lastPeriod" }, { "第 $firstPeriod–$lastPeriod 节" })
 
 @Composable
@@ -97,7 +96,7 @@ private fun RowScope.WeekPicker(term: TermSpec, selected: Int, pager: PagerState
 internal fun CourseHome(
     model: WorkspaceViewModel, catalog: Terms, term: TermSpec?, week: Int?,
     onTerm: (TermSpec) -> Unit, onWeek: (TermSpec, Int) -> Unit, onImport: () -> Unit,
-    onRemove: (TermSpec) -> Unit, onSettings: () -> Unit,
+    onRemove: (TermSpec, String) -> Unit, onSettings: () -> Unit,
 ) {
     var listMode by rememberSaveable { mutableStateOf(false) }
     val pager = if (term != null && week != null) key(term.id) {
@@ -118,9 +117,9 @@ internal fun CourseHome(
             if (term != null) {
                 var menu by remember { mutableStateOf(false) }
                 Box {
-                    val imported = term.id in catalog.importedIds
-                    val owner = Modifier.routeOrigin("course-import", CircleShape)
-                        .then(if (imported) Modifier.routeOrigin("remove-term:${term.id}", CircleShape) else Modifier)
+                    val sources = catalog.importedSources[term.id].orEmpty()
+                    var owner = Modifier.routeOrigin("course-import", CircleShape)
+                    for (source in sources) owner = owner.routeOrigin("remove-term:${term.id}:$source", CircleShape)
                     GlassIcon(R.drawable.ic_more_vert, stringResource(R.string.courses_options), { menu = true }, owner.testTag("course-options"))
                     PlannerDropdownMenu(menu, { menu = false }) {
                         DropdownMenuItem({ Text(stringResource(R.string.courses_add)) }, { menu = false; add() }, modifier = Modifier.testTag("course-add"),
@@ -135,11 +134,14 @@ internal fun CourseHome(
                             for (choice in terms) DropdownMenuItem({ Text(choice.id) }, { menu = false; onTerm(choice) },
                                 enabled = choice.id != term.id)
                         }
-                        if (imported) {
+                        if (sources.isNotEmpty()) {
                             HorizontalDivider()
-                            val removal = rememberRouteLaunch("remove-term:${term.id}")
-                            DropdownMenuItem({ Text(stringResource(R.string.courses_remove_hub)) }, { removal.open { menu = false; onRemove(term) } },
-                                modifier = removal.modifier.testTag("course-remove"))
+                            for (source in sources) {
+                                val removal = rememberRouteLaunch("remove-term:${term.id}:$source")
+                                DropdownMenuItem({ Text(stringResource(R.string.courses_remove_source, sourceLabel(source))) },
+                                    { removal.open { menu = false; onRemove(term, source) } },
+                                    modifier = removal.modifier.testTag(if (sources.size == 1) "course-remove" else "course-remove:$source"))
+                            }
                         }
                     }
                 }
@@ -164,7 +166,7 @@ internal fun CourseHome(
                 val query = remember(term.id, index) { PlannerQuery.Week(term.id, index + 1) }
                 val data by remember(model, query) { model.week(query) }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
                 ReadPanel(data) { result ->
-                    if (result.term != null) CourseWeekPage(result.term, result, listMode, top, bottom) { selected ->
+                    if (result.term != null) CourseWeekPage(result.term, result, catalog.importedSources[term.id].orEmpty(), listMode, top, bottom) { selected ->
                         editor.form = ManualCourseForm(result.term, selected.meeting.week, selected.meeting.pattern())
                     }
                 }
@@ -174,7 +176,7 @@ internal fun CourseHome(
 }
 
 @Composable
-private fun CourseWeekPage(term: TermSpec, week: CourseWeek, listMode: Boolean, top: Dp, bottom: Dp, edit: (ScheduledCourse) -> Unit) {
+private fun CourseWeekPage(term: TermSpec, week: CourseWeek, sources: List<String>, listMode: Boolean, top: Dp, bottom: Dp, edit: (ScheduledCourse) -> Unit) {
     // Store an occurrence key, not a list position: after reimport never show a different course.
     var selected by remember { mutableStateOf<String?>(null) }
     var selectedDay by rememberSaveable { mutableIntStateOf(0) }
@@ -210,7 +212,7 @@ private fun CourseWeekPage(term: TermSpec, week: CourseWeek, listMode: Boolean, 
                 }
             }
         }
-    } else WeekGrid(term, week, top, bottom, openDay = { selectedDay = it }, open = open)
+    } else WeekGrid(term, week, top, bottom, sources = sources, openDay = { selectedDay = it }, open = open)
 }
 
 private fun ScheduledCourse.occurrenceKey(): String = with(meeting) {
@@ -222,9 +224,12 @@ private fun CourseInfo(course: ScheduledCourse) {
     val m = course.meeting
     val pattern = stringResource(R.string.courses_date_pattern)
     val locale = AppLanguage.locale
-    val campusDate = remember(pattern, locale) { DateTimeFormatter.ofPattern(pattern, locale).withZone(campusZone) }
+    val zone = calendarFor(course.source)?.zone ?: java.time.ZoneId.systemDefault()
+    val campusDate = remember(pattern, locale, zone) { DateTimeFormatter.ofPattern(pattern, locale).withZone(zone) }
+    val clock = remember(zone) { courseClock.withZone(zone) }
     Text(stringResource(R.string.courses_class_date, m.week, campusDate.format(Instant.ofEpochMilli(m.startMillis)), m.periodLabel()), style = MaterialTheme.typography.bodyMedium)
-    Text(stringResource(R.string.courses_beijing_time, m.timeLabel()), style = MaterialTheme.typography.bodyMedium)
+    Text(stringResource(R.string.courses_class_time_zone, clock.format(Instant.ofEpochMilli(m.startMillis)),
+        clock.format(Instant.ofEpochMilli(m.endMillis)), zone.id), style = MaterialTheme.typography.bodyMedium)
     Text(stringResource(R.string.courses_room, m.room.ifBlank { stringResource(R.string.courses_not_provided) }), style = MaterialTheme.typography.bodyMedium)
     if (course.conflicts.isNotEmpty()) Text(stringResource(R.string.courses_conflicts, course.conflicts.joinToString(stringResource(R.string.courses_list_separator))), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
 }
@@ -253,7 +258,7 @@ internal fun CourseReadPanel(course: ScheduledCourse?, dayLabel: String?, dayCou
                     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(stringResource(R.string.courses_fixed_class), style = MaterialTheme.typography.titleLarge)
                         Text(detail.meeting.title, style = MaterialTheme.typography.titleLarge)
-                        Text("${detail.termId} · ${when (detail.source) { MANUAL_SOURCE -> stringResource(R.string.courses_manual_source); HUST_SOURCE -> stringResource(R.string.courses_hub_source); else -> stringResource(R.string.courses_fixed_timetable) }}",
+                        Text("${detail.termId} · ${sourceLabel(detail.source)}",
                             style = MaterialTheme.typography.labelLarge)
                         CourseInfo(detail)
                         AssistantComposer(AssistantPage.Week(detail.termId, detail.meeting.week))

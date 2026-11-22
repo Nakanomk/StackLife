@@ -22,6 +22,8 @@ import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.planner.DayPlan
 import io.github.nakanomk.stacklife.planner.PlannerQuery
+import io.github.nakanomk.stacklife.planner.PlannerCommand
+import io.github.nakanomk.stacklife.workspace.rememberSubmission
 
 @Composable
 internal fun EventDay(
@@ -29,6 +31,7 @@ internal fun EventDay(
     revealStart: Long?, onRevealed: () -> Unit, top: Dp, bottom: Dp, trayOpen: Boolean, toggleTray: () -> Unit,
 ) {
     val rows = remember(plan.day, entries) { dayEventRows(plan.day, entries) }
+    val submission = rememberSubmission(model)
     val list = rememberLazyListState()
     LaunchedEffect(revealStart, rows) {
         if (revealStart != null) {
@@ -45,7 +48,7 @@ internal fun EventDay(
             items(rows.size) { index ->
                 val row = rows[index]
                 key(row) {
-                    EventRow(row, plan.day, spine, onEdit) { gap ->
+                    EventRow(row, plan.day, spine, plan.revision, !submission.busy, onEdit, { submission.send(it) }) { gap ->
                         gapStart = gap.start; gapEnd = gap.end; gapRevision = plan.revision
                     }
                 }
@@ -63,7 +66,8 @@ internal fun EventDay(
 }
 
 @Composable
-private fun EventRow(row: DayEventRow, day: PlannerQuery.Day, spine: Dp, onEdit: (String) -> Unit, onGap: (DayEventRow.Gap) -> Unit) {
+private fun EventRow(row: DayEventRow, day: PlannerQuery.Day, spine: Dp, revision: Long, enabled: Boolean, onEdit: (String) -> Unit,
+    complete: (PlannerCommand) -> Unit, onGap: (DayEventRow.Gap) -> Unit) {
     val colors = MaterialTheme.colorScheme
     val entry = (row as? DayEventRow.Event)?.entry
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 0.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -81,10 +85,7 @@ private fun EventRow(row: DayEventRow, day: PlannerQuery.Day, spine: Dp, onEdit:
         }
         val body = Modifier.weight(1f).padding(start = 4.dp, end = 8.dp).heightIn(min = 48.dp)
         when (row) {
-            is DayEventRow.Event -> when (val event = row.entry) {
-                is AxisEntry.Course -> CourseCard(event.course, day, body, wrap = true)
-                is AxisEntry.Task -> BlockCard(event, day, true, onEdit, body, wrap = true)
-            }
+            is DayEventRow.Event -> AgendaEventCard(row.entry, day, revision, enabled, onEdit, complete, body, wrap = true)
             is DayEventRow.Gap -> {
                 val canAdd = row.end - row.start >= MINUTE_MS
                 val label = stringResource(R.string.today_free_duration, elapsedLabel(row.end - row.start))

@@ -1,0 +1,21 @@
+<resources>
+    <string name="reminder_channel">Schedule reminders</string>
+    <string name="reminder_off">Off</string>
+    <string name="reminder_inexact">May be late</string>
+    <string name="reminder_on">15 min before</string>
+    <string name="reminder_explanation">Get a notification 15 minutes before scheduled tasks, classes, wake-up and bedtime. Items added with less notice can alert immediately. Items that have already started are skipped.</string>
+    <string name="reminder_failed">Scheduling failed</string>
+    <string name="reminder_retry">Try scheduling reminders again</string>
+    <string name="reminder_blocked_hint">Notifications are off. Allow them to receive reminders.</string>
+    <string name="reminder_inexact_hint">Android may delay reminders without access to alarms and reminders. Allow this access for precise timing.</string>
+    <string name="reminder_allow">Allow notifications</string>
+    <string name="reminder_system_notifications">Notification settings</string>
+    <string name="reminder_allow_exact">Allow precise reminders</string>
+    <string name="reminder_settings_missing">This device cannot open that settings page. Check StackLife in Android Settings.</string>
+    <string name="reminder_starts_at">Starts at %1$s</string>
+    <string name="reminder_group_at">%1$s · %2$s</string>
+    <plurals name="reminder_count">
+        <item quantity="one">%d upcoming item</item>
+        <item quantity="other">%d upcoming items</item>
+    </plurals>
+</resources>

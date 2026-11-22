@@ -30,8 +30,8 @@ class HustImportTest {
         val a = item("A", "5–6")
         val b = item("B", "5–6")
         val rows = raw("[${week(9, b)},${week(1, a, a, item("A", "实践"))},${week(3, b)}]")
-        val importer: CourseImporter = HustCourseImporter
-        assertEquals("hust-hub", importer.id)
+        val importer = HustCourseImporter
+        assertSame(importer, SchoolImports.find("hust-hub"))
         val draft = importer.parse(rows, term)
         assertEquals(3, draft.validCount)
         val issue = draft.issues.single()
@@ -39,12 +39,15 @@ class HustImportTest {
         rejected { draft.resolve(emptyMap()) }
         rejected { draft.resolve(mapOf("not an issue" to IssueDecision.Exclude)) }
         val decisions = mapOf(issue.position to IssueDecision.Exclude)
-        val classes = draft.resolve(decisions)
+        val reviewed = draft.resolve(decisions)
+        assertEquals(importer.id, reviewed.source)
+        assertEquals(term, reviewed.term)
+        val classes = reviewed.meetings
         assertEquals(listOf(1, 3, 9), classes.map { it.week })
         assertEquals(listOf("A", "B", "B"), classes.map { it.room })
         assertEquals(listOf("2026-09-07T14:30", "2026-09-21T14:30", "2026-11-02T14:00"), classes.map { at(it.startMillis) })
         assertEquals(listOf("2026-09-07T16:05", "2026-09-21T16:05", "2026-11-02T15:35"), classes.map { at(it.endMillis) })
-        assertEquals(classes, importer.parse(rows, term).resolve(decisions))
+        assertEquals(reviewed, importer.parse(rows, term).resolve(decisions))
     }
 
     @Test fun languageChangesIssueLabelsButNotSourceCoordinatesOrClassNames() {
@@ -65,7 +68,7 @@ class HustImportTest {
             assertEquals("JC 节次须为 1–12 中的单节或正序区间", same.reason)
             assertEquals(issue.position, same.position)
             assertEquals(expected, chinese.resolve(decisions))
-            assertEquals(listOf("保留原名", "Original name"), expected.map { it.title })
+            assertEquals(listOf("保留原名", "Original name"), expected.meetings.map { it.title })
         } finally {
             AppLanguage.update(listOf(previous))
         }
@@ -78,7 +81,7 @@ class HustImportTest {
         rejected { draft.resolve(mapOf(issue.position to IssueDecision.Exclude)) }
         rejected { draft.resolve(mapOf(issue.position to IssueDecision.Correct(issue.fields!!))) }
         val corrected = issue.fields!!.copy(period = "12")
-        val result = draft.resolve(mapOf(issue.position to IssueDecision.Correct(corrected))).single()
+        val result = draft.resolve(mapOf(issue.position to IssueDecision.Correct(corrected))).meetings.single()
         assertEquals("2026-09-07T21:35", at(result.startMillis))
         assertEquals("2026-09-07T22:20", at(result.endMillis))
         rejected { HustCourseImporter.parse(JsonArray(emptyList()), term).resolve(emptyMap()) }
@@ -88,7 +91,7 @@ class HustImportTest {
         val fields = requireNotNull(repair.fields)
         assertEquals(longRoom, fields.room)
         val correctedRoom = IssueDecision.Correct(fields.copy(room = "A"))
-        assertEquals("A", longDraft.resolve(mapOf(repair.position to correctedRoom)).single().room)
+        assertEquals("A", longDraft.resolve(mapOf(repair.position to correctedRoom)).meetings.single().room)
     }
 
     @Test fun exactRangesAndRoomArePartOfOccurrenceIdentity() {
@@ -96,7 +99,7 @@ class HustImportTest {
         val items = (bad.map { item("A", it) } + listOf(item("A", "5-6"), item("B", "5 — 6"), item("A", "5–6"))).toTypedArray()
         val draft = HustCourseImporter.parse(raw("[${week(1, *items)}]"), term)
         assertEquals(bad, draft.issues.map { it.fields!!.period })
-        assertEquals(listOf("A", "B"), draft.resolve(draft.issues.associate { it.position to IssueDecision.Exclude }).map { it.room })
+        assertEquals(listOf("A", "B"), draft.resolve(draft.issues.associate { it.position to IssueDecision.Exclude }).meetings.map { it.room })
     }
 
     @Test fun malformedFieldsAndContainersRequireIndividualDecisions() {
@@ -106,19 +109,20 @@ class HustImportTest {
         assertEquals(1, draft.validCount)
         assertEquals(6, draft.issues.size)
         val exclude = draft.issues.associate { it.position to IssueDecision.Exclude }
-        assertEquals("ok", draft.resolve(exclude).single().title)
+        assertEquals("ok", draft.resolve(exclude).meetings.single().title)
         val sunday = draft.issues.last()
         val fixed = draft.resolve(exclude + (sunday.position to IssueDecision.Correct(sunday.fields!!.copy(week = "2"))))
-        assertEquals("2026-09-20T08:55", at(fixed.last().startMillis))
+        assertEquals("2026-09-20T08:55", at(fixed.meetings.last().startMillis))
     }
 
     @Test fun weekOneHintIsNotAnInferredCalendarAndWinterCanSwitchToSummer() {
         val rows = raw("""[{"ZC":3,"KS":"2026-09-21"},{"ZC":"1","KS":"2026-09-07"},{"ZC":1,"KS":"2026-09-07"}]""")
         assertEquals(listOf("2026-09-07"), firstWeekHints(rows))
         val reverse = term.copy(initial = BellSchedule.WINTER, switchDate = LocalDate.parse("2026-09-09"))
-        assertEquals(12, reverse.periodsOn(term.firstMonday).size)
-        assertEquals("14:00", reverse.periodsOn(LocalDate.parse("2026-09-08"))[4].start.toString())
-        assertEquals("14:30", reverse.periodsOn(LocalDate.parse("2026-09-09"))[4].start.toString())
+        val calendar = HustCourseImporter.calendar
+        assertEquals(12, calendar.periods(reverse, term.firstMonday).size)
+        assertEquals("14:00", calendar.periods(reverse, LocalDate.parse("2026-09-08"))[4].start.toString())
+        assertEquals("14:30", calendar.periods(reverse, LocalDate.parse("2026-09-09"))[4].start.toString())
     }
 
     @Test fun onlyTheOfficialHttpsTimetableIsExtractable() {

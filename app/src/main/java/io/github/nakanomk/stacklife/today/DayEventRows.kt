@@ -20,7 +20,7 @@ internal fun dayEventRows(day: PlannerQuery.Day, chronological: List<AxisEntry>)
         if (start >= end) continue
         if (start > occupiedUntil) add(DayEventRow.Gap(occupiedUntil, start))
         add(DayEventRow.Event(entry, start, end))
-        occupiedUntil = maxOf(occupiedUntil, end)
+        occupiedUntil = maxOf(occupiedUntil, if (entry is AxisEntry.Routine) start else end)
     }
     if (occupiedUntil < day.endMillis) add(DayEventRow.Gap(occupiedUntil, day.endMillis))
 }

@@ -4,6 +4,10 @@ import io.github.nakanomk.stacklife.courses.ScheduledCourse
 import io.github.nakanomk.stacklife.planner.DayBlock
 import io.github.nakanomk.stacklife.planner.DayPlan
 import io.github.nakanomk.stacklife.planner.PlannerQuery
+import io.github.nakanomk.stacklife.planner.CourseOccurrenceId
+import io.github.nakanomk.stacklife.planner.RoutineEvent
+import io.github.nakanomk.stacklife.planner.ScheduledState
+import io.github.nakanomk.stacklife.planner.label
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
@@ -29,20 +33,33 @@ internal data class AxisBand(
 internal sealed interface AxisEntry {
     val startMillis: Long
     val endMillis: Long
+    val title: String
+    val completed: Boolean
 
     data class Task(val block: DayBlock, val conflict: Boolean) : AxisEntry {
         override val startMillis get() = block.startMillis
         override val endMillis get() = block.endMillis
+        override val title get() = block.title
+        override val completed get() = block.state == ScheduledState.DONE
     }
-    data class Course(val course: ScheduledCourse) : AxisEntry {
+    data class Course(val course: ScheduledCourse, override val completed: Boolean = false) : AxisEntry {
         override val startMillis get() = course.meeting.startMillis
         override val endMillis get() = course.meeting.endMillis
+        override val title get() = course.meeting.title
+    }
+    data class Routine(val event: RoutineEvent) : AxisEntry {
+        override val startMillis get() = event.startMillis
+        override val endMillis get() = startMillis + MINUTE_MS
+        override val title get() = event.kind.label()
+        override val completed get() = event.completed
     }
 }
 
 internal fun DayPlan.chronologicalEntries(): List<AxisEntry> = buildList<AxisEntry> {
     for (block in blocks) add(AxisEntry.Task(block, block.taskId in conflictingTaskIds))
-    for (course in courses) add(AxisEntry.Course(course))
+    for (course in courses) add(AxisEntry.Course(course, completedCourses.isNotEmpty() &&
+        CourseOccurrenceId.of(course.termId, course.source, course.meeting) in completedCourses))
+    for (routine in routines) add(AxisEntry.Routine(routine))
 }.sortedBy { it.startMillis }
 
 internal data class AxisGroup(val start: Long, val end: Long, val lanes: List<List<AxisEntry>>)

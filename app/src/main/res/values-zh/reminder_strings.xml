@@ -1,0 +1,20 @@
+<resources>
+    <string name="reminder_channel">日程提醒</string>
+    <string name="reminder_off">未开启</string>
+    <string name="reminder_inexact">可能延迟</string>
+    <string name="reminder_on">提前 15 分钟</string>
+    <string name="reminder_explanation">已安排的任务、课程、起床和就寝默认提前 15 分钟提醒。不足 15 分钟时新安排的日程可立即提醒；已经开始的不再补发。</string>
+    <string name="reminder_failed">安排提醒失败</string>
+    <string name="reminder_retry">重新安排提醒</string>
+    <string name="reminder_blocked_hint">通知已关闭。允许通知后才能收到日程提醒。</string>
+    <string name="reminder_inexact_hint">未获得「闹钟和提醒」权限时，Android 可能延迟送达。允许该权限可使用准时提醒。</string>
+    <string name="reminder_allow">允许通知</string>
+    <string name="reminder_system_notifications">系统通知设置</string>
+    <string name="reminder_allow_exact">允许准时提醒</string>
+    <string name="reminder_settings_missing">此设备无法打开该设置页。请在 Android 系统设置中查看 StackLife 的权限。</string>
+    <string name="reminder_starts_at">%1$s 开始</string>
+    <string name="reminder_group_at">%1$s · %2$s</string>
+    <plurals name="reminder_count">
+        <item quantity="other">%d 项日程即将开始</item>
+    </plurals>
+</resources>

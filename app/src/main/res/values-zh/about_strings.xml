@@ -19,13 +19,13 @@
     <string name="about_signer">当前签名证书 · SHA-256</string>
     <string name="about_license_intro">选择 StackLife 或第三方组件，即可离线阅读许可全文。</string>
     <string name="about_help_workspace">中断手头的事，回来接着做</string>
-    <string name="about_help_workspace_body">在工作台按打算执行的顺序排列任务。被打断时可将整个队列压栈，也可先多选再压栈。保存后可补充原因。打开栈帧就能编辑其中的任务，也可恢复全部或仅恢复所选。恢复到哪里由设置中的恢复策略决定。</string>
+    <string name="about_help_workspace_body">被打断时可将队列全部或部分压栈。打开栈帧可以编辑、恢复任务。帧取空后可在详情里删除；列表中的「清除历史」只删除已取空的栈帧，不删除原任务。</string>
     <string name="about_help_today">给任务留出时间</string>
-    <string name="about_help_today_body">在「今天」展开待排队列，将任务拖到时间轴的空档，或点任务选择时间。点开已安排的任务可以改时或取消排程。取消排程只释放时段，任务仍在队列里。</string>
+    <string name="about_help_today_body">把待排任务拖到时间轴空档，或点任务选择时间。勾选右侧复选框标记完成，再点可撤销。课程与作息只标记这一次。在设置顶部可以安排每天的起床、就寝时间，并开启提前 15 分钟提醒。</string>
     <string name="about_help_graphs">从目标梳理步骤</string>
     <string name="about_help_graphs_body">新建流程图，每个步骤设为一个节点，箭头从前置步骤指向依赖它的步骤。选择目标节点，核对有序清单。「加入队列」将这些任务追加到队尾；「存为栈帧」只把它们放入栈中备用。</string>
     <string name="about_help_courses">用课表预留上课时间</string>
-    <string name="about_help_courses_body">在课表中手动添加课程，或导入华科课表。保存前在预览里核对学期、首周周一、周次与节次。导入后，「今天」会保留上课时段。如果校园登录不可用，也可选择已导出的 HUB 原始周数组 JSON 文件。</string>
+    <string name="about_help_courses_body">在课表中手动添加课程，或导入学校课表。保存前核对学期、首周周一、周次与节次。课程同步出现在「今天」；重新导入只替换该校在所选学期的课次。</string>
     <string name="about_help_assistant">先看差异，再让助理修改</string>
     <string name="about_help_assistant_body">不配置模型也能手动安排日程。要对话，请先在设置中填写模型服务和密钥。点发送才会联系该服务；分享其他页面或备注需要授权。助理提出的更改只有经你核对并应用后才会写入日程。</string>
     <string name="about_frames">前台绘帧测量</string>

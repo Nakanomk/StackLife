@@ -121,7 +121,7 @@ internal fun WorkspaceScreen(
             PagerPane(selected, selected || inViewport) {
                 val cardBounds = if (selected) shared else noCardBounds
                 CompositionLocalProvider(LocalCardList provides if (index == 0) queueScroll else stackScroll) {
-                    if (index == 1) FrameList(state.frames, stackScroll, onFrame, onCreateFrame, cardBounds, top, bottom + feedbackInset, state.revision)
+                    if (index == 1) FrameList(state.frames, stackScroll, onFrame, onCreateFrame, cardBounds, top, bottom + feedbackInset, state.revision, actions)
                     else QueueList(state.queue, queueScroll, actions, onTask, actions::pushQueue, cardBounds, top, bottom + taskFabClearance + feedbackInset, state.revision)
                 }
             }

@@ -22,16 +22,17 @@ import java.time.temporal.ChronoUnit
 
 @Composable
 internal fun CoursesRoute(model: WorkspaceViewModel, termId: String?, selectedWeek: Int?, onTerm: (TermSpec) -> Unit,
-    onWeek: (Int) -> Unit, onImport: () -> Unit, onRemove: (TermSpec) -> Unit, onSettings: () -> Unit,
+    onWeek: (Int) -> Unit, onImport: () -> Unit, onRemove: (TermSpec, String) -> Unit, onSettings: () -> Unit,
     onScope: (AssistantPage) -> Unit) {
     val state by remember(model) { model.terms() }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
     ReadPanel(state) { all ->
-        val today = LocalDate.now(campusZone)
+        fun today(id: String): LocalDate = LocalDate.now(calendarFor(all.importedSources[id]?.firstOrNull() ?: MANUAL_SOURCE)?.zone ?: java.time.ZoneId.systemDefault())
         val term = all.terms.firstOrNull { it.id == termId } ?: all.terms.firstOrNull {
-            today >= it.firstMonday && today < it.firstMonday.plusWeeks(it.weeks.toLong())
+            val date = today(it.id)
+            date >= it.firstMonday && date < it.firstMonday.plusWeeks(it.weeks.toLong())
         } ?: all.terms.firstOrNull()
         val week = term?.let {
-            (selectedWeek?.takeIf { term.id == termId } ?: (ChronoUnit.WEEKS.between(term.firstMonday, today).toInt() + 1))
+            (selectedWeek?.takeIf { term.id == termId } ?: (ChronoUnit.WEEKS.between(term.firstMonday, today(term.id)).toInt() + 1))
                 .coerceIn(1, term.weeks)
         }
         val scope = if (term != null && week != null) AssistantPage.Week(term.id, week) else AssistantPage.Terms
@@ -42,7 +43,7 @@ internal fun CoursesRoute(model: WorkspaceViewModel, termId: String?, selectedWe
 }
 
 @Composable
-internal fun RemoveTermReview(id: String, model: WorkspaceViewModel, onBack: () -> Unit) {
+internal fun RemoveTermReview(id: String, source: String, model: WorkspaceViewModel, onBack: () -> Unit) {
     var version by remember { mutableIntStateOf(0) }
     var preview by remember { mutableStateOf<PreviewResult?>(null) }
     val submission = rememberSubmission(model, onError = { preview = PreviewResult.Rejected(it) }) { outcome ->
@@ -51,10 +52,10 @@ internal fun RemoveTermReview(id: String, model: WorkspaceViewModel, onBack: () 
     val saving = submission.busy
     val cancel: () -> Unit = { if (!submission.busy) onBack() }
     val ready = preview as? PreviewResult.Ready
-    LaunchedEffect(model, id, version) {
-        if (!saving) preview = model.previewRemoval(id)
+    LaunchedEffect(model, id, source, version) {
+        if (!saving) preview = model.previewRemoval(id, source)
     }
-    DisposableEffect(model, id) {
+    DisposableEffect(model, id, source) {
         onDispose {
             if (!submission.busy) (preview as? PreviewResult.Ready)?.let { model.discardProposal(it.proposalId) }
         }
@@ -69,7 +70,7 @@ internal fun RemoveTermReview(id: String, model: WorkspaceViewModel, onBack: () 
         }
     }) { top, bottom ->
         LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
-            item { Text(id, style = MaterialTheme.typography.titleLarge); Hint(stringResource(R.string.courses_remove_term_hint)) }
+            item { Text(id, style = MaterialTheme.typography.titleLarge); Hint(stringResource(R.string.courses_remove_term_hint, sourceLabel(source))) }
             when (val result = preview) {
                 null -> item { CircularProgressIndicator() }
                 is PreviewResult.Rejected -> item { Text(result.message) }

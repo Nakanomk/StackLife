@@ -110,7 +110,12 @@ internal class PlannerTools(private val api: PlannerApi, val page: AssistantPage
                 require(page is AssistantPage.CourseDraft && page.draftId == id) { uiText("Only the current import draft reviewed by the user can be used.", "只能使用当前已由用户核对的导入草稿。") }
                 PlannerCommand.CourseImport(id)
             }
-            "term_remove" -> PlannerCommand.TermRemove(seen.term(o.string("termId")))
+            "term_remove" -> {
+                val id = seen.term(o.string("termId"))
+                val source = o.optString("source")
+                require(source == null || source in seen.sources[id].orEmpty()) { uiText("Query the permitted timetable sources first.", "请先查询已授权的课表来源。") }
+                PlannerCommand.TermRemove(id, source)
+            }
             "manual_course_add" -> {
                 require(disclosure.courseDetails) { uiText("Authorize class names and locations first, or add the class manually in the timetable.", "请先授权课程名称与地点，或在课表中手动添加。") }
                 val id = o.string("termId")
@@ -168,6 +173,7 @@ internal class ToolIds(page: AssistantPage) {
     val graphs = mutableSetOf<String>()
     val nodes = mutableSetOf<String>()
     val terms = mutableSetOf<String>()
+    val sources = mutableMapOf<String, Set<String>>()
     init {
         when (page) {
             is AssistantPage.Task -> tasks += page.id

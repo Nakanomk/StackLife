@@ -26,15 +26,17 @@ import io.github.nakanomk.stacklife.planner.RestorePolicy
 @Database(
     entities = [TaskRow::class, FrameRow::class, FrameItemRow::class, SettingsRow::class, TimeBlockRow::class,
         TermRow::class, CourseRow::class, GraphRow::class, GraphNodeRow::class, GraphEdgeRow::class,
-        ConversationRow::class, ConversationMessageRow::class],
-    version = 7,
+        ConversationRow::class, ConversationMessageRow::class, CourseTick::class, RoutineTick::class],
+    version = 8,
     autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4),
-        AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7)],
+        AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7),
+        AutoMigration(from = 7, to = 8)],
     exportSchema = true,
 )
 abstract class PlannerDatabase : RoomDatabase() {
     internal abstract fun plannerDao(): PlannerDao
     internal abstract fun courseDao(): CourseDao
+    internal abstract fun agendaDao(): AgendaDao
     internal abstract fun graphDao(): GraphDao
     internal abstract fun conversationHistory(): ConversationHistory
 }
@@ -54,12 +56,14 @@ internal data class TaskRow(
     val owner: Owner,
     val frameId: String?,
     val queuePosition: Int?,
+    val completedFromFrame: String? = null,
+    val completedFromPosition: Int? = null,
 )
 
 @Entity(
     tableName = "time_blocks",
     foreignKeys = [ForeignKey(entity = TaskRow::class, parentColumns = ["id"], childColumns = ["taskId"])],
-    indices = [Index(value = ["endMillis"])],
+    indices = [Index(value = ["endMillis"]), Index(value = ["startMillis"])],
 )
 internal data class TimeBlockRow(@PrimaryKey val taskId: String, val startMillis: Long, val endMillis: Long)
 
@@ -98,6 +102,8 @@ internal data class SettingsRow(
     val revision: Long = 0,
     val restorePolicy: RestorePolicy = RestorePolicy.PREPEND,
     @ColumnInfo(defaultValue = "'{}'") val appearance: String = "{}",
+    val wakeMinute: Int? = null,
+    val sleepMinute: Int? = null,
 )
 
 internal data class ItemState(@Embedded val item: FrameItemRow, @Embedded(prefix = "live_") val current: QueueTask?)
@@ -171,6 +177,9 @@ internal interface PlannerDao {
 
     @Insert fun insertFrames(frames: List<FrameRow>)
     @Update fun updateFrames(frames: List<FrameRow>)
+    @Query("DELETE FROM frame_items WHERE frameId=:id") fun deleteFrameItems(id: String)
+    @Query("SELECT taskId FROM frame_items WHERE frameId=:id ORDER BY originalPosition") fun originalTaskIds(id: String): List<String>
+    @Query("DELETE FROM frames WHERE id=:id AND NOT EXISTS (SELECT 1 FROM tasks WHERE frameId=:id)") fun deleteEmptyFrame(id: String): Int
     @Insert fun insertTasks(tasks: List<TaskRow>)
     @Update fun updateTasks(tasks: List<TaskRow>)
     @Update(entity = TaskRow::class) fun updatePositions(positions: List<PositionUpdate>)

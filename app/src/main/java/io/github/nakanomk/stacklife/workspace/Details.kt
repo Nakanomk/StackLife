@@ -22,6 +22,11 @@ import io.github.nakanomk.stacklife.i18n.LanguageChoice
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.planner.AppearanceGroup
 import io.github.nakanomk.stacklife.planner.PlannerCommand
+import io.github.nakanomk.stacklife.planner.PolicyView
+import io.github.nakanomk.stacklife.planner.RoutineKind
+import io.github.nakanomk.stacklife.appearance.ClockWheelField
+import io.github.nakanomk.stacklife.reminders.ReminderPreference
+import java.time.LocalTime
 import io.github.nakanomk.stacklife.planner.RestorePolicy
 import io.github.nakanomk.stacklife.planner.Workspace
 import io.github.nakanomk.stacklife.transitions.title
@@ -79,11 +84,25 @@ internal fun MissingDetail(title: String, message: String, onBack: () -> Unit) {
 }
 
 @Composable
-internal fun SettingsScreen(restorePolicy: RestorePolicy, actions: WorkspaceActions, onBack: () -> Unit,
+internal fun SettingsScreen(settings: PolicyView, actions: WorkspaceActions, onBack: () -> Unit,
     onConnection: () -> Unit, onAppearance: (AppearanceGroup) -> Unit, onAbout: () -> Unit) {
     val action = rememberSubmission(actions)
     EditorPage(stringResource(R.string.ui_settings), onBack, AssistantPage.Settings) { top, bottom ->
             LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                item { SettingsGroup(stringResource(R.string.agenda_daily_routine)) {
+                    for (kind in RoutineKind.entries) {
+                        val wake = kind == RoutineKind.WAKE
+                        val time = settings.routine[kind]?.let { LocalTime.ofSecondOfDay(it * 60L) }
+                        ClockWheelField(time, !action.busy, Modifier.testTag(if (wake) "routine-wake" else "routine-sleep"),
+                            label = stringResource(if (wake) R.string.agenda_wake else R.string.agenda_sleep),
+                            initial = LocalTime.of(if (wake) 7 else 23, 0),
+                            onClear = { action.send(PlannerCommand.SetRoutineTime(kind, null)) }) {
+                            action.send(PlannerCommand.SetRoutineTime(kind, it.hour * 60 + it.minute))
+                        }
+                        HorizontalDivider()
+                    }
+                    ReminderPreference()
+                } }
                 item { SettingsGroup(stringResource(R.string.ui_appearance)) {
                     PreferenceRow(stringResource(R.string.ui_colors), modifier = Modifier.routeOrigin("appearance:${AppearanceGroup.COLOR.key}"),
                         leadingIcon = R.drawable.ic_palette) { onAppearance(AppearanceGroup.COLOR) }
@@ -106,7 +125,7 @@ internal fun SettingsScreen(restorePolicy: RestorePolicy, actions: WorkspaceActi
                 } }
                 item { SettingsGroup(stringResource(R.string.ui_restore_policy)) { Column(Modifier.selectableGroup()) {
                     for (policy in RestorePolicy.entries) {
-                        val selected = restorePolicy == policy
+                        val selected = settings.policy == policy
                         val muted = MaterialTheme.colorScheme.onSurfaceVariant
                         Row(Modifier.fillMaxWidth().selectable(selected, enabled = !action.busy, role = Role.RadioButton,
                             onClick = { if (!selected) action.send(PlannerCommand.SetRestorePolicy(policy)) })

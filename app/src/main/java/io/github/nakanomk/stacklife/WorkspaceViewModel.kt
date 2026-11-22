@@ -49,12 +49,12 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
     fun goal(graphId: String, goalId: String) = read<GoalOrder>(PlannerQuery.Goal(graphId, goalId))
     suspend fun preview(command: PlannerCommand) = planner.preview(listOf(command))
 
-    suspend fun previewImport(term: TermSpec, meetings: List<CourseMeeting>): PreviewResult {
-        val draft = planner.stageCourseImport(term, meetings)
+    suspend fun previewImport(term: TermSpec, meetings: List<CourseMeeting>, source: String): PreviewResult {
+        val draft = planner.stageCourseImport(term, meetings, source)
         return try { planner.preview(listOf(PlannerCommand.CourseImport(draft))) }
         finally { planner.discardCourseImport(draft) }
     }
-    suspend fun previewRemoval(term: String) = planner.preview(listOf(PlannerCommand.TermRemove(term)))
+    suspend fun previewRemoval(term: String, source: String) = planner.preview(listOf(PlannerCommand.TermRemove(term, source)))
     fun confirmProposal(id: String): String? = startWrite(notifyOnFailure = false) { commit(id) }
     fun discardProposal(id: String) = planner.discard(id)
 

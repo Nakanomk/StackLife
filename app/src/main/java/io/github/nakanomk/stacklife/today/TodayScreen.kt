@@ -71,7 +71,7 @@ internal fun TodayRoute(
             ReadPanel(state) { plan ->
                 val timeEditor: (String) -> Unit = { id -> plan.editorFor(id)?.let(onEdit) }
                 val target = revealStart.takeIf { query.date == date }
-                val entries = remember(plan.blocks, plan.courses, plan.conflictingTaskIds) { plan.chronologicalEntries() }
+                val entries = remember(plan.blocks, plan.courses, plan.conflictingTaskIds, plan.completedCourses, plan.routines) { plan.chronologicalEntries() }
                 rememberSaveableStateHolder().SaveableStateProvider(eventView) {
                     if (eventView) EventDay(plan, entries, model, timeEditor, onAdd, target, onRevealed,
                         top, bottom, trayOpen, { trayOpen = !trayOpen })
@@ -126,7 +126,7 @@ private fun DayBody(
         Box(Modifier.fillMaxSize().plannerBackdrop(noticeSource)) {
             DayWithTray(plan, drag, !submission.busy, onEdit, onAdd, top, clearance, trayOpen, toggleTray,
                 pickup = { task -> Modifier.slotDrag(SlotSource(task.id, task.minutes), drag, plan.revision, !submission.busy && trayOpen, send) }) { spine, _ ->
-                DayAxis(drag, plan.revision, !submission.busy, onEdit, send, Modifier.fillMaxSize(), top, spine, endInGutter = trayOpen)
+                DayAxis(drag, plan.revision, !submission.busy, onEdit, send, { submission.send(it) }, Modifier.fillMaxSize(), top, spine, endInGutter = trayOpen)
             }
         }
         drag.dropNotice?.let { message ->

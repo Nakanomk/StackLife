@@ -106,12 +106,38 @@ private fun tiles(classes: List<ScheduledCourse>): List<Tile> = buildList {
     }
 }
 
+private data class PeriodRail(val count: Int, val times: List<PeriodTime>, val changeover: LocalDate?)
+
+/** Mixed calendars share period numbers, not necessarily bell times. Don't print a misleading clock rail. */
+private fun periodRail(term: TermSpec, monday: LocalDate, calendars: Set<CourseCalendar?>, lastMeetingPeriod: Int): PeriodRail {
+    val first = calendars.singleOrNull()?.periods(term, monday).orEmpty()
+    var count = lastMeetingPeriod
+    var changeover: LocalDate? = null
+    for (calendar in calendars.filterNotNull()) for (n in 0L..6L) {
+        val date = monday.plusDays(n)
+        val times = calendar.periods(term, date)
+        count = maxOf(count, times.size)
+        if (calendars.size == 1 && times != first && changeover == null) changeover = date
+    }
+    return PeriodRail(count, first, changeover)
+}
+
 @Composable
-internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, openDay: ((Int) -> Unit)? = null, open: (ScheduledCourse) -> Unit) {
+internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, sources: List<String> = emptyList(),
+    openDay: ((Int) -> Unit)? = null, open: (ScheduledCourse) -> Unit) {
     val monday = remember(term.firstMonday, week.week) { term.firstMonday.plusWeeks(week.week - 1L) }
-    val periods = remember(term, monday) { term.periodsOn(monday) }
-    val changeover = term.switchDate?.takeIf { it > monday && it < monday.plusWeeks(1) }
-    val today = LocalDate.now(campusZone)
+    val calendars = remember(sources, week.classes) {
+        buildSet {
+            sources.forEach { add(calendarFor(it)) }
+            week.classes.forEach { add(calendarFor(it.source)) }
+            if (isEmpty()) add(SchoolImports.default.calendar) // Empty manual timetable.
+        }
+    }
+    val railLayout = remember(term, monday, calendars, week.classes) {
+        periodRail(term, monday, calendars, week.classes.maxOfOrNull { it.meeting.lastPeriod } ?: 0)
+    }
+    val changeover = railLayout.changeover
+    val today = LocalDate.now(calendars.singleOrNull()?.zone ?: java.time.ZoneId.systemDefault())
     val typography = MaterialTheme.typography
     val density = LocalDensity.current
     val periodHeight = with(density) { (typography.labelMedium.lineHeight.toDp() * 3 + 8.dp).coerceAtLeast(56.dp) }
@@ -162,8 +188,8 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, ope
                     style = typography.bodySmall, color = colors.onSurfaceVariant)
                 if (changeover != null) Text(stringResource(R.string.courses_changeover, changeover.format(dateFormat)),
                     Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = typography.bodySmall, color = colors.onSurfaceVariant)
-                PeriodGrid(term.id, week, periods, showTimes = changeover == null, dayCount = 7,
-                    highlightedDay = today.toEpochDay() - monday.toEpochDay(), rail, dayWidth, periodHeight, open)
+                PeriodGrid(term.id, week, railLayout.times, showTimes = changeover == null, dayCount = 7,
+                    highlightedDay = today.toEpochDay() - monday.toEpochDay(), rail, dayWidth, periodHeight, open, railLayout.count)
                 Spacer(Modifier.height(bottom + 4.dp))
             }
         }
@@ -173,7 +199,7 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, ope
 /** Only the real grid and rail are recorded as the backdrop; tile labels never sample themselves. */
 @Composable
 private fun PeriodGrid(termId: String, week: CourseWeek, periods: List<PeriodTime>, showTimes: Boolean, dayCount: Int,
-    highlightedDay: Long, rail: Dp, dayWidth: Dp, periodHeight: Dp, open: ((ScheduledCourse) -> Unit)? = null) {
+    highlightedDay: Long, rail: Dp, dayWidth: Dp, periodHeight: Dp, open: ((ScheduledCourse) -> Unit)? = null, periodCount: Int = periods.size) {
     val arrangement = remember(week.classes) { tiles(week.classes) }
     val pigments = remember(termId, week.colorIndices) {
         week.colorIndices.mapValues { (_, index) -> courseColor(termId, index) }
@@ -185,7 +211,7 @@ private fun PeriodGrid(termId: String, week: CourseWeek, periods: List<PeriodTim
         Stroke(with(density) { 1.05.dp.toPx().coerceAtLeast(2f) }, join = StrokeJoin.Round)
     } else null
     val ruleBlend = if (colors.surface.luminance() < .5f) BlendMode.Screen else BlendMode.Multiply
-    GlassBacking(Modifier.fillMaxWidth().height(periodHeight * periods.size), background = {
+    GlassBacking(Modifier.fillMaxWidth().height(periodHeight * periodCount), background = {
         Box(Modifier.fillMaxSize().background(colors.surface).drawBehind {
             val x0 = rail.toPx(); val cell = dayWidth.toPx(); val row = periodHeight.toPx()
             drawRect(colors.surfaceContainerLow, size = Size(x0, size.height))
@@ -197,16 +223,17 @@ private fun PeriodGrid(termId: String, week: CourseWeek, periods: List<PeriodTim
                 drawLine(colors.outlineVariant, Offset(x, 0f), Offset(x, size.height), rule, blendMode = ruleBlend)
             }
             // A stroke centred on the texture boundary loses half its coverage before sampling.
-            for (i in 0..periods.size) {
-                val y = when (i) { 0 -> rule / 2; periods.size -> size.height - rule / 2; else -> row * i }
+            for (i in 0..periodCount) {
+                val y = when (i) { 0 -> rule / 2; periodCount -> size.height - rule / 2; else -> row * i }
                 drawLine(colors.outlineVariant, Offset(0f, y), Offset(size.width, y), rule, blendMode = ruleBlend)
             }
         }) {
             Column(Modifier.width(rail)) {
-                for ((i, period) in periods.withIndex()) Column(Modifier.fillMaxWidth().height(periodHeight),
+                for (i in 0 until periodCount) Column(Modifier.fillMaxWidth().height(periodHeight),
                     verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("${i + 1}", style = typography.labelMedium, color = colors.onSurface)
-                    if (showTimes) {
+                    val period = periods.getOrNull(i)
+                    if (showTimes && period != null) {
                         Text(period.start.toString(), style = typography.labelSmall, color = colors.onSurfaceVariant, maxLines = 1)
                         Text(period.end.toString(), style = typography.labelSmall, color = colors.onSurfaceVariant, maxLines = 1)
                     }
@@ -248,7 +275,7 @@ private fun CourseTile(tile: Tile, swatch: Color, outline: Stroke?, open: ((Sche
 @Composable
 internal fun CourseTimetablePreview() {
     val term = remember { TermSpec("appearance-preview", LocalDate.of(2026, 9, 7), 1, BellSchedule.SUMMER) }
-    val periods = remember(term) { term.periodsOn(term.firstMonday).take(3) }
+    val periods = remember(term) { SchoolImports.default.calendar.periods(term, term.firstMonday).take(3) }
     val physicsLabel = stringResource(R.string.courses_sample_physics)
     val designLabel = stringResource(R.string.courses_sample_design)
     val week = remember(term, physicsLabel, designLabel) {

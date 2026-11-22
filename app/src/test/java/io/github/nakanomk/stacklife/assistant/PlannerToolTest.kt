@@ -29,7 +29,7 @@ class PlannerToolTest {
         override suspend fun preview(commands: List<PlannerCommand>): PreviewResult = error("tool preview")
         override suspend fun commit(proposalId: String): CommitResult = error("tool commit")
         override fun discard(proposalId: String): Unit = error("tool discard")
-        override fun stageCourseImport(term: TermSpec, meetings: List<CourseMeeting>): String = error("tool import")
+        override fun stageCourseImport(term: TermSpec, meetings: List<CourseMeeting>, source: String): String = error("tool import")
         override fun discardCourseImport(draftId: String): Unit = error("tool import discard")
     }
 

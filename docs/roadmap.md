@@ -74,7 +74,13 @@ interface PlannerApi {
 
 只有「全部恢复」且策略为 `SWAP` 且当前队列非空，才自动保存眼前队列，与恢复同一事务；失败/取消不改队列、两帧或次序。**占位独立于工作归属**：压栈保留预约，轴上注明「已压栈 · 仍占用时段」；恢复不复制、不改时，旧快照不覆盖用户后来的安排。
 
+**清理历史。** 详情可删除一条已取空的栈帧，栈列表「清除历史」可一次删除确认时所列的空帧。两者都先说明数量和不可撤销，再在同一事务删除快照与帧，不移除任务、不释放预约。帧内仍有未完成任务或确认期间状态改变时不执行。
+
 ## M2 今天
+
+**完成、作息与提醒。** 时间／事件视图的右侧复选框与正文、拖动手柄各自响应。任务完成仍保留时段；取消完成回原栈帧或原队列位置。原帧已清除，或旧版本未记录原归属时，放回队尾，不复活历史。固定课次按来源、学期及具体课次独立打勾。起床／就寝参照 [Structured 日时间轴](https://help.structured.app/en/articles/380546)；在设置最上方分别设定或清除，默认都未设置。按设备当地日期显示为不挤占其他预约的时间点。完成只影响当天；夏令时跳时向后顺延，重复小时取第一次，整日不存在则跳过。
+
+系统提醒使用 [Android AlarmManager](https://developer.android.com/develop/background-work/services/alarms) 与[通知运行时授权](https://developer.android.com/develop/ui/views/notifications/notification-permission)。只为已排程且未完成的任务、课次与作息提醒，默认提前 15 分钟；进入提前窗口才添加的立即提醒，已经开始的不补发。同刻合并。改时、取消和完成后重新核对，不靠常驻轮询。重启、更新、改时区后重新安排；锁屏不展示内容。Android 13+ 在设置中请求通知；未获精确闹钟权限时使用可能延迟的系统提醒。
 
 完整导航为「今天 / 工作台 / 流程图 / 课表」，设置从顶栏进；今天默认设备所在日期。时间轴延伸至日程助理输入栏的上沿，不藏在输入栏或导航下面。右下加号下的**非模态**待排队列默认展开；点标题可收成小球，再点原地展开，收起后时间轴仍用满输入栏上方的空间。切日、切页和旋转不重置用户刚选的开合状态。收起时箭头向上，展开时向下，队列上缘渐变磨砂。「布局 → 待排队列」可改回常驻托盘。待排指无时段的在队任务。轴和拖动参考 [Structured](https://structured.app/visual-planning) 与 [Planner Hours](https://github.com/baslawson/Planner#features)，小球变列表参考 [Material Container Transform](https://github.com/material-components/material-components-android/blob/master/docs/theming/Motion.md#container-transform)。
 
@@ -88,7 +94,7 @@ interface PlannerApi {
 
 ## M3 华科课表
 
-编译期登记 `HustCourseImporter`（插件 ID `hust-hub`）。`CourseImporter.parse(rows: JsonArray, term: TermSpec): ImportDraft` 是纯 Kotlin，无网络、DAO 或密码。只支持两条已知输入，两路共用解析/预览：
+`SchoolImports` 编译期登记真正可用的学校，现在仅华科（`hust-hub`）。每校提供采集入口、原始格式解析／纠错、帮助、时区和节次表。通用预览与存储接收 `ReviewedTimetable(source, term, meetings)`；重导和删除只作用于同来源、同学期。同学期多来源且未指定学校时不会猜测，手动课程独立。新增学校不需要修改「今天」或新增数据库表。华科的纯 Kotlin 解析器无网络、DAO 或密码，两种已知输入共用解析／预览：
 
 1. 「从 HUB 网页提取课表」在手机内打开[校方登录页](https://hubs.hust.edu.cn/login)。本人完成认证后点「总课表」，选学期，点「提取」进入学期确认，无需电脑或中间文件。`app/src/main/assets/importers/hust-hub.js` 的 Vue 父链查找依据 `../WadwaitaUp/browser.py:37–62`。
 2. Android 系统文件选择器选本人导出的原始周数组 JSON；格式依据 `../WadwaitaUp/tools/hust_converter.py:6–16,84–100`。不架中转服务，不承诺兼容未核实格式。
@@ -154,9 +160,10 @@ interface PlannerApi {
 基线是 Android 标准 Material 3。字形走平台 sans-serif 与中文回退，不分发苹方或按品牌模拟字形。页名使用 `titleLarge`（22/28sp），普通列表标题 `bodyLarge`（16/24sp），次要信息 `bodyMedium`（14/20sp），导航与时间刻度使用标签角色（12/16sp）。是否强调由信息角色决定，不把普通任务当成展示大标题。使用标准 motion scheme；减少动效仍然生效。
 
 - 四个根页面在同一横向分页容器中，导航与助理位于容器外。默认浮动导航，支持改为贴底；键盘出现时收起主导航。根页不重复页名，顶栏中间胶囊放日期、队列/栈、流程图创建或教学周；独立动作用圆形按钮。右下加号属于页面。手动操作不依赖模型。
-- 设置首页按外观、通用、日程助理和工作台恢复策略分组。「色彩」「布局」「材质与动态」各有独立目的地，只显示、保存或恢复本页字段。色彩支持随系统/浅/深、Android 12+ 动态色或种子（默认 `#435D92`）；使用 [MaterialKolor 6.0.0](https://github.com/jordond/MaterialKolor/releases/tag/6.0.0) 生成 `SPEC_2025` 颜色角色。
+- 设置首页先显示「日程与作息」，随后是外观、通用、日程助理和工作台恢复策略。「色彩」「布局」「材质与动态」各有独立目的地，只显示、保存或恢复本页字段。色彩支持随系统/浅/深、Android 12+ 动态色或种子（默认 `#435D92`）；使用 [MaterialKolor 6.0.0](https://github.com/jordond/MaterialKolor/releases/tag/6.0.0) 生成 `SPEC_2025` 颜色角色。
 - 「通用 → 语言」使用和外观相同的[单选项设置](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/SettingsSelectionComponents.kt#L14-L45)：**跟随系统**（默认）、**English**、**中文**。跟随系统按语言顺序选择中／英文，均不匹配或列表为空时用英文。Android 13 起与[系统的应用语言设置](https://developer.android.com/guide/topics/resources/app-languages#app-language-settings)双向同步，旧系统在本机保存。语言选择不改任务、课程、栈帧快照和历史对话原文。
 - 「通用 → 帮助与关于」参照 [BiliPai 关于页](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/ui/MaterialAboutContent.kt)，列出开发者、仓库、实装版本、基础 APK 和签名证书各自的 SHA-256。「开源许可」可离线阅读 StackLife 与第三方组件的许可全文。诊断仅在主动开始后监听主窗口的 [FrameMetrics](https://developer.android.com/reference/android/view/FrameMetrics)，退到后台即结束；帧超时和丢失采样分别计数。事件日志只含固定代码，不含账号、密钥、任务或消息正文；只有手动选择[系统文件位置](https://developer.android.com/training/data-storage/shared/documents-files#create-file)才会导出。
+- 关于页四项菜单和许可正文都从实际点到的行展开，返回收回该行；保留各列表位置并响应预测返回与减弱动画，不把抽屉动效用于全页。「版本与项目」和许可列表顶部都能离线打开与仓库 [`LICENSE`](../LICENSE) 相同的 GPL 文本。项目声明为 `GPL-3.0-or-later`，第三方声明单列。
 - 支持标准/紧凑留白、主导航次序/启动页、任务时长/备注、贴底/浮动、常驻/悬浮队列、材质总开关和导航/助理分项、减弱动效、减少透明度、增强对比及系统触感。默认舒适、今天、动态色、悬浮队列、玻璃开启。首次启动和升级时没有 `glass` 字段的配置均用开启；显式 `false` 不因升级改变，减少透明度和增强对比仍优先。三种恢复策略不受外观重置影响。
 - 首发图标为原创 fumo 颜文字 **`ᗜˬᗜ`**：两只对称方眼和低位短弧嘴，用独立矢量笔画，不依赖字库、商业布偶照片，不强画天子肖像。按 [Android Adaptive Icon](https://developer.android.com/develop/ui/views/launch/icon_design_adaptive) 做 108×108 dp 分层，识别区在中心 66×66 dp，彩色前景/背景及 monochrome 层共用轮廓，不预烘启动器圆角/阴影。空队列小标沿用同一张脸，不用颜文字代替操作标签。
 

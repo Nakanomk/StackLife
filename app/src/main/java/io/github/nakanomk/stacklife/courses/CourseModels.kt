@@ -1,20 +1,24 @@
 package io.github.nakanomk.stacklife.courses
 
 import io.github.nakanomk.stacklife.i18n.uiText
+import io.github.nakanomk.stacklife.i18n.AppLanguage
+import java.time.DayOfWeek
+import java.time.format.TextStyle
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 
-const val HUST_SOURCE = "hust-hub"
+data class ReviewedTimetable(val source: String, val term: TermSpec, val meetings: List<CourseMeeting>)
 const val MANUAL_SOURCE = "manual"
 internal const val MAX_COURSE_FIELD = 256
 internal fun courseFieldProblem(title: String, room: String): String? = when {
-    title.isBlank() -> uiText("KCMC course name cannot be blank.", "KCMC 课名不能为空")
+    title.isBlank() -> uiText("Class name cannot be blank.", "课名不能为空")
     title.length > MAX_COURSE_FIELD || room.length > MAX_COURSE_FIELD -> uiText({ "Course name or room exceeds $MAX_COURSE_FIELD characters. Correct or exclude this entry." }, { "课名或教室超过 $MAX_COURSE_FIELD 个字符，请修正或排除此项。" })
     else -> null
 }
 
-val campusZone: ZoneId = ZoneId.of("Asia/Shanghai")
+val campusZone: ZoneId get() = SchoolImports.default.calendar.zone
+internal fun weekday(day: Int): String = DayOfWeek.of(day).getDisplayName(TextStyle.SHORT, AppLanguage.locale)
 enum class BellSchedule { SUMMER, WINTER }
 data class PeriodTime(val start: LocalTime, val end: LocalTime)
 data class TermSpec(val id: String, val firstMonday: LocalDate, val weeks: Int, val initial: BellSchedule, val switchDate: LocalDate? = null)
@@ -45,10 +49,17 @@ fun TermSpec.problem(): String? = when {
     }
 }
 
-fun TermSpec.meeting(week: Int, day: Int, title: String, room: String, firstPeriod: Int, lastPeriod: Int): CourseMeeting {
-    val date = firstMonday.plusWeeks(week - 1L).plusDays(day - 1L)
-    val periods = periodsOn(date)
+fun TermSpec.meeting(week: Int, day: Int, title: String, room: String, firstPeriod: Int, lastPeriod: Int,
+    calendar: CourseCalendar = SchoolImports.default.calendar): CourseMeeting =
+    requireNotNull(calendar.meetingOrNull(this, week, day, title, room, firstPeriod, lastPeriod))
+
+internal fun CourseCalendar.meetingOrNull(term: TermSpec, week: Int, day: Int, title: String, room: String,
+    firstPeriod: Int, lastPeriod: Int): CourseMeeting? {
+    if (week !in 1..term.weeks || day !in 1..7) return null
+    val date = term.firstMonday.plusWeeks(week - 1L).plusDays(day - 1L)
+    val periods = periods(term, date)
+    if (firstPeriod !in 1..periods.size || lastPeriod !in firstPeriod..periods.size) return null
     return CourseMeeting(week, day, title, room, firstPeriod, lastPeriod,
-        date.atTime(periods[firstPeriod - 1].start).atZone(campusZone).toInstant().toEpochMilli(),
-        date.atTime(periods[lastPeriod - 1].end).atZone(campusZone).toInstant().toEpochMilli())
+        date.atTime(periods[firstPeriod - 1].start).atZone(zone).toInstant().toEpochMilli(),
+        date.atTime(periods[lastPeriod - 1].end).atZone(zone).toInstant().toEpochMilli())
 }

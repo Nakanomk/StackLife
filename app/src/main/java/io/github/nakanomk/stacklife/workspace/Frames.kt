@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
+import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.transitions.DetailCard
 import io.github.nakanomk.stacklife.transitions.DetailListSource
@@ -31,12 +32,17 @@ import io.github.nakanomk.stacklife.transitions.routeOrigin
 @Composable
 internal fun FrameList(
     frames: List<FrameView>, scroll: LazyListState, onFrame: (String) -> Unit, onCreate: () -> Unit,
-    shared: SharedModifier, topClearance: Dp, bottomClearance: Dp, revision: Long,
+    shared: SharedModifier, topClearance: Dp, bottomClearance: Dp, revision: Long, actions: WorkspaceActions,
 ) {
     val source = detailListSource(scroll, topClearance, bottomClearance, revision)
     val available = remember(frames) {
         frames.indexOfFirst { it.remaining == 0 }.let { if (it == -1) frames.size else it }
     }
+    var clearing by remember { mutableStateOf<List<String>?>(null) }
+    val deletion = rememberSubmission(actions) { clearing = null }
+    clearing?.let { ids -> ConfirmFrameDeletion(ids.size, deletion.busy, { clearing = null }) {
+        deletion.send(PlannerCommand.DeleteFrameHistory(ids))
+    } }
     LazyColumn(Modifier.fillMaxSize().then(source?.modifier ?: Modifier).testTag("frames"), state = scroll,
         contentPadding = dockListPadding(topClearance, bottomClearance), verticalArrangement = listSpacing) {
         item {
@@ -56,7 +62,13 @@ internal fun FrameList(
         }
         if (available > 0) item { SectionTitle(stringResource(R.string.ui_recent_frames)) }
         items(available, key = { frames[it].id }) { FrameCard(frames[it], onFrame, shared, source) }
-        if (available < frames.size) item { SectionTitle(stringResource(R.string.ui_emptied_frames)) }
+        if (available < frames.size) item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { SectionTitle(stringResource(R.string.ui_emptied_frames)) }
+                TextButton(modifier = Modifier.testTag("clear-frame-history"), enabled = !deletion.busy,
+                    onClick = { clearing = frames.subList(available, frames.size).map { it.id } }) { Text(stringResource(R.string.agenda_clear_history)) }
+            }
+        }
         items(frames.size - available, key = { frames[available + it].id }) {
             FrameCard(frames[available + it], onFrame, shared, source)
         }
@@ -83,6 +95,14 @@ private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: Share
 @Composable
 internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: () -> Unit, shared: SharedModifier, onEdit: (String) -> Unit) {
     val frame = state.frames.find { it.id == id }
+    var deleting by rememberSaveable(id) { mutableStateOf(false) }
+    val deletion = rememberSubmission(actions) { result ->
+        deleting = false
+        if (result == SaveOutcome.APPLIED) onBack()
+    }
+    if (deleting) ConfirmFrameDeletion(1, deletion.busy, { deleting = false }) {
+        deletion.send(PlannerCommand.DeleteFrameHistory(listOf(id)))
+    }
     if (frame == null) {
         MissingDetail(stringResource(R.string.ui_frame_details), stringResource(R.string.ui_frame_missing), onBack)
         return
@@ -125,6 +145,10 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
                     Text(stringResource(R.string.ui_frame_remaining, entries.size, frame.remaining), style = MaterialTheme.typography.bodyMedium)
                     if (frame.source == FrameSource.PUSH && frame.reason.isBlank() && !editingReason && !choosing)
                         TextButton(onClick = { editingReason = true }) { Text(stringResource(R.string.ui_add_reason)) }
+                    if (frame.remaining == 0)
+                        TextButton(modifier = Modifier.testTag("delete-frame-history"), onClick = { deleting = true }) {
+                            Text(stringResource(R.string.agenda_delete_history), color = MaterialTheme.colorScheme.error)
+                        }
                 }
             }
             if (frame.remaining > 0) item {
@@ -171,6 +195,17 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
             }
         }
     }
+}
+
+@Composable
+private fun ConfirmFrameDeletion(count: Int, busy: Boolean, close: () -> Unit, confirm: () -> Unit) {
+    PlannerAlertDialog(onDismissRequest = { if (!busy) close() },
+        title = { Text(stringResource(R.string.agenda_delete_history)) },
+        text = { Text(stringResource(R.string.agenda_delete_history_message, count)) },
+        dismissButton = { TextButton(onClick = close, enabled = !busy) { Text(stringResource(R.string.ui_cancel)) } },
+        confirmButton = { TextButton(onClick = confirm, enabled = !busy, modifier = Modifier.testTag("confirm-frame-deletion")) {
+            Text(stringResource(R.string.agenda_delete), color = MaterialTheme.colorScheme.error)
+        } })
 }
 
 @Composable

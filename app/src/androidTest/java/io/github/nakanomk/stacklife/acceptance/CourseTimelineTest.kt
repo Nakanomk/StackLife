@@ -6,6 +6,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.planner.PlannerCommand.*
+import io.github.nakanomk.stacklife.storage.RoomPlannerApi
 import java.time.*
 import kotlin.math.abs
 import kotlinx.coroutines.flow.first
@@ -27,7 +28,7 @@ class CourseTimelineTest {
         val input = InstrumentationRegistry.getInstrumentation().context.assets.open("hust-week-acceptance.json").use(::readWeekFile)
         val draft = HustCourseImporter.parse(input, term)
         assertEquals("实践", draft.issues.single().fields!!.period)
-        return draft.resolve(mapOf(draft.issues.single().position to IssueDecision.Exclude))
+        return draft.resolve(mapOf(draft.issues.single().position to IssueDecision.Exclude)).meetings
     }
     private suspend fun proposal(spec: TermSpec, meetings: List<CourseMeeting>, vararg before: PlannerCommand): PreviewResult {
         val id = store.api.stageCourseImport(spec, meetings)
@@ -102,14 +103,58 @@ class CourseTimelineTest {
         assertTrue(both.getValue(HUST_SOURCE).conflicts.single().contains("交换学期研讨"))
         val foreign = both.getValue("another-source")
         assertTrue(foreign.conflicts.single().contains("操作系统"))
-        val removal = store.proposal(TermRemove(term.id)); assertEquals(3, removal.changes.count { it.field.startsWith("移除课程") })
+        assertTrue(store.api.preview(listOf(TermRemove(term.id))) is PreviewResult.Rejected)
+        val removal = store.proposal(TermRemove(term.id, HUST_SOURCE)); assertEquals(3, removal.changes.count { it.field.startsWith("移除课程") })
         assertEquals(nov, both.getValue(HUST_SOURCE).meeting)
         store.api.discard(removal.proposalId); assertEquals(term, week(1).term)
-        store.apply(TermRemove(term.id)); assertNull(week(1).term)
+        store.apply(TermRemove(term.id, HUST_SOURCE)); assertEquals(term, week(1).term)
+        assertEquals(setOf("another-source"), week(9).classes.map { it.source }.toSet())
         assertEquals(listOf(foreign.copy(conflicts = emptyList())), day(winter).courses)
         assertEquals("独立课", week(2, other.id).classes.single().meeting.title)
         db.query("SELECT COUNT(*) FROM course_terms WHERE source='another-source'").use { assertTrue(it.moveToFirst()); assertEquals(1, it.getInt(0)) }
         assertEquals(originalQueue, store.state().queue)
+    }
+
+    @Test fun alternateReviewedSourceReplacesOnlyItsOwnTermAndUsesItsOwnBellTimes() = runBlocking {
+        val alternate = "test-campus"
+        // A Sunday evening at this school falls on Monday in Beijing; it is still in week one.
+        val calendar = object : CourseCalendar {
+            override val zone = ZoneId.of("America/Vancouver")
+            private val bells = (8..20).map { PeriodTime(LocalTime.of(it, 0), LocalTime.of(it, 45)) }
+            override fun periods(term: TermSpec, date: LocalDate) = bells
+            override fun scheduleDescription(term: TermSpec) = "Test schedule"
+        }
+        val api = RoomPlannerApi(store.db, SchoolImports.calendars + (alternate to calendar))
+        suspend fun save(reviewed: ReviewedTimetable) {
+            val id = api.stageCourseImport(reviewed.term, reviewed.meetings, reviewed.source)
+            try {
+                val preview = api.preview(listOf(CourseImport(id)))
+                assertTrue(preview.toString(), preview is PreviewResult.Ready)
+                assertTrue(api.commit((preview as PreviewResult.Ready).proposalId) is CommitResult.Applied)
+            } finally { api.discardCourseImport(id) }
+        }
+        val manual = ManualSeries(CoursePattern("Manual", "M", 4, 1, 1), setOf(1))
+        store.apply(ManualCourse(term.id, null, manual, term))
+        val raw = InstrumentationRegistry.getInstrumentation().context.assets.open("hust-week-acceptance.json").use(::readWeekFile)
+        val hust = HustCourseImporter.parse(raw, term)
+        save(hust.resolve(mapOf(hust.issues.single().position to IssueDecision.Exclude)))
+        val sunday = term.meeting(1, 7, "Seminar", "E", 13, 13, calendar)
+        val reviewed = ReviewedTimetable(alternate, term, listOf(sunday))
+        save(reviewed)
+        val moved = sunday.copy(room = "W")
+        save(reviewed.copy(meetings = listOf(moved)))
+        store.reopen()
+        val rows = week(1).classes.associateBy { it.source }
+        assertEquals(setOf(alternate, MANUAL_SOURCE, HUST_SOURCE), rows.keys)
+        assertEquals(3, week(1).classes.size)
+        assertEquals(moved, rows.getValue(alternate).meeting)
+        assertEquals("A", rows.getValue(HUST_SOURCE).meeting.room)
+        assertEquals("Manual", rows.getValue(MANUAL_SOURCE).meeting.title)
+        val catalog = store.api.observe(PlannerQuery.Terms).first() as Terms
+        assertEquals(setOf(alternate, HUST_SOURCE), catalog.importedSources.getValue(term.id).toSet())
+        store.apply(TermRemove(term.id, alternate))
+        assertEquals(setOf(HUST_SOURCE, MANUAL_SOURCE), week(1).classes.map { it.source }.toSet())
+        assertTrue(store.api.preview(listOf(TermRemove(term.id, MANUAL_SOURCE))) is PreviewResult.Rejected)
     }
 
     @Test fun importingOntoAnExistingSlotLabelsBothAndProtectsTheRightEndpoint() = runBlocking {

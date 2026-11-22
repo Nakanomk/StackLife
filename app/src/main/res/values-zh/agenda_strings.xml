@@ -1,0 +1,12 @@
+<resources>
+    <string name="agenda_complete">将%1$s标记为已完成</string>
+    <string name="agenda_reopen">将%1$s标记为未完成</string>
+    <string name="agenda_daily_routine">日程与作息</string>
+    <string name="agenda_wake">起床</string>
+    <string name="agenda_sleep">就寝</string>
+    <string name="agenda_clear_time">移除时间</string>
+    <string name="agenda_clear_history">清除历史</string>
+    <string name="agenda_delete_history">删除栈帧历史</string>
+    <string name="agenda_delete_history_message">永久删除这 %1$d 条已取空的栈帧记录？原任务和已安排的时段不会改变。</string>
+    <string name="agenda_delete">删除</string>
+</resources>

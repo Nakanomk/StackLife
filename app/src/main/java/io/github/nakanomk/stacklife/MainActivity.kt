@@ -73,7 +73,7 @@ class MainActivity : LocalizedActivity() {
 @Serializable private data object AddTask : NavKey
 @Serializable private data object CreateFrame : NavKey
 @Serializable private data object ImportCourses : NavKey
-@Serializable private data class RemoveTerm(val id: String) : NavKey
+@Serializable private data class RemoveTerm(val id: String, val source: String = SchoolImports.default.id) : NavKey
 @Serializable private data class GraphEditor(val id: String) : NavKey
 
 private fun NavKey.motionKey(): String = when (this) {
@@ -84,7 +84,7 @@ private fun NavKey.motionKey(): String = when (this) {
     is SlotEditorKey -> "slot:$taskId"
     is GraphEditor -> "graph:$id"
     is EditAppearance -> "appearance:$group"
-    is RemoveTerm -> "remove-term:$id"
+    is RemoveTerm -> "remove-term:$id:$source"
     Preferences -> "settings"
     HelpAbout -> "about"
     ModelConnection -> "model"
@@ -205,7 +205,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                                                 Destination.GRAPHS -> GraphsRoute(model, { navigate(GraphEditor(it)) }, { navigate(Preferences) })
                                                 Destination.COURSES -> CoursesRoute(model, selectedTerm, selectedWeek,
                                                     onTerm = { selectedTerm = it.id; selectedWeek = null }, onWeek = { selectedWeek = it },
-                                                    onImport = { navigate(ImportCourses) }, onRemove = { navigate(RemoveTerm(it.id)) },
+                                                    onImport = { navigate(ImportCourses) }, onRemove = { term, source -> navigate(RemoveTerm(term.id, source)) },
                                                     onSettings = { navigate(Preferences) }, onScope = { courseScope = it })
                                             }
                                         }
@@ -230,7 +230,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 entry<ImportCourses> { PrivateScreen(privateScreens) {
                     CourseImportScreen(model, back) { id -> selectedTerm = id; selectedWeek = 1; back() }
                 } }
-                entry<RemoveTerm> { key -> RemoveTermReview(key.id, model, back) }
+                entry<RemoveTerm> { key -> RemoveTermReview(key.id, key.source, model, back) }
                 entry<GraphEditor> { key -> GraphEditorRoute(model, key.id, back) { navigate(FrameDetail(it, generated = true)) } }
                 entry<TaskDetail> { key ->
                     DetailRoute("task:${key.id}", animate && initialDetail == null) {
@@ -250,7 +250,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     }
                 }
                 entry<Preferences> {
-                    SettingsScreen(preferences.policy, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) }, { navigate(HelpAbout) })
+                    SettingsScreen(preferences, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) }, { navigate(HelpAbout) })
                 }
                 entry<HelpAbout> { HelpAboutScreen(back) }
                 entry<EditAppearance> { key -> AppearanceEditor(preferences.appearance,

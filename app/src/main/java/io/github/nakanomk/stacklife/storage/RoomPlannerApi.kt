@@ -12,8 +12,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
+class RoomPlannerApi(private val db: PlannerDatabase, private val importCalendars: Map<String, CourseCalendar> = SchoolImports.calendars,
+    private val afterCommit: suspend () -> Unit = {}) : PlannerApi {
     private val dao = db.plannerDao()
+    private val agenda = db.agendaDao()
     private val pending = ConcurrentHashMap<String, Proposal>()
     private val courses = db.courseDao()
     private val graphs = db.graphDao()
@@ -32,20 +34,25 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
                     is PlannerQuery.Frame -> FrameDetailResult(dao.frame(query.frameId)?.let { f ->
                         FrameView(f.id, f.reason, f.savedAtMillis, f.source, dao.frameEntries(f.id).map { it.entry() })
                     })
-                    PlannerQuery.Settings -> PolicyView(settings.restorePolicy, decodeAppearance(settings.appearance))
+                    PlannerQuery.Settings -> PolicyView(settings.restorePolicy, decodeAppearance(settings.appearance), settings.routine())
                     is PlannerQuery.Day -> {
                         val tray = dao.dayTray()
                         if (query.startMillis >= query.endMillis) DayPlan(query, settings.revision, tray, emptyList())
                         else {
                             val slots = dao.dayBlocks(query.startMillis, query.endMillis)
                             val occupied = CourseOccupancy(courses.intersecting(query.startMillis, query.endMillis), slots)
-                            DayPlan(query, settings.revision, tray, slots, occupied.courses, occupied.taskIds)
+                            val routine = settings.routine()
+                            val done = agenda.routineTicks(query.date.toEpochDay())
+                            val daily = RoutineKind.entries.mapNotNull { routine.event(it, query.date, query.zone, it in done) }
+                            val courseTicks = if (occupied.courses.isEmpty()) emptySet() else
+                                agenda.courseTicks(query.startMillis, query.endMillis).mapTo(HashSet()) { it.occurrence }
+                            DayPlan(query, settings.revision, tray, slots, occupied.courses, occupied.taskIds, courseTicks, daily)
                         }
                     }
                     PlannerQuery.Terms -> {
-                        val rows = courses.terms(HUST_SOURCE, MANUAL_SOURCE)
+                        val rows = courses.terms()
                         Terms(rows.distinctBy { it.termId }.map(TermRow::spec),
-                            rows.filter { it.source == HUST_SOURCE }.mapTo(mutableSetOf()) { it.termId })
+                            rows.filter { it.source != MANUAL_SOURCE }.groupBy({ it.termId }, { it.source }))
                     }
                     is PlannerQuery.Week -> week(query)
                     is PlannerQuery.ManualWeeks -> with(query.pattern) {
@@ -69,27 +76,27 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
         }
 
     private fun week(query: PlannerQuery.Week): CourseWeek {
-        val term = (courses.term(query.termId, HUST_SOURCE) ?: courses.term(query.termId, MANUAL_SOURCE))?.spec()
+        val term = courses.terms(query.termId).firstOrNull()?.spec()
             ?: return CourseWeek(null, query.week, emptyList())
         if (query.week !in 1..term.weeks) return CourseWeek(term, query.week, emptyList())
-        val monday = term.firstMonday.plusWeeks(query.week - 1L)
-        val start = monday.atStartOfDay(campusZone).toInstant().toEpochMilli()
-        val end = monday.plusWeeks(1).atStartOfDay(campusZone).toInstant().toEpochMilli()
+        val range = courses.weekBounds(term.id, query.week)
+        val start = range.firstStart ?: return CourseWeek(term, query.week, emptyList())
+        val end = range.lastEnd ?: return CourseWeek(term, query.week, emptyList())
         val occupancy = CourseOccupancy(courses.intersecting(start, end), dao.dayBlocks(start, end))
-        val visible = occupancy.courses.filter { it.termId == term.id && (it.source == MANUAL_SOURCE || it.source == HUST_SOURCE) }
+        val visible = occupancy.courses.filter { it.termId == term.id && it.meeting.week == query.week }
         if (visible.isEmpty()) return CourseWeek(term, query.week, visible)
         val titles = visible.mapTo(HashSet()) { it.meeting.title }
         val indices = buildMap {
-            courses.orderedTitles(term.id, HUST_SOURCE, MANUAL_SOURCE).forEachIndexed { index, title ->
+            courses.orderedTitles(term.id).forEachIndexed { index, title ->
                 if (title in titles) put(title, index)
             }
         }
         return CourseWeek(term, query.week, visible, indices)
     }
 
-    override fun stageCourseImport(term: TermSpec, meetings: List<CourseMeeting>): String {
+    override fun stageCourseImport(term: TermSpec, meetings: List<CourseMeeting>, source: String): String {
         val id = UUID.randomUUID().toString()
-        reviewed[id] = ReviewedCourses(term, meetings.toList())
+        reviewed[id] = ReviewedCourses(term, meetings.toList(), source, importCalendars[source])
         return id
     }
     override fun discardCourseImport(draftId: String) { reviewed.remove(draftId) }
@@ -107,7 +114,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
 
     override suspend fun preview(commands: List<PlannerCommand>): PreviewResult {
         val proposal = try {
-            db.withTransaction { BatchDraft(dao, courses, graphs, reviewed, dao.settings() ?: SettingsRow()).plan(commands) }
+            db.withTransaction { BatchDraft(dao, courses, graphs, agenda, reviewed, dao.settings() ?: SettingsRow()).plan(commands) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: InvalidCommand) {
@@ -134,7 +141,7 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
                 if (revision != proposal.baseRevision) {
                     CommitResult.Rejected(CommitFailure.STALE_PREVIEW, uiText("The workspace has changed. Preview again.", "工作台已有变更，请重新预览。"))
                 } else {
-                    proposal.applyTo(dao, courses, graphs)
+                    proposal.applyTo(dao, courses, graphs, agenda)
                     CommitResult.Applied(proposal.settings.revision)
                 }
             }
@@ -142,9 +149,14 @@ class RoomPlannerApi(private val db: PlannerDatabase) : PlannerApi {
             throw e
         } catch (e: Exception) {
             CommitResult.Rejected(CommitFailure.STORAGE, uiText({ "Could not save changes: ${e.localizedMessage ?: e.javaClass.simpleName}" }, { "未能保存更改：${e.localizedMessage ?: e.javaClass.simpleName}" }))
-        }.also(AppDiagnostics::recordCommit)
+        }.also { result ->
+            AppDiagnostics.recordCommit(result)
+            if (result is CommitResult.Applied && proposal.agendaChanged) afterCommit()
+        }
     }
 }
+
+internal fun SettingsRow.routine() = DailyRoutine(wakeMinute, sleepMinute)
 
 internal class InvalidCommand(message: String) : IllegalArgumentException(message)
 
@@ -163,8 +175,11 @@ internal class Proposal(
     private val courses: List<CourseWrites>,
     private val graphs: List<GraphWrites>,
     val refs: Map<String, String>,
+    private val deletedFrames: Set<String>,
+    private val ticks: AgendaTicks?,
+    val agendaChanged: Boolean,
 ) {
-    fun applyTo(dao: PlannerDao, courseDao: CourseDao, graphDao: GraphDao) {
+    fun applyTo(dao: PlannerDao, courseDao: CourseDao, graphDao: GraphDao, agendaDao: AgendaDao) {
         if (frames.isNotEmpty()) dao.insertFrames(frames)
         if (amendedFrames.isNotEmpty()) dao.updateFrames(amendedFrames)
         if (inserts.isNotEmpty()) dao.insertTasks(inserts)
@@ -173,6 +188,11 @@ internal class Proposal(
         if (items.isNotEmpty()) dao.insertItems(items)
         slots?.applyTo(dao)
         for (write in courses) write.applyTo(courseDao)
+        ticks?.applyTo(agendaDao)
+        for (id in deletedFrames) {
+            dao.deleteFrameItems(id)
+            check(dao.deleteEmptyFrame(id) == 1)
+        }
         for (write in graphs) write.applyTo(graphDao)
         dao.saveSettings(settings)
     }

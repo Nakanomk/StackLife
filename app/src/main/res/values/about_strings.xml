@@ -19,13 +19,13 @@
     <string name="about_signer">Current signing certificate · SHA-256</string>
     <string name="about_license_intro">Select StackLife or a third-party component to read its license offline.</string>
     <string name="about_help_workspace">Pause work without losing your place</string>
-    <string name="about_help_workspace_body">In Workspace, add tasks in the order you want to do them. Push the queue when interrupted, or select a few tasks to push. You can add a reason afterward. Open the frame to edit tasks in place or restore all or selected tasks. Restore behavior in Settings decides where they go.</string>
+    <string name="about_help_workspace_body">Push the queue when interrupted, or select a few tasks to push. Open the frame to edit or restore tasks. Once empty, the frame can be deleted from its details; Clear history removes only empty frames, not their tasks.</string>
     <string name="about_help_today">Give a task a time</string>
-    <string name="about_help_today_body">On Today, open the unscheduled queue. Drag a task onto a free part of the timeline or tap it to choose a time. Open a scheduled task to change or clear its time. Clearing a time does not remove the task from your queue.</string>
+    <string name="about_help_today_body">Drag a queued task onto the timeline or tap it to set a time. The checkbox at the right marks an item complete; tap again to undo. Class and routine checkmarks apply to that occurrence only. Set your wake-up time, bedtime and 15-minute reminders at the top of Settings.</string>
     <string name="about_help_graphs">Work backwards from a goal</string>
     <string name="about_help_graphs_body">Create a graph and add one node per step. Draw each arrow from a prerequisite to the step that needs it. Choose the goal and review the ordered steps. Add to queue appends those steps; Save as frame keeps them on the stack for later.</string>
     <string name="about_help_courses">Reserve class times</string>
-    <string name="about_help_courses_body">In Timetable, add a class manually or import a HUST schedule. Check the term, first Monday, weeks and periods in the preview before saving. Imported classes reserve time on Today. If campus sign-in is unavailable, choose an exported HUB week-array JSON file instead.</string>
+    <string name="about_help_courses_body">Add classes manually or import your school timetable. Review the term, first Monday, weeks and periods before saving. Imported classes appear on Today. Importing again replaces only that school’s classes in the selected term.</string>
     <string name="about_help_assistant">Review assistant changes</string>
     <string name="about_help_assistant_body">The planner works without a model. To chat, configure your service and key in Settings. Tapping Send contacts that service. Sharing other pages or notes requires permission; a proposed change does not alter your schedule until you review and apply it.</string>
     <string name="about_frames">Foreground frame measurement</string>

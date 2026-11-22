@@ -23,6 +23,7 @@ import io.github.nakanomk.stacklife.StackLifeApp
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.planner.*
+import io.github.nakanomk.stacklife.storage.RoomPlannerApi
 import java.io.File
 import java.time.LocalDate
 import kotlinx.coroutines.CompletableDeferred
@@ -181,6 +182,26 @@ class CourseConfirmationTest {
             assertEquals(other, week(other.id).term)
             assertEquals(before + 1, store.state().revision)
         } finally { file.delete() }
+    }
+
+    @Test fun selectingOneImportedSourceNeverReviewsOrRemovesTheOther() = runBlocking {
+        seed(term, meeting)
+        val second = "test-campus"
+        val api = RoomPlannerApi(store.db, SchoolImports.calendars + (second to HustCourseImporter.calendar))
+        val id = api.stageCourseImport(term, listOf(meeting.copy(title = "第二来源")), second)
+        val proposal = try { api.preview(listOf(PlannerCommand.CourseImport(id))) } finally { api.discardCourseImport(id) }
+        assertTrue(proposal is PreviewResult.Ready)
+        assertTrue(api.commit((proposal as PreviewResult.Ready).proposalId) is CommitResult.Applied)
+        attach()
+        await(hasTestTag("nav:courses")).performClick()
+        await(hasTestTag("course-options")).performClick()
+        await(hasTestTag("course-remove:$second")).performClick()
+        await(hasText(ui.activity.getString(R.string.courses_remove_term_hint, second))).assertIsDisplayed()
+        await(hasText("确认移除")).performClick()
+        await(hasTestTag("course-week")).assertIsDisplayed()
+        val remaining = week(term.id).classes.single()
+        assertEquals(HUST_SOURCE, remaining.source)
+        assertEquals(meeting, remaining.meeting)
     }
 
     @Test fun staleRemovalRequiresFreshPreviewThenSurvivesRecreationExactlyOnce() = runBlocking {

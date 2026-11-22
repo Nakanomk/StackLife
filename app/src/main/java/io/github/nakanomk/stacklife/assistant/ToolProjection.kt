@@ -2,7 +2,7 @@ package io.github.nakanomk.stacklife.assistant
 
 import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.courses.ScheduledCourse
-import io.github.nakanomk.stacklife.courses.campusZone
+import io.github.nakanomk.stacklife.courses.calendarFor
 import io.github.nakanomk.stacklife.planner.*
 import java.time.Instant
 import java.time.ZoneId
@@ -111,13 +111,18 @@ internal class ToolProjection(private val grant: Disclosure, private val seen: T
             }
             PlannerQuery.Terms -> section((result as Terms).terms) { term -> buildJsonObject {
                 id("termId", term.id, seen.terms); put("weeks", term.weeks); put("firstMonday", term.firstMonday.toString())
+                if (grant.courseDetails) {
+                    val imports = result.importedSources[term.id].orEmpty()
+                    seen.sources[term.id] = imports.toSet()
+                    put("importSources", buildJsonArray { imports.forEach { add(it) } })
+                }
             } }
             is PlannerQuery.Week -> {
                 val week = result as CourseWeek
                 val term = requireNotNull(week.term) { uiText("The term does not exist.", "学期不存在。") }
                 require(week.week in 1..term.weeks) { uiText("This week is outside the selected term.", "该周不在所选学期内。") }
-                id("termId", term.id, seen.terms); put("week", week.week); put("zone", campusZone.id)
-                section(week.classes) { course(it, campusZone) }
+                id("termId", term.id, seen.terms); put("week", week.week)
+                section(week.classes) { course(it, calendarFor(it.source)?.zone ?: zone) }
             }
             PlannerQuery.Settings -> {
                 val settings = result as PolicyView

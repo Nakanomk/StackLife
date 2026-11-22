@@ -9,11 +9,14 @@ import io.github.nakanomk.stacklife.assistant.OpenAiTransport
 import io.github.nakanomk.stacklife.planner.PlannerApi
 import io.github.nakanomk.stacklife.storage.PlannerDatabase
 import io.github.nakanomk.stacklife.storage.RoomPlannerApi
+import io.github.nakanomk.stacklife.reminders.AgendaReminders
+import io.github.nakanomk.stacklife.storage.nextReminderGroup
 
 open class StackLifeApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         AppLocales.initialize(this)
+        reminders.initialize()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -25,5 +28,6 @@ open class StackLifeApplication : Application() {
     internal val chat by lazy { OpenAiTransport() }
     private val database by lazy { Room.databaseBuilder(this, PlannerDatabase::class.java, "stacklife.db").build() }
     internal val history by lazy { database.conversationHistory() }
-    internal val planner: PlannerApi by lazy { RoomPlannerApi(database) }
+    internal val reminders by lazy { AgendaReminders(this) { from, zone -> database.nextReminderGroup(from, zone) } }
+    internal val planner: PlannerApi by lazy { RoomPlannerApi(database, afterCommit = { reminders.refresh() }) }
 }

@@ -80,7 +80,7 @@ private fun Wheel(label: String, tag: String, width: Dp, value: Int, range: IntR
 
 @Composable
 private fun WheelDialog(title: String, columns: Int, close: () -> Unit, confirm: () -> Unit,
-    valid: Boolean = true, clear: (() -> Unit)? = null, wheels: @Composable (Dp) -> Unit) {
+    valid: Boolean = true, clear: (() -> Unit)? = null, clearLabel: Int = R.string.wheel_clear_date, wheels: @Composable (Dp) -> Unit) {
     PlannerAlertDialog(onDismissRequest = close, title = { Text(title) }, text = {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             // Wrap columns onto a scrollable second line when scaled digits would not fit side by side.
@@ -89,7 +89,7 @@ private fun WheelDialog(title: String, columns: Int, close: () -> Unit, confirm:
             FlowRow(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), horizontalArrangement = Arrangement.SpaceEvenly) { wheels(width) }
         }
     }, dismissButton = {
-        if (clear != null) TextButton(onClick = clear, modifier = Modifier.testTag("wheel-clear")) { Text(stringResource(R.string.wheel_clear_date)) }
+        if (clear != null) TextButton(onClick = clear, modifier = Modifier.testTag("wheel-clear")) { Text(stringResource(clearLabel)) }
         TextButton(onClick = close, modifier = Modifier.testTag("wheel-cancel")) { Text(stringResource(R.string.ui_cancel)) }
     }, confirmButton = {
         TextButton(onClick = confirm, enabled = valid, modifier = Modifier.testTag("wheel-confirm")) { Text(stringResource(R.string.ui_ok)) }
@@ -169,20 +169,22 @@ internal fun DateWheelField(label: String, date: LocalDate?, initial: LocalDate,
 }
 
 @Composable
-internal fun ClockWheelField(time: LocalTime, enabled: Boolean, modifier: Modifier, onChange: (LocalTime) -> Unit) {
+internal fun ClockWheelField(time: LocalTime?, enabled: Boolean, modifier: Modifier, label: String = stringResource(R.string.today_start_clock),
+    initial: LocalTime = LocalTime.MIDNIGHT, onClear: (() -> Unit)? = null, onChange: (LocalTime) -> Unit) {
     val use24 = DateFormat.is24HourFormat(LocalContext.current)
     val locale = LocalConfiguration.current.locales[0]
     val pattern = remember(locale, use24) { DateFormat.getBestDateTimePattern(locale, if (use24) "Hm" else "hm") }
     val format = remember(pattern, locale) { DateTimeFormatter.ofPattern(pattern, locale) }
-    val label = stringResource(R.string.today_start_clock)
-    PickerField(label, time.format(format), enabled, modifier) { close ->
-        var hour by rememberSaveable { mutableIntStateOf(time.hour) }
-        var minute by rememberSaveable { mutableIntStateOf(time.minute) }
+    PickerField(label, time?.format(format) ?: stringResource(R.string.wheel_unset), enabled, modifier) { close ->
+        val current = time ?: initial
+        var hour by rememberSaveable { mutableIntStateOf(current.hour) }
+        var minute by rememberSaveable { mutableIntStateOf(current.minute) }
         val periods = remember(locale) { DateFormatSymbols.getInstance(locale).amPmStrings }
         val period: @Composable (Dp) -> Unit = { width ->
             Wheel(stringResource(R.string.wheel_period), "wheel-period", width, hour / 12, 0..1, names = periods) { hour = hour % 12 + it * 12 }
         }
-        WheelDialog(label, if (use24) 2 else 3, close, { onChange(LocalTime.of(hour, minute)); close() }) { width ->
+        WheelDialog(label, if (use24) 2 else 3, close, { onChange(LocalTime.of(hour, minute)); close() },
+            clear = onClear?.takeIf { time != null }?.let { { it(); close() } }, clearLabel = R.string.agenda_clear_time) { width ->
             val periodFirst = !use24 && pattern.trimStart().startsWith('a')
             if (periodFirst) period(width)
             if (use24) Wheel(stringResource(R.string.wheel_hour), "wheel-hour", width, hour, 0..23, true) { hour = it }

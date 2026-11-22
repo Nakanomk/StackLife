@@ -13,7 +13,7 @@ interface PlannerApi {
     suspend fun commit(proposalId: String): CommitResult
     fun discard(proposalId: String)
     /** Register local user-reviewed input, never raw web/file contents or a model-supplied draft. */
-    fun stageCourseImport(term: TermSpec, meetings: List<CourseMeeting>): String
+    fun stageCourseImport(term: TermSpec, meetings: List<CourseMeeting>, source: String = SchoolImports.default.id): String
     fun discardCourseImport(draftId: String)
 }
 
@@ -38,7 +38,7 @@ sealed interface PlannerQuery {
 
 sealed interface QueryResult
 
-data class Terms(val terms: List<TermSpec>, val importedIds: Set<String> = emptySet()) : QueryResult
+data class Terms(val terms: List<TermSpec>, val importedSources: Map<String, List<String>> = emptyMap()) : QueryResult
 data class ManualWeeksView(val weeks: Set<Int>) : QueryResult
 data class CourseWeek(val term: TermSpec?, val week: Int, val classes: List<ScheduledCourse>,
     /** Index in this term's distinct title catalog; only this week's keys leave the read transaction. */
@@ -67,6 +67,7 @@ data class DayBlock(
 data class DayPlan(
     val day: PlannerQuery.Day, val revision: Long, val tray: List<QueueTask>, val blocks: List<DayBlock>,
     val courses: List<ScheduledCourse> = emptyList(), val conflictingTaskIds: Set<String> = emptySet(),
+    val completedCourses: Set<CourseOccurrenceId> = emptySet(), val routines: List<RoutineEvent> = emptyList(),
 ) : QueryResult
 
 enum class FrameSource { PUSH, MANUAL, SWAP, GRAPH }
@@ -111,12 +112,17 @@ sealed interface PlannerCommand {
     data class TaskEdit(val taskId: String, val title: String? = null, val notes: String? = null, val minutes: Int? = null,
         val expectedFrameId: String? = null) : PlannerCommand
     data class TaskFinish(val taskId: String) : PlannerCommand
+    data class SetScheduledCompletion(val taskId: String, val completed: Boolean, val expectedRevision: Long) : PlannerCommand
+    data class SetCourseCompletion(val occurrence: CourseOccurrenceId, val completed: Boolean, val expectedRevision: Long) : PlannerCommand
+    data class SetRoutineCompletion(val kind: RoutineKind, val date: LocalDate, val completed: Boolean, val expectedRevision: Long) : PlannerCommand
+    data class SetRoutineTime(val kind: RoutineKind, val minute: Int?) : PlannerCommand
     data class TaskRemove(val taskId: String) : PlannerCommand
     data class QueueOrder(val taskIds: List<String>) : PlannerCommand
     data class FrameCreate(val reason: String, val tasks: List<TaskInput>, val ref: String? = null) : PlannerCommand
     data class FramePush(val reason: String = "", val taskIds: List<String>, val ref: String? = null) : PlannerCommand
     data class FrameAddReason(val frameId: String, val reason: String) : PlannerCommand
     data class FrameRestore(val frameId: String, val mode: RestoreMode, val taskIds: List<String> = emptyList()) : PlannerCommand
+    data class DeleteFrameHistory(val frameIds: List<String>) : PlannerCommand
     data class SetRestorePolicy(val policy: RestorePolicy) : PlannerCommand
     data class EditAppearance(val patch: AppearancePatch, val expected: Appearance? = null) : PlannerCommand
     data class SlotSet(
@@ -124,7 +130,7 @@ sealed interface PlannerCommand {
     ) : PlannerCommand
     data class SlotClear(val taskId: String, val expectedRevision: Long? = null) : PlannerCommand
     data class CourseImport(val draftId: String) : PlannerCommand
-    data class TermRemove(val termId: String) : PlannerCommand
+    data class TermRemove(val termId: String, val source: String? = null) : PlannerCommand
     /** Null before = add, null after = remove. New term creation never reuses an existing ID. */
     data class ManualCourse(val termId: String, val before: ManualSeries?, val after: ManualSeries?,
         val createTerm: TermSpec? = null) : PlannerCommand

@@ -2,7 +2,6 @@ package io.github.nakanomk.stacklife.about
 
 import android.content.Intent
 import android.net.Uri
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,11 +26,16 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.workspace.*
+import io.github.nakanomk.stacklife.courses.SchoolImports
+import io.github.nakanomk.stacklife.transitions.PaneMotion
+import io.github.nakanomk.stacklife.transitions.PaneOrigins
+import io.github.nakanomk.stacklife.transitions.paneOrigin
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 private const val REPOSITORY = "https://github.com/Nakanomk/StackLife"
+private const val PROJECT_LICENSE = "StackLife-GPL-3.0-or-later.txt"
 private enum class AboutPage(val title: Int) {
     HOME(R.string.about_title), HELP(R.string.about_help), BUILD(R.string.about_build),
     LICENSES(R.string.about_licenses), TEXT(R.string.about_license_text), DIAGNOSTICS(R.string.about_diagnostics),
@@ -68,32 +72,48 @@ internal fun HelpAboutScreen(back: () -> Unit) {
     val app = context.applicationContext
     var page by rememberSaveable { mutableStateOf(AboutPage.HOME) }
     var license by rememberSaveable { mutableStateOf("") }
+    var licenseParent by rememberSaveable { mutableStateOf(AboutPage.LICENSES) }
+    val origins = remember { PaneOrigins() }
+    fun origin(entry: AboutPage) = if (entry == AboutPage.TEXT) "license:$license" else entry.name
+    fun openLicense(file: String, parent: AboutPage) {
+        license = file
+        licenseParent = parent
+        page = AboutPage.TEXT
+    }
     var noBrowser by rememberSaveable { mutableStateOf(false) }
     val version = localRead(app) { installedVersion(app) }
     val holder = rememberSaveableStateHolder()
     val up: () -> Unit = {
         when (page) {
             AboutPage.HOME -> back()
-            AboutPage.TEXT -> page = AboutPage.LICENSES
+            AboutPage.TEXT -> page = licenseParent
             else -> page = AboutPage.HOME
         }
     }
-    BackHandler(enabled = page != AboutPage.HOME, onBack = up)
-    EditorPage(stringResource(page.title), up) { top, bottom ->
-        holder.SaveableStateProvider(if (page == AboutPage.TEXT) license else page.name) {
+    PaneMotion(page, origins, depth = { when (it) { AboutPage.HOME -> 0; AboutPage.TEXT -> 2; else -> 1 } },
+        originKey = ::origin, modifier = Modifier.fillMaxSize(),
+        parent = when (page) { AboutPage.HOME -> null; AboutPage.TEXT -> licenseParent; else -> AboutPage.HOME }, onBack = up) { shown ->
+        EditorPage(stringResource(shown.title), up) { top, bottom ->
+        holder.SaveableStateProvider(origin(shown)) {
             val padding = dockListPadding(top, bottom)
-            when (page) {
+            when (shown) {
                 AboutPage.DIAGNOSTICS -> DiagnosticsContent(padding)
                 AboutPage.LICENSES -> {
-                    val files = localRead(app) { app.assets.list("licenses").orEmpty().sorted() }
+                    val files = localRead(app) { app.assets.list("licenses").orEmpty().filterNot { it == PROJECT_LICENSE }.sorted() }
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
                         item { Hint(stringResource(R.string.about_license_intro)) }
+                        item {
+                            PreferenceRow(stringResource(R.string.about_project_license), "GPL-3.0-or-later",
+                                Modifier.paneOrigin(origins, "license:$PROJECT_LICENSE").testTag("license:$PROJECT_LICENSE")) {
+                                openLicense(PROJECT_LICENSE, AboutPage.LICENSES)
+                            }
+                        }
                         when (files) {
                             is Load.Ready -> {
                                 if (files.value.isEmpty()) item { Hint(stringResource(R.string.about_read_failed)) }
                                 items(files.value, key = { it }) { file ->
-                                    PreferenceRow(file.removeSuffix(".txt"), modifier = Modifier.testTag("license:$file")) {
-                                        license = file; page = AboutPage.TEXT
+                                    PreferenceRow(file.removeSuffix(".txt"), modifier = Modifier.paneOrigin(origins, "license:$file").testTag("license:$file")) {
+                                        openLicense(file, AboutPage.LICENSES)
                                     }
                                 }
                             }
@@ -121,7 +141,11 @@ internal fun HelpAboutScreen(back: () -> Unit) {
                     item { HelpSection(R.string.about_help_workspace, R.string.about_help_workspace_body) }
                     item { HelpSection(R.string.about_help_today, R.string.about_help_today_body) }
                     item { HelpSection(R.string.about_help_graphs, R.string.about_help_graphs_body) }
-                    item { HelpSection(R.string.about_help_courses, R.string.about_help_courses_body) }
+                    item { FormGroup {
+                        SectionTitle(stringResource(R.string.about_help_courses))
+                        Text(stringResource(R.string.about_help_courses_body), style = MaterialTheme.typography.bodyMedium)
+                        for (provider in SchoolImports.providers) Text(stringResource(provider.help), style = MaterialTheme.typography.bodyMedium)
+                    } }
                     item { HelpSection(R.string.about_help_assistant, R.string.about_help_assistant_body) }
                 }
                 AboutPage.BUILD -> {
@@ -139,7 +163,14 @@ internal fun HelpAboutScreen(back: () -> Unit) {
                             }
                             if (noBrowser) Hint(stringResource(R.string.about_link_failed))
                         } }
-                        item { HelpSection(R.string.about_project_license, R.string.about_project_license_body) }
+                        item { FormGroup {
+                            SectionTitle(stringResource(R.string.about_project_license))
+                            Text(stringResource(R.string.about_project_license_body), style = MaterialTheme.typography.bodyMedium)
+                            PreferenceRow(stringResource(R.string.about_license_text), "GPL-3.0-or-later",
+                                Modifier.paneOrigin(origins, "license:$PROJECT_LICENSE").testTag("about-project-license")) {
+                                openLicense(PROJECT_LICENSE, AboutPage.BUILD)
+                            }
+                        } }
                         item { FormGroup {
                             SectionTitle(stringResource(R.string.about_apk))
                             apk.display { SelectionContainer { Text(it, modifier = Modifier.testTag("about-apk-sha256")) } }
@@ -167,11 +198,13 @@ internal fun HelpAboutScreen(back: () -> Unit) {
                     } }
                     item { FormGroup {
                         listOf(AboutPage.HELP, AboutPage.DIAGNOSTICS, AboutPage.BUILD, AboutPage.LICENSES).forEach { entry ->
-                            PreferenceRow(stringResource(entry.title), modifier = Modifier.testTag("about-${entry.name.lowercase(java.util.Locale.ROOT)}")) { page = entry }
+                            PreferenceRow(stringResource(entry.title), modifier = Modifier.paneOrigin(origins, origin(entry))
+                                .testTag("about-${entry.name.lowercase(java.util.Locale.ROOT)}")) { page = entry }
                         }
                     } }
                 }
             }
+        }
         }
     }
 }

@@ -1,0 +1,12 @@
+<resources>
+    <string name="agenda_complete">Mark %1$s as completed</string>
+    <string name="agenda_reopen">Mark %1$s as not completed</string>
+    <string name="agenda_daily_routine">Daily schedule</string>
+    <string name="agenda_wake">Wake up</string>
+    <string name="agenda_sleep">Bedtime</string>
+    <string name="agenda_clear_time">Remove time</string>
+    <string name="agenda_clear_history">Clear history</string>
+    <string name="agenda_delete_history">Delete frame history</string>
+    <string name="agenda_delete_history_message">Permanently delete %1$d empty frame record(s)? Your tasks and their scheduled times will not change.</string>
+    <string name="agenda_delete">Delete</string>
+</resources>
