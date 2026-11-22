@@ -1,0 +1,14 @@
+<resources>
+    <string name="feature_entries">Feature shortcuts</string>
+    <string name="feature_hidden">Hidden from navigation</string>
+    <string name="guide_reopen">Open the getting-started guide</string>
+    <string name="guide_features">Choose your features</string>
+    <string name="guide_features_hint">Keep at least one in your navigation. Hidden features stay available in Settings.</string>
+    <string name="guide_routines">Set a daily routine</string>
+    <string name="guide_routines_hint">Optional. The usual schedule editor opens for each routine.</string>
+    <string name="guide_first">Add your first event</string>
+    <string name="guide_first_hint">Create a task or review a timetable import. Nothing is created until you save it.</string>
+    <string name="guide_later">Later</string>
+    <string name="guide_next">Continue</string>
+    <string name="guide_countdown_hint">Countdowns track calendar days without creating tasks or reminders.</string>
+</resources>

@@ -107,8 +107,9 @@ internal fun <T : Any> PaneMotion(
     transition.AnimatedContent(modifier = modifier, contentKey = originKey, contentAlignment = Alignment.BottomStart, transitionSpec = {
         // Sheet panes can have different heights. Keep their bottom edge pinned and
         // finish sizing with the same seek, not when the taller outgoing pane is disposed.
-        (EnterTransition.None togetherWith ExitTransition.KeepUntilTransitionsFinished).using(
-            if (motion) SizeTransform(clip = false) { _, _ -> tween(300) } else null)
+        if (motion) (EnterTransition.None togetherWith ExitTransition.KeepUntilTransitionsFinished).using(
+            SizeTransform(clip = false) { _, _ -> tween(300) })
+        else (EnterTransition.None togetherWith ExitTransition.None).using(null)
     }) { shown ->
         var layout by remember { mutableStateOf<LayoutCoordinates?>(null) }
         val moving = motion && distance > 0
@@ -134,7 +135,7 @@ internal fun <T : Any> PaneMotion(
                     val bounds = lerp(source, destination, progress)
                     // Complementary clips, including the landing itself. As the moving
                     // pane reaches its control the real parent takes back the last pixels.
-                    val coverage = landingAlpha(progress)
+                    val coverage = smoothHandoff(progress, 0f, .045f)
                     val reveal = if (coverage == 1f) bounds else lerp(Rect(bounds.center, bounds.center), bounds, coverage)
                     val radius = minOf(16.dp.toPx(), reveal.minDimension / 2) * (1f - progress)
                     path.reset(); path.addRoundRect(RoundRect(reveal, CornerRadius(radius)))

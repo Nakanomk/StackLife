@@ -65,10 +65,16 @@ class ConnectionScreenTest {
         val replacement = UUID.randomUUID().toString()
         ui.onNodeWithText("更改模型").performScrollTo().performClick()
         field("model").performTextReplacement("my-enabled-model")
+        field("images").performScrollTo().assertIsOff().performClick()
+        field("images").assertIsOn()
+        field("model").performTextReplacement("another-model")
+        field("images").assertIsOff()
+        field("model").performTextReplacement("my-enabled-model")
+        field("images").performScrollTo().assertIsOff().performClick()
         field("key").performTextReplacement(replacement)
         save()
         val persisted = runBlocking { store.load() }!!
-        assertEquals(ServiceProfile("https://api.openai.com/v1", "my-enabled-model", "https://api.openai.com"), persisted.profile)
+        assertEquals(ServiceProfile("https://api.openai.com/v1", "my-enabled-model", "https://api.openai.com", supportsImages = true), persisted.profile)
         assertEquals(replacement, persisted.key)
     }
 

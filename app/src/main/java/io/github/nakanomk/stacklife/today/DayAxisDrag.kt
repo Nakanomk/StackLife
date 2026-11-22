@@ -17,35 +17,52 @@ import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import io.github.nakanomk.stacklife.planner.PlannerCommand
-import java.time.Instant
+import io.github.nakanomk.stacklife.planner.*
 import kotlin.math.min
 
-internal data class SlotSource(val id: String, val minutes: Int, val originalStart: Long? = null)
+internal data class SlotSource(val key: OccurrenceKey.Schedule, val durationMillis: Long, val originalStart: Long? = null)
+internal data class SlotDrop(val interval: ExactInterval, val command: PlannerCommand)
 private sealed class Pickup(val source: SlotSource, val revision: Long) {
     class Move(source: SlotSource, revision: Long, val grabMillis: Long) : Pickup(source, revision)
     class End(source: SlotSource, revision: Long, val grabPixels: Float, val railX: Float) : Pickup(source, revision)
 }
-internal data class CheckedSlot(val slot: PlannerCommand.SlotSet, val error: String?)
+internal data class CheckedSlot(val slot: SlotDrop, val error: String?)
 
 internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
     // A held pointer need not move when the IME or tray moves across it. Recheck
     // the snap and edge-scroll regions on placement changes during a drag.
     var viewport by mutableStateOf(Rect.Zero)
+        private set
+    private var viewportLayout: LayoutCoordinates? = null
+    private var rootLayout: LayoutCoordinates? = null
+    fun placeViewport(layout: LayoutCoordinates) {
+        viewportLayout = layout
+        rootLayout = layout.findRootCoordinates()
+        viewport = layout.boundsInRoot()
+    }
     var trayBounds by mutableStateOf(Rect.Zero)
     var addBounds by mutableStateOf(Rect.Zero)
     private var pickup by mutableStateOf<Pickup?>(null)
     var pointer by mutableStateOf(Offset.Zero)
         private set
     val active get() = pickup != null
+    fun isDragging(key: OccurrenceKey) = pickup?.source?.key == key
     val resizeRailX get() = (pickup as? Pickup.End)?.railX
     var checked by mutableStateOf<CheckedSlot?>(null)
     var dropNotice by mutableStateOf<String?>(null)
-    private fun contentY(point: Offset) = point.y - viewport.top + scroll.value
-    private fun hit(point: Offset) = scale.instantAt(contentY(point))
+    // Gestures arrive in the transformed card/handle's coordinates, then localToRoot maps them
+    // into the same space as tray hit tests. Only the untransformed viewport feeds instantAt.
+    private fun contentY(point: Offset): Float {
+        val viewportCoords = viewportLayout ?: return Float.NaN
+        val root = rootLayout ?: return Float.NaN
+        if (!viewportCoords.isAttached || !root.isAttached) return Float.NaN
+        return viewportCoords.localPositionOf(root, point).y + scroll.value
+    }
 
     private fun accepts(at: Offset) = viewport.contains(at) && !trayBounds.contains(at) && !addBounds.contains(at)
 
@@ -73,22 +90,22 @@ internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
     private val snapped by derivedStateOf {
         val session = pickup ?: return@derivedStateOf null
         val y = contentY(pointer)
-        if (!accepts(pointer) || y < 0 || y >= scale.height) null
+        if (!accepts(pointer) || !(y >= 0f && y < scale.height)) null
         else {
             val step = 5 * MINUTE_MS
             when (session) {
                 is Pickup.Move -> {
                     val delta = scale.instantAt(y) - session.grabMillis - scale.day.startMillis
                     val millis = scale.day.startMillis + Math.floorDiv(delta + step / 2, step) * step
-                    millis.takeIf { it < scale.day.endMillis && it + session.source.minutes * MINUTE_MS > scale.day.startMillis }
+                    millis.takeIf { intersectsWindow(it, it + session.source.durationMillis, scale.day.startMillis, scale.day.endMillis) }
                 }
                 is Pickup.End -> {
                     val start = requireNotNull(session.source.originalStart)
-                    val end = start + session.source.minutes * MINUTE_MS
+                    val end = start + session.source.durationMillis
                     val endY = y + session.grabPixels
                     // Preserve an unsnapped original when the handle returns to its starting pixel.
                     if (kotlin.math.abs(scale.yAt(end) - endY) < 1f) end else {
-                        // SlotSet expresses whole elapsed minutes, even for a start with seconds.
+                        // Snap relative to the original sub-minute offset.
                         val origin = scale.day.startMillis + Math.floorMod(start - scale.day.startMillis, MINUTE_MS)
                         val steps = Math.floorDiv(scale.instantAt(endY) - origin + step / 2, step)
                         origin + steps.coerceIn(0L, Math.floorDiv(scale.day.endMillis - origin, step)) * step
@@ -102,32 +119,43 @@ internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
         val millis = snapped
         if (session == null || millis == null) null else {
             val start = if (session is Pickup.End) requireNotNull(session.source.originalStart) else millis
-            val minutes = if (session is Pickup.End) (millis - start) / MINUTE_MS else session.source.minutes.toLong()
-            if (minutes !in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) null else
-                PlannerCommand.SlotSet(session.source.id, Instant.ofEpochMilli(start).atZone(scale.day.zone).toOffsetDateTime(),
-                    minutes.toInt(), session.revision)
+            val end = if (session is Pickup.End) millis else start + session.source.durationMillis
+            // Changing a span to a point is explicit in the editor, not an accidental resize.
+            if (end < start || session is Pickup.End && end == start) null else {
+                val interval = ExactInterval(start, end)
+                val key = session.source.key
+                SlotDrop(interval, if (key.originalDay == null) PlannerCommand.SetSchedule(key.scheduleId,
+                    SchedulePattern.Once(interval), expectedRevision = session.revision)
+                else PlannerCommand.SetOccurrenceOverride(key, EditScope.THIS, interval = interval, expectedRevision = session.revision))
+            }
         }
     }
 
     fun start(source: SlotSource, at: Offset, revision: Long) {
+        val y = contentY(at)
+        if (!y.isFinite()) return
         dropNotice = null
         checked = null
         pointer = at
-        pickup = Pickup.Move(source, revision, source.originalStart?.let { hit(at) - it } ?: 0L)
+        pickup = Pickup.Move(source, revision, source.originalStart?.let { scale.instantAt(y) - it } ?: 0L)
     }
 
     fun startEnd(source: SlotSource, at: Offset, railX: Float, revision: Long) {
-        val end = requireNotNull(source.originalStart) + source.minutes * MINUTE_MS
+        val y = contentY(at)
+        if (!y.isFinite()) return
+        val end = requireNotNull(source.originalStart) + source.durationMillis
         dropNotice = null
         checked = null
         pointer = at
-        pickup = Pickup.End(source, revision, scale.yAt(end) - contentY(at), railX)
+        pickup = Pickup.End(source, revision, scale.yAt(end) - y, railX)
     }
     fun move(to: Offset) { pointer = to }
     fun stop() { pickup = null; checked = null }
 
-    fun release(at: Offset, revision: Long, send: (PlannerCommand.SlotSet) -> Unit) {
+    fun release(at: Offset, revision: Long, send: (PlannerCommand) -> Unit) {
         move(at)
+        val y = contentY(at)
+        if (!y.isFinite()) return
         val session = pickup ?: return
         if (session.revision != revision) {
             dropNotice = uiText("The schedule changed. Drag again.", "日程已更新，请重新拖动。")
@@ -136,19 +164,19 @@ internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
         val command = candidate ?: return
         val original = session.source.originalStart
         when (session) {
-            is Pickup.End -> if (command.durationMinutes == session.source.minutes) return
+            is Pickup.End -> if (command.interval.endMillis - command.interval.startMillis == session.source.durationMillis) return
             is Pickup.Move -> if (original != null &&
-                (hit(at) - session.grabMillis == original || command.start.toInstant().toEpochMilli() == original)) return
+                (scale.instantAt(y) - session.grabMillis == original || command.interval.startMillis == original)) return
         }
         val error = checked?.takeIf { it.slot == command }?.error
         // If the finger lifted before the hover preview finished, submission still goes
         // through the exact same domain preview + revision-checked commit, never a blind write.
-        if (error != null) dropNotice = error else send(command)
+        if (error != null) dropNotice = error else send(command.command)
     }
 }
 
 internal fun Modifier.slotDrag(
-    source: SlotSource, drag: AxisDrag, revision: Long, enabled: Boolean, send: (PlannerCommand.SlotSet) -> Unit,
+    source: SlotSource, drag: AxisDrag, revision: Long, enabled: Boolean, send: (PlannerCommand) -> Unit,
 ): Modifier = composed {
     var layout by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val latestRevision by rememberUpdatedState(revision)
@@ -168,7 +196,7 @@ internal fun Modifier.slotDrag(
 /** Already selected: grab the endpoint on vertical slop, not a second long press.
  * Until then the surrounding day pager, scroll and accessible click remain available. */
 internal fun Modifier.endDrag(
-    source: SlotSource, drag: AxisDrag, revision: Long, enabled: Boolean, send: (PlannerCommand.SlotSet) -> Unit,
+    source: SlotSource, drag: AxisDrag, revision: Long, enabled: Boolean, send: (PlannerCommand) -> Unit,
 ): Modifier = composed {
     var layout by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val latestRevision by rememberUpdatedState(revision)
@@ -191,7 +219,7 @@ internal fun Modifier.endDrag(
 }
 
 private suspend fun AwaitPointerEventScope.trackSlot(
-    id: PointerId, coords: LayoutCoordinates, drag: AxisDrag, revision: () -> Long, send: (PlannerCommand.SlotSet) -> Unit,
+    id: PointerId, coords: LayoutCoordinates, drag: AxisDrag, revision: () -> Long, send: (PlannerCommand) -> Unit,
 ) {
     try {
         while (true) {
@@ -211,11 +239,11 @@ private suspend fun AwaitPointerEventScope.trackSlot(
 }
 
 @Composable
-internal fun DragEffects(drag: AxisDrag, checkSlot: suspend (PlannerCommand.SlotSet) -> String?) {
+internal fun DragEffects(drag: AxisDrag, checkSlot: suspend (PlannerCommand) -> String?) {
     val latestCheck by rememberUpdatedState(checkSlot)
     val command = drag.candidate
     LaunchedEffect(drag, command) {
-        if (command != null) drag.checked = CheckedSlot(command, latestCheck(command))
+        if (command != null) drag.checked = CheckedSlot(command, latestCheck(command.command))
         else drag.checked = null
     }
     val density = LocalDensity.current

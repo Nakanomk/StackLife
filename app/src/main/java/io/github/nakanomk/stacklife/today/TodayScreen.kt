@@ -33,12 +33,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
-import io.github.nakanomk.stacklife.planner.DayPlan
-import io.github.nakanomk.stacklife.planner.PlannerCommand
-import io.github.nakanomk.stacklife.planner.PlannerQuery
+import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.R
 import androidx.compose.ui.res.painterResource
 import io.github.nakanomk.stacklife.workspace.WorkspaceActions
+import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.workspace.rememberSubmission
 import java.time.LocalDate
 import java.time.ZoneId
@@ -53,12 +52,17 @@ private val lastDay = LocalDate.of(9999, 12, 31)
 @Composable
 internal fun TodayRoute(
     model: WorkspaceViewModel, date: LocalDate, zone: ZoneId, onDate: (LocalDate) -> Unit,
-    onEdit: (SlotEditorKey) -> Unit, onSettings: () -> Unit, revealStart: Long?, onRevealed: () -> Unit, onAdd: () -> Unit,
+    onEdit: (SlotEditorKey) -> Unit, onSettings: () -> Unit, revealKey: OccurrenceKey?, onRevealed: () -> Unit, onAdd: () -> Unit,
 ) {
     var choosingDate by rememberSaveable { mutableStateOf(false) }
     val floatingTray = LocalAppearance.current.floatingDayTray
     var trayOpen by rememberSaveable(floatingTray) { mutableStateOf(true) }
     var eventView by rememberSaveable { mutableStateOf(false) }
+    val editor = courseEditor("today")
+    if (editor.form != null) {
+        val terms by remember(model) { model.terms() }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
+        ReadPanel(terms) { all -> CourseEditorHost(model, editor, all.terms) { _, _ -> } }
+    }
     if (choosingDate) DateWheelDialog(date, { choosingDate = false; onDate(it) }, { choosingDate = false })
     RootPane(header = {
         DayHeader(date, { choosingDate = true }, onDate, { onDate(LocalDate.now(zone)) }, onSettings, eventView, { eventView = it })
@@ -69,14 +73,45 @@ internal fun TodayRoute(
             val query = remember(index, zone) { PlannerQuery.Day(firstDay.plusDays(index.toLong()), zone) }
             val state by remember(model, query) { model.day(query) }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
             ReadPanel(state) { plan ->
-                val timeEditor: (String) -> Unit = { id -> plan.editorFor(id)?.let(onEdit) }
-                val target = revealStart.takeIf { query.date == date }
-                val entries = remember(plan.blocks, plan.courses, plan.conflictingTaskIds, plan.completedCourses, plan.routines) { plan.chronologicalEntries() }
+                val editTray: (String) -> Unit = { id -> plan.tray.find { it.id == id }?.let {
+                    onEdit(SlotEditorKey(it.id, it.title, query.date.toEpochDay(), zone.id, it.minutes, plan.revision))
+                } }
+                val editEvent: (AgendaOccurrence) -> Unit = { item ->
+                    val key = item.key as OccurrenceKey.Schedule
+                    onEdit(SlotEditorKey(key.scheduleId, item.title, query.date.toEpochDay(), zone.id,
+                        ((item.endMillis - item.startMillis) / MINUTE_MS).coerceIn(if (item.point) 0L else 1L, Int.MAX_VALUE.toLong()).toInt(), plan.revision, key, item.role))
+                }
+                var reading by rememberSaveable(index) { mutableStateOf<String?>(null) }
+                val openCourse: (ScheduledCourse) -> Unit = { reading = it.occurrenceKey() }
+                val selected = reading?.let { id -> plan.occurrences.firstOrNull { it.course?.occurrenceKey() == id }?.course }
+                if (selected != null) {
+                    val terms by remember(model) { model.terms() }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
+                    ReadPanel(terms) { all ->
+                        val term = all.terms.firstOrNull { it.id == selected.termId }
+                        CourseReadPanel(selected, null, emptyList(), model = model, edit = term?.let { t -> { c ->
+                            reading = null; editor.open(t, c.meeting.week, c.meeting.pattern())
+                        } }, close = { reading = null })
+                    }
+                } else if (reading != null) SideEffect { reading = null }
+                val target = revealKey.takeIf { query.date == date }
+                val placement = remember(query, plan.occurrences) { TimeGridPlacement(plan.occurrences, query.startMillis, query.endMillis) }
+                var moreStart by rememberSaveable { mutableStateOf<Long?>(null) }
+                var focused by rememberSaveable { mutableStateOf<String?>(null) }
+                val group = moreStart?.let { start -> placement.more.firstOrNull { it.start == start } }
+                LaunchedEffect(target, placement) {
+                    if (target != null) {
+                        focused = target.storageKey()
+                        placement.more.firstOrNull { g -> g.hidden.any { it.key == target } }?.let { moreStart = it.start }
+                    }
+                }
+                if (group != null) OverlapSheet(placement, group, plan, model, { moreStart = null; editEvent(it) },
+                    { moreStart = null; openCourse(it) }, { moreStart = null }, focused)
+                val more: (TimeGridPlacement.Overflow) -> Unit = { focused = null; moreStart = it.start }
                 rememberSaveableStateHolder().SaveableStateProvider(eventView) {
-                    if (eventView) EventDay(plan, entries, model, timeEditor, onAdd, target, onRevealed,
+                    if (eventView) EventDay(plan, placement, model, editTray, editEvent, openCourse, more, onAdd, focused, target, onRevealed,
                         top, bottom, trayOpen, { trayOpen = !trayOpen })
-                    else DayBody(plan, entries, model, model::checkSlot, timeEditor, onAdd,
-                        target, onRevealed, top, bottom, trayOpen, { trayOpen = !trayOpen })
+                    else DayBody(plan, placement, model, model::checkSchedule, editTray, editEvent, openCourse, more, onAdd,
+                        focused, target, onRevealed, top, bottom, trayOpen, { trayOpen = !trayOpen })
                 }
             }
         }
@@ -85,8 +120,8 @@ internal fun TodayRoute(
 
 @Composable
 private fun DayBody(
-    plan: DayPlan, entries: List<AxisEntry>, actions: WorkspaceActions, checkSlot: suspend (PlannerCommand.SlotSet) -> String?,
-    onEdit: (String) -> Unit, onAdd: () -> Unit, revealStart: Long?, onRevealed: () -> Unit,
+    plan: DayPlan, placement: TimeGridPlacement, actions: WorkspaceActions, checkSlot: suspend (PlannerCommand) -> String?,
+    editTray: (String) -> Unit, onEdit: (AgendaOccurrence) -> Unit, openCourse: (ScheduledCourse) -> Unit, onMore: (TimeGridPlacement.Overflow) -> Unit, onAdd: () -> Unit, focused: String?, revealKey: OccurrenceKey?, onRevealed: () -> Unit,
     top: Dp, clearance: Dp, trayOpen: Boolean, toggleTray: () -> Unit,
 ) {
     val submission = rememberSubmission(actions)
@@ -97,36 +132,34 @@ private fun DayBody(
     }
     val minCourse = minCard + with(density) { type.bodySmall.lineHeight.toDp().roundToPx() }
     val minutePx = with(density) { 2.dp.toPx() }
-    val scale = remember(plan.day, entries, minutePx, minCard, minCourse) {
-        DayAxisScale(plan.day, entries, minutePx, minCard, minCourse)
+    val scale = remember(plan.day, placement, minutePx, minCard, minCourse) {
+        DayAxisScale(plan.day, placement, minutePx, minCard, minCourse, with(density) { 48.dp.roundToPx() })
     }
     val initial = remember {
         val now = System.currentTimeMillis()
         val anchor = when {
             now in plan.day.startMillis until plan.day.endMillis -> now - 60 * MINUTE_MS
-            scale.groups.isNotEmpty() -> scale.groups.first().start - 30 * MINUTE_MS
+            placement.visible.isNotEmpty() -> placement.visible.first().start - 30 * MINUTE_MS
             else -> plan.day.date.atTime(8, 0).atZone(plan.day.zone).toInstant().toEpochMilli()
         }
         scale.yAt(anchor)
     }
     val scroll = rememberScrollState(initial)
-    LaunchedEffect(revealStart, scale) {
-        val start = revealStart ?: return@LaunchedEffect
-        if (plan.blocks.any { it.startMillis == start }) {
-            snapshotFlow { scroll.maxValue }.first { it != Int.MAX_VALUE }
-            scroll.scrollTo((scale.yAt(start) - with(density) { 24.dp.roundToPx() }).coerceAtLeast(0))
-            onRevealed()
-        }
+    LaunchedEffect(revealKey, scale) {
+        val item = revealKey?.let { key -> plan.occurrences.firstOrNull { it.key == key } } ?: return@LaunchedEffect
+        snapshotFlow { scroll.maxValue }.first { it != Int.MAX_VALUE }
+        scroll.scrollTo((scale.yAt(item.startMillis) - with(density) { 24.dp.roundToPx() }).coerceAtLeast(0))
+        onRevealed()
     }
     val drag = remember(scale, scroll) { AxisDrag(scale, scroll) }
-    val send: (PlannerCommand.SlotSet) -> Unit = { submission.send(it) }
+    val send: (PlannerCommand) -> Unit = { submission.send(it) }
     DragEffects(drag, checkSlot)
     Box(Modifier.fillMaxSize()) {
         val noticeSource = rememberPlannerBackdrop(drag.dropNotice != null)
         Box(Modifier.fillMaxSize().plannerBackdrop(noticeSource)) {
-            DayWithTray(plan, drag, !submission.busy, onEdit, onAdd, top, clearance, trayOpen, toggleTray,
-                pickup = { task -> Modifier.slotDrag(SlotSource(task.id, task.minutes), drag, plan.revision, !submission.busy && trayOpen, send) }) { spine, _ ->
-                DayAxis(drag, plan.revision, !submission.busy, onEdit, send, { submission.send(it) }, Modifier.fillMaxSize(), top, spine, endInGutter = trayOpen)
+            DayWithTray(plan, drag, !submission.busy, editTray, onAdd, top, clearance, trayOpen, toggleTray,
+                pickup = { task -> Modifier.slotDrag(SlotSource(OccurrenceKey.Schedule(task.id), task.minutes * MINUTE_MS), drag, plan.revision, !submission.busy && trayOpen, send) }) { spine, _ ->
+                DayAxis(drag, plan.revision, !submission.busy, onEdit, openCourse, send, onMore, focused, Modifier.fillMaxSize(), top, spine, endInGutter = trayOpen)
             }
         }
         drag.dropNotice?.let { message ->

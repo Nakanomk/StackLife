@@ -68,7 +68,7 @@ internal fun ReminderPreference() {
             Text(stringResource(R.string.reminder_explanation))
             if (failed) TextButton(onClick = { reminders.refreshAsync() }) { Text(stringResource(R.string.reminder_retry)) }
             if (!allowed) Text(stringResource(R.string.reminder_blocked_hint))
-            if (allowed && !exact) Text(stringResource(R.string.reminder_inexact_hint))
+            if (!exact) Text(stringResource(R.string.reminder_inexact_hint))
             val runtime = Build.VERSION.SDK_INT >= 33 && activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
                 PackageManager.PERMISSION_GRANTED && (!asked || activity.shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))
             TextButton(onClick = {
@@ -79,7 +79,7 @@ internal fun ReminderPreference() {
                         .putExtra(Settings.EXTRA_CHANNEL_ID, REMINDER_CHANNEL))
                 }
             }) { Text(stringResource(if (runtime) R.string.reminder_allow else R.string.reminder_system_notifications)) }
-            if (Build.VERSION.SDK_INT >= 31 && allowed && !exact) TextButton(onClick = {
+            if (Build.VERSION.SDK_INT >= 31 && !exact) TextButton(onClick = {
                 launch(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.fromParts("package", activity.packageName, null)))
             }) { Text(stringResource(R.string.reminder_allow_exact)) }
             if (unavailable) Text(stringResource(R.string.reminder_settings_missing))

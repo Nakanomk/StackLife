@@ -17,11 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.dismiss
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.appearance.CapsuleScene
@@ -47,21 +43,6 @@ internal fun GoalReviewAction(label: String, onClick: () -> Unit, modifier: Modi
                 Text(label, color = ink, style = MaterialTheme.typography.labelLarge)
             }
         }
-    }
-}
-
-@Composable
-internal fun GoalSheetHandle(enabled: Boolean, close: () -> Unit) {
-    val label = stringResource(R.string.ui_close_panel)
-    val source = remember { MutableInteractionSource() }
-    val pressed by source.collectIsPressedAsState()
-    val focused by source.collectIsFocusedAsState()
-    val colors = MaterialTheme.colorScheme
-    val ink = if (pressed || focused) colors.onSurface else colors.outline
-    Box(Modifier.size(56.dp, 48.dp).testTag("goal-sheet-handle")
-        .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = close)
-        .semantics { contentDescription = label; if (enabled) dismiss { close(); true } }, contentAlignment = Alignment.Center) {
-        StackLifeSurface(CapsuleScene.INSET, Modifier.size(36.dp, 5.dp).testTag("goal-grip"), ink, tint = ink.copy(alpha = .80f)) {}
     }
 }
 

@@ -1,0 +1,74 @@
+package io.github.nakanomk.stacklife.appearance
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.GlobalPositionAwareModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.invalidateDraw
+import androidx.compose.ui.platform.InspectorInfo
+import androidx.compose.ui.platform.LocalContext
+import io.github.nakanomk.stacklife.StackLifeApplication
+import io.github.nakanomk.stacklife.planner.WallpaperSpec
+
+internal val LocalBackgroundStore = compositionLocalWithComputedDefaultOf {
+    (LocalContext.currentValue.applicationContext as StackLifeApplication).backgrounds
+}
+
+// Adapted from BiliPai 5893c2c, design-system/.../wallpaper/GlobalWallpaperBackdrop.kt (GPL-3.0).
+private val LocalWallpaperRecording = compositionLocalOf<PlannerBackdrop?> { null }
+
+@Composable
+internal fun WallpaperHost(spec: WallpaperSpec, content: @Composable () -> Unit) {
+    val visible = spec.imageId != null && !wallpaperUsesSolidSurface()
+    val layer = if (visible) rememberGraphicsLayer() else null
+    val base = MaterialTheme.colorScheme.surface
+    val recording = remember(layer, base) { layer?.let { PlannerBackdrop(it, base, null, null) } }
+    // A preview starts a new wallpaper plane, even when embedded in a page with a glass donor.
+    // Transparent parts of a plain preview must not show the enclosing page's photo.
+    Box(if (recording == null) Modifier.background(base) else Modifier, propagateMinConstraints = true) {
+        if (recording != null) WallpaperPixels(spec, base, MaterialTheme.colorScheme.onSurface, card = false,
+            modifier = Modifier.matchParentSize(), record = Modifier.plannerBackdrop(recording), reportFailure = false)
+        // Page chrome can still record scroll content over this donor. Never capture that content here.
+        CompositionLocalProvider(LocalWallpaperRecording provides recording, LocalCapsuleBackdrop provides recording, content = content)
+    }
+}
+
+@Composable
+internal fun Modifier.wallpaperBackground(fallback: Color): Modifier {
+    val source = LocalWallpaperRecording.current ?: return background(fallback)
+    return then(WallpaperReplay(source))
+}
+
+private data class WallpaperReplay(val source: PlannerBackdrop) : ModifierNodeElement<ReplayNode>() {
+    override fun create() = ReplayNode(source)
+    override fun update(node: ReplayNode) { node.source = source }
+    override fun InspectorInfo.inspectableProperties() { name = "wallpaperBackground" }
+}
+
+private class ReplayNode(var source: PlannerBackdrop) : Modifier.Node(), DrawModifierNode, GlobalPositionAwareModifierNode {
+    private var receiver: LayoutCoordinates? = null
+    private var screen = Offset.Unspecified
+    override fun onGloballyPositioned(coordinates: LayoutCoordinates) {
+        val position = coordinates.localToScreen(Offset.Zero)
+        if (receiver !== coordinates || screen != position) {
+            receiver = coordinates; screen = position
+            invalidateDraw()
+        }
+    }
+    override fun onDetach() { receiver = null; screen = Offset.Unspecified }
+    override fun ContentDrawScope.draw() {
+        // Direct drawing works on API 26–32 too; no API-33-only Miuix effect modifier on this path.
+        clipRect { with(source) { drawBackdrop(this@draw, receiver, null, 1f) } }
+        drawContent()
+    }
+}

@@ -1,13 +1,6 @@
 package io.github.nakanomk.stacklife.today
 
-import io.github.nakanomk.stacklife.courses.ScheduledCourse
-import io.github.nakanomk.stacklife.planner.DayBlock
-import io.github.nakanomk.stacklife.planner.DayPlan
 import io.github.nakanomk.stacklife.planner.PlannerQuery
-import io.github.nakanomk.stacklife.planner.CourseOccurrenceId
-import io.github.nakanomk.stacklife.planner.RoutineEvent
-import io.github.nakanomk.stacklife.planner.ScheduledState
-import io.github.nakanomk.stacklife.planner.label
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
@@ -23,54 +16,29 @@ internal fun clockLabel(millis: Long, day: PlannerQuery.Day, includeDate: Boolea
     return date + time.format(clockFormat) + offset
 }
 
+
+/** Shared by the day axis and before/after strips, including spans that cross midnight. */
+internal fun timeFraction(start: Long, end: Long, at: Long): Double = when {
+    at <= start -> 0.0
+    at >= end -> 1.0
+    end - start > 0 -> (at - start).toDouble() / (end - start)
+    else -> (at.toDouble() - start.toDouble()) / (end.toDouble() - start.toDouble())
+}
 internal data class AxisTick(val millis: Long, val label: String, val tag: String, val major: Boolean)
 internal data class AxisBand(
     val start: Long, val end: Long, val top: Int, val height: Int, val ticks: List<AxisTick>,
 ) {
-    fun yAt(millis: Long): Int = ((millis - start).toDouble() / (end - start) * height).roundToInt()
+    fun yAt(millis: Long): Int = (timeFraction(start, end, millis) * height).roundToInt()
 }
-
-internal sealed interface AxisEntry {
-    val startMillis: Long
-    val endMillis: Long
-    val title: String
-    val completed: Boolean
-
-    data class Task(val block: DayBlock, val conflict: Boolean) : AxisEntry {
-        override val startMillis get() = block.startMillis
-        override val endMillis get() = block.endMillis
-        override val title get() = block.title
-        override val completed get() = block.state == ScheduledState.DONE
-    }
-    data class Course(val course: ScheduledCourse, override val completed: Boolean = false) : AxisEntry {
-        override val startMillis get() = course.meeting.startMillis
-        override val endMillis get() = course.meeting.endMillis
-        override val title get() = course.meeting.title
-    }
-    data class Routine(val event: RoutineEvent) : AxisEntry {
-        override val startMillis get() = event.startMillis
-        override val endMillis get() = startMillis + MINUTE_MS
-        override val title get() = event.kind.label()
-        override val completed get() = event.completed
-    }
-}
-
-internal fun DayPlan.chronologicalEntries(): List<AxisEntry> = buildList<AxisEntry> {
-    for (block in blocks) add(AxisEntry.Task(block, block.taskId in conflictingTaskIds))
-    for (course in courses) add(AxisEntry.Course(course, completedCourses.isNotEmpty() &&
-        CourseOccurrenceId.of(course.termId, course.source, course.meeting) in completedCourses))
-    for (routine in routines) add(AxisEntry.Routine(routine))
-}.sortedBy { it.startMillis }
-
-internal data class AxisGroup(val start: Long, val end: Long, val lanes: List<List<AxisEntry>>)
 
 /** The same piecewise transform draws, hit-tests and auto-scrolls. Expand short occupied
  * intervals in place, rather than covering adjacent appointments with oversized touch targets. */
-internal class DayAxisScale(val day: PlannerQuery.Day, entries: List<AxisEntry>, pixelsPerMinute: Float,
-    minimumBlockHeight: Int, minimumCourseHeight: Int) {
+internal class DayAxisScale(val day: PlannerQuery.Day, val placement: TimeGridPlacement, pixelsPerMinute: Float,
+    private val minimumBlockHeight: Int, private val minimumCourseHeight: Int, private val checkHeight: Int) {
     val bands: List<AxisBand>
-    val groups: List<AxisGroup>
     val height: Int
+    fun minimumHeight(rect: TimeGridPlacement.Rect): Int = (if (rect.item.course != null) minimumCourseHeight else minimumBlockHeight) +
+        if (rect.columns > 1) checkHeight else 0
 
     init {
         val ticks = buildList {
@@ -85,31 +53,18 @@ internal class DayAxisScale(val day: PlannerQuery.Day, entries: List<AxisEntry>,
                 }
             }
         }.sortedBy { it.millis }
-        fun start(entry: AxisEntry) = maxOf(entry.startMillis, day.startMillis)
-        fun end(entry: AxisEntry) = minOf(entry.endMillis, day.endMillis)
-
-        // Only simultaneous events share horizontal space. Adjacent half-open intervals do not.
-        groups = buildList {
-            var i = 0
-            while (i < entries.size) {
-                val first = start(entries[i])
-                var last = end(entries[i])
-                val lanes = mutableListOf<MutableList<AxisEntry>>()
-                do {
-                    val entry = entries[i++]
-                    val free = lanes.firstOrNull { end(it.last()) <= start(entry) }
-                    if (free == null) lanes.add(mutableListOf(entry)) else free.add(entry)
-                    last = maxOf(last, end(entry))
-                } while (i < entries.size && start(entries[i]) < last)
-                add(AxisGroup(first, last, lanes))
-            }
-        }
-
-        // A shared monotonic mapping even for nested intervals. At each end, stretch only as
-        // much as the ending entries still need to reach their minimum height from their start.
-        val endsAt = entries.groupBy { end(it) }
+        // Pixels required by an instant (or a +N entrance) belong to the visual axis only.
+        // Reserve them before the following boundary without extending the logical interval.
         val boundaries = sortedSetOf(day.startMillis, day.endMillis)
-        for (entry in entries) { boundaries.add(start(entry)); boundaries.add(end(entry)) }
+        val pointHeights = mutableMapOf<Long, Int>()
+        val minimumAtEnd = mutableMapOf<Long, MutableList<Pair<Long, Int>>>()
+        fun reserve(start: Long, end: Long, height: Int) {
+            boundaries.add(start); boundaries.add(end)
+            if (start == end) pointHeights[start] = maxOf(pointHeights[start] ?: 0, height)
+            else minimumAtEnd.getOrPut(end) { ArrayList() }.add(start to height)
+        }
+        for (r in placement.visible) reserve(r.start, r.end, minimumHeight(r))
+        for (g in placement.more) reserve(g.start, g.end, minimumBlockHeight)
         val tops = mutableMapOf(day.startMillis to 0)
         val result = mutableListOf<AxisBand>()
         var top = 0
@@ -118,9 +73,9 @@ internal class DayAxisScale(val day: PlannerQuery.Day, entries: List<AxisEntry>,
         for (next in boundaries) {
             if (next <= cursor) continue
             var bottom = top + ((next - cursor).toDouble() / MINUTE_MS * pixelsPerMinute).roundToInt().coerceAtLeast(1)
-            for (entry in endsAt[next].orEmpty()) {
-                val minimum = if (entry is AxisEntry.Course) minimumCourseHeight else minimumBlockHeight
-                bottom = maxOf(bottom, tops.getValue(start(entry)) + minimum)
+            bottom = maxOf(bottom, top + (pointHeights[cursor] ?: 0))
+            for ((start, minimum) in minimumAtEnd[next].orEmpty()) {
+                bottom = maxOf(bottom, tops.getValue(start) + minimum)
             }
             val first = tickIndex
             while (tickIndex < ticks.size && ticks[tickIndex].millis < next) tickIndex++

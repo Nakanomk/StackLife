@@ -13,7 +13,10 @@ internal data class TermRow(val termId: String, val source: String, val monday: 
 @Entity(tableName = "course_meetings", primaryKeys = ["termId", "source", "week", "day", "firstPeriod", "lastPeriod", "title", "room"],
     foreignKeys = [ForeignKey(entity = TermRow::class, parentColumns = ["termId", "source"], childColumns = ["termId", "source"], onDelete = ForeignKey.CASCADE)],
     indices = [Index("endMillis"), Index("startMillis")])
-internal data class CourseRow(val termId: String, val source: String, @Embedded val meeting: CourseMeeting)
+internal data class CourseRow(val termId: String, val source: String, @Embedded val meeting: CourseMeeting) {
+    // Provenance changes only on replacement. It is not part of the deduplication/content key.
+    @ColumnInfo(defaultValue = "0") var occurrenceVersion: Long = 0
+}
 
 internal data class CourseWeekBounds(val firstStart: Long?, val lastEnd: Long?)
 
@@ -32,6 +35,8 @@ internal interface CourseDao {
     fun weekBounds(id: String, week: Int): CourseWeekBounds
     @Query("SELECT week FROM course_meetings WHERE termId=:id AND source=:source AND title=:title AND room=:room AND day=:day AND firstPeriod=:first AND lastPeriod=:last ORDER BY week")
     fun patternWeeks(id: String, source: String, title: String, room: String, day: Int, first: Int, last: Int): List<Int>
+    @Query("SELECT * FROM course_meetings WHERE termId=:term AND source=:source AND week=:week AND day=:day AND firstPeriod=:first AND lastPeriod=:last AND title=:title AND room=:room")
+    fun occurrence(term: String, source: String, week: Int, day: Int, first: Int, last: Int, title: String, room: String): CourseRow?
     @Query("SELECT * FROM course_meetings WHERE startMillis < :end AND endMillis > :start ORDER BY startMillis,endMillis,termId,title,room")
     fun intersecting(start: Long, end: Long): List<CourseRow>
     @Upsert fun put(term: TermRow)

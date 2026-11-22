@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="import_choose_timetable">Choose a timetable</string>
+    <string name="import_source_scope">Only classes from %1$s in this timetable will be replaced. Other sources and tasks are kept.</string>
+    <string name="import_meeting_count">Class meetings: %1$d</string>
+    <string name="import_valid_count">Valid meetings after deduplication: %1$d</string>
+    <string name="import_unresolved">Awaiting a decision: %1$d</string>
+    <string name="import_corrected_count">Corrected: %1$d</string>
+    <string name="import_excluded_count">Excluded: %1$d</string>
+    <string name="import_flagged">Entries that need review</string>
+    <string name="import_row">Source row %1$d</string>
+    <string name="import_item">Entry %1$d</string>
+    <string name="import_period_range">Periods %1$d–%2$d</string>
+    <string name="import_starts_on">First class: %1$s</string>
+    <string name="import_show_raw">View original data</string>
+    <string name="import_hide_raw">Hide original data</string>
+    <string name="import_raw_week">Source week: %1$s</string>
+</resources>

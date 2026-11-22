@@ -2,16 +2,13 @@ package io.github.nakanomk.stacklife.storage
 
 import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.courses.*
-import io.github.nakanomk.stacklife.planner.CourseOccurrenceId
+import io.github.nakanomk.stacklife.planner.*
 import java.time.ZoneId
-import io.github.nakanomk.stacklife.planner.DayBlock
-import io.github.nakanomk.stacklife.planner.PlannerChange
-import io.github.nakanomk.stacklife.planner.PlannerCommand
 
 internal data class ReviewedCourses(val term: TermSpec, val meetings: List<CourseMeeting>, val source: String, val calendar: CourseCalendar?)
 private data class TermContents(val term: TermRow, val rows: Set<CourseRow>)
 internal class CourseWrites(val termId: String, val source: String, val removeTerm: Boolean, val term: TermRow?,
-    val removed: List<CourseRow>, val added: List<CourseRow>) {
+    val removed: List<CourseRow>, val added: List<CourseRow>, val links: List<CourseReplacement>) {
     fun applyTo(dao: CourseDao) {
         if (removeTerm) { dao.remove(termId, source); return }
         term?.let(dao::put)
@@ -33,26 +30,28 @@ private class SourceDraft(val source: String, private val dao: CourseDao) {
 
 private fun TermSpec.row(source: String) = TermRow(id, source, firstMonday.toEpochDay(), weeks, initial, switchDate?.toEpochDay())
 
+internal fun CourseRow.key() = CourseOccurrenceId.of(termId, source, meeting)
+internal fun CourseRow.overlap(): Overlap {
+    val key = key()
+    return Overlap(key.stableKey(), meeting.title, meeting.startMillis, meeting.endMillis, key)
+}
+
 /** Each import replaces exactly one (source, term); manual edits replace only one pattern. */
 internal class CourseDraft(private val dao: CourseDao) {
     private val sources = mutableMapOf<String, SourceDraft>()
+    private val manualOrigins = mutableMapOf<CourseRow, CourseRow>()
     private fun source(name: String) = sources.getOrPut(name) { SourceDraft(name, dao) }
     private fun calendar(name: String) = sources[name]?.calendar ?: calendarFor(name)
     private fun zone(name: String) = calendar(name)?.zone ?: ZoneId.systemDefault()
-    private fun CourseRow.summary(): String {
-        val zone = zone(source)
-        return uiText({ "${label()} · Week ${meeting.week} · Periods ${meeting.firstPeriod}–${meeting.lastPeriod} · " },
-            { "${label()} · 第${meeting.week}周 · 第${meeting.firstPeriod}–${meeting.lastPeriod}节 · " }) +
-            "${intervalLabel(meeting.startMillis, meeting.endMillis, zone)} (${zone.id})"
-    }
     private fun otherTerm(id: String, except: String): TermSpec? {
         for ((name, overlay) in sources) if (name != except) overlay.current[id]?.let { return it.term.spec() }
         return dao.terms(id).firstOrNull { it.source != except && sources[it.source]?.current?.containsKey(id) != true }?.spec()
     }
-    fun contains(key: CourseOccurrenceId, stored: () -> Boolean): Boolean {
-        val overlay = sources[key.source]?.current ?: return stored()
-        if (key.termId !in overlay) return stored()
-        return overlay[key.termId]?.rows?.any { key == CourseOccurrenceId.of(it.termId, it.source, it.meeting) } == true
+    fun stored(key: CourseOccurrenceId) = with(key) { dao.occurrence(termId, source, week, day, firstPeriod, lastPeriod, title, room) }
+    fun resolve(key: CourseOccurrenceId): CourseRow? {
+        val overlay = sources[key.source]?.current
+        if (overlay == null || key.termId !in overlay) return stored(key)
+        return overlay[key.termId]?.rows?.find { it.key() == key }
     }
     fun replace(draft: ReviewedCourses) {
         val spec = draft.term
@@ -103,10 +102,16 @@ internal class CourseDraft(private val dao: CourseDao) {
         } ?: existing ?: throw InvalidCommand(uiText("This term no longer exists. Select another term.", "所选学期已不存在，请重新选择。"))
         if (cmd.before == null && cmd.after == null) throw InvalidCommand(uiText("Select a manual class.", "请选择一门手动课程。"))
         val rows = previous?.rows.orEmpty().toMutableSet()
+        val originalWeeks = mutableMapOf<Int, CourseRow>()
         cmd.before?.let { before ->
             val found = mutableSetOf<Int>()
             rows.removeAll { row ->
-                if (before.pattern.matches(row.meeting)) { found.add(row.meeting.week); true } else false
+                if (!before.pattern.matches(row.meeting)) false else {
+                    found.add(row.meeting.week)
+                    val origin = manualOrigins.remove(row) ?: row.takeIf { it in manual.original[id]?.rows.orEmpty() }
+                    if (origin != null) originalWeeks[row.meeting.week] = origin
+                    true
+                }
             }
             if (found.isEmpty() || found != before.weeks) throw InvalidCommand(uiText("The weeks for this class have changed. Close and reopen the editor.", "这门手动课程的周次已改变，请关闭编辑器并重新打开。"))
         }
@@ -121,11 +126,15 @@ internal class CourseDraft(private val dao: CourseDao) {
             for (w in after.weeks.sorted()) {
                 val meeting = SchoolImports.default.calendar.meetingOrNull(term, w, p.day, p.title, p.room, p.firstPeriod, p.lastPeriod)
                     ?: throw InvalidCommand(uiText("Select weeks within the term, a weekday, and valid start and end periods.", "请选择学期内的上课周、星期和有效的起止节次。"))
-                rows.add(CourseRow(id, MANUAL_SOURCE, meeting))
+                val row = CourseRow(id, MANUAL_SOURCE, meeting)
+                rows.add(row)
+                originalWeeks[w]?.let { if (row != it) manualOrigins[row] = it }
             }
         }
         manual.current[id] = if (rows.isEmpty()) null else TermContents(term.row(MANUAL_SOURCE), rows)
     }
+    fun storedIntersecting(start: Long, end: Long) = dao.intersecting(start, end)
+
     fun intersecting(start: Long, end: Long): List<CourseRow> {
         val stored = dao.intersecting(start, end)
         if (sources.isEmpty()) return stored
@@ -136,37 +145,52 @@ internal class CourseDraft(private val dao: CourseDao) {
             }
         }.sortedBy { it.meeting.startMillis }
     }
-    fun finish(changes: MutableList<PlannerChange>, tasks: (Long, Long) -> List<DayBlock>): List<CourseWrites> {
+    fun finish(changes: MutableList<PlannerChange>, version: Long, previousTasks: (Long, Long) -> List<AgendaOccurrence>,
+        tasks: (Long, Long) -> List<AgendaOccurrence>): List<CourseWrites> {
         if (sources.isEmpty()) return emptyList()
         val writes = ArrayList<CourseWrites>()
-        var from = Long.MAX_VALUE; var until = Long.MIN_VALUE
-        fun touched(row: CourseRow): Boolean {
-            val src = sources[row.source] ?: return false
-            return row.termId in src.current && (src.source != MANUAL_SOURCE || src.original[row.termId]?.rows?.contains(row) != true)
-        }
-        for (s in sources.values) for (contents in s.current.values) if (contents != null) for (row in contents.rows) {
-            if (touched(row)) { from = minOf(from, row.meeting.startMillis); until = maxOf(until, row.meeting.endMillis) }
-        }
-        if (from < until) {
-            fun warn(a: CourseRow, other: String) {
-                changes.add(PlannerChange(a.termId, uiText({ "Conflict · ${a.meeting.title.diagnosticText()}" }, { "冲突 · ${a.meeting.title.diagnosticText()}" }), a.summary(), uiText({ "Overlaps with $other; both will be kept" }, { "与 $other 重叠；保留双方" })))
+        fun conflicts(stored: Boolean): Map<Pair<String, String>, CourseOverlapSummary> {
+            var from = Long.MAX_VALUE; var until = Long.MIN_VALUE
+            fun touched(row: CourseRow): Boolean {
+                val src = sources[row.source] ?: return false
+                if (row.termId !in src.current) return false
+                val opposite = if (stored) src.current else src.original
+                return src.source != MANUAL_SOURCE || row !in opposite[row.termId]?.rows.orEmpty()
             }
-            importConflicts(intersecting(from, until), tasks(from, until), ::touched,
-                { a, b -> warn(a, b.summary()) },
-                { c, t -> warn(c, "${t.title.diagnosticText()} ${intervalLabel(t.startMillis, t.endMillis, zone(c.source))}") })
+            for (s in sources.values) for (id in s.current.keys) {
+                val contents = (if (stored) s.original[id] else s.current[id]) ?: continue
+                for (row in contents.rows) if (touched(row)) {
+                    from = minOf(from, row.meeting.startMillis); until = maxOf(until, row.meeting.endMillis)
+                }
+            }
+            if (from >= until) return emptyMap()
+            return importConflicts(if (stored) storedIntersecting(from, until) else intersecting(from, until),
+                if (stored) previousTasks(from, until) else tasks(from, until), ::touched)
         }
+        val nextConflicts = conflicts(false)
+        val oldConflicts = conflicts(true)
         for (s in sources.values) for ((id, next) in s.current) {
             val old = s.original[id]
             val was = old?.rows.orEmpty(); val now = next?.rows.orEmpty()
             val removed = was.filterNot { it in now }; val added = now.filterNot { it in was }
-            if (old?.term != next?.term) {
-                val label = if (s.source == MANUAL_SOURCE) uiText("Manual timetable", "手动课表") else s.source
-                changes.add(PlannerChange(id, "$label · $id", old?.term?.spec()?.calendarSummary(s.calendar), next?.term?.spec()?.calendarSummary(s.calendar)))
+            val changed = old?.term != next?.term || removed.isNotEmpty() || added.isNotEmpty()
+            val key = s.source to id
+            val overlaps = nextConflicts[key]
+            val links = if (s.source != MANUAL_SOURCE) emptyList() else added.mapNotNull { row ->
+                manualOrigins[row]?.let { CourseReplacement(it.key(), row.key()) }
             }
-            for (row in removed) changes.add(PlannerChange(id, uiText({ "Remove class · ${row.meeting.title}" }, { "移除课程 · ${row.meeting.title}" }), row.summary(), null))
-            for (row in added) changes.add(PlannerChange(id, uiText({ "Add class · ${row.meeting.title}" }, { "新增课程 · ${row.meeting.title}" }), null, row.summary()))
-            if (old?.term != next?.term || removed.isNotEmpty() || added.isNotEmpty()) {
-                writes.add(CourseWrites(id, s.source, next == null, next?.term?.takeUnless { it == old?.term }, removed, added))
+            if (changed || (overlaps?.count ?: 0L) != 0L) {
+                val retained = added.mapTo(hashSetOf()) { it.key() }.also { keys -> links.forEach { keys.add(it.old) } }
+                val cancelled = removed.count { it.key() !in retained }
+                fun TermContents.snapshot(rows: List<CourseRow>, summary: CourseOverlapSummary?, links: List<CourseReplacement>, cancelled: Int) =
+                    CourseSetSnapshot(id, s.source, term.monday, term.weeks, term.initial, term.switchDay,
+                        zone(s.source).id, rows.map { it.meeting }, summary?.examples.orEmpty(), links, summary?.count ?: 0, cancelled)
+                changes.add(PlannerChange("courses:${s.source.length}:${s.source}:$id", old?.snapshot(removed, oldConflicts[key], emptyList(), cancelled),
+                    next?.snapshot(added, overlaps, links, 0)))
+            }
+            if (changed) {
+                for (row in added) row.occurrenceVersion = version
+                writes.add(CourseWrites(id, s.source, next == null, next?.term?.takeUnless { it == old?.term }, removed, added, links))
             }
         }
         return writes

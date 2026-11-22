@@ -4,7 +4,7 @@ StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Andr
 
 **项目许可：** StackLife 采用 [GNU 通用公共许可证第 3 版或任何后续版本](../LICENSE)（`GPL-3.0-or-later`）。第三方代码与资源保留[各自的许可和署名](../app/src/main/assets/licenses/)。
 
-**当前交付：v0.9.0 · 手动录课与日程交互。** 空课表可直接添加课程；已有学期从「课表选项 → 添加课程」进入。今天可长按已排任务旁的竖条，拖下端点改变结束时间。顶栏箭头横移日／周；底部输入和导航不参与横移。玻璃使用 BiliPai 同源的 Miuix 渲染器及其原版折射着色器，不支持时仍使用同形 MD3。普通包不含联盟 SDK。
+**当前候选版本：v0.10.12（27），Room v12。** 今天可以安排重叠事件、单点和每日重复；流程图能引用已有任务，倒数日按日历日计数。手动功能不依赖模型或网络。下文 M0–M6 是历史契约；原本“冲突拒绝写入”“节点都是模板”等规则已由 [本次升级](#v01012-排程链接倒数日与外观) 替代。普通包不含联盟 SDK。
 
 ## 起点与产品决定
 
@@ -316,6 +316,49 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 **v0.10.8 复审。** 画面验收使用 API 37 模拟器。440 dpi 同一工作台截图中，队列选中底的中心段从 83 px 增到 110 px，点击区仍高 132 px；玻璃／实色两档点上边缘均能选栈，沿轨横拖可回队列。课表在 320、440、560 dpi 下滚动时，日期行内仍有磨砂，下沿外第一个像素起的网格分隔线与清晰处相同，日期仍可点开。深色任务详情返回时，原行与邻项不换位；逐帧覆盖落位、销毁、预测返回反拖，以及编辑器打开键盘后取消返回仍保留草稿。流程图针对真实背景变色验证握柄和选中行：玻璃透色、减少透明度不透色；换目标、加入队列、存栈和滑动关闭均通过。
 
 **v0.10.9 复审。** API 37、1080×2340、440 dpi 上，以 24 个合成课次从差异页顶部确认导入；底部确认仍覆盖事务进行中旋转的场景。课格和历史的开合录屏显示抽屉从屏幕下沿进出，背景不横移。实测栈帧中编辑后恢复的是修改过的原任务，历史快照没有变化。系统文件选择器成功导出事件日志及含 78 行原始帧计时的报告（模拟器，不作为真机帧率）。OnePlus USB 覆盖安装 `0.10.9 (24)`，设备上基础 APK 的 SHA-256 与关于页和构建产物一致。HUB 说明和合成数据的提取流程已验证，未代登录个人账号。
+
+**v0.10.12 · 抽屉与卡片。** API 37 隔离模拟器，1080×2340、440 dpi。课程阅读、手动录课、拓扑预览及助理／历史使用同一半高 → 全高窗口；实测上拉、回拉、IME 交接和旋转保留表单。队列、栈和图条目把标题、时间、数量及笔记分开排版，200% 字号不缩字。19 个定向设备用例覆盖可见高度、内部返回、卡片往返、手势取消和相邻行占位；不是联盟真机或绘帧性能证据。
+
+|本地实现|固定来源、许可与适配|
+|---|---|
+|`appearance/PlannerPopups.kt`、`courses/{CourseHome,ManualCourseSheet}.kt`、`graphs/GoalReview.kt`、`assistant/{AssistantSheet,ConversationHistorySheet}.kt`|[BiliPai `resolveAppModalLayoutSpec`](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/design-system/src/main/java/com/android/purebilibili/core/ui/AppSheetComponents.kt#L118-L141)（GPL-3.0）；[AndroidX `BottomSheet`](https://github.com/androidx/androidx/blob/296313a488a01c84ddcb0801d4efee640a14070c/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/BottomSheet.kt#L293-L306)（Apache-2.0）。采用手机全高壳、原生锚点／嵌套滚动；应用决定何时允许隐藏或先退内页。|
+|`transitions/{SceneMotion,RouteMotion,PaneMotion,DetailCard}.kt`|[BiliPai `VideoCardReturnTimeline`](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/core/ui/transition/VideoCardReturnTimeline.kt#L29-L65)（GPL-3.0）。同一进度驱动几何和前景交接，删除来源时退为普通转场，不取播放器代码。|
+|`workspace/{WorkspaceScreen,Frames}.kt`、`graphs/{GraphsRoute,GraphEditorRoute}.kt`|[Miuix `Card`](https://github.com/compose-miuix-ui/miuix/blob/d27cbb0b375912cdf42670553fdb564d8ff7fc23/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/basic/Card.kt)（Apache-2.0）及 [BiliPai `AdaptivePreferenceComponents`](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/design-system/src/main/java/com/android/purebilibili/core/ui/components/AdaptivePreferenceComponents.kt#L760-L805)（GPL-3.0）。借内容内边距及标题／支持文字层级；保留 Material 字体、事务和实体转场，不引入 Miuix 窗口和资源。|
+
+**Markdown 与笔记。** 阅读器、消息和本地笔记共用 GFM，任务框只读，远程图片不取网。编辑器保留原文及原生选区；长笔记不进 Bundle。API 37 隔离模拟器、1080×2340、440 dpi：同一合成任务升级前显示源码，升级后显示勾选框、粗体、表格及可复制的缩进代码；200% 字号深色下，滚动可达表格两列与代码复制。Fcitx5 Android 0.1.3 的 Pinyin、Anthy、Hangul 分别确认了「你好」「日本」「한글」。后台终止进程后由最近任务恢复，未保存笔记仍在，明确放弃才还原旧文。另有定向用例覆盖 100 KB、IME composing、链接、快照、父草稿取消、过期修订及草稿文件丢失。
+
+|本地实现|固定来源、许可与适配|
+|---|---|
+|`markdown/PlannerMarkdown.kt`|[Mike Penz `Markdown` 0.45.0](https://github.com/mikepenz/multiplatform-markdown-renderer/tree/v0.45.0/multiplatform-markdown-renderer-m3) 与 [JetBrains Markdown 0.7.9](https://github.com/JetBrains/markdown)（Apache-2.0；渲染库另含 MIT 通告）。[GPTMobile `ChatMarkdown`](https://github.com/Taewan-P/gpt_mobile/blob/e3a14c38b59012c88bc78bf327050ecffa44798f/app/src/main/kotlin/dev/chungjungsoo/gptmobile/presentation/ui/chat/ChatMarkdown.kt)（GPL-3.0）的代码复制行为。适配本地链接白名单、宽块滚动、源码缩进与禁自动取图。|
+|`markdown/MarkdownComposer.kt`、`markdown/kern` 同名输入／输出变换、样式、scanner、parser、element、list syntax、projection、engine|[Kern editor 与 parser](https://github.com/iamkeeler/kern-android-markdown/tree/6b1df7d67c9fb47df654f4063144091ab5defe0e/app/src/main/java/com/attachdesign/kern)（Apache-2.0）。仅移植编辑闭包，移除智能标点和随机段标识；原文不改，移动选区复用解析。|
+|`notes/{NoteDraft,NoteEditorScreen}.kt`、任务与节点编辑入口|[Telegram `getDraft/saveDraft`](https://github.com/TelegramMessenger/Telegram-Android/blob/21f7d109da6ab3506c9e9577f98c6a38771ab335/TMessagesProj/src/main/java/org/telegram/messenger/MediaDataController.java#L7908-L7940) 只借「按身份恢复本地草稿」的行为，不移植代码。应用自行管理私有草稿文件、原始 UTF-16、接受／取消和 PlannerApi 修订校验。|
+
+**对话图片与本地提案。** `assistant/AttachmentStore.kt` 按 [GPTMobile v0.9.1 `FileUtils`](https://github.com/Taewan-P/gpt_mobile/blob/e3a14c38b59012c88bc78bf327050ecffa44798f/app/src/main/kotlin/dev/chungjungsoo/gptmobile/util/FileUtils.kt#L310-L408)（GPL-3.0）先读尺寸，按真实方向重编码，发送的字节就是可放大的本地预览。`ChatDraft` 区分准备、就绪、失败；`ChatTransport` 只为本次明确发送的消息流式写入有序图片。消息左右排列、输入框上方缩略条只参考 [RikkaHub 3.3.1 `ChatInput`](https://github.com/rikkahub/rikkahub/blob/3.3.1/app/src/main/java/me/rerere/rikkahub/ui/components/ai/ChatInput.kt#L614-L640) 和 [Telegram `ChatAttachAlert`](https://github.com/TelegramMessenger/Telegram-Android/blob/21f7d109da6ab3506c9e9577f98c6a38771ab335/TMessagesProj/src/main/java/org/telegram/ui/Components/ChatAttachAlert.java#L4895-L4909) 的行为，不移植两者代码或资源。系统选图遵循 [Photo Picker](https://developer.android.com/training/data-storage/shared/photopicker)，API 37 实际选择两张合成图片；API 26 实际打开 DocumentsUI，没有申请全图库权限。
+
+`planner/ChangeSnapshot.kt` 保存事务的前值与后值；`assistant/ChangePreview.kt` 与 `ChangeDiagrams.kt` 复用本地卡片、日轴和 DAG 几何（[KotlinFlow 1.0.1 `components/MiniMap.kt` 源码，MIT](https://repo.maven.apache.org/maven2/io/github/joaonart/kotlinflow/1.0.1/kotlinflow-1.0.1-sources.jar)；完整通知随 APK）。仅模型可见的字段由 `ToolProjection` 逐项生成。Room v9 的旧 NOTICE 原文不变，新历史图没有可执行的 proposal ID；历史续聊只取最近 12 条文字，旧图片需再次附加。外部账户服务可用性不能由本机 TLS 测试端点证明。
+
+**手动课程与导入。** `courses/ManualCourseSheet.kt`、`CourseTermFields.kt` 和 `HustImportScreen.kt` 沿用已有学校解析器与 `PlannerApi`，不共用覆盖操作。手动流程逐步选学期、填课程、选周次、核对差异；新学期 ID 由本机生成。草稿的任意一步可返回或重建，只有事务回执结束提交流程。校方／文件导入先选目标课表，错误行单独更正，原始行仅按需展开，长核对页顶部和底部都可确认。视觉分组只借 [Miuix Card](https://github.com/compose-miuix-ui/miuix/blob/d27cbb0b375912cdf42670553fdb564d8ff7fc23/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/basic/Card.kt) 的标题与支持信息层级，以及 [NiA ForYouScreen](https://github.com/android/nowinandroid/blob/2982e63cb691ad49cd009aab43dc206fee6699c2/feature/foryou/impl/src/main/kotlin/com/google/samples/apps/nowinandroid/feature/foryou/impl/ForYouScreen.kt) 的真实选择／显式完成行为；两者均 Apache-2.0，不移植资源。API 37 实际以 200% 字体滚动并提交 6 课次；API 26 复测新建、编辑、取消与删除。校方本人在线登录不以测试夹具代证。
+
+### v0.10.12 排程、链接、倒数日与外观
+
+|用户可做什么|写入和恢复的边界|实现与来源|
+|---|---|---|
+|安排重叠事件、零分钟单点和不限结束日的每日系列；在时间或事件视图点 `+N` 查看整组。|最多两列是显示规则，不是保存上限。空闲只扣非零区间的并集。每日按原始本地日期标识；改本次、之后或整个系列不会把跨日移动变成第二份事件。|`today/TimeGridPlacement.kt` 适配 [FullCalendar Standard timeGrid 6.1.22](../app/src/main/assets/licenses/FullCalendar-Standard-MIT.txt)（MIT）；`planner/DailySegment.kt` 以 [dmfs 0.17.1](../app/src/main/assets/licenses/dmfs-Recurrence-Apache-2.0.txt)（Apache-2.0）枚举有界日期，时区、跳日和例外由本机解析。|
+|为日程添加多条提前提醒，或为一次发生指定绝对时间；点通知打开对应日期。|以实际触发时间排序，以发生项、规则 ID 和触发时刻去重。拒绝通知权限不丢规则；错过的提醒不补发。系统强制停止后须重新打开应用。|`today/SlotEditor.kt`、`storage/AgendaDraft.kt`：[Etar `EditEventHelper`](../app/src/main/assets/licenses/Android-Calendar-and-Onboarding-Apache-2.0.txt)（Apache-2.0）；`reminders/ReminderRulesEditor.kt`、`storage/AgendaReminders.kt`：[Tasks.org 规则和计算](../app/src/main/assets/licenses/Tasks-org-GPL-3.0.txt)（GPL-3.0）。保留本机 AlarmManager、事务和回执。|
+|流程图可混排模板、原任务与特定日期的任务发生项；先预览每项去向，再加入队列或存栈。|仅模板创建新任务。链接不移动已有任务；存栈得到不可恢复的引用快照。解除链接不删源事件，来源已移除则阻止生成。课程和倒数日不在选择器内。|`graphs/GraphForms.kt` 借 [Vikunja `RelatedTasks.vue`](https://github.com/go-vikunja/vikunja/blob/2ba8cef799cf12f7d0cf1196a180d75a2890c873/frontend/src/components/tasks/partials/RelatedTasks.vue) / `Multiselect.vue` 的搜索、多选与解除关联交互；不移植 AGPL 代码。`GraphDraft` 与 `BatchDraft` 只读写本批的权威事务状态。|
+|在第五个功能保存、置顶、排序倒数日，或在编辑页预览日期和私有背景。|使用本地公历日期，不以毫秒除以 24 小时。当天显示 0，过期标「已过」。不会创建待办、占时或发提醒；取消编辑不产生记录。|`countdown/{CountdownRoute,CountdownCards,CountdownEditor}.kt`、`planner/CountdownModels.kt`：[TimeTrace 固定版本、逐文件映射与 MIT 全文](../app/src/main/assets/licenses/TimeTrace-MIT.txt)。未引入上游数据库、图标或摄影图。|
+|在外观设置中选择全局或逐页背景、开关课表辅助线、切换平面／滚轮、拖排和隐藏五个功能。|只录制背景，文字和导航不录进壁纸；本地图片按持久引用回收。关线保留课块与触达，滚轮不吸附。完整排列、可见集合与启动页一次保存，至少保留一项。设置仍可打开隐藏页。|`appearance/{WallpaperHost,WallpaperPolicy,BackgroundStore,NavigationFields}.kt`、`today/DayWheel.kt`：[BiliPai 固定版本和逐文件映射](../app/src/main/assets/licenses/BiliPai-GPL-3.0.txt)（GPL-3.0）。真实拖排沿用 [Reorderable 3.1.0](../app/src/main/assets/licenses/reorderable-3.1.0-LICENSE.txt)。|
+|首次启动可选功能、进入真实作息编辑器、新增任务或导入；也可直接选「稍后」。|空队列不等于新安装。升级不弹引导，稍后不提交未保存的功能选择，帮助中可重看。不预填任务、不索要密钥或通知权限。|`onboarding/OnboardingScreen.kt`：[Now in Android `ForYouScreen`](../app/src/main/assets/licenses/Android-Calendar-and-Onboarding-Apache-2.0.txt)（Apache-2.0）；完成状态独立于外观重置。|
+
+**迁移和授权。** API 26 `PlannerMigrationTest` 从导出的 v8 schema 实际开库，经 v9（对话与引导）、v10（排程与收据）、v11（图链接）、v12（倒数日），关闭再打开。比对同起点两项的 ID/时刻、帧历史与当前值、模板图、课程和停用作息的勾选、聊天原文、四项外观升级及旧通知收据只导入一次。API 37 `AssistantProposalTest` 和 `WorkspaceTest` 走查询、预览、手动确认、事务和重开；模型没有提交工具，读取过某任务也不等于获准读取其笔记或背景文件。
+
+**课表玻璃取样。** API 37 `ManualCourseEntryTest#courseGlassSamplesThePageWallpaperEvenWhenGridRulesAreHidden` 在真实课表页关闭辅助线，裁切同一张红／蓝测试图；空列和同一课格内部的实测颜色随裁切改变，点击仍打开原课程。对照 `u8-wallpaper-course-red.png` 和 `u8-wallpaper-course-blue.png`，不是设置预览代证。
+
+**画面复审。** 证据在本地 `app/build/outputs/`，只使用合成日程。API 37（1080×2340、440 dpi）与 API 26（1080×1920、420 dpi）覆盖玻璃／实色、深浅色与 200% 字号。字阶与层级对照 `u2-dark-200-detail.png`、`u7-countdown-list-200.png`：标题、日期和天数各自换行，不靠缩字。留白与对齐看 `u1-queue-before.png`／`u1-queue-after.png`；密度看 `u5-points-drawer-middle.png`：20 个同刻项改为整组可滚动而非细条。一致性看 `u8-week-grid-on.png`／`u8-week-grid-off.png`，同一课块和日期栏不移动；原生交互看 `u8-navigation-drag.png` 的实际换位及日期滚轮、系统选图、输入法记录。曾发现矮横屏的队列按钮压住设置、窄屏导航末行被圆形裁掉；两处均调整布局，不缩小 48 dp 触达区。
+
+**动效和性能分开验收。** `u8-integrated-motion.mp4` 与 `u8-recorded-gestures.txt` 对应卡片往返及返回取消、根页、抽屉、日／周切换和滚轮拖时。独立 `.bench` 包用 30 个任务和 5 门双节课完成滚动、卡片往返、助理开合的玻璃／实色六项模拟器 dry-run（`u8-benchmark-emulator-dryrun.txt`）。本轮没有 API 31+ 物理设备；没有新旧版本同机同刷新率的 p50、p95 或 overrun 结论。HUB 本人登录、真实外部 BYOK、联盟 SDK 分发许可和支持设备转场仍分别未验；候选包不等于发布。
+
+### 历史里程碑验收用例（M1–M6）
 
 |阶段 / 用例|输入 → 可观察结果（校方登录、真实模型、联盟真机和性能有各自的验收条件）|
 |---|---|

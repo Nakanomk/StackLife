@@ -1,0 +1,8 @@
+GPTMobile v0.9.1, Taewan-P and contributors — GNU General Public License, version 3
+https://github.com/Taewan-P/gpt_mobile/tree/e3a14c38b59012c88bc78bf327050ecffa44798f
+
+Source: app/src/main/kotlin/dev/chungjungsoo/gptmobile/util/FileUtils.kt (bounds-first decoding, power-of-two sampling, input/edge/direct-upload thresholds) and presentation/ui/chat/ChatAttachmentDraft.kt (preparing/ready/failed states within the same source package tree).
+
+Modified for StackLife: assistant/AttachmentStore.kt normalizes orientation, rejects non-static inputs, strips metadata even for small images, and works with private UUID files. The local composer keeps preparation errors editable; transmission streams the normalized files, and local history never grants permission to upload them again. GPTMobile's provider implementation and resources are not included.
+
+The complete GNU GPL version 3 text is included in this directory as StackLife-GPL-3.0-or-later.txt. Upstream license: https://github.com/Taewan-P/gpt_mobile/blob/e3a14c38b59012c88bc78bf327050ecffa44798f/LICENSE

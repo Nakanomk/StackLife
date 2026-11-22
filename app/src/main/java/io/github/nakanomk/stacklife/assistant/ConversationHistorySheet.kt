@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -36,11 +35,12 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun ConversationHistoryPane(model: AssistantModel, fallback: AssistantPage, id: Long?, origins: PaneOrigins, threads: List<ConversationRow>?,
-    listState: LazyListState, onThread: (Long?) -> Unit, onBack: () -> Unit, onSettings: () -> Unit, onClose: () -> Unit) {
+    listState: LazyListState, active: Boolean, onThread: (Long?) -> Unit, onBack: () -> Unit, onSettings: () -> Unit, onClose: () -> Unit) {
     val history = model.history
     val selected = if (id == null) null else threads?.find { it.id == id }
     val page = remember(selected, fallback) { selected?.resumePage(fallback) ?: fallback }
-    var draft by remember(id) { mutableStateOf("") }
+    val ui by model.state.collectAsStateWithLifecycle()
+    val canReply = active && ui.work == AssistantWork.IDLE && ui.pending == null && !ui.reviewAgain && !ui.importRequested
     LaunchedEffect(id, selected, threads != null) {
         if (id != null && threads != null && selected == null) onThread(null)
     }
@@ -53,7 +53,7 @@ internal fun ConversationHistoryPane(model: AssistantModel, fallback: AssistantP
         var confirmDelete by rememberSaveable { mutableStateOf(false) }
         var deletionError by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
-            Column(Modifier.fillMaxWidth().fillMaxHeight(.9f).imePadding().padding(horizontal = 16.dp, vertical = 4.dp)) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 4.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     if (id != null) IconButton(onClick = onBack, modifier = Modifier.testTag("assistant-history-back")) {
                         Icon(painterResource(R.drawable.ic_arrow_back), stringResource(R.string.assistant_back_to_history))
@@ -88,7 +88,7 @@ internal fun ConversationHistoryPane(model: AssistantModel, fallback: AssistantP
                                 .clickable(role = Role.Button, onClickLabel = stringResource(R.string.assistant_view_conversation)) { onThread(row.id) }
                                 .heightIn(min = 56.dp).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
-                                    Text(row.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                                    Text(row.title.ifEmpty { stringResource(R.string.chat_image_message) }, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
                                     Text("$scopeName · $date", style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
@@ -99,33 +99,19 @@ internal fun ConversationHistoryPane(model: AssistantModel, fallback: AssistantP
                     }
                 } else {
                     val messages by remember(history, id) { history.observeMessages(id) }.collectAsStateWithLifecycle(initialValue = emptyList())
-                    val transcript = rememberLazyListState()
-                    LaunchedEffect(messages.lastOrNull()?.id) {
-                        if (messages.isNotEmpty()) transcript.scrollToItem(messages.lastIndex)
-                    }
-                    LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("assistant-history-messages"), state = transcript,
-                        contentPadding = PaddingValues(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(messages, key = { it.id }) { message ->
-                            if (message.role == HistoryRole.NOTICE) {
-                                Surface(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, shape = MaterialTheme.shapes.small,
-                                    color = MaterialTheme.colorScheme.surfaceContainerHighest) {
-                                    Column(Modifier.padding(12.dp)) {
-                                        Text(stringResource(R.string.assistant_local_record), style = MaterialTheme.typography.labelLarge)
-                                        Text(message.text, style = MaterialTheme.typography.bodyMedium)
-                                    }
-                                }
-                            } else ChatBubble(ChatLine(message.role == HistoryRole.USER, message.text))
-                        }
-                    }
+                    val draft = remember(model, id) { model.draft("history:$id") }
+                    ChatMessages(messages, model.attachments, Modifier.weight(1f), "assistant-history-messages",
+                        reattach = if (canReply) ({ draft.add(listOf(ImageSource.Saved(it))) }) else null)
                     val receiver = (recipient as? ReadState.Loaded)?.value
                     if (receiver != null && selected != null) {
                         Text(stringResource(R.string.assistant_history_recipient, receiver.profile.origin, receiver.profile.model),
                             Modifier.padding(vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        MessageEditor(draft, page.scopeName(), { draft = it }, {
-                            if (model.continueConversation(id, page, draft, receiver)) onClose()
-                        }, tagPrefix = "history-reply")
+                        MessageEditor(model, draft, page.scopeName(), {
+                            if (model.continueConversation(id, page, receiver)) onClose()
+                        }, active = canReply, tagPrefix = "history-reply")
                     } else if (recipient != ReadState.Loading) {
+                        if (active && draft.images.isNotEmpty()) DraftImageStrip(model.attachments, draft)
                         val launch = rememberRouteLaunch("model")
                         TextButton(onClick = { launch.open(onSettings) }, modifier = Modifier.align(Alignment.CenterHorizontally).then(launch.modifier)) {
                             Text(if (recipient == ReadState.ReadFailed) stringResource(R.string.assistant_repair_to_continue) else stringResource(R.string.assistant_configure_to_continue))

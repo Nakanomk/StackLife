@@ -48,13 +48,34 @@ class PlannerToolTest {
         denied { tools.proposal(cmd("""{"kind":"graph_remove","graphId":"a"}""")) }
     }
 
+    @Test fun countdownScopesGrantOnlyReturnedCardsAndNeverTheirPrivateBackgroundFiles() = runBlocking {
+        val photo = "dd957e19-e907-4e7c-a513-707fb834162b"
+        val card = Countdown("c", "Trip", day.date.toEpochDay(), CountdownMode.COUNT_DOWN, true, 0, photo)
+        val other = card.copy(id = "other", position = 1)
+        val data = Reads(PlannerQuery.Countdowns to CountdownsView(7, listOf(card, other)))
+        val tools = PlannerTools(data, AssistantPage.Countdowns, Disclosure())
+        denied { PlannerTools(data, day, Disclosure()).query(obj("""{"kind":"countdowns"}""")) }
+        val view = tools.query(obj("""{"kind":"current","limit":1}"""))
+        assertFalse(photo in view.toString()); assertTrue(view.jsonObject.getValue("rows").jsonArray[0].jsonObject.getValue("hasBackground").jsonPrimitive.boolean)
+        fun edit(id:String, field:String) = cmd("""{"kind":"countdown_edit","countdownId":"$id",$field}""")
+        denied { tools.proposal(edit("other", "\"title\":\"changed\"")) }
+        denied { tools.proposal(edit("c", "\"backgroundId\":\"$photo\"")) }
+        assertEquals(ToolPlan.Commands(listOf(PlannerCommand.CountdownEdit("c", title="Revised"))), tools.proposal(edit("c", "\"title\":\"Revised\"")))
+        assertEquals(ToolPlan.Commands(listOf(PlannerCommand.CountdownEdit("c", background=BackgroundChange(null)))), tools.proposal(edit("c", "\"removeBackground\":true")))
+    }
     @Test fun dayUsesOnlyDayPlanAndCoursesStayAnonymous() = runBlocking {
         val read = PlannerQuery.Day(day.date, day.zone)
         val start = read.startMillis
         val course = ScheduledCourse("secret-term", "source", CourseMeeting(1, 4, "secret-title", "secret-room", 1, 2, start, start + 3600000), listOf("secret-conflict"))
-        val source = Reads(read to DayPlan(read, 5, listOf(QueueTask("a", "A", "secret-note", 30)), emptyList(), listOf(course)))
+        val key = OccurrenceKey.Course(CourseOccurrenceId.of(course.termId,course.source,course.meeting))
+        val event = AgendaOccurrence(key,course.meeting.title,"",start,course.meeting.endMillis,false,7,course = course)
+        val source = Reads(read to DayPlan(read,5,listOf(QueueTask("a","A","secret-note",30)),listOf(event)))
         val tools = PlannerTools(source, day, Disclosure())
-        val result = tools.query(current).toString()
+        val response = tools.query(current).jsonObject; val result = response.toString()
+        val token = response.getValue("rows").jsonArray.first().jsonObject.getValue("occurrenceId").jsonPrimitive.content
+        val check = cmd("""{"kind":"set_occurrence_completion","occurrenceId":"$token","completed":true}""")
+        assertEquals(ToolPlan.Commands(listOf(PlannerCommand.SetOccurrenceCompletion(key,true))),tools.proposal(check))
+        denied { PlannerTools(source,day,Disclosure()).proposal(check) }
         assertTrue("busy" in result && "tray" in result && "start" in result); assertFalse("secret-" in result)
         denied { tools.query(obj("""{"kind":"task","taskId":"a"}""")) }
         denied { tools.query(obj("""{"kind":"terms"}""")) }
@@ -65,8 +86,8 @@ class PlannerToolTest {
 
     @Test fun frameListAndHistoryDoNotExposeCurrentTasksOutsideFrame() = runBlocking {
         val frame = FrameView("f", "private-reason", 0, FrameSource.PUSH, listOf(
-            FrameEntry("active", 0, "A", "private-notes", 15, null, null, QueueTask("active", "Edited A", "private-live", 20)),
-            FrameEntry("departed", 1, "B", "private-notes", 30, null, null, null)))
+            FrameEntry("active", 0, "A", "private-notes", 15, null, QueueTask("active", "Edited A", "private-live", 20)),
+            FrameEntry("departed", 1, "B", "private-notes", 30, null, null)))
         val index = FrameIndex(listOf(FrameSummary("f", frame.reason, 0, frame.source, 2, 1)))
         val source = Reads(PlannerQuery.Frames to index, PlannerQuery.Frame("f") to FrameDetailResult(frame))
         val list = PlannerTools(source, AssistantPage.Frames, Disclosure())
@@ -96,7 +117,8 @@ class PlannerToolTest {
             """{"kind":"task_add","title":"X","minutes":"30"}""", """{"kind":"task_add","title":true}""",
             """{"kind":"task_finish","taskId":"t","apply":true}""", """{"kind":"commit","proposalId":"abc"}""",
             """{"kind":"queue_order","taskIds":[null]}""", """{"kind":"prefs_set","group":"privacy","restorePolicy":"SWAP"}""",
-            """{"kind":"prefs_reset"}""", """{"kind":"slot_set","taskId":"t","start":"2026-11-19T16:00","durationMinutes":5}""",
+            """{"kind":"prefs_reset"}""", """{"kind":"set_schedule","scheduleId":"t","pattern":{"kind":"once","start":"2026-11-19T16:00","durationMinutes":5}}""",
+            """{"kind":"task_add","title":"X","minutes":-1}""", """{"kind":"set_occurrence_completion","occurrenceId":"invented","completed":true}""",
             """{"kind":"frame_restore","frameId":"@f","mode":"selected"}""",
             """{"kind":"graph_patch","graphId":"@g","edits":[{"kind":"add_node","title":"n","script":"sh"}]}"""
         )) denied { tools.proposal(cmd(input)) }
@@ -123,6 +145,23 @@ class PlannerToolTest {
         )) denied { tools.proposal(cmd(invalid)) }
     }
 
+    @Test fun wallpaperChangesUseOnlyReturnedMaterialAndKeepUnmentionedPageTransforms() = runBlocking {
+        val id = "dd957e19-e907-4e7c-a513-707fb834162b"
+        val a = Appearance(background = WallpaperSpec(id, scale=2f), pageBackgrounds=mapOf(Destination.WORKSPACE to WallpaperSpec()))
+        val tools = PlannerTools(Reads(PlannerQuery.Settings to PolicyView(RestorePolicy.PREPEND,a)), AssistantPage.Settings, Disclosure())
+        fun propose(fields:String) = (tools.proposal(cmd("""{"kind":"prefs_set","group":"material","values":$fields}""")) as ToolPlan.Commands).commands.single() as PlannerCommand.EditAppearance
+        denied { propose("""{"background":{"tint":0.4}}""") }
+        tools.query(obj("""{"kind":"current","limit":1}""")); denied { propose("""{"background":{"imageId":"$id"}}""") }
+        val view = tools.query(current).jsonObject
+        assertFalse(id in view.toString())
+        val material = view.getValue("rows").jsonArray.single { it.jsonObject["group"] == JsonPrimitive("material") }.jsonObject.getValue("values").jsonObject
+        val token = material.getValue("background").jsonObject.getValue("imageId").jsonPrimitive.content
+        val changes = propose("""{"background":{"tint":0.4},"pageBackgrounds":{"TODAY":{"imageId":"$token"}}}""")
+        val next = changes.patch.applyTo(a)
+        assertEquals(a,changes.expected); assertEquals(a.background.copy(tint=.4f), next.background)
+        assertEquals(a.background,next.wallpaper(Destination.TODAY)); assertEquals(WallpaperSpec(),next.wallpaper(Destination.WORKSPACE))
+        denied { propose("""{"background":{"imageId":"$id"}}""") }
+    }
     @Test fun importerRequiresExactReviewedDraftAndCannotBeMixedWithCommands() = runBlocking {
         val tools = PlannerTools(Reads(), AssistantPage.CourseDraft("d", "term"), Disclosure())
         assertEquals(obj("""{"draftId":"d","termId":"term"}"""), tools.query(current))
@@ -132,6 +171,28 @@ class PlannerToolTest {
         denied { PlannerTools(Reads(), day, Disclosure(extra = setOf(ReadArea.COURSES))).proposal(import) }
         assertEquals(ToolPlan.OpenImporter, tools.proposal(obj("""{"action":"open_course_import"}""")))
         denied { tools.proposal(obj("""{"action":"open_course_import","commands":[]}""")) }
+    }
+
+    @Test fun linkingRequiresThisTurnsReturnedIdentityNotAPickerQueryOrACourseToken() = runBlocking {
+        val q = PlannerQuery.Day(day.date, ZoneId.systemDefault())
+        val k = OccurrenceKey.Schedule("repeat", day.date.toEpochDay())
+        val c = ScheduledCourse("term","hust",CourseMeeting(1,1,"secret-class","room",1,2,q.startMillis,q.startMillis+60000))
+        val event = AgendaOccurrence(k,"D","secret-note",q.startMillis,q.startMillis,false,1,taskId="repeat",owner=Owner.QUEUE)
+        val course = event.copy(key=OccurrenceKey.Course(CourseOccurrenceId.of(c.termId,c.source,c.meeting)),course=c)
+        val data = Reads(q to DayPlan(q,1,listOf(QueueTask("single","A","secret-note",0)),listOf(event,course)))
+        fun fresh() = PlannerTools(data, AssistantPage.Graph("g"), Disclosure(extra=setOf(ReadArea.DAY)))
+        val tools = fresh()
+        fun link(source: String) = cmd("""{"kind":"graph_patch","graphId":"g","edits":[{"kind":"link_existing","source":$source}]}""")
+        val ordinary = link("""{"kind":"task","taskId":"single"}""")
+        denied { tools.proposal(ordinary) }; denied { tools.query(obj("""{"kind":"linkable_events"}""")) }
+        val result = tools.query(obj("""{"kind":"day","date":"${day.date}"}""")).jsonObject
+        assertFalse("secret-" in result.toString())
+        assertEquals(ToolPlan.Commands(listOf(PlannerCommand.GraphPatch("g",listOf(GraphEdit.LinkExisting(GraphLink.Task("single")))))),tools.proposal(ordinary))
+        val rows = result.getValue("rows").jsonArray
+        fun fromRow(index: Int) = link("""{"kind":"occurrence","occurrenceId":${rows[index].jsonObject.getValue("occurrenceId")}}""")
+        assertEquals(ToolPlan.Commands(listOf(PlannerCommand.GraphPatch("g",listOf(GraphEdit.LinkExisting(GraphLink.Occurrence("repeat",day.date.toEpochDay())))))),tools.proposal(fromRow(0)))
+        denied { tools.proposal(fromRow(1)) }; denied { fresh().proposal(fromRow(0)) }
+        denied { tools.proposal(link("""{"kind":"task","taskId":"@not_read"}""")) }
     }
 
     @Test fun selectedGraphContainsItsGoalButNotOtherGraphs() = runBlocking {

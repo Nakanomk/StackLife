@@ -8,7 +8,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 internal enum class ReadArea(private val en: String, private val zh: String) {
-    DAY("Schedules on other dates", "其他日期的日程"), WORKSPACE("Queue and other frames", "队列与其他栈帧"), GRAPHS("Other graphs", "其他流程图"), COURSES("Other terms and weekly timetables", "其他学期与周课表"), SETTINGS("Appearance and restore settings", "外观与恢复设置");
+    DAY("Schedules on other dates", "其他日期的日程"), WORKSPACE("Queue and other frames", "队列与其他栈帧"), GRAPHS("Other graphs", "其他流程图"), COURSES("Other terms and weekly timetables", "其他学期与周课表"), COUNTDOWNS("Other countdowns", "其他倒数日"), SETTINGS("Appearance and restore settings", "外观与恢复设置");
 
     val label: String get() = uiText(en, zh)
 }
@@ -24,6 +24,8 @@ internal sealed class AssistantPage(private val en: String, private val zh: Stri
     data object Graphs : AssistantPage("Graphs", "流程图")
     data class Graph(val id: String, val nodeId: String? = null) : AssistantPage(
         if (nodeId == null) "Current graph" else "Current node", if (nodeId == null) "当前流程图" else "当前节点")
+    data object Countdowns : AssistantPage("Countdowns", "倒数日")
+    data class Countdown(val id: String) : AssistantPage("Countdown details", "倒数日详情")
     data object Terms : AssistantPage("Timetable", "课表")
     data class Week(val termId: String, val week: Int) : AssistantPage("Weekly timetable", "本周课表")
     data class CourseDraft(val draftId: String, val termId: String) : AssistantPage("Timetable import", "课表导入")
@@ -40,6 +42,8 @@ internal fun AssistantPage.scopeName() = when (this) {
     AssistantPage.Queue -> uiText("Current queue", "当前队列")
     AssistantPage.Frames -> uiText("Frame list", "栈帧列表")
     AssistantPage.Graphs -> uiText("Graph list", "流程图列表")
+    AssistantPage.Countdowns -> uiText("Countdowns", "倒数日")
+    is AssistantPage.Countdown -> uiText("Current countdown", "当前倒数日")
     AssistantPage.Terms -> uiText("Term list", "学期列表")
     AssistantPage.Settings -> uiText("Appearance and workspace restore settings", "外观与工作台恢复设置")
 }
@@ -59,6 +63,8 @@ internal fun AssistantPage.historyKey(): String = Json.encodeToString(when (this
     AssistantPage.Frames -> HistoryLocation("frames")
     AssistantPage.Graphs -> HistoryLocation("graphs")
     AssistantPage.Settings -> HistoryLocation("settings")
+    AssistantPage.Countdowns -> HistoryLocation("countdowns")
+    is AssistantPage.Countdown -> HistoryLocation("countdown", id)
     AssistantPage.Terms -> HistoryLocation("terms")
     is AssistantPage.CourseDraft -> HistoryLocation("terms", termId)
 })
@@ -75,6 +81,8 @@ private fun HistoryLocation.page(): AssistantPage = when (type) {
     "frames" -> AssistantPage.Frames
     "graphs" -> AssistantPage.Graphs
     "settings" -> AssistantPage.Settings
+    "countdowns" -> AssistantPage.Countdowns
+    "countdown" -> AssistantPage.Countdown(requireNotNull(id))
     "terms" -> AssistantPage.Terms
     else -> error(uiText("Unknown conversation scope", "未知的对话范围"))
 }

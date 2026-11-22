@@ -25,8 +25,8 @@ android {
         applicationId = "io.github.nakanomk.stacklife"
         minSdk = 26
         targetSdk = 37
-        versionCode = 26
-        versionName = "0.10.11"
+        versionCode = 27
+        versionName = "0.10.12"
         testInstrumentationRunner = "io.github.nakanomk.stacklife.acceptance.StackLifeTestRunner"
     }
     buildTypes {
@@ -53,6 +53,7 @@ android {
         it.systemProperty("user.language", "zh")
         it.systemProperty("user.country", "CN")
     }
+    sourceSets.getByName("androidTest").assets.directories.add("schemas")
     buildFeatures { compose = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -71,6 +72,8 @@ room { schemaDirectory("$projectDir/schemas") }
 dependencies {
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.material3)
+    implementation(libs.markdown.m3)
+    implementation(libs.recur)
     implementation(libs.compose.foundation)
     implementation(libs.compose.animation)
     implementation(libs.activity.compose)

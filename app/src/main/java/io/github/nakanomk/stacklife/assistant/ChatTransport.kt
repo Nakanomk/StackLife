@@ -1,11 +1,16 @@
 package io.github.nakanomk.stacklife.assistant
 
 import io.github.nakanomk.stacklife.i18n.uiText
+import java.io.File
 import java.io.IOException
 import java.io.InterruptedIOException
+import java.io.OutputStream
+import java.util.Base64
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLException
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.*
@@ -19,10 +24,14 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.Response
+import okio.Buffer
+import okio.ByteString
 import okio.BufferedSink
 
-internal fun interface ChatTransport {
-    suspend fun complete(connection: ServiceConnection, messages: JsonArray, tools: JsonArray): JsonObject
+internal data class TurnImages(val messageIndex: Int, val entries: List<Pair<ChatImage, File>>)
+
+internal interface ChatTransport {
+    suspend fun complete(connection: ServiceConnection, messages: JsonArray, tools: JsonArray, images: TurnImages? = null): JsonObject
 }
 
 internal class ChatProblem(message: String) : IllegalStateException(message)
@@ -43,8 +52,8 @@ internal class OpenAiTransport(client: OkHttpClient = OkHttpClient()) : ChatTran
         .writeTimeout(capped(client.writeTimeoutMillis, 20_000), TimeUnit.MILLISECONDS)
         .build()
 
-    override suspend fun complete(connection: ServiceConnection, messages: JsonArray, tools: JsonArray): JsonObject {
-        val profile = serviceProfile(connection.profile.baseUrl, connection.profile.model)
+    override suspend fun complete(connection: ServiceConnection, messages: JsonArray, tools: JsonArray, images: TurnImages?): JsonObject {
+        val profile = serviceProfile(connection.profile.baseUrl, connection.profile.model, connection.profile.supportsImages)
         if (profile.origin != connection.profile.origin) throw ChatProblem(uiText("The service origin has changed. Enter your key again to authorize it.", "服务域已变化，请重新填写密钥并授权。"))
         val names = tools.mapTo(mutableSetOf()) { tool ->
             val spec = tool as? JsonObject ?: incompatible()
@@ -53,19 +62,8 @@ internal class OpenAiTransport(client: OkHttpClient = OkHttpClient()) : ChatTran
             name
         }
         if (names.size != tools.size) throw ChatProblem(uiText("Duplicate assistant tool definition.", "助理工具定义重复。"))
-        val payload = buildJsonObject {
-            put("model", profile.model); put("messages", messages); put("tools", tools)
-            put("stream", false); put("parallel_tool_calls", false)
-            if (profile.origin == ServicePreset.DeepSeek.baseUrl) {
-                putJsonObject("thinking") { put("type", "disabled") }
-            }
-        }.toString().encodeToByteArray()
-        val body = object : RequestBody() {
-            override fun contentType() = JSON_TYPE
-            override fun contentLength() = payload.size.toLong()
-            override fun isOneShot() = true // Never replay a prompt, including an automatic HTTP follow-up.
-            override fun writeTo(sink: BufferedSink) { sink.write(payload) }
-        }
+        val body = if (images == null) prepareBody(profile, messages, tools, null)
+            else withContext(Dispatchers.IO) { prepareBody(profile, messages, tools, images) }
         val endpoint = profile.baseUrl.toHttpUrl().newBuilder().addPathSegments("chat/completions").build()
         val request = Request.Builder().url(endpoint).header("Authorization", "Bearer ${connection.key}")
             .header("Accept", "application/json").post(body).build()
@@ -88,6 +86,118 @@ internal class OpenAiTransport(client: OkHttpClient = OkHttpClient()) : ChatTran
         }
     }
 }
+
+/** Same local preflight before history claims the files and before each explicitly authorized tool round. */
+internal suspend fun validateImageTurn(profile: ServiceProfile, messages: JsonArray, tools: JsonArray, images: TurnImages) {
+    withContext(Dispatchers.IO) { prepareBody(profile, messages, tools, images) }
+}
+
+private fun invalidTurn(): Nothing = throw ChatProblem(uiText("Invalid message or attachment position. Attach images to the current message only.", "消息或附件位置无效。只能给本次发送的消息附加图片。"))
+private fun imageNotReady(): Nothing = throw ChatProblem(uiText("An image is not ready or no longer available. Remove it or select it again.", "有图片尚未就绪或已失效，请移除或重新选择。"))
+
+private data class UploadPart(val prefix: ByteString, val image: ChatImage, val file: File)
+
+private fun prepareBody(profile: ServiceProfile, messages: JsonArray, tools: JsonArray, images: TurnImages?): RequestBody {
+        var lastUser = -1
+        for ((index, element) in messages.withIndex()) {
+            val message = element as? JsonObject ?: invalidTurn()
+            val role = message.string("role")
+            when (role) {
+                "user" -> lastUser = index
+                "assistant", "system", "tool" -> Unit
+                else -> invalidTurn()
+            }
+            // No caller may inject prebuilt content parts, URLs or images from older history.
+            if (message.string("content") == null && !(role == "assistant" &&
+                    (message["content"] ?: JsonNull) == JsonNull && message["tool_calls"] is JsonArray)) invalidTurn()
+            if (message.keys.any { it != "role" && it != "content" &&
+                    !(role == "tool" && it == "tool_call_id") && !(role == "assistant" && it == "tool_calls") }) invalidTurn()
+        }
+        if (lastUser < 0) invalidTurn()
+        if (images != null) {
+            // After the explicit prompt the only valid suffix is completed tool exchanges from this send.
+            var tail = lastUser + 1
+            while (tail < messages.size) {
+                val reply = messages[tail].jsonObject
+                val result = messages.getOrNull(tail + 1) as? JsonObject ?: invalidTurn()
+                val call = (reply["tool_calls"] as? JsonArray)?.singleOrNull() as? JsonObject ?: invalidTurn()
+                val id = call.string("id") ?: invalidTurn()
+                if (reply.string("role") != "assistant" || result.string("role") != "tool" || result.string("tool_call_id") != id) invalidTurn()
+                tail += 2
+            }
+            if (images.messageIndex != lastUser) invalidTurn()
+            if (!profile.supportsImages) throw ChatProblem(uiText(
+                "Image input is not enabled for this endpoint and model. Check the service settings or remove the images.",
+                "此服务地址和模型未启用图片输入。请检查服务配置或移除图片。"))
+            if (images.entries.size !in 1..MAX_CHAT_IMAGES) throw ChatProblem(uiText("Select one to five images per message.", "每条消息请选择一至五张图片。"))
+        } else if (messages[lastUser].jsonObject.string("content").isNullOrBlank()) invalidTurn()
+
+        val preset = ServicePreset.forProfile(profile)
+        val header = Buffer().writeUtf8("{\"model\":").writeUtf8(JsonPrimitive(profile.model).toString()).writeUtf8(",\"messages\":[")
+        val parts = ArrayList<UploadPart>(images?.entries?.size ?: 0)
+        var uploadLength = 0L
+        for ((index, message) in messages.withIndex()) {
+            if (index > 0) header.writeByte(','.code)
+            if (images == null || index != images.messageIndex) {
+                header.writeUtf8(message.toString())
+                continue
+            }
+            header.writeUtf8("{\"role\":\"user\",\"content\":[")
+            val text = message.jsonObject.getValue("content").jsonPrimitive
+            val includeText = text.content.isNotEmpty()
+            if (includeText) header.writeUtf8("{\"type\":\"text\",\"text\":").writeUtf8(text.toString()).writeByte('}'.code)
+            val ids = mutableSetOf<String>()
+            for ((ordinal, entry) in images.entries.withIndex()) {
+                val (image, file) = entry
+                if (!ids.add(image.id) || !image.matchesPreparedFile(file, forUpload = true)) imageNotReady()
+                val length = preset.inlineImageLength(image.bytes)
+                if (includeText || ordinal > 0) header.writeByte(','.code)
+                header.writeUtf8("{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:").writeUtf8(image.mime).writeUtf8(";base64,")
+                val prefix = header.readByteString()
+                parts += UploadPart(prefix, image, file)
+                uploadLength += prefix.size + length
+                header.writeUtf8("\"}}")
+            }
+            header.writeUtf8("]}")
+        }
+        header.writeUtf8("],\"tools\":").writeUtf8(tools.toString()).writeUtf8(",\"stream\":false,\"parallel_tool_calls\":false")
+        if (profile.origin == ServicePreset.DeepSeek.baseUrl) header.writeUtf8(",\"thinking\":{\"type\":\"disabled\"}")
+        val suffix = header.writeByte('}'.code).readByteString()
+        val total = uploadLength + suffix.size
+        preset.checkRequestLength(total)
+
+        return object : RequestBody() {
+            override fun contentType() = JSON_TYPE
+            override fun contentLength() = total
+            override fun isOneShot() = true
+            override fun writeTo(sink: BufferedSink) {
+                if (parts.isNotEmpty()) {
+                    val output = object : OutputStream() {
+                        override fun write(value: Int) { sink.writeByte(value) }
+                        override fun write(bytes: ByteArray, offset: Int, length: Int) { sink.write(bytes, offset, length) }
+                        // The per-image encoder closes this adapter to emit padding, not the HTTP sink.
+                    }
+                    val buffer = ByteArray(32 * 1024)
+                    for (part in parts) {
+                        sink.write(part.prefix)
+                        part.file.inputStream().use { input ->
+                            Base64.getEncoder().wrap(output).use { encoder ->
+                                var left = part.image.bytes
+                                while (left > 0) {
+                                    val count = input.read(buffer, 0, minOf(left, buffer.size.toLong()).toInt())
+                                    if (count <= 0) throw IOException("Image length changed")
+                                    encoder.write(buffer, 0, count)
+                                    left -= count
+                                }
+                                if (input.read() != -1) throw IOException("Image length changed")
+                            }
+                        }
+                    }
+                }
+                sink.write(suffix)
+            }
+        }
+    }
 
 private fun capped(value: Int, limit: Int): Long = (if (value == 0) limit else minOf(value, limit)).toLong()
 

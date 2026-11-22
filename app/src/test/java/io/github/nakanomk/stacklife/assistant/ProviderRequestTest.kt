@@ -13,6 +13,30 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProviderRequestTest {
+    @Test fun officialImageDefaultsRequireCanonicalEndpointAndExactModel() {
+        for (preset in listOf(ServicePreset.DeepSeek, ServicePreset.Claude, ServicePreset.Gpt)) {
+            assertTrue(serviceProfile("${preset.baseUrl}/", preset.model).supportsImages)
+            assertFalse(serviceProfile(preset.baseUrl, "${preset.model}-other").supportsImages)
+            assertFalse(serviceProfile("${preset.baseUrl}/proxy", preset.model).supportsImages)
+            assertFalse(serviceProfile("https://private.invalid/v1", preset.model).supportsImages)
+            assertTrue(serviceProfile("https://private.invalid/v1", preset.model, supportsImages = true).supportsImages)
+        }
+    }
+
+    @Test fun inlineLimitsCountRealBase64PaddingAndEntireEncodedRequest() {
+        assertEquals(4L, ServicePreset.Claude.inlineImageLength(1))
+        assertEquals(10_000_000L, ServicePreset.Claude.inlineImageLength(7_500_000))
+        assertTrue(runCatching { ServicePreset.Claude.inlineImageLength(7_500_001) }.exceptionOrNull() is ChatProblem)
+        val deepSeekImage = 32L * 1024 * 1024
+        assertTrue(ServicePreset.DeepSeek.inlineImageLength(deepSeekImage) > deepSeekImage)
+        assertTrue(runCatching { ServicePreset.DeepSeek.inlineImageLength(deepSeekImage + 1) }.exceptionOrNull() is ChatProblem)
+        for ((preset, bytes) in listOf(ServicePreset.DeepSeek to 48L * 1024 * 1024,
+            ServicePreset.Claude to 128_000_000L, ServicePreset.Gpt to 512_000_000L)) {
+            preset.checkRequestLength(bytes)
+            assertTrue(runCatching { preset.checkRequestLength(bytes + 1) }.exceptionOrNull() is ChatProblem)
+        }
+    }
+
     @Test fun presetsAddressOfficialChatEndpointsAndOnlyDeepSeekDisablesThinking() = runBlocking {
         val messages = buildJsonArray { addJsonObject { put("role", "user"); put("content", "查队列") } }
         val tools = buildJsonArray { addJsonObject {

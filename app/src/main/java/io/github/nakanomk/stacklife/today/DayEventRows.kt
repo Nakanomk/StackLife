@@ -2,27 +2,35 @@ package io.github.nakanomk.stacklife.today
 
 import java.util.Locale
 import io.github.nakanomk.stacklife.i18n.AppLanguage
+import io.github.nakanomk.stacklife.planner.AgendaOccurrence
 import io.github.nakanomk.stacklife.planner.PlannerQuery
 
 internal sealed interface DayEventRow {
     val start: Long
     val end: Long
-    data class Event(val entry: AxisEntry, override val start: Long, override val end: Long) : DayEventRow
+    data class Event(val entry: AgendaOccurrence, override val start: Long, override val end: Long) : DayEventRow
+    data class More(val group: TimeGridPlacement.Overflow) : DayEventRow {
+        override val start get() = group.start
+        override val end get() = group.end
+    }
     data class Gap(override val start: Long, override val end: Long) : DayEventRow
 }
 
-/** Events stay individual; free time is the complement of the union of their clipped intervals. */
-internal fun dayEventRows(day: PlannerQuery.Day, chronological: List<AxisEntry>): List<DayEventRow> = buildList {
-    var occupiedUntil = day.startMillis
-    for (entry in chronological) {
-        val start = maxOf(day.startMillis, entry.startMillis)
-        val end = minOf(day.endMillis, entry.endMillis)
-        if (start >= end) continue
-        if (start > occupiedUntil) add(DayEventRow.Gap(occupiedUntil, start))
-        add(DayEventRow.Event(entry, start, end))
-        occupiedUntil = maxOf(occupiedUntil, if (entry is AxisEntry.Routine) start else end)
+/** Visible entries plus overflow links; the free complement uses *every* clipped span. */
+internal fun dayEventRows(day: PlannerQuery.Day, placement: TimeGridPlacement): List<DayEventRow> {
+    val rows = ArrayList<DayEventRow>()
+    for (r in placement.visible) rows.add(DayEventRow.Event(r.item, r.start, r.end))
+    for (g in placement.more) rows.add(DayEventRow.More(g))
+    rows.sortBy { it.start }
+    return buildList {
+        var cursor = day.startMillis
+        for (row in rows) {
+            if (row.start > cursor) add(DayEventRow.Gap(cursor, row.start))
+            add(row)
+            cursor = maxOf(cursor, row.end)
+        }
+        if (cursor < day.endMillis) add(DayEventRow.Gap(cursor, day.endMillis))
     }
-    if (occupiedUntil < day.endMillis) add(DayEventRow.Gap(occupiedUntil, day.endMillis))
 }
 
 internal fun elapsedLabel(millis: Long, locale: Locale = AppLanguage.locale): String = buildList {

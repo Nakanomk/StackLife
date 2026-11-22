@@ -12,12 +12,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -28,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -38,6 +37,8 @@ import io.github.nakanomk.stacklife.assistant.LocalAssistant
 import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.planner.NavStyle
 import io.github.nakanomk.stacklife.transitions.LocalDetailChrome
+
+private val LocalShortDock = compositionLocalOf { false }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -55,24 +56,29 @@ internal fun DockOverlay(
     val source = rememberPlannerBackdrop((navigationBar != null && appearance.navGlass) || (composer != null && appearance.assistantGlass))
     val ms = if (LocalMotionEnabled.current) 150 else 0
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val shareRow = maxWidth >= 600.dp && maxWidth > maxHeight && composer != null && showNav
+        // Use the actual safe height: a landscape window with three-button navigation can
+        // leave only enough room for one action row between the toolbar and this dock.
+        val short = maxWidth >= 480.dp && maxWidth > maxHeight && maxHeight < 220.dp
+        val shareRow = (short || maxWidth >= 600.dp && maxWidth > maxHeight) && composer != null && showNav
         val navSlot: @Composable () -> Unit = {
             if (navigationBar != null) AnimatedVisibility(showNav,
                 enter = expandVertically(tween(ms), expandFrom = Alignment.Bottom),
                 exit = shrinkVertically(tween(ms), shrinkTowards = Alignment.Bottom)) {
-                Box(if (docked) Modifier.fillMaxWidth() else chromeRail()) { navigationBar() }
+                Box(if (docked) Modifier.fillMaxWidth() else chromeRail()) {
+                    CompositionLocalProvider(LocalShortDock provides short) { navigationBar() }
+                }
             }
         }
         Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), bottomBar = {
             CompositionLocalProvider(LocalCapsuleBackdrop provides source) {
                 Column(LocalDetailChrome.current().fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     if (composer != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        Box(Modifier.weight(if (short && shareRow) 2f else 1f), contentAlignment = Alignment.Center) {
                             Box(chromeRail(top = 0.dp).onFocusChanged { composerFocused = it.hasFocus }.focusGroup()) {
-                                AssistantComposer(composer, persistentRoot = navigationBar != null)
+                                AssistantComposer(composer, persistentRoot = navigationBar != null || LocalFeatureBack.current != null)
                             }
                         }
-                        if (shareRow) Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { navSlot() }
+                        if (shareRow) Box(Modifier.weight(if (short) 3f else 1f), contentAlignment = Alignment.Center) { navSlot() }
                     }
                     if (!shareRow) navSlot()
                 }
@@ -91,7 +97,7 @@ private fun chromeRail(top: Dp = 4.dp) = Modifier.widthIn(max = 520.dp).fillMaxW
 @Composable
 internal fun rememberDestinationCapsule(active: String, pagerPosition: State<Float>? = null, onSelect: (String) -> Unit): @Composable () -> Unit {
     val appearance = LocalAppearance.current
-    val position = appearance.order.indexOfFirst { it.key == active }.coerceAtLeast(0).toFloat()
+    val position = appearance.visibleOrder.indexOfFirst { it.key == active }.coerceAtLeast(0).toFloat()
     val slot = pagerPosition ?: animateFloatAsState(position, if (LocalMotionEnabled.current) tween(200) else snap(), label = "navigation slot")
     return {
         val haptics = LocalHapticFeedback.current
@@ -101,11 +107,12 @@ internal fun rememberDestinationCapsule(active: String, pagerPosition: State<Flo
                 onSelect(key)
             }
         }
-        if (appearance.navStyle == NavStyle.DOCKED) DockedNavigation(appearance.order, active, select)
-        else DestinationCapsule(appearance.order, active, slot, select)
+        if (appearance.navStyle == NavStyle.DOCKED) DockedNavigation(appearance.visibleOrder, active, select)
+        else DestinationCapsule(appearance.visibleOrder, active, slot, select)
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DockedNavigation(tabs: List<Destination>, active: String, onSelect: (String) -> Unit) {
     val colors = MaterialTheme.colorScheme
@@ -113,11 +120,23 @@ private fun DockedNavigation(tabs: List<Destination>, active: String, onSelect: 
     StackLifeSurface(CapsuleScene.NAVIGATION, Modifier.fillMaxWidth(), colors.surfaceContainer,
         shape = androidx.compose.foundation.shape.RoundedCornerShape(0.dp)) {
         val description = stringResource(R.string.ui_bottom_nav)
-        NavigationBar(Modifier.fillMaxWidth().testTag("navigation-capsule").semantics { stateDescription = description },
-            windowInsets = WindowInsets(0), containerColor = if (glass) Color.Transparent else colors.surfaceContainer) {
+        val bar = Modifier.fillMaxWidth().testTag("navigation-capsule").semantics { stateDescription = description }
+        if (LocalShortDock.current) BoxWithConstraints(bar) {
+            // Material text-only scrollable tabs retain full labels (including long translations)
+            // and a 48dp hit row without taking a second row away from the calendar.
+            PrimaryScrollableTabRow(selectedTabIndex = tabs.indexOfFirst { it.key == active }.coerceAtLeast(0),
+                containerColor = Color.Transparent, edgePadding = 0.dp, minTabWidth = (maxWidth / tabs.size).coerceAtLeast(48.dp),
+                divider = {}) {
+                for (tab in tabs) key(tab.key) {
+                    Tab(selected = tab.key == active, onClick = { onSelect(tab.key) }, modifier = Modifier.heightIn(min = 48.dp).testTag("nav:${tab.key}")) {
+                        Text(tab.label, Modifier.padding(horizontal = 4.dp), softWrap = false, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        } else NavigationBar(bar, windowInsets = WindowInsets(0), containerColor = if (glass) Color.Transparent else colors.surfaceContainer) {
             for (tab in tabs) key(tab.key) {
                 NavigationBarItem(selected = tab.key == active, onClick = { onSelect(tab.key) },
-                    icon = { DockIcon(tab.key, LocalContentColor.current) }, label = { Text(tab.label) },
+                    icon = { DockIcon(tab.key, LocalContentColor.current) }, label = { Text(tab.label, textAlign = TextAlign.Center) },
                     modifier = Modifier.testTag("nav:${tab.key}"))
             }
         }
@@ -131,16 +150,18 @@ private fun DestinationCapsule(tabs: List<Destination>, active: String, slot: St
         solid = colors.surfaceContainerLow, elevation = 2.dp) {
         SegmentTrack(slot, tabs.size, colors.secondaryContainer, { onSelect(tabs[it].key) },
             Modifier.fillMaxWidth(), navigationInset = 4.dp) { highlighted ->
-            Row(Modifier.fillMaxWidth().selectableGroup(), verticalAlignment = Alignment.CenterVertically) {
+            val short = LocalShortDock.current
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).selectableGroup()) {
                 for (index in tabs.indices) key(tabs[index].key) {
                     val tab = tabs[index]
                     val ink = if (highlighted == index) colors.primary else colors.onSurfaceVariant
-                    Column(Modifier.weight(1f).clip(CircleShape)
+                    Column(Modifier.weight(1f).fillMaxHeight()
                         .testTag("nav:${tab.key}").selectable(active == tab.key, role = Role.Tab) { onSelect(tab.key) }
-                        .heightIn(min = 48.dp).padding(vertical = 2.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                        DockIcon(tab.key, ink)
-                        Text(tab.label, color = ink, style = MaterialTheme.typography.labelMedium)
+                        .heightIn(min = 48.dp).padding(vertical = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = if (short) Arrangement.Center else Arrangement.Top) {
+                        if (!short) DockIcon(tab.key, ink)
+                        Text(tab.label, Modifier.fillMaxWidth(), color = ink, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
                     }
                 }
             }
@@ -154,7 +175,9 @@ private fun DockIcon(id: String, ink: Color) {
         "today" -> R.drawable.ic_schedule
         "workspace" -> R.drawable.ic_view_agenda
         "graphs" -> R.drawable.ic_account_tree
-        else -> R.drawable.ic_calendar_view_week
+        "courses" -> R.drawable.ic_calendar_view_week
+        "countdown" -> R.drawable.ic_today
+        else -> error("Unknown destination: $id")
     }
     Icon(painterResource(icon), contentDescription = null, modifier = Modifier.size(22.dp), tint = ink)
 }

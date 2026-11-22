@@ -5,6 +5,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -12,17 +13,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import io.github.nakanomk.stacklife.DockOverlay
+import io.github.nakanomk.stacklife.chromeGutter
 import io.github.nakanomk.stacklife.StackLifeTheme
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.rememberDestinationCapsule
 import io.github.nakanomk.stacklife.courses.CourseTimetablePreview
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.*
+import io.github.nakanomk.stacklife.today.DayWheelPreview
+import kotlinx.coroutines.CancellationException
+import sh.calvin.reorderable.ReorderableColumn
 
 private val appearanceSaver = Saver<Appearance, String>(save = { encodeAppearance(it) }, restore = ::decodeAppearance)
 private val validSeed = Regex("#[0-9A-F]{6}")
@@ -37,37 +40,89 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
     var draft by rememberSaveable(stateSaver = appearanceSaver) { mutableStateOf(saved) }
     var seedInput by rememberSaveable { mutableStateOf(saved.seed) }
     var message by rememberSaveable { mutableStateOf("") }
-    val receipt = rememberSubmission(actions, onError = { message = it }) { if (it == SaveOutcome.APPLIED) onBack() }
+    var leases by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
+    var wallpaperTarget by rememberSaveable { mutableStateOf<Destination?>(null) }
+    var closing by rememberSaveable { mutableStateOf(false) }
+    var applied by rememberSaveable { mutableStateOf(false) }
+    val backgrounds = LocalBackgroundStore.current
+    val latestBack by rememberUpdatedState(onBack)
+    val cleanupFailure = stringResource(R.string.appearance_image_cleanup_failed)
+    val receipt = rememberSubmission(actions, onError = { message = it }) {
+        if (it == SaveOutcome.APPLIED) { applied = true; closing = true }
+    }
+    LaunchedEffect(closing) {
+        if (closing) {
+            try {
+                for (id in leases) backgrounds.release(id)
+                leases = arrayListOf()
+                latestBack()
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) { message = cleanupFailure; closing = false }
+        }
+    }
+    val picker = if (group == AppearanceGroup.MATERIAL && !receipt.busy && !closing && !applied) rememberWallpaperPicker { page, id ->
+        leases = ArrayList(leases).apply { add(id) }
+        draft = draft.replacingWallpaper(page, WallpaperSpec(imageId = id))
+    } else null
+    val busy = receipt.busy || closing || picker?.preparing == true
+    val leave: () -> Unit = { if (!receipt.busy) closing = true }
     val seedOK = group != AppearanceGroup.COLOR || draft.palette != PaletteMode.SEED || validSeed.matches(seedInput)
     val selected = remember(group, draft) { group.project(draft) }
     val persisted = remember(group, saved) { group.project(saved) }
     val stale = remember(group, baseline, persisted) { group.project(baseline) != persisted }
     val preview = remember(group, selected, saved) { AppearanceFields(group, selected).applyTo(saved) }
+    var previewPage by rememberSaveable(preview.start, wallpaperTarget) { mutableStateOf(wallpaperTarget ?: preview.start) }
     val reload = { baseline = saved; draft = saved; seedInput = saved.seed; message = "" }
-    BackHandler(enabled = receipt.busy) { }
+    BackHandler(enabled = busy || leases.isNotEmpty()) { leave() }
+    val scroll = rememberLazyListState()
     StackLifeTheme(preview) {
         Page {
             CenterAlignedTopAppBar(title = { Text(group.title, style = MaterialTheme.typography.titleLarge) },
-                navigationIcon = { TextButton(onClick = onBack, enabled = !receipt.busy) { Text(stringResource(R.string.ui_cancel)) } },
+                navigationIcon = { TextButton(onClick = leave, enabled = !receipt.busy && !closing) { Text(stringResource(R.string.ui_cancel)) } },
                 actions = {
-                    TextButton(enabled = !receipt.busy && seedOK && !stale && selected != persisted,
+                    TextButton(enabled = !busy && !applied && seedOK && !stale && selected != persisted,
                         onClick = { receipt.send(PlannerCommand.EditAppearance(AppearanceFields(group, selected), expected = baseline)) }) {
                         Text(stringResource(R.string.ui_save_appearance))
                     }
                 }, windowInsets = WindowInsets(0))
-            LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("appearance-scroll"), contentPadding = dockListPadding(0.dp, 0.dp),
+            LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("appearance-scroll"), state = scroll, contentPadding = dockListPadding(0.dp, 0.dp),
                 verticalArrangement = listSpacing) {
                 if (message.isNotEmpty()) item { Text(message, color = MaterialTheme.colorScheme.error) }
-                item { AppearancePreview(preview) }
+                item {
+                    val page = previewPage.takeIf { it in preview.visible || it == wallpaperTarget } ?: preview.start
+                    AppearancePreview(preview, page) { previewPage = it }
+                }
                 when (group) {
                     AppearanceGroup.COLOR -> item { ColorFields(draft, seedInput, { seedInput = it }, { draft = it }) }
-                    AppearanceGroup.LAYOUT -> item { LayoutFields(draft) { draft = it } }
+                    AppearanceGroup.LAYOUT -> {
+                        item { LayoutFields(draft) { draft = it } }
+                        item { DayWheelPreview() }
+                        item { SectionTitle(stringResource(R.string.ui_nav_order)) }
+                        // Only these five rows reorder. Measure their intervals in this section,
+                        // not in the lazy viewport that also contains previews and preferences.
+                        item {
+                            ReorderableColumn(draft.order, onSettle = { from, to -> draft = draft.moveTab(from, to) },
+                                verticalArrangement = listSpacing) { index, dest, dragging ->
+                                key(dest) {
+                                    ReorderableItem {
+                                        NavigationField(dest, index, draft, enabled = !busy, dragging = dragging, update = { draft = it })
+                                    }
+                                }
+                            }
+                        }
+                    }
                     AppearanceGroup.MATERIAL -> {
                         item { MaterialFields(draft) { draft = it } }
                         item {
+                            if (picker != null) WallpaperControls(draft, { draft = it }, wallpaperTarget, { wallpaperTarget = it }, picker)
+                        }
+                        item {
                             Column {
                                 SectionTitle(stringResource(R.string.ui_course_preview))
-                                CompositionLocalProvider(LocalPlannerGlassAllowed provides true) { CourseTimetablePreview() }
+                                CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
+                                    WallpaperHost(preview.wallpaper(Destination.COURSES)) { CourseTimetablePreview() }
+                                }
+                                SwitchRow(stringResource(R.string.appearance_grid_lines), draft.showCourseGrid) { draft = draft.copy(showCourseGrid = !draft.showCourseGrid) }
                                 SwitchRow(stringResource(R.string.ui_course_outline), draft.courseTextOutline) { draft = draft.copy(courseTextOutline = !draft.courseTextOutline) }
                             }
                         }
@@ -79,31 +134,43 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                         HorizontalDivider()
                         Spacer(Modifier.height(12.dp))
                         TextButton(onClick = { draft = AppearanceFields(group, null).applyTo(draft); seedInput = draft.seed; message = "" },
-                            enabled = !receipt.busy, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
+                            enabled = !busy && !applied, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
                             Text(stringResource(R.string.ui_restore_defaults))
                         }
                     }
                 }
-                if (stale) item { Secondary(stringResource(R.string.ui_reload_settings), enabled = !receipt.busy, onClick = reload) }
+                if (stale && !applied) item { Secondary(stringResource(R.string.ui_reload_settings), enabled = !busy, onClick = reload) }
             }
         }
     }
 }
 
 @Composable
-private fun AppearancePreview(value: Appearance) {
-    var selected by rememberSaveable(value.start) { mutableStateOf(value.start.key) }
-    val nav = rememberDestinationCapsule(selected) { selected = it }
-    val scale = LocalDensity.current.fontScale
-    Surface(Modifier.fillMaxWidth().height((144 * scale.coerceAtLeast(1f)).dp), shape = MaterialTheme.shapes.medium,
+private fun AppearancePreview(value: Appearance, selected: Destination, choose: (Destination) -> Unit) {
+    val nav = if (selected in value.visible) rememberDestinationCapsule(selected.key) { key ->
+        choose(value.visibleOrder.first { it.key == key })
+    } else null
+    Surface(Modifier.fillMaxWidth().testTag("appearance-page-preview"), shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerLow) {
         CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
-            DockOverlay(nav) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = if (value.compact) 4.dp else 8.dp)) {
-                    Text(stringResource(R.string.ui_preview_of, Destination.entries.first { it.key == selected }.label), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
-                    Text(stringResource(R.string.ui_sample_task), style = MaterialTheme.typography.bodyLarge)
-                    if (value.showDuration || value.showNotes) Hint(listOfNotNull(stringResource(R.string.ui_sample_duration).takeIf { value.showDuration },
-                        stringResource(R.string.ui_sample_note).takeIf { value.showNotes }).joinToString(" · "))
+            WallpaperHost(value.wallpaper(selected)) {
+                // Unlike the full-screen overlay, this preview wraps its content. Measure the
+                // actual note and dock in sequence, including wrapped text and docked labels.
+                GlassBacking(Modifier.fillMaxWidth(), background = {
+                    Spacer(Modifier.matchParentSize().wallpaperBackground(MaterialTheme.colorScheme.surfaceContainerLow))
+                }) {
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = if (value.compact) 4.dp else 8.dp)) {
+                            Text(stringResource(R.string.ui_preview_of, selected.label), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelMedium)
+                            Text(stringResource(R.string.ui_sample_task), style = MaterialTheme.typography.bodyLarge)
+                            if (value.showDuration) Hint(stringResource(R.string.ui_sample_duration))
+                            if (value.showNotes) Hint(stringResource(R.string.ui_sample_note))
+                        }
+                        if (nav != null) {
+                            if (value.navStyle == NavStyle.DOCKED) nav()
+                            else Box(Modifier.widthIn(max = 520.dp).fillMaxWidth().padding(horizontal = chromeGutter, vertical = 4.dp)) { nav() }
+                        }
+                    }
                 }
             }
         }
@@ -129,26 +196,16 @@ private fun LayoutFields(d: Appearance, update: (Appearance) -> Unit) {
         Choice(stringResource(R.string.ui_spacing), listOf(false, true), d.compact, { if (it) stringResource(R.string.ui_compact) else stringResource(R.string.ui_standard) }) { update(d.copy(compact = it)) }
         Choice(stringResource(R.string.ui_nav_style), NavStyle.entries, d.navStyle, { if (it == NavStyle.FLOATING) stringResource(R.string.ui_floating_nav) else stringResource(R.string.ui_bottom_nav) }) { update(d.copy(navStyle = it)) }
         Choice(stringResource(R.string.ui_backlog), listOf(true, false), d.floatingDayTray, { if (it) stringResource(R.string.ui_floating_button) else stringResource(R.string.ui_persistent_tray) }) { update(d.copy(floatingDayTray = it)) }
-        Choice(stringResource(R.string.ui_start_page), d.order, d.start, { it.label }) { update(d.copy(start = it)) }
-        SectionTitle(stringResource(R.string.ui_nav_order))
-        for ((i, dest) in d.order.withIndex()) {
-            fun move(to: Int) { val next = d.order.toMutableList(); next[i] = next[to]; next[to] = dest; update(d.copy(order = next)) }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("${i + 1}. ${dest.label}", Modifier.weight(1f))
-                MoveButton(dest, up = true, enabled = i > 0) { move(i - 1) }
-                MoveButton(dest, up = false, enabled = i < d.order.lastIndex) { move(i + 1) }
-            }
+        Choice(stringResource(R.string.ui_start_page), d.visibleOrder, d.start, { it.label }) { update(d.copy(start = it)) }
+        Choice(stringResource(R.string.appearance_day_scroll), DayScrollEffect.entries, d.dayScrollEffect,
+            { stringResource(if (it == DayScrollEffect.FLAT) R.string.appearance_scroll_flat else R.string.appearance_scroll_wheel) }) {
+            update(d.copy(dayScrollEffect = it))
         }
         SwitchRow(stringResource(R.string.ui_show_duration), d.showDuration) { update(d.copy(showDuration = !d.showDuration)) }
         SwitchRow(stringResource(R.string.ui_show_notes), d.showNotes) { update(d.copy(showNotes = !d.showNotes)) }
     }
 }
 
-@Composable
-private fun MoveButton(dest: Destination, up: Boolean, enabled: Boolean, move: () -> Unit) {
-    val label = stringResource(if (up) R.string.ui_move_tab_up else R.string.ui_move_tab_down, dest.label)
-    ToolbarIcon(if (up) R.drawable.ic_expand_less else R.drawable.ic_expand_more, label, enabled, move)
-}
 
 @Composable
 private fun MaterialFields(d: Appearance, update: (Appearance) -> Unit) {

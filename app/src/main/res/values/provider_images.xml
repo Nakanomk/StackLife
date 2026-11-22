@@ -1,0 +1,4 @@
+<resources>
+    <string name="provider_images_toggle">Supports image input</string>
+    <string name="provider_images_hint">Turn on only if this endpoint and model accept images in Chat Completions. Saving does not contact the service.</string>
+</resources>

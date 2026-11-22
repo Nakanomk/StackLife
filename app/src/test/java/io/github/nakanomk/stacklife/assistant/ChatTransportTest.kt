@@ -68,6 +68,102 @@ class ChatTransportTest {
         assertEquals(Json.parseToJsonElement("""{"role":"assistant","content":"没有安排"}"""), transport.complete(connection, messages, tools))
     }
 
+    @Test fun streamsOrderedImagesOnlyOnLatestUserTurnIncludingToolRoundsAndImageOnly() = runBlocking {
+        val dir = java.nio.file.Files.createTempDirectory("stacklife-wire").toFile()
+        try {
+            val selected = listOf(pngFixture(dir, 121), pngFixture(dir, 127))
+            val authorized = ServiceConnection(profile.copy(supportsImages = true), key)
+            for (prompt in listOf("文字与图片，含引号 \"", "")) {
+                val conversation = buildJsonArray {
+                    addJsonObject { put("role", "user"); put("content", "historical image caption") }
+                    addJsonObject { put("role", "assistant"); put("content", "old reply") }
+                    addJsonObject { put("role", "user"); put("content", prompt) }
+                    addJsonObject { put("role", "assistant"); put("content", JsonNull); putJsonArray("tool_calls") {
+                        addJsonObject { put("id", "t1"); put("type", "function"); putJsonObject("function") { put("name", "planner_query"); put("arguments", "{}") } }
+                    } }
+                    addJsonObject { put("role", "tool"); put("tool_call_id", "t1"); put("content", "{}") }
+                }
+                val turn = TurnImages(2, selected)
+                validateImageTurn(authorized.profile, conversation, tools, turn)
+                assertEquals(if (prompt.isEmpty()) 1 else 0, server.requestCount)
+                server.enqueue(MockResponse(body = reply("""{"role":"assistant","content":"ok"}""")))
+                transport.complete(authorized, conversation, tools, turn)
+                val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+                val wire = requireNotNull(request.body)
+                assertEquals(wire.size.toLong(), request.headers["Content-Length"]!!.toLong())
+                val sent = Json.parseToJsonElement(wire.utf8()).jsonObject.getValue("messages").jsonArray
+                assertEquals(conversation.size, sent.size)
+                for (i in conversation.indices) if (i != 2) assertEquals(conversation[i], sent[i])
+                val parts = sent[2].jsonObject.getValue("content").jsonArray
+                val textCount = if (prompt.isEmpty()) 0 else 1
+                if (textCount == 1) assertEquals(buildJsonObject { put("type", "text"); put("text", prompt) }, parts.first())
+                assertEquals(textCount + selected.size, parts.size)
+                for ((i, entry) in selected.withIndex()) {
+                    val part = parts[textCount + i].jsonObject
+                    assertEquals(JsonPrimitive("image_url"), part["type"])
+                    val data = part.getValue("image_url").jsonObject.getValue("url").jsonPrimitive.content
+                    assertTrue(data.startsWith("data:image/png;base64,"))
+                    assertArrayEquals(entry.second.readBytes(), java.util.Base64.getDecoder().decode(data.substringAfter(',')))
+                }
+            }
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun refusesUnreadyDisabledWrongRoleNoncurrentOrInjectedImagesWithoutStartingHttp() = runBlocking {
+        val dir = java.nio.file.Files.createTempDirectory("stacklife-wire-invalid").toFile()
+        try {
+            val entry = pngFixture(dir, 1)
+            val enabled = ServiceConnection(profile.copy(supportsImages = true), key)
+            val turn = TurnImages(0, listOf(entry))
+            val invalidRole = Json.parseToJsonElement("""[{"role":"remote","content":"x"}]""").jsonArray
+            val twoUsers = JsonArray(listOf(messages.single(), messages.single()))
+            val completedTurn = Json.parseToJsonElement("""[{"role":"user","content":"previous"},{"role":"assistant","content":"answered"}]""").jsonArray
+            val injected = Json.parseToJsonElement("""[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://private.invalid/media"}}]},{"role":"user","content":"new"}]""").jsonArray
+            suspend fun blocked(c: ServiceConnection, m: JsonArray, t: TurnImages?) {
+                assertTrue(runCatching { transport.complete(c, m, tools, t) }.exceptionOrNull() is ChatProblem)
+            }
+            blocked(connection, messages, turn)
+            blocked(enabled, invalidRole, turn)
+            blocked(enabled, twoUsers, turn)
+            blocked(enabled, completedTurn, turn)
+            blocked(enabled, messages, turn.copy(messageIndex = -1))
+            blocked(enabled, injected, null)
+            blocked(enabled, messages, turn.copy(entries = emptyList()))
+            blocked(enabled, messages, turn.copy(entries = List(6) { entry }))
+            for (bad in listOf(entry.first.copy(bytes = 0), entry.first.copy(width = 2049), entry.first.copy(width = 2),
+                entry.first.copy(mime = "image/svg+xml"), entry.first.copy(mime = "image/jpeg"),
+                entry.first.copy(id = "../escape"), entry.first.copy(bytes = MAX_IMAGE_INPUT_BYTES + 1))) {
+                blocked(enabled, messages, TurnImages(0, listOf(bad to entry.second)))
+            }
+            entry.second.delete()
+            blocked(enabled, messages, turn)
+            assertEquals(0, server.requestCount)
+        } finally { dir.deleteRecursively() }
+    }
+
+    /** Real static RGB PNGs with multi-buffer IDAT and deterministic, non-sensitive pixels. */
+    private fun pngFixture(dir: java.io.File, side: Int): Pair<ChatImage, java.io.File> {
+        val id = java.util.UUID.randomUUID().toString()
+        val file = java.io.File(dir, id)
+        java.io.DataOutputStream(file.outputStream()).use { out ->
+            out.writeLong(0x89504e470d0a1a0auL.toLong())
+            fun chunk(name: String, data: ByteArray) {
+                val tag = name.toByteArray(Charsets.US_ASCII)
+                out.writeInt(data.size); out.write(tag); out.write(data)
+                out.writeInt(java.util.zip.CRC32().apply { update(tag); update(data) }.value.toInt())
+            }
+            chunk("IHDR", java.nio.ByteBuffer.allocate(13).putInt(side).putInt(side).put(byteArrayOf(8, 2, 0, 0, 0)).array())
+            val compressed = java.io.ByteArrayOutputStream()
+            val random = java.util.Random(side.toLong())
+            val row = ByteArray(3 * side)
+            java.util.zip.DeflaterOutputStream(compressed).use { data ->
+                repeat(side) { data.write(0); random.nextBytes(row); data.write(row) }
+            }
+            chunk("IDAT", compressed.toByteArray()); chunk("IEND", byteArrayOf())
+        }
+        return ChatImage(id, "image/png", side, side, file.length()) to file
+    }
+
     @Test fun neverFollowsCrossHostRedirectEvenWhenSuppliedClientEnablesIt() = runBlocking {
         MockWebServer().use { other ->
             other.useHttps(serverTls.sslSocketFactory()); other.start(InetAddress.getByName("127.0.0.1"), 0)

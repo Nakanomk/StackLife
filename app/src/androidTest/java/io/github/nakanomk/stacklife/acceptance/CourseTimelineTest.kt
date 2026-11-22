@@ -77,7 +77,7 @@ class CourseTimelineTest {
         store.apply(TaskAdd(TaskInput("报告提纲")))
         val originalQueue = store.state().queue
         val meetings = fixture(); val preview = proposal(term, meetings) as PreviewResult.Ready
-        assertEquals(3, preview.changes.count { it.field.startsWith("新增课程") })
+        assertEquals(meetings.toSet(), (preview.changes.single().after as CourseSetSnapshot).meetings.toSet())
         assertNull(week(1).term); commit(preview)
         val sep = week(1).classes.single().meeting; val nov = week(9).classes.single().meeting
         assertEquals("A", sep.room); assertEquals("B", week(3).classes.single().meeting.room); assertTrue(week(2).classes.isEmpty())
@@ -87,7 +87,7 @@ class CourseTimelineTest {
         assertEquals(at(winter, 15, 35).toInstant().toEpochMilli(), nov.endMillis)
         val repeated = proposal(term, fixture()) as PreviewResult.Ready
         assertTrue(repeated.changes.isEmpty()); commit(repeated)
-        store.reopen(); assertEquals(listOf(nov), day(winter).courses.map { it.meeting })
+        store.reopen(); assertEquals(listOf(nov), day(winter).occurrences.mapNotNull { it.course }.map { it.meeting })
         val other = term.copy(id = "暑期课")
         commit(proposal(other, listOf(other.meeting(2, 2, "独立课", "C", 1, 1))))
         assertTrue(proposal(term, emptyList()) is PreviewResult.Rejected)
@@ -99,17 +99,19 @@ class CourseTimelineTest {
             SELECT termId,'another-source',week,day,firstPeriod,lastPeriod,'交换学期研讨','D',startMillis,endMillis
             FROM course_meetings WHERE termId=? AND source=? AND week=9""", arrayOf(term.id, HUST_SOURCE))
         commit(proposal(term, meetings))
-        val both = day(winter).courses.associateBy { it.source }
+        val both = day(winter).occurrences.mapNotNull { it.course }.associateBy { it.source }
         assertTrue(both.getValue(HUST_SOURCE).conflicts.single().contains("交换学期研讨"))
         val foreign = both.getValue("another-source")
         assertTrue(foreign.conflicts.single().contains("操作系统"))
         assertTrue(store.api.preview(listOf(TermRemove(term.id))) is PreviewResult.Rejected)
-        val removal = store.proposal(TermRemove(term.id, HUST_SOURCE)); assertEquals(3, removal.changes.count { it.field.startsWith("移除课程") })
+        val removal = store.proposal(TermRemove(term.id, HUST_SOURCE))
+        assertEquals(meetings.toSet(), (removal.changes.single().before as CourseSetSnapshot).meetings.toSet())
+        assertNull(removal.changes.single().after)
         assertEquals(nov, both.getValue(HUST_SOURCE).meeting)
         store.api.discard(removal.proposalId); assertEquals(term, week(1).term)
         store.apply(TermRemove(term.id, HUST_SOURCE)); assertEquals(term, week(1).term)
         assertEquals(setOf("another-source"), week(9).classes.map { it.source }.toSet())
-        assertEquals(listOf(foreign.copy(conflicts = emptyList())), day(winter).courses)
+        assertEquals(listOf(foreign.copy(conflicts = emptyList())), day(winter).occurrences.mapNotNull { it.course })
         assertEquals("独立课", week(2, other.id).classes.single().meeting.title)
         db.query("SELECT COUNT(*) FROM course_terms WHERE source='another-source'").use { assertTrue(it.moveToFirst()); assertEquals(1, it.getInt(0)) }
         assertEquals(originalQueue, store.state().queue)
@@ -158,35 +160,38 @@ class CourseTimelineTest {
     }
 
     @Test fun importingOntoAnExistingSlotLabelsBothAndProtectsTheRightEndpoint() = runBlocking {
-        store.apply(TaskAdd(TaskInput("报告提纲", ref = "t")), SlotSet("@t", at(winter, 15, 0), 10))
+        store.apply(TaskAdd(TaskInput("报告提纲", ref = "t")), exact("@t", at(winter, 15, 0), 10))
         val id = store.state().queue.single().id
         val before = day(winter); val preview = proposal(term, fixture()) as PreviewResult.Ready
-        assertTrue(preview.changes.any { "操作系统" in it.field && it.after.orEmpty().contains("报告提纲") })
+        val conflict = (preview.changes.single().after as CourseSetSnapshot).conflicts.single()
+        assertEquals("操作系统", conflict.occurrence.title); assertEquals(OccurrenceKey.Schedule(id).storageKey(), conflict.other.id)
+        assertEquals("报告提纲", conflict.other.title)
         assertEquals(before, day(winter)); commit(preview)
-        val collided = day(winter); assertEquals(before.blocks, collided.blocks); assertEquals(setOf(id), collided.conflictingTaskIds)
-        assertEquals(listOf("报告提纲"), collided.courses.single().conflicts); assertEquals(collided.courses, week(9).classes)
-        val rejected = store.api.preview(listOf(SlotSet(id, at(winter, 15, 0), 30))) as PreviewResult.Rejected
-        for (s in listOf("操作系统", "14:00", "15:35", "B")) assertTrue(rejected.message, s in rejected.message)
+        val collided = day(winter); assertEquals(before.occurrences.single().key, collided.occurrences.single { it.taskId == id }.key); assertEquals(listOf("操作系统"),collided.occurrences.single { it.taskId == id }.conflicts)
+        assertEquals(listOf("报告提纲"), collided.occurrences.mapNotNull { it.course }.single().conflicts); assertEquals(collided.occurrences.mapNotNull { it.course }, week(9).classes)
+        val allowed = store.proposal(exact(id,at(winter,15,0),30))
+        assertEquals("操作系统",allowed.changes.mapNotNull { it.after as? ScheduleSnapshot }.single().overlaps.single().title); store.api.discard(allowed.proposalId)
         assertEquals(collided, day(winter))
-        store.apply(SlotSet(id, at(winter, 15, 35), 30)); val adjacent = day(winter)
-        assertEquals(id, adjacent.blocks.single().taskId); assertEquals(novEnd(), adjacent.blocks.single().startMillis)
-        assertTrue(adjacent.conflictingTaskIds.isEmpty()); assertTrue(adjacent.courses.single().conflicts.isEmpty())
+        store.apply(exact(id, at(winter, 15, 35), 30)); val adjacent = day(winter)
+        assertEquals(id, adjacent.occurrences.single { it.taskId == id }.taskId); assertEquals(novEnd(), adjacent.occurrences.single { it.taskId == id }.startMillis)
+        assertTrue(adjacent.occurrences.all { it.conflicts.isEmpty() })
     }
     private fun novEnd() = at(winter, 15, 35).toInstant().toEpochMilli()
 
-    @Test fun orderedImportsCannotBypassConflictsOrSurviveAnInvalidBatch() = runBlocking {
+    @Test fun orderedImportsAndSchedulesShareAnOverlayAndRejectAStaleBatch() = runBlocking {
         store.apply(TaskAdd(TaskInput("A"))); val task = store.state().queue.single().id
-        val id = store.api.stageCourseImport(term, fixture()); val placement = SlotSet(task, at(winter, 15, 0), 30)
+        val id = store.api.stageCourseImport(term, fixture()); val placement = exact(task, at(winter, 15, 0), 30)
         val before = day(winter)
-        val invalid = store.api.preview(listOf(CourseImport(id), placement)) as PreviewResult.Rejected
-        assertTrue("操作系统" in invalid.message); assertEquals(before, day(winter))
-        val mixed = store.proposal(placement, CourseImport(id)); assertTrue(mixed.changes.any { it.field.startsWith("冲突") })
+        val reverse = store.proposal(CourseImport(id),placement)
+        assertEquals("操作系统",reverse.changes.mapNotNull { it.after as? ScheduleSnapshot }.single().overlaps.single().title); store.api.discard(reverse.proposalId); assertEquals(before,day(winter))
+        val mixed = store.proposal(placement, CourseImport(id))
+        assertEquals(OccurrenceKey.Schedule(task).storageKey(), mixed.changes.mapNotNull { it.after as? CourseSetSnapshot }.single().conflicts.single().other.id)
         store.apply(TaskAdd(TaskInput("第二项")))
         assertEquals(CommitFailure.STALE_PREVIEW, (store.api.commit(mixed.proposalId) as CommitResult.Rejected).code)
-        assertTrue(day(winter).courses.isEmpty()); assertTrue(day(winter).blocks.isEmpty())
+        assertTrue(day(winter).occurrences.mapNotNull { it.course }.isEmpty()); assertTrue(day(winter).occurrences.isEmpty())
         store.apply(CourseImport(id)); store.api.discardCourseImport(id)
         store.apply(TermRemove(term.id), placement)
-        assertTrue(day(winter).courses.isEmpty()); assertEquals(task, day(winter).blocks.single().taskId)
+        assertTrue(day(winter).occurrences.mapNotNull { it.course }.isEmpty()); assertEquals(task, day(winter).occurrences.single().taskId)
     }
 
     @Test fun failedReplacementRollsBackTheWholeImportIncludingEarlierCommands() = runBlocking {

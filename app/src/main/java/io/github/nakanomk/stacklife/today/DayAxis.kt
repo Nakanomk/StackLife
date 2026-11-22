@@ -6,23 +6,21 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -35,12 +33,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import io.github.nakanomk.stacklife.courses.CourseDetails
 import io.github.nakanomk.stacklife.courses.ScheduledCourse
-import io.github.nakanomk.stacklife.planner.PlannerCommand
-import io.github.nakanomk.stacklife.planner.PlannerQuery
-import io.github.nakanomk.stacklife.planner.ScheduledState
-import io.github.nakanomk.stacklife.planner.CourseOccurrenceId
+import io.github.nakanomk.stacklife.planner.*
 import androidx.compose.ui.text.style.TextDecoration
 import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch
 import kotlinx.coroutines.delay
@@ -48,18 +42,19 @@ import kotlin.math.roundToInt
 
 @Composable
 internal fun DayAxis(
-    drag: AxisDrag, revision: Long, enabled: Boolean, onEdit: (String) -> Unit,
-    send: (PlannerCommand.SlotSet) -> Unit, complete: (PlannerCommand) -> Unit, modifier: Modifier, topInset: Dp, spine: Dp, endInGutter: Boolean,
+    drag: AxisDrag, revision: Long, enabled: Boolean, onEdit: (AgendaOccurrence) -> Unit, openCourse: (ScheduledCourse) -> Unit,
+    send: (PlannerCommand) -> Unit, onMore: (TimeGridPlacement.Overflow) -> Unit, focused: String?, modifier: Modifier, topInset: Dp, spine: Dp, endInGutter: Boolean,
 ) {
     val density = LocalDensity.current
     val scale = drag.scale
+    val wheel = dayWheelEnabled()
     val hourStyle = MaterialTheme.typography.labelMedium
     val railWidth = 48.dp
     val gutter = spine + railWidth / 2
     var selectedEnd by remember(drag, revision) { mutableStateOf<String?>(null) }
     Box(modifier.fillMaxWidth().clipToBounds()) {
         Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll).padding(top = topInset, bottom = 16.dp)) {
-            Box(Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() })) {
+            BoxWithConstraints(Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() })) {
                 for (band in scale.bands) for (tick in band.ticks) {
                     Box(Modifier.offset { IntOffset(0, band.top + band.yAt(tick.millis)) }.width(spine - 10.dp)
                         .testTag(tick.tag)) {
@@ -68,37 +63,33 @@ internal fun DayAxis(
                         else Spacer(Modifier.align(Alignment.TopEnd).size(4.dp, 1.dp).background(MaterialTheme.colorScheme.outlineVariant))
                     }
                 }
-                for (group in scale.groups) key(group.start) {
-                    val top = scale.yAt(group.start)
-                    BoxWithConstraints(Modifier.offset { IntOffset(0, top) }.fillMaxWidth().padding(start = gutter - railWidth, end = 8.dp)
-                        .height(with(density) { (scale.yAt(group.end) - top).toDp() })) {
-                        val width = maxWidth / group.lanes.size
-                        val minimumLane = railWidth + 152.dp
-                        val overflow = group.lanes.size > 1 && width < minimumLane
-                        Row(if (overflow) Modifier.horizontalScroll(rememberScrollState()) else Modifier) {
-                            for (lane in group.lanes) Box(Modifier.width(if (overflow) minimumLane else width).fillMaxHeight()) {
-                                for (entry in lane) key(entry) {
-                                    val y = scale.yAt(entry.startMillis)
-                                    val bounds = Modifier.offset { IntOffset(0, y - top) }.fillMaxWidth()
-                                        .height(with(density) { (scale.yAt(entry.endMillis) - y).toDp() })
-                                    Row(bounds) {
-                                        EventRail(entry, selectedEnd, { selectedEnd = it }, drag, revision, enabled, onEdit, send,
-                                            Modifier.width(railWidth).fillMaxHeight())
-                                        val block = (entry as? AxisEntry.Task)?.block
-                                        val move = if (block == null || entry.completed) Modifier else Modifier.slotDrag(
-                                            SlotSource(block.taskId, ((block.endMillis - block.startMillis) / MINUTE_MS).toInt(), block.startMillis),
-                                            drag, revision, enabled, send)
-                                        AgendaEventCard(entry, scale.day, revision, enabled, onEdit, complete, Modifier.fillMaxSize(), move)
-                                    }
-                                }
-                            }
-                        }
+                val moreWidth = if (scale.placement.more.isEmpty()) 0.dp else 52.dp
+                for (rect in scale.placement.visible) key(rect.item.key) {
+                    val item = rect.item
+                    val y = scale.yAt(rect.start)
+                    val compact = rect.columns > 1
+                    val left = (if (compact || moreWidth > 0.dp) spine + 4.dp else gutter - railWidth) + moreWidth
+                    val width = (maxWidth - left - 4.dp) / rect.columns
+                    val height = if (item.point) scale.minimumHeight(rect) else scale.yAt(rect.end) - y
+                    val bounds = Modifier.offset(x = left + width * rect.column, y = with(density) { y.toDp() })
+                        .size(width, with(density) { height.toDp() })
+                    Row(bounds.axisWheel(wheel, drag, y, item.key)) {
+                        if (!compact) EventRail(item, selectedEnd, { selectedEnd = it }, drag, revision, enabled, onEdit, send,
+                            Modifier.width(railWidth).fillMaxHeight())
+                        val source = item.dragSource()
+                        val move = if (source == null) Modifier else Modifier.slotDrag(source, drag, revision, enabled, send)
+                        AgendaEventCard(item, scale.day, revision, enabled, onEdit, openCourse, send, Modifier.fillMaxSize(), move, compact = compact, focused = item.stableKey == focused)
                     }
+                }
+                for (group in scale.placement.more) key(group.start) {
+                    val y = scale.yAt(group.start)
+                    MoreEventsButton(group, onMore, Modifier
+                        .offset(x = spine + 4.dp, y = with(density) { y.toDp() }).width(moreWidth).axisWheel(wheel, drag, y, null))
                 }
             }
             val end = remember(scale.day) { clockLabel(scale.day.endMillis, scale.day) }
             val label = stringResource(R.string.today_end_boundary, end)
-            val compact = endInGutter || scale.groups.lastOrNull()?.end == scale.day.endMillis
+            val compact = endInGutter || scale.placement.visible.any { it.end == scale.day.endMillis }
             val clock = remember(scale.day) { clockLabel(scale.day.endMillis, scale.day, includeDate = false) }
             Text(if (compact) clock else label,
                 Modifier.align(Alignment.BottomStart).padding(start = if (compact) 4.dp else spine + 12.dp)
@@ -106,7 +97,7 @@ internal fun DayAxis(
                 style = hourStyle, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Box(Modifier.fillMaxSize().padding(top = topInset).clipToBounds().testTag("day-drop-area")
-            .onGloballyPositioned { drag.viewport = it.boundsInRoot() }) {
+            .onGloballyPositioned(drag::placeViewport)) {
             CurrentLine(drag, spine)
             DropPreview(drag, gutter)
         }
@@ -125,26 +116,26 @@ internal fun daySpine(): Dp {
 
 @Composable
 private fun EventRail(
-    entry: AxisEntry, selectedId: String?, select: (String?) -> Unit, drag: AxisDrag, revision: Long,
-    enabled: Boolean, onEdit: (String) -> Unit, send: (PlannerCommand.SlotSet) -> Unit, modifier: Modifier,
+    entry: AgendaOccurrence, selectedId: String?, select: (String?) -> Unit, drag: AxisDrag, revision: Long,
+    enabled: Boolean, onEdit: (AgendaOccurrence) -> Unit, send: (PlannerCommand) -> Unit, modifier: Modifier,
 ) {
-    val task = (entry as? AxisEntry.Task)?.block
+    val source = entry.dragSource()
     // A clipped continuation has no endpoint here. Its full interval is still editable by tapping the title.
-    val resizable = task?.takeIf { it.state != ScheduledState.DONE && it.endMillis <= drag.scale.day.endMillis }
-    val selected = resizable != null && resizable.taskId == selectedId
+    val resizable = entry.takeIf { source != null && !it.point && it.endMillis <= drag.scale.day.endMillis }
+    val selected = resizable != null && resizable.uiId == selectedId
     val colors = MaterialTheme.colorScheme
     val ink = when {
         selected -> colors.primary
-        task == null -> colors.tertiary
+        entry.course != null -> colors.tertiary
         else -> colors.secondary
     }
     val barDescription = resizable?.let { stringResource(R.string.today_task_bar, it.title) }
     val handleState = if (selected) stringResource(R.string.today_handle_shown)
         else stringResource(R.string.today_hold_to_resize)
-    val action = if (resizable == null) Modifier else Modifier.testTag("resize-bar:${resizable.taskId}")
+    val action = if (resizable == null) Modifier else Modifier.testTag("resize-bar:${resizable.uiId}")
         .combinedClickable(enabled = enabled, role = Role.Button, onLongClickLabel = stringResource(R.string.today_show_handle),
-            onLongClick = { select(resizable.taskId) }, onClickLabel = if (selected) stringResource(R.string.today_hide_handle) else stringResource(R.string.today_show_handle),
-            onClick = { select(if (selected) null else resizable.taskId) })
+            onLongClick = { select(resizable.uiId) }, onClickLabel = if (selected) stringResource(R.string.today_hide_handle) else stringResource(R.string.today_show_handle),
+            onClick = { select(if (selected) null else resizable.uiId) })
         .semantics {
             contentDescription = barDescription.orEmpty()
             stateDescription = handleState
@@ -153,19 +144,18 @@ private fun EventRail(
         Spacer(Modifier.fillMaxSize().then(action).drawBehind {
             val radius = 6.dp.toPx()
             val top = Offset(size.width / 2, radius)
-            if (!selected || drag.resizeRailX == null || drag.candidate == null) {
+            if (!entry.point && (!selected || drag.resizeRailX == null || drag.candidate == null)) {
                 drawLine(ink.copy(alpha = if (selected) 1f else .65f), top,
                     Offset(top.x, size.height - 3.dp.toPx()), 5.dp.toPx(), StrokeCap.Round)
             }
             drawCircle(ink, radius, top)
             drawCircle(colors.surface, 2.dp.toPx(), top)
         })
-        if (selected && resizable != null) {
-            val source = SlotSource(resizable.taskId, ((resizable.endMillis - resizable.startMillis) / MINUTE_MS).toInt(), resizable.startMillis)
+        if (selected && resizable != null && source != null) {
             val endLabel = clockLabel(resizable.endMillis, drag.scale.day)
             val handleLabel = stringResource(R.string.today_end_handle, resizable.title, endLabel)
             var railX by remember { mutableFloatStateOf(Float.NaN) }
-            LaunchedEffect(drag, resizable.taskId, railX) {
+            LaunchedEffect(drag, resizable.uiId, railX) {
                 if (railX.isNaN()) return@LaunchedEffect
                 // A long task may continue below the screen. Reveal the real end, never put
                 // a substitute handle at the viewport edge or on a clipped midnight boundary.
@@ -177,11 +167,11 @@ private fun EventRail(
                     drag.scroll.scrollTo((endY - visibleHeight + margin).coerceAtLeast(0))
                 }
             }
-            val handle = rememberRouteLaunch("slot:${resizable.taskId}", CircleShape)
-            Spacer(Modifier.align(Alignment.BottomCenter).size(48.dp).then(handle.modifier).testTag("resize-end:${resizable.taskId}")
+            val handle = rememberRouteLaunch("slot:${resizable.uiId}", CircleShape)
+            Spacer(Modifier.align(Alignment.BottomCenter).size(48.dp).then(handle.modifier).testTag("resize-end:${resizable.uiId}")
                 .onGloballyPositioned { railX = it.localToRoot(Offset(it.size.width / 2f, 0f)).x }
                 .endDrag(source, drag, revision, enabled, send)
-                .clickable(enabled, onClickLabel = stringResource(R.string.today_edit_exact_time), role = Role.Button) { handle.open { onEdit(resizable.taskId) } }
+                .clickable(enabled, onClickLabel = stringResource(R.string.today_edit_exact_time), role = Role.Button) { handle.open { onEdit(resizable) } }
                 .semantics { contentDescription = handleLabel }
                 .drawBehind {
                     if (drag.resizeRailX == null || drag.candidate == null) drawEndKnob(size.width / 2, size.height, ink, colors.surface)
@@ -197,71 +187,56 @@ private fun DrawScope.drawEndKnob(x: Float, endY: Float, ink: Color, centerColor
     drawCircle(centerColor, 3.dp.toPx(), center)
 }
 
+private val AgendaOccurrence.uiId: String get() = (key as? OccurrenceKey.Schedule)?.takeIf { it.originalDay == null }?.scheduleId ?: stableKey
+private fun AgendaOccurrence.dragSource() = (key as? OccurrenceKey.Schedule)?.takeIf { editable && !completed }?.let {
+    SlotSource(it, endMillis - startMillis, startMillis)
+}
+
 @Composable
-internal fun AgendaEventCard(entry: AxisEntry, day: PlannerQuery.Day, revision: Long, enabled: Boolean, onEdit: (String) -> Unit,
-    complete: (PlannerCommand) -> Unit, modifier: Modifier, move: Modifier = Modifier, wrap: Boolean = false) {
-    Row(modifier) {
-        val body = Modifier.weight(1f).then(if (wrap) Modifier else Modifier.fillMaxHeight())
-        when (entry) {
-            is AxisEntry.Task -> BlockCard(entry, day, enabled, onEdit, body, move, wrap)
-            is AxisEntry.Course -> CourseCard(entry.course, day, body, wrap, entry.completed)
-            is AxisEntry.Routine -> Column(body.padding(start = 4.dp)) {
-                Text(clockLabel(entry.startMillis, day), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(entry.title, style = MaterialTheme.typography.titleSmall, textDecoration = if (entry.completed) TextDecoration.LineThrough else null)
+internal fun AgendaEventCard(entry: AgendaOccurrence, day: PlannerQuery.Day, revision: Long, enabled: Boolean, onEdit: (AgendaOccurrence) -> Unit,
+    openCourse: (ScheduledCourse) -> Unit, complete: (PlannerCommand) -> Unit, modifier: Modifier, move: Modifier = Modifier,
+    wrap: Boolean = false, compact: Boolean = false, focused: Boolean = false) {
+    val container = if (focused) modifier.background(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.shapes.medium) else modifier
+    val body: @Composable (Modifier) -> Unit = { area ->
+        if (entry.course != null) CourseCard(entry.course, day, area, wrap, entry.completed, openCourse)
+        else {
+            val scheme = MaterialTheme.colorScheme
+            val range = if (entry.point) stringResource(R.string.slot_point_at, clockLabel(entry.startMillis, day))
+                else "${clockLabel(entry.startMillis, day)}–${clockLabel(entry.endMillis, day)}"
+            val state = stringResource(when {
+                entry.completed -> R.string.today_done
+                entry.daily -> R.string.slot_daily
+                entry.owner == Owner.FRAME -> R.string.today_stacked_occupied
+                else -> R.string.today_queue
+            })
+            val launch = rememberRouteLaunch("slot:${entry.uiId}", MaterialTheme.shapes.medium)
+            Column(area.testTag("block:${entry.uiId}").clip(MaterialTheme.shapes.medium).then(move).then(launch.modifier)
+                .clickable(enabled, onClickLabel = stringResource(R.string.today_edit_time), role = Role.Button) { launch.open { onEdit(entry) } }
+                .padding(horizontal = 4.dp)) {
+                val lines = if (wrap) Int.MAX_VALUE else 1
+                Text(range, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = lines, overflow = TextOverflow.Ellipsis)
+                Text(entry.title, style = MaterialTheme.typography.titleSmall, textDecoration = if (entry.completed) TextDecoration.LineThrough else null,
+                    maxLines = lines, overflow = TextOverflow.Ellipsis)
+                Text(if (entry.conflicts.isEmpty()) state else stringResource(R.string.today_conflict_state, state), style = MaterialTheme.typography.labelMedium, color = scheme.secondary, maxLines = lines, overflow = TextOverflow.Ellipsis)
             }
         }
-        val description = stringResource(if (entry.completed) R.string.agenda_reopen else R.string.agenda_complete, entry.title)
+    }
+    val check: @Composable () -> Unit = {
+        val description = stringResource(if (entry.completed) R.string.agenda_reopen else if (entry.daily) R.string.slot_complete_this else R.string.agenda_complete, entry.title)
         Checkbox(checked = entry.completed, enabled = enabled, modifier = Modifier.size(48.dp).semantics { contentDescription = description },
-            onCheckedChange = { checked -> complete(when (entry) {
-                is AxisEntry.Task -> PlannerCommand.SetScheduledCompletion(entry.block.taskId, checked, revision)
-                is AxisEntry.Course -> with(entry.course) {
-                    PlannerCommand.SetCourseCompletion(CourseOccurrenceId.of(termId, source, meeting), checked, revision)
-                }
-                is AxisEntry.Routine -> PlannerCommand.SetRoutineCompletion(entry.event.kind, entry.event.date, checked, revision)
-            }) })
+            onCheckedChange = { complete(PlannerCommand.SetOccurrenceCompletion(entry.key, it, revision, entry.version)) })
     }
+    if (compact) Column(container.padding(end = 2.dp)) { body(Modifier.fillMaxWidth().weight(1f)); check() }
+    else Row(container) { body(Modifier.weight(1f).then(if (wrap) Modifier.heightIn(min = 48.dp) else Modifier.fillMaxHeight())); check() }
 }
 
 @Composable
-internal fun BlockCard(
-    entry: AxisEntry.Task, day: PlannerQuery.Day, enabled: Boolean, onEdit: (String) -> Unit,
-    modifier: Modifier, move: Modifier = Modifier, wrap: Boolean = false,
-) {
-    val scheme = MaterialTheme.colorScheme
-    val block = entry.block
-    val state = when (block.state) {
-        ScheduledState.QUEUE -> stringResource(R.string.today_queue)
-        ScheduledState.FRAME -> stringResource(R.string.today_stacked_occupied)
-        ScheduledState.DONE -> stringResource(R.string.today_done)
-    }
-    val range = "${clockLabel(block.startMillis, day)}–${clockLabel(block.endMillis, day)}"
-    val editable = block.state != ScheduledState.DONE
-    val lines = if (wrap) Int.MAX_VALUE else 1
-    val action = if (!editable) Modifier else {
-        val launch = rememberRouteLaunch("slot:${block.taskId}", MaterialTheme.shapes.medium)
-        move.then(launch.modifier).clickable(enabled, onClickLabel = stringResource(R.string.today_edit_time), role = Role.Button) {
-            launch.open { onEdit(block.taskId) }
-        }
-    }
-    Column(modifier.testTag("block:${block.taskId}").clip(MaterialTheme.shapes.medium).then(action)
-        .semantics(mergeDescendants = true) {}.padding(start = 4.dp, end = 4.dp)) {
-        Text(range, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = lines, overflow = TextOverflow.Ellipsis)
-        Text(block.title, style = MaterialTheme.typography.titleSmall, textDecoration = if (entry.completed) TextDecoration.LineThrough else null,
-            maxLines = lines, overflow = TextOverflow.Ellipsis)
-        Text(if (entry.conflict) stringResource(R.string.today_conflict_state, state) else state, style = MaterialTheme.typography.labelMedium,
-            color = if (entry.conflict) scheme.error else scheme.secondary, maxLines = lines, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
-private fun CourseCard(course: ScheduledCourse, day: PlannerQuery.Day, modifier: Modifier, wrap: Boolean, completed: Boolean) {
+private fun CourseCard(course: ScheduledCourse, day: PlannerQuery.Day, modifier: Modifier, wrap: Boolean, completed: Boolean, open: (ScheduledCourse) -> Unit) {
     val meeting = course.meeting
     val scheme = MaterialTheme.colorScheme
     val lines = if (wrap) Int.MAX_VALUE else 1
-    var open by rememberSaveable { mutableStateOf(false) }
-    if (open) CourseDetails(course) { open = false }
     Column(modifier.testTag("day-course").clip(MaterialTheme.shapes.medium)
-        .clickable(onClickLabel = stringResource(R.string.today_view_class), role = Role.Button) { open = true }.padding(horizontal = 4.dp)) {
+        .clickable(onClickLabel = stringResource(R.string.today_view_class), role = Role.Button) { open(course) }.padding(horizontal = 4.dp)) {
         Text("${clockLabel(meeting.startMillis, day)}–${clockLabel(meeting.endMillis, day)}",
             style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = lines, overflow = TextOverflow.Ellipsis)
         Text(meeting.title, style = MaterialTheme.typography.titleSmall, textDecoration = if (completed) TextDecoration.LineThrough else null,
@@ -282,11 +257,12 @@ private fun CurrentLine(drag: AxisDrag, spine: Dp) {
         }
     }
     if (millis !in drag.scale.day.startMillis until drag.scale.day.endMillis) return
-    val top = drag.scale.yAt(millis) - drag.scroll.value
-    if (top < 0) return
+    val y = remember(drag.scale, millis) { drag.scale.yAt(millis) }
+    val aboveViewport by remember(drag, y) { derivedStateOf { y < drag.scroll.value } }
+    if (aboveViewport) return
     val color = MaterialTheme.colorScheme.primary
     val now = stringResource(R.string.today_now_at, clockLabel(millis, drag.scale.day))
-    HorizontalDivider(Modifier.offset { IntOffset(0, top) }.padding(start = spine).testTag("now-line")
+    HorizontalDivider(Modifier.offset { IntOffset(0, y - drag.scroll.value) }.padding(start = spine).testTag("now-line")
         .semantics { contentDescription = now }, color = color, thickness = 2.dp)
 }
 
@@ -294,22 +270,36 @@ private fun CurrentLine(drag: AxisDrag, spine: Dp) {
 private fun DropPreview(drag: AxisDrag, gutter: Dp) {
     val slot = drag.candidate ?: return
     val checked = drag.checked?.takeIf { it.slot == slot }
-    val start = slot.start.toInstant().toEpochMilli()
-    val end = start + slot.durationMinutes * MINUTE_MS
-    val top = (drag.scale.yAt(start) - drag.scroll.value).coerceAtLeast(0)
-    val bottom = (drag.scale.yAt(end) - drag.scroll.value).coerceAtMost(drag.viewport.height.roundToInt())
-    val density = LocalDensity.current
+    val (start, end) = slot.interval
+    val startY = drag.scale.yAt(start)
+    val endY = drag.scale.yAt(end)
     val color = if (checked?.error == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-    if (bottom > top) Box(Modifier.fillMaxWidth().offset { IntOffset(0, top) }.padding(start = gutter, end = 4.dp)
-        .height(with(density) { (bottom - top).toDp() }).background(color.copy(alpha = 0.29f), MaterialTheme.shapes.medium)) {
-        HorizontalDivider(Modifier.align(if (drag.resizeRailX == null) Alignment.TopCenter else Alignment.BottomCenter),
-            thickness = 3.dp, color = color)
-    }
     val railX = drag.resizeRailX
+    if (slot.interval.point) Spacer(Modifier.offset { IntOffset(0, (startY - drag.scroll.value).coerceAtLeast(0)) }.padding(start = gutter)
+        .size(12.dp).background(color, CircleShape))
+    else {
+        val corner = MaterialTheme.shapes.medium.topStart
+        val fill = color.copy(alpha = .29f)
+        Spacer(Modifier.fillMaxSize().padding(start = gutter, end = 4.dp).drawBehind {
+            val scroll = drag.scroll.value
+            val top = (startY - scroll).coerceAtLeast(0).toFloat()
+            val bottom = (endY - scroll).toFloat().coerceAtMost(size.height)
+            if (bottom <= top) return@drawBehind
+            val area = Size(size.width, bottom - top)
+            val radius = corner.toPx(area, this).coerceAtMost(area.minDimension * .5f)
+            drawRoundRect(fill, Offset(0f, top), area, CornerRadius(radius))
+            val thickness = 3.dp.toPx().coerceAtMost(area.height)
+            val edge = if (railX == null) top else bottom - thickness
+            drawRect(color, Offset(0f, edge), Size(size.width, thickness))
+        })
+    }
     if (railX != null) {
-        val edge = drag.scale.yAt(end) - drag.scroll.value
         val centerColor = MaterialTheme.colorScheme.surface
         Spacer(Modifier.fillMaxSize().clipToBounds().drawBehind {
+            val scroll = drag.scroll.value
+            val edge = endY - scroll
+            val top = (startY - scroll).coerceAtLeast(0)
+            val bottom = edge.coerceAtMost(size.height.roundToInt())
             val x = railX - drag.viewport.left
             if (bottom > top) drawLine(color, Offset(x, top.toFloat()), Offset(x, bottom.toFloat()), 5.dp.toPx())
             if (edge in 0..size.height.roundToInt()) {
@@ -319,13 +309,16 @@ private fun DropPreview(drag: AxisDrag, gutter: Dp) {
     }
     val status = checked?.error ?: when {
         checked == null -> stringResource(R.string.today_checking)
+        slot.command is PlannerCommand.SetOccurrenceOverride -> stringResource(R.string.slot_release_this)
         railX != null -> stringResource(R.string.today_release_resize)
         else -> stringResource(R.string.today_release_schedule)
     }
     Surface(Modifier.fillMaxWidth().padding(start = gutter, end = 4.dp, top = 2.dp).testTag("drop-preview"),
         color = if (checked?.error == null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
         shape = MaterialTheme.shapes.medium, shadowElevation = 2.dp) {
-        Text("${clockLabel(start, drag.scale.day)}–${clockLabel(end, drag.scale.day)} · $status",
+        val range = if (slot.interval.point) stringResource(R.string.slot_point_at, clockLabel(start, drag.scale.day))
+            else "${clockLabel(start, drag.scale.day)}–${clockLabel(end, drag.scale.day)}"
+        Text("$range · $status",
             Modifier.padding(horizontal = 10.dp, vertical = 4.dp), style = MaterialTheme.typography.labelLarge)
     }
 }

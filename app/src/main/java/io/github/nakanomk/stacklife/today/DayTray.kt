@@ -41,6 +41,7 @@ import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.ScrollEdge
 import io.github.nakanomk.stacklife.TaskAddButton
 import io.github.nakanomk.stacklife.appearance.*
+import io.github.nakanomk.stacklife.markdown.markdownSummary
 import io.github.nakanomk.stacklife.planner.DayPlan
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.taskFabMargin
@@ -80,23 +81,38 @@ internal fun DayWithTray(
         val spine = daySpine()
         val wide = maxWidth >= 480.dp && maxWidth > maxHeight
         val usable = (maxHeight - top - clearance).coerceAtLeast(0.dp)
+        val oneRow = wide && usable < taskFabSize * 2 + 12.dp
         val sideWidth = (maxWidth * .40f).coerceAtMost(420.dp)
         // Keep the clock column and spine visible even when the queue is opaque.
-        val bottom = clearance + if (floating) 6.dp else 0.dp
+        val margin = if (floating) (usable - 48.dp).coerceIn(0.dp, 6.dp) else 0.dp
+        val bottom = clearance + margin
+        val actionSize = if (oneRow) (usable - margin).coerceIn(48.dp, taskFabSize) else taskFabSize
         val openEnd = if (floating) 8.dp else 0.dp
         val openWidth = if (wide) sideWidth else (maxWidth - spine - 12.dp - openEnd).coerceAtLeast(taskFabSize)
-        val width = if (floating) lerp(taskFabSize, openWidth, progress) else openWidth
         val end = if (floating) lerp(taskFabMargin, openEnd, progress) else openEnd
-        val limit = if (wide) usable - 12.dp else maxOf(usable * .44f, header + 48.dp)
-        val openHeight = minOf(header + body + 8.dp, limit).coerceAtLeast(header)
-        val closedHeight = if (floating) taskFabSize else header
+        val limit = when {
+            oneRow -> usable - margin
+            wide -> usable - 12.dp
+            else -> maxOf(usable * .44f, header + 48.dp)
+        }
+        // At large type a short landscape viewport can fit one target, not a header above it.
+        // Keep the same list and toggle side by side so the first row is not wholly clipped.
+        val inlineToggle = wide && limit < header + 48.dp
+        val width = if (floating || inlineToggle) lerp(taskFabSize, openWidth, progress) else openWidth
+        val openHeight = minOf((if (inlineToggle) 0.dp else header) + body + 8.dp, limit)
+            .coerceAtLeast(if (inlineToggle) 48.dp else header)
+        val closedHeight = if (oneRow) actionSize else if (floating) taskFabSize else header
         val height = lerp(closedHeight, openHeight, progress)
-        // In a short wide window move + around the end pane, not over its rows: clear its
-        // side first, then lower the button. Both legs use the same reversible progress.
-        val alongside = wide
-        val fabEnd = if (alongside) lerp(taskFabMargin, end + width + 8.dp, (progress * 3f).coerceAtMost(1f)) else taskFabMargin
+        // If even the closed controls won't stack, keep + beside the tray for the entire
+        // gesture. With more space it first clears the end pane, then moves down beside it.
+        val fabEnd = when {
+            oneRow -> end + width + 8.dp
+            wide -> lerp(taskFabMargin, end + width + 8.dp, (progress * 3f).coerceAtMost(1f))
+            else -> taskFabMargin
+        }
         val fabBottom = when {
-            alongside -> lerp(bottom + height + 4.dp, clearance + taskFabMargin, ((progress * 3f - 1f) / 2f).coerceIn(0f, 1f))
+            oneRow -> bottom
+            wide -> lerp(bottom + height + 4.dp, clearance + taskFabMargin, ((progress * 3f - 1f) / 2f).coerceIn(0f, 1f))
             else -> bottom + height + 4.dp
         }
         val axisSource = rememberPlannerBackdrop()
@@ -114,9 +130,9 @@ internal fun DayWithTray(
             }
         }
         CompositionLocalProvider(LocalCapsuleBackdrop provides axisSource) {
-            TaskAddButton(onAdd, Modifier.align(Alignment.BottomEnd).padding(end = fabEnd, bottom = fabBottom)
+            TaskAddButton(onAdd, Modifier.align(Alignment.BottomEnd).padding(end = fabEnd, bottom = fabBottom).size(actionSize)
                 .onGloballyPositioned { drag?.addBounds = it.boundsInRoot() })
-            QueueTray(plan.tray, expanded, toggle, enabled, onEdit, pickup, progress, floating, axisSource != null, header, openWidth,
+            QueueTray(plan.tray, expanded, toggle, enabled, onEdit, pickup, progress, floating, axisSource != null, header, openWidth, inlineToggle,
                 Modifier.align(Alignment.BottomEnd).padding(end = end, bottom = bottom).size(width, height)
                     .onGloballyPositioned { drag?.trayBounds = it.boundsInRoot() }.testTag("day-tray-container"))
         }
@@ -127,7 +143,7 @@ internal fun DayWithTray(
 private fun QueueTray(
     tasks: List<QueueTask>, expanded: Boolean, toggle: () -> Unit, enabled: Boolean,
     onEdit: (String) -> Unit, pickup: ((QueueTask) -> Modifier)?, progress: Float,
-    floating: Boolean, glass: Boolean, header: Dp, openWidth: Dp, modifier: Modifier,
+    floating: Boolean, glass: Boolean, header: Dp, openWidth: Dp, inlineToggle: Boolean, modifier: Modifier,
 ) {
     val appearance = LocalAppearance.current
     val solid = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -144,7 +160,8 @@ private fun QueueTray(
             if (progress > 0f) {
                 LazyColumn(Modifier.fillMaxSize().wrapContentWidth(Alignment.End, unbounded = true).width(openWidth)
                     .plannerBackdrop(edgeSource).testTag("day-tray"), state = listState,
-                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = header, bottom = 6.dp),
+                    contentPadding = PaddingValues(start = 8.dp, end = if (inlineToggle) taskFabSize else 8.dp,
+                        top = if (inlineToggle) 0.dp else header, bottom = if (inlineToggle) 0.dp else 6.dp),
                     verticalArrangement = Arrangement.spacedBy(if (appearance.compact) 2.dp else 4.dp)) {
                     if (tasks.isEmpty()) item {
                         Text(stringResource(R.string.today_tray_empty), Modifier.padding(8.dp), style = MaterialTheme.typography.bodyMedium)
@@ -157,7 +174,7 @@ private fun QueueTray(
                             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(task.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                if (appearance.showNotes && task.notes.isNotBlank()) Text(task.notes, style = MaterialTheme.typography.bodySmall,
+                                if (appearance.showNotes && task.notes.isNotBlank()) Text(remember(task.notes) { markdownSummary(task.notes) }, style = MaterialTheme.typography.bodyMedium,
                                     maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 val action = if (pickup == null) stringResource(R.string.today_tap_to_schedule) else stringResource(R.string.today_hold_to_drag)
                                 Text(if (appearance.showDuration) stringResource(R.string.today_tray_duration, task.minutes, action) else action,
@@ -169,8 +186,8 @@ private fun QueueTray(
                 }
             }
             val barHeight = if (floating) lerp(taskFabSize, header, progress) else header
-            val bar = Modifier.fillMaxWidth().height(barHeight)
-            if (glass && progress > 0f) {
+            val bar = if (inlineToggle) Modifier.align(Alignment.CenterEnd).width(taskFabSize).fillMaxHeight() else Modifier.fillMaxWidth().height(barHeight)
+            if (!inlineToggle && glass && progress > 0f) {
                 // The empty list inset already shows the glass shell. Re-sampling that shell
                 // as a second header paints a stripe even with no rows behind the toggle.
                 // Feather the material itself; bring in real row blur only as content crosses it.
@@ -181,15 +198,15 @@ private fun QueueTray(
                     alpha = if (listState.firstVisibleItemIndex > 0) 1f
                         else (listState.firstVisibleItemScrollOffset / 12.dp.toPx()).coerceIn(0f, 1f)
                 })
-            } else if (!glass && progress > 0f && underHeader) Spacer(bar.background(solid))
+            } else if (!inlineToggle && !glass && progress > 0f && underHeader) Spacer(bar.background(solid))
             val queueDescription = stringResource(R.string.today_tray_count, tasks.size)
             val queueState = if (expanded) stringResource(R.string.today_expanded) else stringResource(R.string.today_collapsed)
             val click = Modifier.testTag("day-tray-toggle").clickable(interactionSource = interaction, indication = null,
                 onClickLabel = if (expanded) stringResource(R.string.today_collapse_queue) else stringResource(R.string.today_expand_queue), role = Role.Button, onClick = toggle).semantics {
                 contentDescription = queueDescription; stateDescription = queueState
             }
-            if (floating) Box(bar.then(click)) {
-                if (progress > 0f) Text(stringResource(R.string.today_tray_title, tasks.size), Modifier.align(Alignment.CenterStart).padding(start = 16.dp, end = 48.dp)
+            if (floating || inlineToggle) Box(bar.then(click)) {
+                if (!inlineToggle && progress > 0f) Text(stringResource(R.string.today_tray_title, tasks.size), Modifier.align(Alignment.CenterStart).padding(start = 16.dp, end = 48.dp)
                     .graphicsLayer { alpha = progress }.clearAndSetSemantics {},
                     style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 TrayChevron(progress, Modifier.align(Alignment.CenterEnd).size(lerp(taskFabSize, 48.dp, progress))

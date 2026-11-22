@@ -24,40 +24,39 @@ class DaySlotTest {
         return (preview as PreviewResult.Rejected).message
     }
 
-    @Test fun orderedConflictAndStaleDropNeverOverwriteAnotherTask() = runBlocking {
-        store.apply(TaskAdd(TaskInput("报告提纲", ref = "a")), SlotSet("@a", at(15, 45), 30),
-            TaskAdd(TaskInput("评审", ref = "b")), SlotSet("@b", at(16, 15), 30), TaskAdd(TaskInput("待排")))
-        val (a, b, c) = store.state().queue
+    @Test fun twentyCommonStartsSurviveReopenAndAStaleDropChangesNone() = runBlocking {
+        val commands = (0 until 20).flatMap { n -> listOf(TaskAdd(TaskInput("Task$n",minutes = n,ref = "t$n")),
+            exact("@t$n",at(16,0),if (n < 3) 0 else n)) }
+        store.apply(*commands.toTypedArray())
         val before = day()
-        assertEquals(listOf(c.id), before.tray.map { it.id })
-        val conflict = reject(SlotSet(c.id, at(16, 0), 35, before.revision))
-        for (part in listOf("报告提纲", "评审", "15:45", "16:15", "16:45")) assertTrue(conflict, part in conflict)
-        // The first command moved B in the overlay; the second conflicts with that new position. Neither is applied.
-        assertTrue("评审" in reject(SlotSet(b.id, at(17, 0), 30), SlotSet(a.id, at(16, 50), 30)))
-        assertEquals(before, day())
-        store.apply(SlotClear(b.id), SlotSet(a.id, at(16, 0), 30), SlotSet(b.id, at(16, 30), 15))
-        assertEquals(listOf(a.id, b.id), day().blocks.map { it.taskId })
-        assertEquals(at(16, 0).toInstant().toEpochMilli(), day().blocks.first().startMillis)
-        val moved = day()
-        reject(SlotClear(a.id, before.revision)); reject(SlotSet(c.id, at(15, 0), 5, before.revision))
-        assertEquals(moved, day())
-        store.apply(SlotClear(a.id, moved.revision))
-        assertEquals(listOf(a.id, c.id), day().tray.map { it.id })
-        assertEquals(listOf(a.id, b.id, c.id), store.state().queue.map { it.id })
+        assertEquals(20,before.occurrences.size)
+        assertEquals(20,before.occurrences.map { it.key }.toSet().size)
+        assertEquals(3,before.occurrences.count { it.point })
+        assertTrue(before.tray.isEmpty())
+        val ids = store.state().queue.map { it.id }
+        val key = OccurrenceKey.Schedule(ids.first())
+        store.apply(SetOccurrenceCompletion(key,true,before.revision))
+        reject(SetSchedule(ids.last(),null,expectedRevision = before.revision))
+        store.reopen(); val after = day()
+        assertEquals(before.occurrences.map { it.key },after.occurrences.map { it.key })
+        assertEquals(listOf(key),after.occurrences.filter { it.completed }.map { it.key })
+        store.apply(SetSchedule(ids.last(),null))
+        assertEquals(listOf(ids.last()),day().tray.map { it.id })
+        assertEquals(ids.drop(1),store.state().queue.map { it.id })
     }
 
     @Test fun competingReservationsAndStorageFailureLeaveNoPartialState() = runBlocking {
         store.apply(TaskAdd(TaskInput("A")), TaskAdd(TaskInput("B")))
         val (a, b) = store.state().queue
-        val first = store.proposal(SlotSet(a.id, at(15, 45), 30))
-        val competing = store.proposal(SlotSet(b.id, at(15, 45), 30))
+        val first = store.proposal(exact(a.id, at(15, 45), 30))
+        val competing = store.proposal(exact(b.id, at(15, 45), 30))
         assertTrue(store.api.commit(first.proposalId) is CommitResult.Applied)
         assertEquals(CommitFailure.STALE_PREVIEW, (store.api.commit(competing.proposalId) as CommitResult.Rejected).code)
         val before = day(); val workspace = store.state()
-        assertEquals(listOf(a.id), before.blocks.map { it.taskId })
-        val replace = store.proposal(SlotClear(a.id), FramePush("暂停", listOf(a.id)), SlotSet(b.id, at(15, 45), 30))
+        assertEquals(listOf(a.id), before.occurrences.map { it.taskId })
+        val replace = store.proposal(SetSchedule(a.id,null), FramePush("暂停", listOf(a.id)), exact(b.id, at(15, 45), 30))
         store.db.openHelper.writableDatabase.execSQL("""
-            CREATE TRIGGER reject_reservation BEFORE INSERT ON time_blocks
+            CREATE TRIGGER reject_reservation BEFORE INSERT ON agenda_schedules
             BEGIN SELECT RAISE(ABORT, 'acceptance: reservation failed'); END
         """.trimIndent())
         assertEquals(CommitFailure.STORAGE, (store.api.commit(replace.proposalId) as CommitResult.Rejected).code)
@@ -65,32 +64,32 @@ class DaySlotTest {
     }
 
     @Test fun pushSwapAndRestoreKeepActualSlotAndTheSnapshotAtThatMoment() = runBlocking {
-        store.apply(TaskAdd(TaskInput("A", ref = "a")), SlotSet("@a", at(15, 45), 30), FramePush("开会", listOf("@a")),
-            TaskAdd(TaskInput("X", ref = "x")), SlotSet("@x", at(17, 0), 30), SetRestorePolicy(RestorePolicy.SWAP))
+        store.apply(TaskAdd(TaskInput("A", ref = "a")), exact("@a", at(15, 45), 30), FramePush("开会", listOf("@a")),
+            TaskAdd(TaskInput("X", ref = "x")), exact("@x", at(17, 0), 30), SetRestorePolicy(RestorePolicy.SWAP))
         val snapshot = store.state().frames.single()
         val a = snapshot.items.single().taskId
         val x = store.state().queue.single().id
-        val frameBlock = day().blocks.first()
-        assertEquals(ScheduledState.FRAME, frameBlock.state)
-        assertEquals(frameBlock.startMillis, snapshot.items.single().scheduledStartMillis)
-        assertEquals(frameBlock.endMillis, snapshot.items.single().scheduledEndMillis)
-        assertTrue("A" in reject(SlotSet(x, at(16, 0), 30)))
-        store.apply(SlotSet(a, at(16, 0), 35), FrameRestore(snapshot.id, RestoreMode.ALL))
+        val frameBlock = day().occurrences.first()
+        assertEquals(Owner.FRAME, frameBlock.owner)
+        assertEquals(frameBlock.startMillis, (snapshot.items.single().schedule!!.pattern as SchedulePattern.Once).interval.startMillis)
+        assertEquals(frameBlock.endMillis, (snapshot.items.single().schedule!!.pattern as SchedulePattern.Once).interval.endMillis)
+        val overlap = store.proposal(exact(x,at(16,0),30)); assertEquals("A", overlap.changes.mapNotNull { it.after as? ScheduleSnapshot }.single().overlaps.single().title); store.api.discard(overlap.proposalId)
+        store.apply(exact(a, at(16, 0), 35), FrameRestore(snapshot.id, RestoreMode.ALL))
         val resumed = day()
         assertEquals(listOf(a), store.state().queue.map { it.id })
-        assertEquals(listOf(ScheduledState.QUEUE, ScheduledState.FRAME), resumed.blocks.map { it.state })
-        assertEquals(at(16, 0).toInstant().toEpochMilli(), resumed.blocks.first().startMillis)
-        assertEquals(at(16, 35).toInstant().toEpochMilli(), resumed.blocks.first().endMillis)
+        assertEquals(listOf(Owner.QUEUE, Owner.FRAME), resumed.occurrences.map { it.owner })
+        assertEquals(at(16, 0).toInstant().toEpochMilli(), resumed.occurrences.first().startMillis)
+        assertEquals(at(16, 35).toInstant().toEpochMilli(), resumed.occurrences.first().endMillis)
         val frames = store.state().frames
-        assertEquals(frameBlock.startMillis, frames.single { it.id == snapshot.id }.items.single().scheduledStartMillis)
+        assertEquals(frameBlock.startMillis, (frames.single { it.id == snapshot.id }.items.single().schedule!!.pattern as SchedulePattern.Once).interval.startMillis)
         val savedX = frames.single { it.source == FrameSource.SWAP }.items.single()
-        assertEquals(x, savedX.taskId); assertEquals(resumed.blocks.last().startMillis, savedX.scheduledStartMillis)
+        assertEquals(x, savedX.taskId); assertEquals(resumed.occurrences.last().startMillis, (savedX.schedule!!.pattern as SchedulePattern.Once).interval.startMillis)
         store.reopen(); assertEquals(resumed, day())
         store.apply(TaskFinish(a), TaskRemove(x))
-        assertEquals(listOf(a), day().blocks.map { it.taskId }); assertEquals(ScheduledState.DONE, day().blocks.single().state)
-        reject(SlotClear(a)); reject(SlotSet(a, at(15, 0), 10))
-        store.apply(TaskAdd(TaskInput("接替 X", ref = "new")), SlotSet("@new", at(17, 0), 30))
-        assertEquals(listOf("A", "接替 X"), day().blocks.map { it.title })
+        assertEquals(listOf(a), day().occurrences.map { it.taskId }); assertEquals(Owner.DONE, day().occurrences.single().owner)
+        reject(SetSchedule(a,null)); reject(exact(a, at(15, 0), 10))
+        store.apply(TaskAdd(TaskInput("接替 X", ref = "new")), exact("@new", at(17, 0), 30))
+        assertEquals(listOf("A", "接替 X"), day().occurrences.map { it.title })
     }
 
     @Test fun civilDayUsesTwoLocalMidnightsAndClipsOnlyAtPresentation() = runBlocking {
@@ -99,23 +98,23 @@ class DaySlotTest {
         val from = spring.minusDays(1).atTime(23, 45).atZone(ny).toOffsetDateTime()
         val midnight = spring.atStartOfDay(ny).toOffsetDateTime()
         val folds = ny.rules.getValidOffsets(fall.atTime(1, 30))
-        store.apply(TaskAdd(TaskInput("跨午夜", ref = "night")), SlotSet("@night", from, 45),
-            TaskAdd(TaskInput("回拨之前", ref = "first")), SlotSet("@first", fall.atTime(1, 30).atOffset(folds.first()), 30),
-            TaskAdd(TaskInput("回拨之后", ref = "last")), SlotSet("@last", fall.atTime(1, 30).atOffset(folds.last()), 30))
+        store.apply(TaskAdd(TaskInput("跨午夜", ref = "night")), exact("@night", from, 45),
+            TaskAdd(TaskInput("回拨之前", ref = "first")), exact("@first", fall.atTime(1, 30).atOffset(folds.first()), 30),
+            TaskAdd(TaskInput("回拨之后", ref = "last")), exact("@last", fall.atTime(1, 30).atOffset(folds.last()), 30))
         val firstDay = day(spring.minusDays(1), ny); val nextDay = day(spring, ny); val repeated = day(fall, ny)
         assertEquals(23 * 3_600_000L, nextDay.day.endMillis - nextDay.day.startMillis)
         assertEquals(25 * 3_600_000L, repeated.day.endMillis - repeated.day.startMillis)
-        assertEquals(firstDay.blocks.single(), nextDay.blocks.single())
-        assertEquals(listOf("回拨之前", "回拨之后"), repeated.blocks.map { it.title })
-        assertEquals(3_600_000L, repeated.blocks.last().startMillis - repeated.blocks.first().startMillis)
-        assertTrue(firstDay.tray.isEmpty()); assertTrue(day(fall.plusDays(1), ny).blocks.isEmpty())
-        val id = firstDay.blocks.single().taskId
-        store.apply(SlotSet(id, from, 15))
-        assertTrue(day(spring, ny).blocks.isEmpty()) // End at midnight does not intersect the next day.
-        store.apply(SlotSet(id, midnight, 15))
-        assertTrue(day(spring.minusDays(1), ny).blocks.isEmpty())
+        assertEquals(firstDay.occurrences.single(), nextDay.occurrences.single())
+        assertEquals(listOf("回拨之前", "回拨之后"), repeated.occurrences.map { it.title })
+        assertEquals(3_600_000L, repeated.occurrences.last().startMillis - repeated.occurrences.first().startMillis)
+        assertTrue(firstDay.tray.isEmpty()); assertTrue(day(fall.plusDays(1), ny).occurrences.isEmpty())
+        val id = requireNotNull(firstDay.occurrences.single().taskId)
+        store.apply(exact(id, from, 15))
+        assertTrue(day(spring, ny).occurrences.isEmpty()) // End at midnight does not intersect the next day.
+        store.apply(exact(id, midnight, 15))
+        assertTrue(day(spring.minusDays(1), ny).occurrences.isEmpty())
         val apia = ZoneId.of("Pacific/Apia"); val skipped = LocalDate.of(2011, 12, 30)
-        store.apply(SlotSet(id, skipped.minusDays(1).atTime(23, 45).atZone(apia).toOffsetDateTime(), 30))
-        assertTrue(day(skipped, apia).blocks.isEmpty()); assertEquals(id, day(skipped.plusDays(1), apia).blocks.single().taskId)
+        store.apply(exact(id, skipped.minusDays(1).atTime(23, 45).atZone(apia).toOffsetDateTime(), 30))
+        assertTrue(day(skipped, apia).occurrences.isEmpty()); assertEquals(id, day(skipped.plusDays(1), apia).occurrences.single().taskId)
     }
 }

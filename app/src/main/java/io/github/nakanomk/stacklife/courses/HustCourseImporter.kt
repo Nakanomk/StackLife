@@ -40,6 +40,14 @@ private val periodPattern = Regex("([0-9]{1,2})(?:\\s*[-–—]\\s*([0-9]{1,2}))
 private val weekPattern = Regex("[0-9]{1,2}")
 private val dayKeys = listOf("MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY")
 
+/** Preserve the provider's original value for explicit inspection, including malformed records. */
+internal fun JsonArray.sourceValue(issue: ImportIssue): JsonElement {
+    val row = this[issue.row - 1]
+    val day = issue.day ?: return row
+    val entries = (row as JsonObject).getValue(dayKeys[day - 1])
+    return issue.item?.let { (entries as JsonArray)[it - 1] } ?: entries
+}
+
 // Quoted and unquoted integers are found in HUB exports. Names and rooms must be strings.
 private fun JsonElement?.numberText() = (this as? JsonPrimitive)?.takeUnless { it === JsonNull }?.content.orEmpty()
 private fun JsonElement?.text() = (this as? JsonPrimitive)?.takeIf { it.isString }?.content.orEmpty()
@@ -90,7 +98,7 @@ sealed interface IssueDecision {
     data class Correct(val fields: CourseFields) : IssueDecision
 }
 
-internal class ImportDraft(val provider: SchoolImportProvider, val term: TermSpec, private val valid: Set<Occurrence>, val issues: List<ImportIssue>) {
+internal class ImportDraft(val provider: SchoolImportProvider, val term: TermSpec, val valid: Set<Occurrence>, val issues: List<ImportIssue>) {
     val validCount: Int get() = valid.size
 
     /** The only path to meetings: a decision for each source problem, and at least one actual class. */

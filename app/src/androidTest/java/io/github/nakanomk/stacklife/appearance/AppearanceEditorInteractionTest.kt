@@ -1,0 +1,326 @@
+package io.github.nakanomk.stacklife.appearance
+
+import android.app.Activity
+import android.content.ContextWrapper
+import android.content.Intent
+import android.graphics.Bitmap
+import android.net.Uri
+import android.os.SystemClock
+import android.view.InputDevice
+import android.view.MotionEvent
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResultRegistry
+import androidx.activity.result.ActivityResultRegistryOwner
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContract
+import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.core.app.ActivityOptionsCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.nakanomk.stacklife.R
+import androidx.room.withTransaction
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.filters.SdkSuppress
+import androidx.test.platform.app.InstrumentationRegistry
+import io.github.nakanomk.stacklife.StackLifeApp
+import io.github.nakanomk.stacklife.WorkspaceViewModel
+import io.github.nakanomk.stacklife.acceptance.WorkspaceFixture
+import io.github.nakanomk.stacklife.assistant.withChatPhoto
+import io.github.nakanomk.stacklife.planner.*
+import io.github.nakanomk.stacklife.planner.Destination.*
+import io.github.nakanomk.stacklife.storage.RoomPlannerApi
+import java.io.File
+import java.nio.file.Files
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.RuleChain
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class AppearanceEditorInteractionTest {
+    private val fixture = WorkspaceFixture()
+    private val ui = createAndroidComposeRule<ComponentActivity>()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(fixture).around(ui)
+    private val pagePreview = hasTestTag("appearance-page-preview")
+
+    /** Substitute only the platform's selection; the picker contract, IO, rendering and transaction are real. */
+    private class Selection : ActivityResultRegistry(), ActivityResultRegistryOwner {
+        @Volatile var uri: Uri? = null
+        @Volatile var hold = false
+        private var pending: Int? = null
+        override val activityResultRegistry: ActivityResultRegistry get() = this
+        override fun <I, O> onLaunch(requestCode: Int, contract: ActivityResultContract<I, O>, input: I, options: ActivityOptionsCompat?) {
+            check(contract is PickVisualMedia && (input as PickVisualMediaRequest).mediaType == PickVisualMedia.ImageOnly)
+            check(pending == null)
+            pending = requestCode
+            if (!hold) finishSelection()
+        }
+        fun finishSelection() {
+            val code = checkNotNull(pending)
+            pending = null; hold = false
+            val selected = uri
+            dispatchResult(code, if (selected == null) Activity.RESULT_CANCELED else Activity.RESULT_OK, Intent().setData(selected))
+        }
+    }
+
+    private fun attach(api: PlannerApi = fixture.api, photos: BackgroundStore? = null, selection: Selection? = null) =
+        ui.activityRule.scenario.onActivity { activity -> activity.setContent {
+            CompositionLocalProvider(LocalActivityResultRegistryOwner provides (selection ?: activity),
+                LocalBackgroundStore provides (photos ?: LocalBackgroundStore.current)) {
+                StackLifeApp(viewModel { WorkspaceViewModel(api) })
+            }
+        } }
+
+    private fun revision() = runBlocking { fixture.state().revision }
+    private fun saved() = runBlocking { (fixture.api.observe(PlannerQuery.Settings).first() as PolicyView).appearance }
+    private fun row(text: String) = hasText(text) and hasClickAction()
+    private fun await(m: SemanticsMatcher): SemanticsNodeInteraction {
+        ui.waitUntil(12_000) { ui.onAllNodes(m).fetchSemanticsNodes().size == 1 }
+        return ui.onNode(m)
+    }
+    private fun openSettings() = await(hasContentDescription("设置") and hasClickAction()).performClick()
+    private fun openGroup(label: String) {
+        val group = row(label)
+        await(hasScrollToIndexAction()).performScrollToNode(group)
+        await(group).performScrollTo().performClick()
+        await(hasTestTag("appearance-scroll"))
+    }
+    private fun field(m: SemanticsMatcher): SemanticsNodeInteraction {
+        await(hasTestTag("appearance-scroll")).performScrollToNode(m)
+        return ui.onNode(m).performScrollTo().assertIsDisplayed()
+    }
+    private fun choice(title: String, option: String) {
+        field(row(title)).performClick()
+        await(hasText(option) and hasClickAction() and hasAnyAncestor(isDialog())).performScrollTo().performClick()
+    }
+    private fun capture(name: String) {
+        if (InstrumentationRegistry.getArguments().getString("captureU8") != "yes") return
+        ui.waitForIdle()
+        val inst = InstrumentationRegistry.getInstrumentation()
+        inst.uiAutomation.waitForIdle(400, 5_000)
+        val bitmap = checkNotNull(inst.uiAutomation.takeScreenshot())
+        try { File(checkNotNull(inst.targetContext.getExternalFilesDir(null)), "u8-$name.png").outputStream().use {
+            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+        } } finally { bitmap.recycle() }
+    }
+
+    // The fixtures have a blue triangle or green circle on gray. Read inside the colored shape,
+    // outside the preview's text and dock, after the real asynchronous decode and crop protection.
+    private fun sample(node: SemanticsNodeInteraction, y: Float): Color = node.captureToImage().toPixelMap().let {
+        it[it.width / 2, (it.height * y).toInt()]
+    }
+    private fun blue(c: Color) = c.blue > c.red + .12f && c.blue > c.green + .06f
+    private fun green(c: Color) = c.green > c.red + .12f && c.green > c.blue + .06f
+    private fun page(destination: Destination): SemanticsNodeInteraction {
+        val preview = field(pagePreview)
+        ui.onNode(hasTestTag("nav:${destination.key}") and hasAnyAncestor(pagePreview)).assertIsSelected()
+        ui.onNode(hasText("${destination.label} · 预览") and hasAnyAncestor(pagePreview)).assertIsDisplayed()
+        val text = ui.activity.getString(R.string.ui_sample_note)
+        val note = ui.onNode(hasText(text) and hasAnyAncestor(pagePreview)).assertIsDisplayed()
+        val dock = ui.onNode(hasTestTag("navigation-capsule") and hasAnyAncestor(pagePreview)).assertIsDisplayed()
+        val bounds = note.fetchSemanticsNode().boundsInRoot
+        assertTrue("Preview dock covers the note", bounds.bottom <= dock.fetchSemanticsNode().boundsInRoot.top)
+        note.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { get ->
+            val layouts = mutableListOf<TextLayoutResult>()
+            assertTrue(get(layouts))
+            val layout = layouts.single()
+            // The semantics adapter rebuilds a MultiParagraph with the parent's max width but
+            // returns the wrap-content node's size. Its hasVisualOverflow is not glyph clipping.
+            assertEquals(text, layout.layoutInput.text.text)
+            val last = layout.lineCount - 1
+            assertEquals(text.length, layout.getLineEnd(last, visibleEnd = true))
+            for (line in 0..last) {
+                assertFalse("Ellipsized preview note line $line", layout.isLineEllipsized(line))
+                val width = layout.getLineRight(line) - layout.getLineLeft(line)
+                assertTrue("Preview note line width $width exceeds $bounds", width <= bounds.width + 1f)
+            }
+            assertTrue("Preview note last line at ${layout.getLineBottom(last)} exceeds $bounds",
+                layout.getLineBottom(last) <= bounds.height + 1f)
+        }
+        return preview
+    }
+    private fun preview(destination: Destination, matches: (Color) -> Boolean) {
+        val node = page(destination)
+        ui.waitUntil(12_000) { matches(sample(node, .22f)) }
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test fun largeTextPreviewKeepsTheFullNoteAboveBothDockStyles() {
+        ui.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
+                StackLifeApp(viewModel { WorkspaceViewModel(fixture.api) })
+            }
+        }
+        openSettings(); openGroup("布局"); page(TODAY)
+        choice(ui.activity.getString(R.string.ui_nav_style), ui.activity.getString(R.string.ui_bottom_nav))
+        page(TODAY)
+    }
+
+    @SdkSuppress(minSdkVersion = 29)
+    @Test fun privatePhotoDraftSurvivesRecreationAndCancelKeepsOnlyCommittedImages() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val folder = Files.createTempDirectory(context.cacheDir.toPath(), "material-editor-").toFile()
+        val dir = File(folder, "background-images")
+        fun files() = dir.list().orEmpty().toSet()
+        val photos = BackgroundStore(object : ContextWrapper(context) { override fun getNoBackupFilesDir() = folder }) {
+            fixture.db.withTransaction { fixture.db.plannerDao().settings()?.let { decodeAppearance(it.appearance).backgroundIds() }.orEmpty() }
+        }
+        val api = RoomPlannerApi(fixture.db, imageExists = photos::exists, collectBackgrounds = photos::collect)
+        val picker = Selection()
+        val original = saved(); val initialRevision = revision()
+        try {
+            attach(api, photos, picker); openSettings(); openGroup("材质与动态")
+            val solid = sample(page(TODAY), .22f)
+            withChatPhoto(context, 180) { uri ->
+                picker.uri = uri; choice("背景", "私有图片")
+                await(row("保存外观") and isEnabled())
+                val crop = field(hasTestTag("wallpaper-crop-preview"))
+                ui.waitUntil(12_000) { blue(sample(crop, .5f)) }
+                field(hasContentDescription("缩放")).performSemanticsAction(SemanticsActions.SetProgress) { it(1.5f) }
+            }
+            val global = files().single(); assertTrue(photos.exists(global))
+            choice("应用范围", WORKSPACE.label)
+            field(row("背景")).assertTextContains("继承全局背景")
+            preview(WORKSPACE, ::blue); capture("wallpaper-inherited-preview")
+            withChatPhoto(context, 216) { uri ->
+                picker.uri = uri; picker.hold = true; choice("背景", "私有图片")
+                // A result delivered after recreation still targets the original page, even when
+                // resizing/scrolling has moved its lazy settings row out of composition.
+                field(row("减少透明度"))
+                ui.activityRule.scenario.recreate(); attach(api, photos, picker)
+                field(row("减少透明度")); await(row("保存外观")).assertIsNotEnabled()
+                ui.runOnIdle { picker.finishSelection() }
+                await(row("保存外观") and isEnabled())
+                val crop = field(hasTestTag("wallpaper-crop-preview"))
+                ui.waitUntil(12_000) { green(sample(crop, .5f)) }
+                capture("wallpaper-crop-settings")
+            }
+            val own = (files() - global).single(); assertTrue(photos.exists(own))
+            picker.uri = null
+            field(row("重新选择图片")).performClick() // Cancelling the system picker leaves the current choice alone.
+            preview(WORKSPACE, ::green); capture("wallpaper-own-preview")
+            choice("应用范围", COURSES.label); choice("背景", "主题纯色")
+            preview(COURSES) { it == solid }; capture("wallpaper-plain-preview")
+            field(row("显示课表辅助线")).assertIsOn().performClick()
+            assertEquals(original, saved()); assertEquals(initialRevision, revision())
+
+            // Both source URIs have been removed. Only app-private copies and saveable draft IDs remain.
+            ui.activityRule.scenario.recreate(); attach(api, photos, picker)
+            field(row("显示课表辅助线")).assertIsOff()
+            field(row("应用范围")).assertTextContains(COURSES.label)
+            choice("应用范围", WORKSPACE.label); preview(WORKSPACE, ::green)
+            choice("应用范围", TODAY.label); field(row("背景")).assertTextContains("继承全局背景"); preview(TODAY, ::blue)
+            assertEquals(initialRevision, revision())
+            await(row("保存外观") and isEnabled()).performClick(); await(row("材质与动态"))
+            val expected = original.copy(background = WallpaperSpec(global, scale = 1.5f),
+                pageBackgrounds = mapOf(WORKSPACE to WallpaperSpec(own), COURSES to WallpaperSpec()), showCourseGrid = false)
+            assertEquals(expected, saved()); assertEquals(initialRevision + 1, revision()); assertEquals(setOf(global, own), files())
+
+            openGroup("材质与动态"); preview(TODAY, ::blue)
+            choice("应用范围", COURSES.label); preview(COURSES) { it == solid }
+            choice("应用范围", WORKSPACE.label); preview(WORKSPACE, ::green)
+            withChatPhoto(context, 180) { uri ->
+                picker.uri = uri; field(row("重新选择图片")).performClick()
+                await(row("保存外观") and isEnabled())
+                val crop = field(hasTestTag("wallpaper-crop-preview")); ui.waitUntil(12_000) { blue(sample(crop, .5f)) }
+            }
+            val discarded = (files() - setOf(global, own)).single()
+            choice("背景", "继承全局背景"); field(row("背景")).assertTextContains("继承全局背景")
+            choice("应用范围", "全局"); choice("背景", "主题纯色")
+            assertEquals(expected, saved()); assertTrue(photos.exists(discarded))
+            await(row("取消")).performClick(); await(row("材质与动态"))
+            assertEquals(expected, saved()); assertEquals(initialRevision + 1, revision()); assertEquals(setOf(global, own), files())
+        } finally { folder.deleteRecursively() }
+    }
+
+    private fun shown(dest: Destination) = field(hasTestTag("visibility:${dest.key}"))
+    private fun move(dest: Destination, up: Boolean) {
+        field(hasTestTag("move:${dest.key}")).performClick()
+        await(row((if (up) "上移" else "下移") + dest.label)).performClick()
+    }
+    private fun dragBefore(from: Destination, above: Destination) {
+        // Leave room below the last row: the edge strip is for auto-scroll, not a drop target.
+        field(row("恢复默认设置"))
+        fun center(dest: Destination): Offset {
+            val node = ui.onNodeWithTag("move:${dest.key}").assertIsDisplayed().fetchSemanticsNode()
+            return ui.runOnUiThread {
+                val coords = node.layoutInfo.coordinates
+                coords.localToScreen(Offset.Zero) + (node.boundsInRoot.center - coords.localToRoot(Offset.Zero))
+            }
+        }
+        val start = center(from); val end = center(above)
+        assertTrue(end.y < start.y)
+        val input = InstrumentationRegistry.getInstrumentation()
+        val down = SystemClock.uptimeMillis()
+        var last = start
+        fun send(action: Int, at: Offset) {
+            last = at
+            val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, at.x, at.y, 0)
+            try { event.source = InputDevice.SOURCE_TOUCHSCREEN; input.sendPointerSync(event) } finally { event.recycle() }
+        }
+        send(MotionEvent.ACTION_DOWN, start)
+        try {
+            // Observe the library's lifted row, not just a timestamp on a synthetic move event.
+            await(hasTestTag("dragging:${from.key}")).assertIsDisplayed()
+            for (step in 1..12) {
+                SystemClock.sleep(16)
+                send(MotionEvent.ACTION_MOVE, start + (end - start) * (step / 12f))
+                // Deliver a frame per move, as on a real display; animation and measurement in
+                // this Compose test host are driven by the test frame clock, not SystemClock.
+                ui.mainClock.advanceTimeByFrame()
+            }
+            capture("navigation-drag")
+            // It is the *other* row moving into the vacated slot that proves a reorder took
+            // effect, rather than just the dragged item's graphics-layer translation.
+            ui.waitUntil(5_000) { center(above).y > (end.y + start.y) / 2f }
+        } catch (failure: Throwable) {
+            send(MotionEvent.ACTION_CANCEL, last); throw failure
+        }
+        send(MotionEvent.ACTION_UP, last)
+        ui.waitForIdle()
+        assertTrue("Released ${from.key} must remain above ${above.key}", center(from).y < center(above).y)
+    }
+
+    @Test fun navigationRowsCommitDragVisibilityAndStartTogether() {
+        val original = saved(); val before = revision()
+        attach(); openSettings(); openGroup("布局")
+        choice("启动页", GRAPHS.label)
+        shown(GRAPHS).assertIsOn().performClick()
+        field(row("启动页")).assertTextContains(COURSES.label)
+        for (dest in listOf(TODAY, WORKSPACE, COURSES)) shown(dest).performClick()
+        shown(COUNTDOWN).assertIsOn().assertIsNotEnabled().performTouchInput { click() }
+        shown(COUNTDOWN).assertIsOn().assertIsNotEnabled()
+        field(row("启动页")).assertTextContains(COUNTDOWN.label)
+        shown(TODAY).performClick(); shown(GRAPHS).performClick()
+        move(COURSES, up = true)    // today, workspace, courses, graphs, countdown (a hidden row can still be positioned)
+        move(TODAY, up = false)   // workspace, today, courses, graphs, countdown
+        dragBefore(COUNTDOWN, GRAPHS)
+        choice("启动页", GRAPHS.label)
+        shown(WORKSPACE).assertIsOff(); shown(COUNTDOWN).assertIsOn(); capture("navigation-settings")
+        val order = listOf(WORKSPACE, TODAY, COURSES, COUNTDOWN, GRAPHS)
+        val visible = setOf(TODAY, COUNTDOWN, GRAPHS)
+        page(GRAPHS)
+        val visiblePositions = order.filter { it in visible }.map { ui.onNode(hasTestTag("nav:${it.key}") and hasAnyAncestor(pagePreview))
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot.left }
+        assertEquals(visiblePositions.sorted(), visiblePositions)
+        ui.onNode(hasTestTag("nav:workspace") and hasAnyAncestor(pagePreview)).assertDoesNotExist()
+        capture("navigation-preview")
+        assertEquals(original, saved()); assertEquals(before, revision())
+        await(row("保存外观") and isEnabled()).performClick(); await(row("布局"))
+        assertEquals(original.copy(order = order, visible = visible, start = GRAPHS), saved()); assertEquals(before + 1, revision())
+        openGroup("布局"); shown(WORKSPACE).assertIsOff(); shown(COURSES).assertIsOff()
+        field(row("启动页")).assertTextContains(GRAPHS.label); await(row("保存外观")).assertIsNotEnabled()
+    }
+}

@@ -41,6 +41,9 @@ class WheelInputsTest {
             var form by remember { mutableStateOf(TermForm(id = "Term", monday = LocalDate.of(2024, 1, 29), weeks = 6, switchDate = original)) }
             Column(Modifier.verticalScroll(rememberScrollState())) { TermFields(form, true) { form = it } }
         } }
+        ui.onNodeWithTag("termId").assertDoesNotExist()
+        ui.onNodeWithTag("termSwitchDate").assertDoesNotExist()
+        ui.onNodeWithTag("termAdvanced").performScrollTo().performClick()
         val field = ui.onNodeWithTag("termSwitchDate")
         field.performScrollTo().performClick()
         // Tap the next visible item of the actual Android NumberPicker rather than setting its value.
@@ -65,11 +68,11 @@ class WheelInputsTest {
         val zone = ZoneId.of("America/New_York")
         val spring = LocalDate.of(2026, 3, 8)
         val fall = LocalDate.of(2026, 11, 1)
-        val entry = SlotEditorKey(task.id, task.title, spring.toEpochDay(), zone.id, null, 30, state.revision)
+        val entry = SlotEditorKey(task.id, task.title, spring.toEpochDay(), zone.id, 30, state.revision)
         val receipt = CompletableDeferred<Instant?>()
         ui.setContent { StackLifeTheme {
             val model: WorkspaceViewModel = viewModel { WorkspaceViewModel(store.api) }
-            SlotEditor(entry, model, model::checkSlot, {}, { receipt.complete(it) })
+            SlotEditor(entry, model, {}) { _, instant -> receipt.complete(instant) }
         } }
         ui.chooseClock("slot:time", 2, 30)
         ui.onNodeWithText(ui.activity.getString(R.string.today_skipped_time)).performScrollTo().assertIsDisplayed()
@@ -85,7 +88,7 @@ class WheelInputsTest {
         ui.waitUntil(5_000) { receipt.isCompleted }
         assertEquals(expected, receipt.await())
         val day = store.api.observe(PlannerQuery.Day(fall, zone)).first() as DayPlan
-        assertEquals(task.id, day.blocks.single().taskId)
-        assertEquals(expected.toEpochMilli(), day.blocks.single().startMillis)
+        assertEquals(task.id, day.occurrences.single().taskId)
+        assertEquals(expected.toEpochMilli(), day.occurrences.single().startMillis)
     }
 }

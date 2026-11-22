@@ -17,13 +17,17 @@ import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.appearance.SegmentTrack
 import io.github.nakanomk.stacklife.i18n.uiText
+import io.github.nakanomk.stacklife.i18n.AppLanguage
 import io.github.nakanomk.stacklife.appearance.DateWheelField
 import io.github.nakanomk.stacklife.appearance.NumberWheelField
 import io.github.nakanomk.stacklife.workspace.*
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.UUID
 
-internal data class TermForm(val id: String = "", val monday: LocalDate? = null, val weeks: Int? = null,
-    val initial: BellSchedule = BellSchedule.SUMMER, val switchDate: LocalDate? = null) {
+internal data class TermForm(val id: String = UUID.randomUUID().toString(), val monday: LocalDate? = null, val weeks: Int? = null,
+    val initial: BellSchedule = BellSchedule.SUMMER, val switchDate: LocalDate? = null, val expanded: Boolean = false) {
     fun term(): TermSpec {
         val start = monday ?: throw IllegalArgumentException(uiText("Choose the first Monday of the term.", "请选择学期首周周一。"))
         val term = TermSpec(id, start, weeks ?: throw IllegalArgumentException(uiText("Choose the number of weeks in the term.", "请选择学期总周数。")),
@@ -33,6 +37,11 @@ internal data class TermForm(val id: String = "", val monday: LocalDate? = null,
     }
 }
 
+internal fun TermSpec.dateRangeLabel(): String {
+    val format = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(AppLanguage.locale)
+    return "${firstMonday.format(format)} – ${firstMonday.plusWeeks(weeks.toLong()).minusDays(1).format(format)}"
+}
+
 @Composable
 internal fun TermFields(form: TermForm, enabled: Boolean, frosted: Boolean = false, change: (TermForm) -> Unit) =
     // Keep unconfirmed dates and calendar choices in the editor, not an Activity Bundle.
@@ -40,13 +49,17 @@ internal fun TermFields(form: TermForm, enabled: Boolean, frosted: Boolean = fal
     val campusToday = remember { LocalDate.now(campusZone) }
     val thisMonday = remember(campusToday) { campusToday.minusDays((campusToday.dayOfWeek.value - 1).toLong()) }
     FormGroup(frosted = frosted) {
-        ImportField(stringResource(R.string.courses_term_id), form.id, "termId", enabled) { change(form.copy(id = it)) }
         DateWheelField(stringResource(R.string.courses_first_monday), form.monday, thisMonday, enabled, Modifier.testTag("termMonday")) {
             change(form.copy(monday = it))
         }
         NumberWheelField(stringResource(R.string.courses_week_count), form.weeks, 1..53, enabled, Modifier.testTag("termWeeks"),
             initial = 16) { change(form.copy(weeks = it)) }
+        TextButton({ change(form.copy(expanded = !form.expanded)) }, enabled = enabled,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("termAdvanced")) {
+            Text(stringResource(if (form.expanded) R.string.manual_hide_bell else R.string.manual_show_bell))
+        }
     }
+    if (!form.expanded) return@CompositionLocalProvider
     Text(stringResource(R.string.courses_initial_bell))
     val initial = rememberUpdatedState(form.initial.ordinal.toFloat())
     ControlGroup(frosted = frosted) {

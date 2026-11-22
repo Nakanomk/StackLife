@@ -6,6 +6,14 @@ import android.content.Intent
 import android.content.IntentFilter
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import java.time.Duration
+import java.time.Instant
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -18,18 +26,27 @@ private fun currentDay(): DeviceDay {
 
 @Composable
 internal fun deviceDay(): DeviceDay {
-    val context = LocalContext.current
-    var day by remember { mutableStateOf(currentDay()) }
-    DisposableEffect(context) {
-        val clock = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) { day = currentDay() }
+    val context = LocalContext.current.applicationContext
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    return produceState(currentDay(), context, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            val changes = Channel<Unit>(Channel.CONFLATED)
+            val clock = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) { changes.trySend(Unit) }
+            }
+            context.registerReceiver(clock, IntentFilter().apply {
+                addAction(Intent.ACTION_TIMEZONE_CHANGED); addAction(Intent.ACTION_DATE_CHANGED); addAction(Intent.ACTION_TIME_CHANGED)
+            })
+            try {
+                while (isActive) {
+                    val now = Instant.now()
+                    val zone = ZoneId.systemDefault()
+                    val date = now.atZone(zone).toLocalDate()
+                    value = DeviceDay(date, zone)
+                    val midnight = date.plusDays(1).atStartOfDay(zone).toInstant()
+                    withTimeoutOrNull(Duration.between(now, midnight).toMillis().coerceAtLeast(1L)) { changes.receive() }
+                }
+            } finally { context.unregisterReceiver(clock); changes.close() }
         }
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_TIMEZONE_CHANGED); addAction(Intent.ACTION_DATE_CHANGED)
-            addAction(Intent.ACTION_TIME_CHANGED); addAction(Intent.ACTION_TIME_TICK)
-        }
-        context.registerReceiver(clock, filter)
-        onDispose { context.unregisterReceiver(clock) }
-    }
-    return day
+    }.value
 }

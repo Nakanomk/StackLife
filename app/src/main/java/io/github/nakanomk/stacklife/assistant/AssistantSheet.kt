@@ -2,27 +2,16 @@ package io.github.nakanomk.stacklife.assistant
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -35,7 +24,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -49,47 +37,59 @@ import io.github.nakanomk.stacklife.transitions.PaneMotion
 import io.github.nakanomk.stacklife.transitions.PaneOrigins
 import io.github.nakanomk.stacklife.transitions.paneOrigin
 import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch
-import io.github.nakanomk.stacklife.planner.PlannerChange
 import io.github.nakanomk.stacklife.workspace.CheckRow
-import io.github.nakanomk.stacklife.workspace.Hint
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.activity.compose.LocalActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia
+import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import io.github.nakanomk.stacklife.markdown.MarkdownComposer
 import java.util.UUID
 
 internal val LocalAssistant = staticCompositionLocalOf<AssistantModel?> { null }
+internal val LocalRootDraftId = staticCompositionLocalOf<String?> { null }
 internal val LocalOpenChatHistory = staticCompositionLocalOf<(AssistantPage) -> Unit> { error("Missing conversation history host") }
 
 @Composable
 internal fun AssistantComposer(page: AssistantPage, persistentRoot: Boolean = false) {
-    ScopedComposer(page.label, page, if (persistentRoot) null else page) { page }
+    ScopedComposer(page.label, page, if (persistentRoot) null else page, if (persistentRoot) LocalRootDraftId.current else null) { page }
 }
 
 @Composable
 internal fun AssistantComposer(target: () -> AssistantPage) {
-    ScopedComposer(stringResource(R.string.assistant_import_scope), null, null, target)
+    ScopedComposer(stringResource(R.string.assistant_import_scope), null, null, target = target)
 }
 
 @Composable
-private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: AssistantPage?, target: () -> AssistantPage) {
+private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: AssistantPage?, retainedId: String? = null, target: () -> AssistantPage) {
     val model = LocalAssistant.current ?: return
-    val id = rememberSaveable(privateScope) { UUID.randomUUID().toString() }
+    val id = retainedId ?: rememberSaveable(privateScope) { UUID.randomUUID().toString() }
+    val activity = LocalActivity.current
+    val draft = remember(id, model) { model.draft(id) }
     DisposableEffect(model, id) {
         model.composerReturned(id)
-        onDispose { model.composerLeft(id) }
+        onDispose { if (retainedId == null && activity?.isChangingConfigurations != true) model.composerLeft(id) }
     }
     val ui by model.state.collectAsStateWithLifecycle()
-    val active = ui.page == null
-    val surface = if (active) Modifier else Modifier.clearAndSetSemantics {}
-    val origin = ui.draftPage.takeIf { active && ui.composerId == id }
+    val active = ui.page == null && !model.browsingHistory
+    val currentPage by rememberUpdatedState(page)
+    LaunchedEffect(draft, active) {
+        if (active) snapshotFlow { draft.field.text.isNotEmpty() || draft.images.isNotEmpty() }.collect { hasContent ->
+            draft.origin = if (hasContent) draft.origin ?: currentPage else null
+        }
+    }
     val openHistory = LocalOpenChatHistory.current
-    MessageEditor(if (active && ui.composerId == id) ui.draft else "", origin?.scopeName() ?: scope,
-        { model.editLocal(id, it, page) }, { model.submitLocal(id, target) },
-        origin?.takeIf { page != null && privateScope == null }?.let { stringResource(R.string.assistant_draft_scope, it.scopeName()) }, active, surface,
-        openHistory = { openHistory(page ?: AssistantPage.Terms) })
+    MessageEditor(model, draft, draft.origin?.scopeName() ?: scope, { model.submitLocal(id, target) },
+        draft.origin?.takeIf { page != null && privateScope == null }?.let { stringResource(R.string.assistant_draft_scope, it.scopeName()) },
+        active = active, openHistory = { openHistory(page ?: AssistantPage.Terms) })
 }
 
 @Composable
-internal fun MessageEditor(text: String, scope: String, onChange: (String) -> Unit, onSend: () -> Unit, originHint: String? = null,
-    active: Boolean = true, modifier: Modifier = Modifier, openHistory: (() -> Unit)? = null, tagPrefix: String = "assistant",
-    historyOrigin: Modifier = Modifier) {
+internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: String, onSend: () -> Unit, originHint: String? = null,
+    active: Boolean = true, openHistory: (() -> Unit)? = null, tagPrefix: String = "assistant", historyOrigin: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -101,47 +101,47 @@ internal fun MessageEditor(text: String, scope: String, onChange: (String) -> Un
         else -> null
     }
     val fieldDescription = stringResource(R.string.assistant_message_field, scope)
-    val enabled = active && text.isSendable()
-    fun submit() {
-        if (!enabled) return
-        keyboard?.hide()
-        focus.clearFocus()
-        haptics.performHapticFeedback(HapticFeedbackType.VirtualKey)
-        onSend()
+    val enabled = active && draft.sendable
+    val picker = rememberLauncherForActivityResult(PickMultipleVisualMedia(MAX_CHAT_IMAGES)) { uris ->
+        if (active) draft.add(uris.map { ImageSource.Picker(it) })
     }
-    StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth().then(modifier), colors.surfaceContainerHigh, solidBorder = solidBorder) {
+    val submit: () -> Unit = {
+        if (active && draft.sendable) {
+            keyboard?.hide()
+            focus.clearFocus()
+            haptics.performHapticFeedback(HapticFeedbackType.VirtualKey)
+            onSend()
+        }
+    }
+    Column(if (active) Modifier.testTag("$tagPrefix-composer") else Modifier.clearAndSetSemantics {}) {
+    if (active) DraftImageStrip(model.attachments, draft)
+    StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth(), colors.surfaceContainerHigh, solidBorder = solidBorder) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) }, enabled = active,
+                modifier = Modifier.size(48.dp).testTag("$tagPrefix-attach")) {
+                Icon(painterResource(R.drawable.ic_add), stringResource(R.string.chat_attach))
+            }
             if (openHistory != null) IconButton(onClick = { keyboard?.hide(); openHistory() }, enabled = active,
                 modifier = historyOrigin.size(48.dp).testTag("assistant-history")) {
                 Icon(painterResource(R.drawable.ic_history), stringResource(R.string.assistant_history), tint = colors.onSurfaceVariant)
-            } else Spacer(Modifier.width(16.dp))
-            CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
-                BasicTextField(value = text, onValueChange = onChange, singleLine = true, enabled = active,
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("$tagPrefix-input")
-                        .semantics { contentDescription = fieldDescription }
-                        .onFocusChanged { editing = it.isFocused }
-                        .onPreviewKeyEvent {
-                            if (it.key != Key.Enter && it.key != Key.NumPadEnter) false
-                            else { if (it.type == KeyEventType.KeyUp) submit(); true }
-                        },
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurface),
-                    cursorBrush = SolidColor(colors.primary),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { submit() }),
-                    decorationBox = { field -> Column(verticalArrangement = Arrangement.Center) {
-                        if (originHint != null) Text(originHint, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Box(contentAlignment = Alignment.CenterStart) {
-                            if (text.isEmpty()) Text(stringResource(R.string.assistant_message_placeholder), style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
-                            field()
-                        }
-                    } })
             }
-            IconButton(onClick = ::submit, enabled = enabled, modifier = Modifier.size(48.dp).testTag("$tagPrefix-send"),
+            Column(Modifier.weight(1f).heightIn(min = 48.dp), verticalArrangement = Arrangement.Center) {
+                if (originHint != null) Text(originHint, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (!active || draft.field.text.isEmpty()) Text(stringResource(R.string.assistant_message_placeholder),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
+                    if (active) MarkdownComposer(draft.field, Modifier.fillMaxWidth().testTag("$tagPrefix-input")
+                        .semantics { contentDescription = fieldDescription }.onFocusChanged { editing = it.isFocused }
+                        .heightIn(min = 48.dp).wrapContentHeight(Alignment.CenterVertically), onSend = submit)
+                }
+            }
+            IconButton(onClick = submit, enabled = enabled, modifier = Modifier.size(48.dp).testTag("$tagPrefix-send"),
                 colors = IconButtonDefaults.iconButtonColors(contentColor = colors.primary)) {
                 Icon(painterResource(R.drawable.ic_assistant_send), contentDescription = stringResource(R.string.assistant_send))
             }
         }
+    }
     }
 }
 
@@ -157,6 +157,7 @@ private sealed interface AssistantPanel {
 internal fun AssistantPanels(model: AssistantModel, history: AssistantPage?, configuring: Boolean,
     onCloseHistory: () -> Unit, onSettings: () -> Unit, onImport: () -> Unit) {
     val ui by model.state.collectAsStateWithLifecycle()
+    SideEffect { model.browsingHistory = history != null }
     var selected by rememberSaveable(history) { mutableStateOf<Long?>(null) }
     if (history == null && ui.page == null) return
     val origins = remember { PaneOrigins() }
@@ -176,27 +177,30 @@ internal fun AssistantPanels(model: AssistantModel, history: AssistantPage?, con
         is AssistantPanel.History -> AssistantPanel.Chat.takeIf { ui.page != null }
         AssistantPanel.Chat -> null
     }
-    fun back() {
+    val back: () -> Unit = {
         when (panel) {
-            is AssistantPanel.Thread -> selected = null
+            is AssistantPanel.Thread -> { model.leaveDraft("history:${panel.id}"); selected = null }
             is AssistantPanel.History -> onCloseHistory()
             AssistantPanel.Chat -> model.close()
         }
     }
-    PlannerModalBottomSheet(::back, nested = previous != null, onNestedBack = ::back,
+    PlannerModalBottomSheet(back, nested = previous != null, onNestedBack = back,
         canDismiss = ui.work != AssistantWork.COMMIT) {
         PaneMotion(panel, origins, depth = { when (it) {
             AssistantPanel.Chat -> 0; is AssistantPanel.History -> 1; is AssistantPanel.Thread -> 2
         } }, originKey = { when (it) {
             AssistantPanel.Chat -> "chat"; is AssistantPanel.History -> "history"; is AssistantPanel.Thread -> "thread:${it.id}"
-        } }, parent = previous, onBack = ::back, modifier = Modifier.fillMaxWidth()) { shown ->
+        } }, parent = previous.takeUnless { ui.work == AssistantWork.COMMIT }, onBack = back, modifier = Modifier.fillMaxSize()) { shown ->
             when (shown) {
-                AssistantPanel.Chat -> chatState.SaveableStateProvider("chat") { ChatPanel(model, ui, origins, onSettings, onImport) }
+                AssistantPanel.Chat -> chatState.SaveableStateProvider("chat") { ChatPanel(model, ui, shown == panel, origins, onSettings, onImport) }
                 else -> {
                     val id = (shown as? AssistantPanel.Thread)?.id
                     val fallback = if (shown is AssistantPanel.Thread) shown.fallback else (shown as AssistantPanel.History).fallback
-                    ConversationHistoryPane(model, fallback, id, origins, threads, listState, onThread = { selected = it },
-                        onBack = LocalPanelBack.current ?: ::back,
+                    ConversationHistoryPane(model, fallback, id, origins, threads, listState, shown == panel, onThread = {
+                        if (it == null && id != null) model.leaveDraft("history:$id")
+                        selected = it
+                    },
+                        onBack = LocalPanelBack.current ?: back,
                         onSettings = onSettings, onClose = onCloseHistory)
                 }
             }
@@ -205,10 +209,9 @@ internal fun AssistantPanels(model: AssistantModel, history: AssistantPage?, con
 }
 
 @Composable
-private fun ChatPanel(model: AssistantModel, ui: AssistantState, origins: PaneOrigins, onSettings: () -> Unit, onImport: () -> Unit) {
+private fun ChatPanel(model: AssistantModel, ui: AssistantState, active: Boolean, origins: PaneOrigins, onSettings: () -> Unit, onImport: () -> Unit) {
     val page = ui.page ?: return
     val openHistory = LocalOpenChatHistory.current
-    var expanded by rememberSaveable(page) { mutableStateOf(false) }
     var options by remember(page) { mutableStateOf(false) }
     val service = ui.profile
     val ready = ui.pending
@@ -238,21 +241,10 @@ private fun ChatPanel(model: AssistantModel, ui: AssistantState, origins: PaneOr
         NoticeLevel.WARNING -> if (dark) Color(0xFFF2CC60) else Color(0xFF7D4E00)
         NoticeLevel.ERROR -> if (dark) Color(0xFFFFC1BA) else Color(0xFFA40E26)
     }
-    val list = rememberLazyListState()
-    val groups = remember(ui.pending) { ui.pending?.changes?.groupBy { it.entityId }.orEmpty() }
-    LaunchedEffect(ui.pending?.proposalId) { if (ui.pending != null) expanded = true }
-    LaunchedEffect(ui.lines.lastOrNull(), ui.pending, noticeOpen) {
-        if (noticeOpen || ui.pending != null) list.scrollToItem(0)
-        else if (ui.lines.isNotEmpty()) list.scrollToItem(ui.lines.lastIndex)
-    }
-    val compact = ui.profile == null
+    val draft = ui.composerId?.let(model::draft) ?: return
     val settingsLaunch = rememberRouteLaunch("model")
     val importLaunch = rememberRouteLaunch("course-import")
-        val density = LocalDensity.current
-        val needsHeight = LocalConfiguration.current.screenHeightDp < 480 || density.fontScale >= 1.5f ||
-            WindowInsets.ime.getBottom(density) > 0
-        Column(Modifier.fillMaxWidth().then(if (compact) Modifier else Modifier.fillMaxHeight(if (expanded || needsHeight) .94f else .56f))
-            .imePadding().padding(horizontal = 16.dp, vertical = 4.dp).testTag("assistant-sheet")) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 4.dp).testTag("assistant-sheet")) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.assistant_page_title, page.label), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -270,56 +262,54 @@ private fun ChatPanel(model: AssistantModel, ui: AssistantState, origins: PaneOr
                         }
                     }
                 }
-                if (!compact && !needsHeight) IconButton(onClick = { expanded = !expanded }) {
-                    Icon(painterResource(if (expanded) R.drawable.ic_expand_more else R.drawable.ic_expand_less),
-                        contentDescription = if (expanded) stringResource(R.string.assistant_collapse) else stringResource(R.string.assistant_expand))
-                }
                 TextButton(onClick = LocalPanelBack.current ?: model::close, enabled = ui.work != AssistantWork.COMMIT) { Text(stringResource(R.string.assistant_close)) }
             }
             if (service != null) Text("${service.origin} · ${service.model}", style = MaterialTheme.typography.labelMedium,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
             HorizontalDivider(Modifier.padding(vertical = 6.dp))
-            LazyColumn(Modifier.weight(1f, fill = !compact).fillMaxWidth().testTag("assistant-scroll"), state = list,
-                verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
-                if (noticeOpen) item {
+            if (noticeOpen) {
+                Column(Modifier.fillMaxWidth().weight(if (options) 1.6f else 0.9f, fill = false).verticalScroll(rememberScrollState()).testTag("assistant-notice-scroll")) {
                     Surface(Modifier.fillMaxWidth().testTag("assistant-notice-details"), shape = MaterialTheme.shapes.small,
                         color = tint, contentColor = ink) {
                         Column(Modifier.padding(12.dp)) {
-                            Text(severity.label, style = MaterialTheme.typography.labelLarge)
-                            Text(help, style = MaterialTheme.typography.bodyMedium)
-                            if (service != null) {
-                                Text(grantSummary(ui.grant), style = MaterialTheme.typography.bodyMedium)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(severity.label, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
                                 if (canChangeGrant) TextButton(onClick = { options = !options }) {
-                                    Text(if (options) stringResource(R.string.assistant_hide_scope) else stringResource(R.string.assistant_edit_scope))
+                                    Text(stringResource(if (options) R.string.assistant_hide_scope else R.string.assistant_edit_scope))
                                 }
+                            }
+                            if (!options || !canChangeGrant) {
+                                Text(help, style = MaterialTheme.typography.bodyMedium)
+                                if (service != null) Text(grantSummary(ui.grant), style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
-                }
-                if (noticeOpen && options && canChangeGrant) {
-                    items(ReadArea.entries) { area -> CheckRow(area.label, area in ui.grant.extra) { model.setGrant(ui.grant.copy(extra =
-                        if (area in ui.grant.extra) ui.grant.extra - area else ui.grant.extra + area)) } }
-                    item { CheckRow(stringResource(R.string.assistant_share_notes), ui.grant.notes) { model.setGrant(ui.grant.copy(notes = !ui.grant.notes)) }
+                    if (options && canChangeGrant) {
+                        CheckRow(stringResource(R.string.assistant_share_notes), ui.grant.notes) { model.setGrant(ui.grant.copy(notes = !ui.grant.notes)) }
                         CheckRow(stringResource(R.string.assistant_share_reasons), ui.grant.reasons) { model.setGrant(ui.grant.copy(reasons = !ui.grant.reasons)) }
-                        CheckRow(stringResource(R.string.assistant_share_classes), ui.grant.courseDetails) { model.setGrant(ui.grant.copy(courseDetails = !ui.grant.courseDetails)) } }
-                }
-                when {
-                    ui.work == AssistantWork.LOADING -> item { LinearProgressIndicator() }
-                    service == null -> item { Text(stringResource(R.string.assistant_not_connected), style = MaterialTheme.typography.titleMedium) }
-                    ready != null -> {
-                        item { Text(stringResource(R.string.assistant_preview), style = MaterialTheme.typography.titleMedium) }
-                        groups.forEach { (id, changes) ->
-                            item(key = "head:$id") { Text(changes.firstNotNullOfOrNull { it.entityLabel } ?: id, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium) }
-                            items(changes) { change -> Text(stringResource(R.string.assistant_change, change.field, change.before ?: stringResource(R.string.assistant_none), change.after ?: stringResource(R.string.assistant_none)), style = MaterialTheme.typography.bodyMedium) }
-                        }
-                    }
-                    else -> {
-                        items(ui.lines) { ChatBubble(it) }
-                        if (ui.lines.isEmpty()) item { Hint(stringResource(R.string.assistant_empty_hint)) }
+                        CheckRow(stringResource(R.string.assistant_share_classes), ui.grant.courseDetails) { model.setGrant(ui.grant.copy(courseDetails = !ui.grant.courseDetails)) }
+                        ReadArea.entries.forEach { area -> CheckRow(area.label, area in ui.grant.extra) { model.setGrant(ui.grant.copy(extra =
+                            if (area in ui.grant.extra) ui.grant.extra - area else ui.grant.extra + area)) } }
                     }
                 }
             }
-            ui.message?.takeIf { !noticeOpen && (severity != NoticeLevel.INFO || ui.applied || ui.importRequested) }?.let {
+            ChatMessages(ui.lines, model.attachments, Modifier.weight(1f), "assistant-scroll",
+                emptyText = when {
+                    ui.work == AssistantWork.LOADING -> stringResource(R.string.assistant_loading_settings)
+                    service == null -> stringResource(R.string.assistant_not_connected)
+                    else -> stringResource(R.string.assistant_empty_hint)
+                }, live = true, requestedLine = ui.requestedPreview, reattach = if (active && canChangeGrant) ({ draft.add(listOf(ImageSource.Saved(it))) }) else null) { line ->
+                if (active && line.id == ui.eventId && ui.work == AssistantWork.IDLE) {
+                    if (ready != null) FlowRow {
+                        TextButton(onClick = model::cancel) { Text(stringResource(R.string.assistant_discard)) }
+                        ActionPill(stringResource(R.string.assistant_apply), { model.apply(ready.proposalId) }, Modifier.testTag("assistant-apply"), prominent = true)
+                    } else if (ui.reviewAgain) FlowRow {
+                        TextButton(onClick = model::cancel) { Text(stringResource(R.string.assistant_discard)) }
+                        ActionPill(stringResource(R.string.assistant_preview_again), model::refreshProposal)
+                    }
+                }
+            }
+            ui.message?.takeIf { !noticeOpen && (severity != NoticeLevel.INFO || ui.importRequested) }?.let {
                 Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }
                     .testTag("assistant-status"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(severity.label, color = ink, style = MaterialTheme.typography.labelLarge)
@@ -337,34 +327,18 @@ private fun ChatPanel(model: AssistantModel, ui: AssistantState, origins: PaneOr
                     Text(stringResource(R.string.assistant_processing), Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     TextButton(onClick = model::cancel) { Text(stringResource(R.string.assistant_cancel_request)) }
                 }
-                ready != null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionPill(stringResource(R.string.assistant_discard), model::cancel)
-                    ActionPill(stringResource(R.string.assistant_apply), { model.apply(ready.proposalId) }, Modifier.testTag("assistant-apply"), prominent = true)
-                }
-                ui.reviewAgain -> Row { ActionPill(stringResource(R.string.assistant_discard), model::cancel); ActionPill(stringResource(R.string.assistant_preview_again), model::refreshProposal, prominent = true) }
+                ready != null || ui.reviewAgain -> Unit
                 ui.importRequested -> Row {
                     ActionPill(stringResource(R.string.assistant_cancel), model::cancel)
                     ActionPill(stringResource(R.string.assistant_open_importer),
                         { importLaunch.open { model.close(); onImport() } }, importLaunch.modifier, prominent = true)
                 }
-                else -> MessageEditor(ui.draft, page.scopeName(), model::editMessage, model::send, openHistory = { openHistory(page) },
+                else -> MessageEditor(model, draft, page.scopeName(), model::send, active = active, openHistory = { openHistory(page) },
                     historyOrigin = Modifier.paneOrigin(origins, "history"))
             }
         }
 }
 
-@Composable
-internal fun ChatBubble(line: ChatLine, author: String = if (line.user) stringResource(R.string.assistant_user) else stringResource(R.string.assistant_model_reply)) {
-    val colors = MaterialTheme.colorScheme
-    Row(Modifier.fillMaxWidth().padding(start = if (line.user) 40.dp else 0.dp, end = if (line.user) 0.dp else 40.dp),
-        horizontalArrangement = if (line.user) Arrangement.End else Arrangement.Start) {
-        Surface(Modifier.widthIn(max = 440.dp).semantics(mergeDescendants = true) { stateDescription = author },
-            shape = MaterialTheme.shapes.large, color = if (line.user) colors.secondaryContainer else colors.surfaceContainerHigh,
-            contentColor = if (line.user) colors.onSecondaryContainer else colors.onSurface) {
-            Text(line.text, Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge)
-        }
-    }
-}
 
 @Composable
 private fun grantSummary(grant: Disclosure): String {

@@ -88,7 +88,7 @@ class CourseTimelineGestureTest {
             }
         }
         ui.runOnIdle { assumeTrue("Needs a hardware-accelerated optical surface", available) }
-        fun ruleContrast(solid: Boolean): Float {
+        fun ruleContrast(solid: Boolean, lines: Boolean = true): Float {
             val node = ui.onNodeWithTag("grid-course:0").fetchSemanticsNode()
             val topLeft = ui.runOnIdle { node.positionOnScreen }
             val width = node.size.width
@@ -114,7 +114,8 @@ class CourseTimelineGestureTest {
                     }
                     val interior = line(bodyY)
                     result = (y - height / 40..y + height / 40).maxOf { kotlin.math.abs(line(it) - interior) }
-                    if (!solid) {
+                    if (!solid && !lines && (pixel == swatch || result > .008f)) return@waitUntil false
+                    if (!solid && lines) {
                         fun halfPeakWidth(x: Int): Int {
                             fun l(row: Int) = Color(pixels.getPixel(x, row)).luminance()
                             val baseline = l(bodyY)
@@ -135,7 +136,10 @@ class CourseTimelineGestureTest {
         }
         val glass = ruleContrast(solid = false)
         assertTrue("The transmitted period rule must remain visible inside the course (ΔL=$glass)", glass > .025f)
-        ui.runOnIdle { appearance.value = appearance.value.copy(glass = false) }
+        ui.runOnIdle { appearance.value = appearance.value.copy(showCourseGrid = false) }
+        val clear = ruleContrast(solid = false, lines = false)
+        assertTrue("Disabling the rule left a sampled stripe in the colored lens (ΔL=$clear)", clear < .008f)
+        ui.runOnIdle { appearance.value = appearance.value.copy(glass = false, showCourseGrid = true) }
         val solid = ruleContrast(solid = true)
         assertTrue("The solid fallback must completely cover the period rule (ΔL=$solid)", solid < .008f)
     }
@@ -345,7 +349,7 @@ class CourseTimelineGestureTest {
         ui.onNode(week).assertTextContains("第 2 周")
         await(hasTestTag("grid-course:0") and hasContentDescription("周日", substring = true)).performClick()
         await(hasTestTag("course-detail")).assertIsDisplayed()
-        ui.onNodeWithText("教室：B").assertIsDisplayed()
+        ui.onNode(hasText("B") and hasAnyAncestor(hasTestTag("course-detail"))).performScrollTo().assertIsDisplayed()
         ui.onNodeWithText("关闭").performClick()
         await(hasTestTag("nav:today")).performClick()
         await(hasTestTag("nav:courses")).performClick()
@@ -355,7 +359,7 @@ class CourseTimelineGestureTest {
         ui.onNodeWithContentDescription("课表选项").performClick()
         ui.onNodeWithTag("course-view-toggle").performClick()
         await(hasTestTag("week-course:0")).performClick()
-        ui.onNode(hasText("教室：A") and hasAnyAncestor(hasTestTag("course-detail"))).assertIsDisplayed()
+        ui.onNode(hasText("A") and hasAnyAncestor(hasTestTag("course-detail"))).performScrollTo().assertIsDisplayed()
         assertEquals(revision, runBlocking { store.state().revision })
     }
 }

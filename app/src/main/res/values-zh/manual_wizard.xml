@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="manual_step_term">选择课表</string>
+    <string name="manual_step_course">课程与时间</string>
+    <string name="manual_next">下一步</string>
+    <string name="manual_progress">第 %1$d 步，共 4 步</string>
+    <string name="manual_show_bell">展开作息设置</string>
+    <string name="manual_hide_bell">收起作息设置</string>
+    <string name="manual_draft_error">无法读取或保存本机草稿。请检查设备存储空间再继续。</string>
+    <string name="manual_interrupted">无法核实上次保存的结果，不会再次提交。请关闭面板并查看课表。</string>
+    <string name="manual_missing_class">所选课次已不存在，请关闭并重新选择。</string>
+    <string name="manual_read_class_failed">无法读取课程，请关闭并重新打开。</string>
+    <string name="manual_no_changes">没有需要保存的更改。</string>
+    <string name="manual_read_term_failed">无法读取课表。</string>
+</resources>

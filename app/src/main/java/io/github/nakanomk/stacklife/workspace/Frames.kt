@@ -12,22 +12,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 import io.github.nakanomk.stacklife.assistant.AssistantPage
+import io.github.nakanomk.stacklife.transitions.CardMetadata
+import io.github.nakanomk.stacklife.transitions.CardSummary
+import io.github.nakanomk.stacklife.transitions.CardTitle
 import io.github.nakanomk.stacklife.transitions.DetailCard
 import io.github.nakanomk.stacklife.transitions.DetailListSource
 import io.github.nakanomk.stacklife.transitions.detailListSource
 import io.github.nakanomk.stacklife.transitions.title
 import androidx.compose.foundation.shape.CircleShape
 import io.github.nakanomk.stacklife.transitions.routeOrigin
+import io.github.nakanomk.stacklife.notes.CurrentTaskNote
+import io.github.nakanomk.stacklife.markdown.PlannerMarkdown
 
 @Composable
 internal fun FrameList(
@@ -47,8 +50,10 @@ internal fun FrameList(
         contentPadding = dockListPadding(topClearance, bottomClearance), verticalArrangement = listSpacing) {
         item {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.ui_frame_counts, available, frames.size - available), Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(Modifier.weight(1f)) { CardMetadata {
+                    Text(stringResource(R.string.frames_available, available))
+                    Text(stringResource(R.string.frames_emptied, frames.size - available))
+                } }
                 ActionPill(stringResource(R.string.ui_new_frame), onCreate, Modifier.routeOrigin("create-frame", CircleShape))
             }
         }
@@ -79,21 +84,29 @@ internal fun FrameList(
 private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: SharedModifier, source: DetailListSource?) {
     val appearance = LocalAppearance.current
     DetailCard(source, "frame", frame.id, onFrame, modifier = shared("frame:${frame.id}").fillMaxWidth().testTag("frame:${frame.id}"),
-        shape = RectangleShape, color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.fillMaxWidth().padding(vertical = if (appearance.compact) 4.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(frameLabel(frame.reason, frame.source), shared.title("frame:${frame.id}"), style = MaterialTheme.typography.bodyLarge,
-                maxLines = 3, overflow = TextOverflow.Ellipsis)
-            Text(stringResource(R.string.ui_frame_summary, savedTime(frame.savedAtMillis), frame.items.size, frame.remaining),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(frame.items.joinToString("、", limit = 3, truncated = "…") { it.current?.title ?: it.title }, style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = if (appearance.compact) 6.dp else 10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            CardTitle(frameLabel(frame.reason, frame.source), shared.title("frame:${frame.id}"))
+            CardMetadata {
+                Text(stringResource(R.string.card_frame_saved_at, savedTime(frame.savedAtMillis)))
+                Text(stringResource(R.string.card_frame_original_count, frame.items.size))
+                Text(stringResource(R.string.card_frame_remaining_count, frame.remaining))
+            }
+            if (frame.items.isNotEmpty()) {
+                val separator = stringResource(R.string.card_item_separator)
+                val titles = remember(frame.items, separator) {
+                    frame.items.joinToString(separator, limit = 3, truncated = "…") { it.current?.title ?: it.title }
+                }
+                CardSummary(titles)
+            }
         }
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 @Composable
-internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: () -> Unit, shared: SharedModifier, onEdit: (String) -> Unit) {
+internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: () -> Unit, shared: SharedModifier,
+    onSource: (GraphLink) -> Unit, onEdit: (String) -> Unit) {
     val frame = state.frames.find { it.id == id }
     var deleting by rememberSaveable(id) { mutableStateOf(false) }
     val deletion = rememberSubmission(actions) { result ->
@@ -122,7 +135,8 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
         footer = if (editingReason) ({ PushReasonEditor(id, actions) { editingReason = false } })
         else if (!choosing) null else ({
             Column(Modifier.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(stringResource(R.string.ui_restore_selection_count, selectionIds.size), style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(R.string.ui_selected_count, selectionIds.size), style = MaterialTheme.typography.labelLarge)
+                Hint(stringResource(R.string.frame_restore_order))
                 Actions {
                     Primary(stringResource(R.string.ui_restore_selected), enabled = !action.busy && selectionIds.isNotEmpty()) {
                         action.send(PlannerCommand.FrameRestore(id, RestoreMode.SELECTED, selectionIds))
@@ -141,8 +155,14 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
                         FrameSource.GRAPH -> stringResource(R.string.ui_source_graph)
                     }
                     Text(frameLabel(frame.reason, frame.source), shared.title("frame:$id"), style = MaterialTheme.typography.titleLarge)
-                    Text("$source · ${savedTime(frame.savedAtMillis)}", style = MaterialTheme.typography.labelMedium)
-                    Text(stringResource(R.string.ui_frame_remaining, entries.size, frame.remaining), style = MaterialTheme.typography.bodyMedium)
+                    CardMetadata {
+                        Text(source)
+                        Text(stringResource(R.string.card_frame_saved_at, savedTime(frame.savedAtMillis)))
+                    }
+                    CardMetadata {
+                        Text(stringResource(R.string.card_frame_original_count, entries.size))
+                        Text(stringResource(R.string.card_frame_remaining_count, frame.remaining))
+                    }
                     if (frame.source == FrameSource.PUSH && frame.reason.isBlank() && !editingReason && !choosing)
                         TextButton(onClick = { editingReason = true }) { Text(stringResource(R.string.ui_add_reason)) }
                     if (frame.remaining == 0)
@@ -163,9 +183,11 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
             }
             item {
                 SectionTitle(stringResource(if (frame.remaining == 0) R.string.ui_saved_list else R.string.ui_frame_tasks))
-                Hint(if (frame.remaining == 0) stringResource(R.string.ui_empty_frame_hint) else stringResource(R.string.ui_frame_history_hint))
+                Hint(when { entries.isNotEmpty() && entries.all { it.referenceOnly } -> stringResource(R.string.graph_no_restorable)
+                    frame.remaining == 0 -> stringResource(R.string.ui_empty_frame_hint)
+                    else -> stringResource(R.string.ui_frame_history_hint) })
             }
-            itemsIndexed(entries, key = { _, item -> item.taskId }) { index, item ->
+            itemsIndexed(entries, key = { _, item -> item.originalPosition }) { index, item ->
                 val current = item.current
                 val title = current?.title ?: item.title
                 val notes = current?.notes ?: item.notes
@@ -173,8 +195,11 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
                 Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large) {
                     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(R.string.ui_entry_status, index + 1, stringResource(if (current != null) R.string.ui_restorable else R.string.ui_taken)),
-                                Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                            Box(Modifier.weight(1f)) { CardMetadata {
+                                Text(stringResource(R.string.frame_item_number, index + 1))
+                                Text(stringResource(when { item.referenceOnly -> R.string.graph_linked_event; current != null -> R.string.ui_restorable; else -> R.string.ui_taken }))
+                            } }
+                            if (!choosing) item.link?.let { link -> TextButton(modifier = Modifier.testTag("frame-source:${item.originalPosition}"), onClick = { onSource(link) }, enabled = !action.busy) { Text(stringResource(R.string.graph_open_source)) } }
                             if (!choosing && current != null) ActionPill(stringResource(R.string.ui_edit_task), { onEdit(item.taskId) },
                                 Modifier.routeOrigin("edit:${item.taskId}", CircleShape).testTag("frame-edit:${item.taskId}"), enabled = !action.busy)
                         }
@@ -182,13 +207,21 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
                             CheckRow(title, item.taskId in selected) { selected = ArrayList(selected.toggle(item.taskId)) }
                         } else Text(title, style = MaterialTheme.typography.titleMedium)
                         Hint(stringResource(R.string.ui_minutes_value, minutes))
-                        if (notes.isNotBlank()) Text(notes, style = MaterialTheme.typography.bodyMedium)
+                        if (current != null && !choosing) CurrentTaskNote(current, state.revision, enabled = !action.busy, frameId = id)
+                        else if (notes.isNotBlank()) PlannerMarkdown(notes, Modifier.fillMaxWidth())
                         if (current != null && (title != item.title || minutes != item.minutes || notes != item.notes)) {
-                            Hint(stringResource(R.string.ui_frame_original, item.title, item.minutes))
-                            if (item.notes.isNotBlank()) Hint(item.notes)
+                            SectionTitle(stringResource(R.string.frame_saved_snapshot))
+                            Text(item.title, style = MaterialTheme.typography.bodyMedium)
+                            Hint(stringResource(R.string.ui_minutes_value, item.minutes))
+                            if (item.notes.isNotBlank()) PlannerMarkdown(item.notes, Modifier.fillMaxWidth())
                         }
-                        if (item.scheduledStartMillis != null && item.scheduledEndMillis != null) {
-                            Hint(stringResource(R.string.ui_saved_slot, savedTime(item.scheduledStartMillis), savedTime(item.scheduledEndMillis)))
+                        item.occurrenceDay?.let { Text(java.time.LocalDate.ofEpochDay(it).toString(), style = MaterialTheme.typography.labelLarge) }
+                        item.occurrenceInterval?.let { span ->
+                            Text(if (span.point) savedTime(span.startMillis) else "${savedTime(span.startMillis)} – ${savedTime(span.endMillis)}")
+                        }
+                        item.schedule?.let { schedule ->
+                            Hint(io.github.nakanomk.stacklife.i18n.uiText("Schedule when saved", "保存时的排程"))
+                            Text(scheduleText(schedule), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }

@@ -23,6 +23,8 @@ import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
 import io.github.nakanomk.stacklife.workspace.*
 
+import io.github.nakanomk.stacklife.transitions.CardMetadata
+import io.github.nakanomk.stacklife.transitions.CardTitle
 import io.github.nakanomk.stacklife.transitions.routeOrigin
 
 @Composable
@@ -42,11 +44,16 @@ internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Uni
                         Hint(stringResource(R.string.ui_graph_empty_hint))
                     }
                     items(list.graphs, key = { it.id }) { graph ->
-                        Surface(color = MaterialTheme.colorScheme.surface) {
-                            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                TextButton(onClick = { onOpenGraph(graph.id) }, modifier = Modifier.weight(1f).heightIn(min = 60.dp).routeOrigin("graph:${graph.id}")
-                                    .testTag("open-graph:${graph.id}")) {
-                                    Text(graph.title, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                        val shape = MaterialTheme.shapes.large
+                        Surface(onClick = { onOpenGraph(graph.id) }, shape = shape, color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            modifier = Modifier.fillMaxWidth().routeOrigin("graph:${graph.id}", shape).testTag("open-graph:${graph.id}")) {
+                            Row(Modifier.heightIn(min = 60.dp).padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f).padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    CardTitle(graph.title)
+                                    CardMetadata {
+                                        Text(stringResource(R.string.card_graph_node_count, graph.nodeCount))
+                                        Text(stringResource(R.string.card_graph_dependency_count, graph.edgeCount))
+                                    }
                                 }
                                 var menu by remember { mutableStateOf(false) }
                                 Box {

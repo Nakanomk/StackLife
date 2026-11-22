@@ -18,9 +18,10 @@ import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 import io.github.nakanomk.stacklife.appearance.ClockWheelField
 import io.github.nakanomk.stacklife.appearance.DurationWheelField
-import io.github.nakanomk.stacklife.planner.DayPlan
-import io.github.nakanomk.stacklife.planner.PlannerCommand
-import io.github.nakanomk.stacklife.planner.TaskInput
+import io.github.nakanomk.stacklife.planner.*
+import io.github.nakanomk.stacklife.reminders.ReminderRuleFields
+import io.github.nakanomk.stacklife.reminders.ReminderRuleLabel
+import kotlinx.serialization.json.Json
 import io.github.nakanomk.stacklife.workspace.SaveOutcome
 import io.github.nakanomk.stacklife.workspace.rememberSubmission
 import java.time.Instant
@@ -34,6 +35,9 @@ internal fun GapTaskEditor(plan: DayPlan, start: Long, end: Long, revision: Long
     var minuteOfDay by rememberSaveable { mutableIntStateOf(initial.hour * 60 + initial.minute) }
     var minutes by rememberSaveable { mutableIntStateOf(minOf(30L, (end - start) / MINUTE_MS).toInt()) }
     var offsetId by rememberSaveable { mutableStateOf(initial.offset.id) }
+    val subject = remember { ReminderSubject.Occurrence(OccurrenceKey.Schedule("@task")) }
+    var ruleJson by rememberSaveable { mutableStateOf(Json.encodeToString(ReminderPolicy(true, emptyList()))) }
+    val policy = remember(ruleJson) { Json.decodeFromString<ReminderPolicy>(ruleJson) }
     var rejection by rememberSaveable { mutableStateOf<String?>(null) }
     val submission = rememberSubmission(model, onError = { rejection = it }) { if (it == SaveOutcome.APPLIED) close() }
     val editable = !submission.busy
@@ -48,10 +52,17 @@ internal fun GapTaskEditor(plan: DayPlan, start: Long, end: Long, revision: Long
     val problem = when {
         revision != plan.revision -> stringResource(R.string.today_stale_gap)
         atMillis == null -> stringResource(R.string.today_skipped_time)
-        minutes <= 0 -> stringResource(R.string.today_positive_minutes)
-        atMillis < start || atMillis + minutes * MINUTE_MS > end -> stringResource(R.string.today_outside_gap)
+        atMillis !in start until end || atMillis + minutes * MINUTE_MS > end -> stringResource(R.string.today_outside_gap)
         else -> null
     }
+    val changes = remember(title, atMillis, minutes, policy, problem) {
+        if (atMillis == null || title.isBlank() || problem != null) emptyList() else buildList {
+            add(PlannerCommand.TaskAdd(TaskInput(title.trim(), minutes = minutes, ref = "task")))
+            add(PlannerCommand.SetSchedule("@task", SchedulePattern.Once(ExactInterval(atMillis, atMillis + minutes * MINUTE_MS)), expectedRevision = revision))
+            if (!policy.inherit) add(PlannerCommand.SetReminders(subject, policy, revision))
+        }
+    }
+    var reviewed by remember(changes) { mutableStateOf(false) }
     PlannerAlertDialog(onDismissRequest = { if (editable) close() }, title = { Text(stringResource(R.string.today_gap_title)) }, text = {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("${clockLabel(start, plan.day)}–${clockLabel(end, plan.day)} · ${elapsedLabel(end - start)}")
@@ -64,14 +75,17 @@ internal fun GapTaskEditor(plan: DayPlan, start: Long, end: Long, revision: Long
                     label = { Text("UTC${choice.id}") }, enabled = editable)
             }
             DurationWheelField(stringResource(R.string.today_duration_minutes), minutes, editable, Modifier.testTag("gap-duration")) { minutes = it }
+            ReminderRuleFields(subject, policy) { if (editable) ruleJson = Json.encodeToString(it) }
+            if (policy.inherit) for (rule in initialReminderPolicy.rules) Text(ReminderRuleLabel(rule.time), style = MaterialTheme.typography.bodyMedium)
+            val valid = ScheduleReview(model, changes, revision)
+            SideEffect { reviewed = valid }
             (problem ?: rejection)?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.error) }
         }
     }, dismissButton = { TextButton(onClick = close, enabled = editable) { Text(stringResource(R.string.today_cancel)) } }, confirmButton = {
-        TextButton(enabled = editable && title.isNotBlank() && problem == null, modifier = Modifier.testTag("gap-save"), onClick = {
-            if (at != null && minutes > 0) {
+        TextButton(enabled = editable && reviewed && changes.isNotEmpty(), modifier = Modifier.testTag("gap-save"), onClick = {
+            if (atMillis != null) {
                 rejection = null
-                submission.submit { model.startReviewed(listOf(PlannerCommand.TaskAdd(TaskInput(title.trim(), minutes = minutes, ref = "task")),
-                    PlannerCommand.SlotSet("@task", at, minutes, revision)), revision) }
+                submission.submit { model.startReviewed(changes, revision) }
             }
         }) { Text(stringResource(R.string.today_add_and_schedule)) }
     })

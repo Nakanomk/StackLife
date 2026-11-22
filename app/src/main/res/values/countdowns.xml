@@ -1,0 +1,33 @@
+<resources>
+    <string name="countdown_new">New countdown</string>
+    <string name="countdown_empty">No countdowns yet</string>
+    <string name="countdown_empty_hint">Choose a date to count down to, or count the days since it.</string>
+    <string name="countdown_details">Countdown</string>
+    <string name="countdown_not_found">This countdown no longer exists.</string>
+    <string name="countdown_edit">Edit countdown</string>
+    <string name="countdown_edit_action">Edit</string>
+    <string name="countdown_name">Name</string>
+    <string name="countdown_date">Date</string>
+    <string name="countdown_mode">Display</string>
+    <string name="countdown_until_mode">Count down</string>
+    <string name="countdown_since_mode">Count up</string>
+    <string name="countdown_until">Remaining</string>
+    <string name="countdown_past">Past</string>
+    <string name="countdown_since">Elapsed</string>
+    <string name="countdown_today">Today</string>
+    <string name="countdown_pinned">Pinned</string>
+    <string name="countdown_choose_photo">Choose a background photo</string>
+    <string name="countdown_clear_photo">Remove background</string>
+    <string name="countdown_dimming">Photo dimming</string>
+    <string name="countdown_preparing">Preparing photo…</string>
+    <string name="countdown_photo_error">Could not use this photo. Choose an accessible static image.</string>
+    <string name="countdown_cleanup_error">Could not release the draft photo. Try again.</string>
+    <string name="countdown_delete">Delete countdown</string>
+    <string name="countdown_reorder">Reorder</string>
+    <string name="countdown_stale">Your data changed. Go back and reopen this countdown editor before saving.</string>
+    <string name="countdown_preview">Card preview</string>
+    <plurals name="countdown_day_unit">
+        <item quantity="one">day</item>
+        <item quantity="other">days</item>
+    </plurals>
+</resources>

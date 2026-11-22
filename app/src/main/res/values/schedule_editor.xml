@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="slot_point_at">Point at %1$s</string>
+    <string name="slot_daily">Daily</string>
+    <string name="slot_complete_this">Complete this occurrence of %1$s</string>
+    <string name="slot_finish_series">Finish the entire series</string>
+    <string name="slot_more_events">%1$d more events. Show all overlapping events.</string>
+    <string name="slot_overlapping">Overlapping events (%1$d)</string>
+    <string name="slot_repeat">Repeat</string>
+    <string name="slot_once">Once</string>
+    <string name="slot_scope">Apply changes to</string>
+    <string name="slot_this">Only this occurrence</string>
+    <string name="slot_following">This and following occurrences</string>
+    <string name="slot_all">Entire series</string>
+    <string name="slot_end_date">Last date</string>
+    <string name="slot_unbounded">No end date</string>
+    <string name="slot_zone">Time zone</string>
+    <string name="slot_follow_zone">Follow device time zone</string>
+    <string name="slot_last_invalid">The last date precedes the first date.</string>
+    <string name="slot_missing">This occurrence is no longer on the schedule.</string>
+    <string name="slot_cancel_this">Cancel only this occurrence</string>
+    <string name="slot_cancel_following">Cancel this and following occurrences</string>
+    <string name="slot_disable_series">Disable the entire series</string>
+    <string name="slot_duration_type">Event length</string>
+    <string name="slot_point">Point in time</string>
+    <string name="slot_span">Time span</string>
+    <string name="slot_series_notes">Notes are shared by every occurrence.</string>
+    <string name="slot_stale">This event changed. Reopen it to edit the latest version.</string>
+    <string name="slot_shared_reminders">These reminder rules apply to the entire series.</string>
+    <string name="slot_search_zone">Find time zone</string>
+    <string name="slot_kept_exceptions">Kept individual exceptions: %1$d</string>
+    <string name="slot_overlap_notice">This time overlaps %1$d other events.</string>
+    <string name="slot_pick_zone">Choose an IANA time zone</string>
+    <string name="slot_choose_shorter">Choose a duration within the wheel range for a daily series.</string>
+    <string name="slot_this_completed">Completed this occurrence</string>
+    <string name="slot_release_this">Release to change only this occurrence</string>
+</resources>

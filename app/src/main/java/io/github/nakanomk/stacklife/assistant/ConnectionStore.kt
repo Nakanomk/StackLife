@@ -23,10 +23,11 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.put
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
-internal data class ServiceProfile(val baseUrl: String, val model: String, val origin: String)
+internal data class ServiceProfile(val baseUrl: String, val model: String, val origin: String, val supportsImages: Boolean = false)
 
 // Not a data class: no generated toString/componentN/copy that includes the credential.
 internal class ServiceConnection(val profile: ServiceProfile, val key: String) {
@@ -35,7 +36,7 @@ internal class ServiceConnection(val profile: ServiceProfile, val key: String) {
 
 private class ConfigurationProblem(message: String) : IllegalArgumentException(message)
 
-internal fun serviceProfile(baseUrl: String, model: String): ServiceProfile {
+internal fun serviceProfile(baseUrl: String, model: String, supportsImages: Boolean? = null): ServiceProfile {
     val address = baseUrl.trim()
     fun invalidAddress(): Nothing = throw ConfigurationProblem(uiText("Enter a full HTTPS service address. An API path is allowed, but not credentials, a query, or a fragment.", "请输入完整的 HTTPS 服务地址（可含 API 路径，不含账号、查询或片段）。"))
     if (address.length > 4096) invalidAddress()
@@ -47,9 +48,11 @@ internal fun serviceProfile(baseUrl: String, model: String): ServiceProfile {
     if (modelName.isBlank() || modelName.length > 256 || modelName.any(Char::isISOControl)) {
         throw ConfigurationProblem(uiText("Enter a valid model name.", "请输入有效的模型名称。"))
     }
+    val canonical = url.toString().trimEnd('/')
     return ServiceProfile(
-        url.toString().trimEnd('/'), modelName,
+        canonical, modelName,
         url.newBuilder().encodedPath("/").build().toString().removeSuffix("/"),
+        supportsImages ?: ServicePreset.entries.any { it != ServicePreset.Custom && it.baseUrl == canonical && it.model == modelName },
     )
 }
 
@@ -65,8 +68,8 @@ internal class ConnectionStore(context: Context, storageName: String = "assistan
 
     suspend fun load(): ServiceConnection? = access { readConnection(file) }
 
-    suspend fun save(baseUrl: String, model: String, newKey: String?): ServiceProfile = access {
-        val profile = serviceProfile(baseUrl, model)
+    suspend fun save(baseUrl: String, model: String, newKey: String?, supportsImages: Boolean? = null): ServiceProfile = access {
+        val profile = serviceProfile(baseUrl, model, supportsImages)
         val target = file
         val previous = readConnection(target)
         val key = if (newKey.isNullOrBlank()) {
@@ -79,6 +82,7 @@ internal class ConnectionStore(context: Context, storageName: String = "assistan
         cipher.init(Cipher.ENCRYPT_MODE, encryptionKey(create = true)) // Keystore supplies a fresh IV.
         val plain = buildJsonObject {
             put("baseUrl", profile.baseUrl); put("model", profile.model); put("key", key)
+            put("supportsImages", profile.supportsImages)
         }.toString().encodeToByteArray()
         val encrypted = try { cipher.doFinal(plain) } finally { plain.fill(0) }
         val iv = cipher.iv
@@ -117,7 +121,8 @@ internal class ConnectionStore(context: Context, storageName: String = "assistan
             val plain = cipher.doFinal(it.readBytes())
             try {
                 val data = Json.parseToJsonElement(plain.decodeToString()).jsonObject
-                val profile = serviceProfile(data.getValue("baseUrl").jsonPrimitive.content, data.getValue("model").jsonPrimitive.content)
+                val profile = serviceProfile(data.getValue("baseUrl").jsonPrimitive.content,
+                    data.getValue("model").jsonPrimitive.content, data["supportsImages"]?.jsonPrimitive?.boolean)
                 val key = data.getValue("key").jsonPrimitive.content
                 ServiceConnection(profile, key)
             } finally { plain.fill(0) }

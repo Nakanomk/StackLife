@@ -41,6 +41,8 @@ private fun Wheel(label: String, tag: String, width: Dp, value: Int, range: IntR
     val ink = MaterialTheme.colorScheme.onSurface
     val dark = MaterialTheme.colorScheme.surface.luminance() < .5f
     val size = with(LocalDensity.current) { 18.sp.toPx() }
+    // Keep the native view's MeasureSpec exact even when wide digits wrap this column onto its own row.
+    val height = with(LocalDensity.current) { (24.sp.toDp() + 8.dp).coerceAtLeast(48.dp) * 3 }
     Column(Modifier.width(width), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label, Modifier.clearAndSetSemantics {}, style = MaterialTheme.typography.labelLarge)
         Box(Modifier.fillMaxWidth().testTag(tag).clearAndSetSemantics {
@@ -67,13 +69,13 @@ private fun Wheel(label: String, tag: String, width: Dp, value: Int, range: IntR
             }, update = { picker ->
                 if (picker.minValue != range.first) picker.minValue = range.first
                 if (picker.maxValue != range.last) picker.maxValue = range.last
-                picker.wrapSelectorWheel = wrap
+                if (picker.wrapSelectorWheel != wrap) picker.wrapSelectorWheel = wrap
                 if (picker.value != value) picker.value = value
                 if (Build.VERSION.SDK_INT >= 29) {
                     if (picker.textColor != ink.toArgb()) picker.textColor = ink.toArgb()
                     if (picker.textSize != size) picker.textSize = size
                 }
-            }, modifier = Modifier.fillMaxWidth().heightIn(min = 144.dp))
+            }, modifier = Modifier.fillMaxWidth().height(height))
         } }
     }
 }
@@ -129,11 +131,12 @@ private fun PickerField(label: String, display: String, enabled: Boolean, modifi
 
 @Composable
 internal fun NumberWheelField(label: String, value: Int?, range: IntRange, enabled: Boolean, modifier: Modifier,
-    initial: Int = range.first, onChange: (Int) -> Unit) {
-    PickerField(label, value?.toString() ?: stringResource(R.string.wheel_unset), enabled, modifier) { close ->
+    initial: Int = range.first, names: Array<String>? = null, onChange: (Int) -> Unit) {
+    val display = value?.let { names?.get(it - range.first) ?: it.toString() } ?: stringResource(R.string.wheel_unset)
+    PickerField(label, display, enabled, modifier) { close ->
         var draft by rememberSaveable { mutableIntStateOf(value ?: initial) }
         WheelDialog(label, 1, close, { onChange(draft); close() }) { width ->
-            Wheel(label, "wheel-number", width, draft, range) { draft = it }
+            Wheel(label, "wheel-number", width, draft, range, names = names) { draft = it }
         }
     }
 }
@@ -200,9 +203,9 @@ internal fun DurationWheelField(label: String, minutes: Int, enabled: Boolean, m
     PickerField(label, stringResource(R.string.ui_minutes_value, minutes), enabled, modifier) { close ->
         var hours by rememberSaveable { mutableIntStateOf(minutes / 60) }
         var remainder by rememberSaveable { mutableIntStateOf(minutes % 60) }
-        // Preserve the full positive Int domain accepted by PlannerApi, including multi-day estimates.
+        // Preserve the full nonnegative Int domain, including point and multi-day estimates.
         val limit = if (hours == Int.MAX_VALUE / 60) Int.MAX_VALUE % 60 else 59
-        WheelDialog(label, 2, close, { onChange(hours * 60 + remainder); close() }, valid = hours != 0 || remainder != 0) { width ->
+        WheelDialog(label, 2, close, { onChange(hours * 60 + remainder); close() }) { width ->
             Wheel(stringResource(R.string.wheel_hours), "wheel-hours", width, hours, 0..Int.MAX_VALUE / 60) {
                 hours = it
                 if (it == Int.MAX_VALUE / 60) remainder = minOf(remainder, Int.MAX_VALUE % 60)

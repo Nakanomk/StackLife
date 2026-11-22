@@ -1,0 +1,18 @@
+<resources>
+    <string name="chat_attach">Attach images</string>
+    <string name="chat_image_message">Image message</string>
+    <string name="chat_image_label">Image %1$d, %2$d × %3$d</string>
+    <string name="chat_remove_image">Remove image %1$d</string>
+    <string name="chat_failed_image">Image %1$d failed</string>
+    <string name="chat_image_unavailable">Image unavailable</string>
+    <string name="chat_retry">Retry</string>
+    <string name="chat_view_image">View image</string>
+    <string name="chat_zoom_out">Zoom out</string>
+    <string name="chat_zoom_in">Zoom in</string>
+    <string name="chat_reattach">Attach again</string>
+    <string name="chat_applied">Changes applied.</string>
+    <string name="chat_discarded">Proposal discarded</string>
+    <string name="chat_stale">Preview expired</string>
+    <string name="chat_failed">Changes not confirmed</string>
+    <string name="chat_new_messages">New messages</string>
+</resources>

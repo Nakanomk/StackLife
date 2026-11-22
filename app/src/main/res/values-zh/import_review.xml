@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="import_choose_timetable">选择课表</string>
+    <string name="import_source_scope">仅替换此课表中来自%1$s的课程。其他来源及已安排的任务保持不变。</string>
+    <string name="import_meeting_count">课次：%1$d</string>
+    <string name="import_valid_count">去重后有效课次：%1$d</string>
+    <string name="import_unresolved">待处理：%1$d</string>
+    <string name="import_corrected_count">已修正：%1$d</string>
+    <string name="import_excluded_count">已排除：%1$d</string>
+    <string name="import_flagged">需要核对的条目</string>
+    <string name="import_row">来源第 %1$d 行</string>
+    <string name="import_item">第 %1$d 项</string>
+    <string name="import_period_range">第 %1$d–%2$d 节</string>
+    <string name="import_starts_on">首次上课：%1$s</string>
+    <string name="import_show_raw">查看原始数据</string>
+    <string name="import_hide_raw">收起原始数据</string>
+    <string name="import_raw_week">原始周次：%1$s</string>
+</resources>

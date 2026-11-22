@@ -7,6 +7,7 @@ import java.time.format.TextStyle
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import kotlinx.serialization.Serializable
 
 data class ReviewedTimetable(val source: String, val term: TermSpec, val meetings: List<CourseMeeting>)
 const val MANUAL_SOURCE = "manual"
@@ -23,11 +24,13 @@ enum class BellSchedule { SUMMER, WINTER }
 data class PeriodTime(val start: LocalTime, val end: LocalTime)
 data class TermSpec(val id: String, val firstMonday: LocalDate, val weeks: Int, val initial: BellSchedule, val switchDate: LocalDate? = null)
 /** One occurrence, not a recurring course collapsed by name. day is ISO 1..7. */
+@Serializable
 data class CourseMeeting(val week: Int, val day: Int, val title: String, val room: String, val firstPeriod: Int, val lastPeriod: Int,
     val startMillis: Long, val endMillis: Long)
-data class ScheduledCourse(val termId: String, val source: String, val meeting: CourseMeeting, val conflicts: List<String> = emptyList())
+data class ScheduledCourse(val termId: String, val source: String, val meeting: CourseMeeting,
+    val conflicts: List<String> = emptyList(), val completed: Boolean = false)
 
-/** Identity of one weekly time pattern within the manual source, never just a title. */
+/** A weekly pattern within one source and timetable; never matched by title alone. */
 data class CoursePattern(val title: String, val room: String, val day: Int, val firstPeriod: Int, val lastPeriod: Int) {
     internal fun matches(m: CourseMeeting) = m.day == day && m.firstPeriod == firstPeriod && m.lastPeriod == lastPeriod &&
         m.title == title && m.room == room

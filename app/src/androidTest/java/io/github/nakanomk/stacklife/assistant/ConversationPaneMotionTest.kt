@@ -10,6 +10,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.StackLifeApp
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.acceptance.WorkspaceFixture
+import io.github.nakanomk.stacklife.acceptance.exerciseSheetAnchors
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -23,16 +24,41 @@ class ConversationPaneMotionTest {
     private val ui = createAndroidComposeRule<ComponentActivity>()
     @get:Rule val rules: RuleChain = RuleChain.outerRule(store).around(ui)
 
+    @Test fun readingEarlierMessagesDoesNotMoveUntilExplicitJumpOrOwnSend() {
+        val rows = androidx.compose.runtime.mutableStateOf((1L..45L).map { ChatLine(it, HistoryRole.ASSISTANT, "Message $it") })
+        val history = store.db.conversationHistory()
+        val images = AttachmentStore(InstrumentationRegistry.getInstrumentation().targetContext, { history.imageIds().toSet() },
+            "transcript-${java.util.UUID.randomUUID()}")
+        ui.setContent { ChatMessages(rows.value, images, androidx.compose.ui.Modifier, "transcript", live = true) }
+        fun awaitText(s: String): SemanticsNodeInteraction {
+            ui.waitUntil(5_000) { ui.onAllNodesWithText(s).fetchSemanticsNodes().isNotEmpty() }
+            return ui.onNodeWithText(s)
+        }
+        val list = ui.onNodeWithTag("transcript")
+        awaitText("Message 45")
+        list.performScrollToNode(hasText("Message 1"))
+        awaitText("Message 1").assertIsDisplayed()
+        ui.runOnIdle { rows.value += ChatLine(46, HistoryRole.ASSISTANT, "New reply") }
+        awaitText("新消息")
+        awaitText("Message 1").assertIsDisplayed()
+        awaitText("新消息").performClick()
+        awaitText("New reply").assertIsDisplayed()
+        list.performScrollToNode(hasText("Message 1"))
+        ui.runOnIdle { rows.value += ChatLine(47, HistoryRole.USER, "My new turn") }
+        awaitText("My new turn").assertIsDisplayed()
+    }
+
     @Test fun listThreadAndBackKeepTheSameDialogAndTheRealScrolledRow() {
         val history = store.db.conversationHistory()
         val oldest = runBlocking {
-            val first = history.start("Course", "Local conversation 1")
-            for (n in 2..30) history.start("Course", "Local conversation $n")
+            val first = history.sendUser(null, "Course", "Local conversation 1", null, emptyList()).conversationId
+            for (n in 2..30) history.sendUser(null, "Course", "Local conversation $n", null, emptyList())
             first
         }
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         ui.setContent {
-            val assistant = viewModel { AssistantModel(store.api, ConnectionStore(instrumentation.targetContext, "pane-motion"), OpenAiTransport(), history) }
+            val assistant = viewModel { AssistantModel(store.api, ConnectionStore(instrumentation.targetContext, "pane-motion"), OpenAiTransport(), history,
+                AttachmentStore(instrumentation.targetContext, { history.imageIds().toSet() }, "pane-images-${java.util.UUID.randomUUID()}")) }
             StackLifeApp(viewModel { WorkspaceViewModel(store.api) }, assistant)
         }
         fun tag(value: String): SemanticsNodeInteraction {
@@ -40,14 +66,22 @@ class ConversationPaneMotionTest {
             return ui.onNodeWithTag(value)
         }
         tag("assistant-history").performClick()
+        tag("assistant-history-list").assertIsDisplayed()
+        ui.exerciseSheetAnchors("history")
         val rowTag = "assistant-history-thread-$oldest"
         tag("assistant-history-list").performScrollToNode(hasTestTag(rowTag))
+        // Scrolling to an old thread gives the native nested scroll its expansion first.
+        // Use the accessibility equivalent if the viewport fit the requested item directly.
+        val handle = tag("planner-sheet-handle")
+        val expand = androidx.compose.ui.semantics.SemanticsActions.Expand
+        if (handle.fetchSemanticsNode().config.contains(expand)) handle.performSemanticsAction(expand)
         val row = tag(rowTag)
         val position = row.fetchSemanticsNode().boundsInRoot
         val dialog = ui.onNode(isDialog(), useUnmergedTree = true).fetchSemanticsNode().id
         row.performClick()
         tag("assistant-history-messages").assertIsDisplayed()
         assertEquals(dialog, ui.onNode(isDialog(), useUnmergedTree = true).fetchSemanticsNode().id)
+        ui.exerciseSheetAnchors("history-thread", startsFull = true)
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         assertEquals(position, tag(rowTag).fetchSemanticsNode().boundsInRoot)
         assertEquals(dialog, ui.onNode(isDialog(), useUnmergedTree = true).fetchSemanticsNode().id)

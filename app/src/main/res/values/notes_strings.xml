@@ -1,0 +1,8 @@
+<resources>
+    <string name="note_add">Add note</string>
+    <string name="note_edit">Edit note</string>
+    <string name="note_discard_question">Discard changes to this note?</string>
+    <string name="note_discard">Discard changes</string>
+    <string name="note_keep_editing">Keep editing</string>
+    <string name="note_file_error">Could not access this note draft on this device.</string>
+</resources>

@@ -1,0 +1,32 @@
+<resources>
+    <string name="countdown_new">新建倒数日</string>
+    <string name="countdown_empty">还没有倒数日</string>
+    <string name="countdown_empty_hint">选一个日期，看看还有多少天，或已过去多少天。</string>
+    <string name="countdown_details">倒数日详情</string>
+    <string name="countdown_not_found">倒数日已不存在。</string>
+    <string name="countdown_edit">编辑倒数日</string>
+    <string name="countdown_edit_action">编辑</string>
+    <string name="countdown_name">名称</string>
+    <string name="countdown_date">日期</string>
+    <string name="countdown_mode">显示方式</string>
+    <string name="countdown_until_mode">倒数</string>
+    <string name="countdown_since_mode">累计</string>
+    <string name="countdown_until">还有</string>
+    <string name="countdown_past">已过</string>
+    <string name="countdown_since">已累计</string>
+    <string name="countdown_today">今天</string>
+    <string name="countdown_pinned">置顶</string>
+    <string name="countdown_choose_photo">选择背景图片</string>
+    <string name="countdown_clear_photo">移除背景</string>
+    <string name="countdown_dimming">遮罩透明度</string>
+    <string name="countdown_preparing">正在准备图片…</string>
+    <string name="countdown_photo_error">无法使用此图，请重新选择可读取的静态图片。</string>
+    <string name="countdown_cleanup_error">未能释放草稿图片，请重试。</string>
+    <string name="countdown_delete">删除倒数日</string>
+    <string name="countdown_reorder">排序</string>
+    <string name="countdown_stale">数据已变更。请返回并重新打开编辑页，核对后再保存。</string>
+    <string name="countdown_preview">卡片预览</string>
+    <plurals name="countdown_day_unit">
+        <item quantity="other">天</item>
+    </plurals>
+</resources>

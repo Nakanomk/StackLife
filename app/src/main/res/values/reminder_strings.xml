@@ -2,8 +2,8 @@
     <string name="reminder_channel">Schedule reminders</string>
     <string name="reminder_off">Off</string>
     <string name="reminder_inexact">May be late</string>
-    <string name="reminder_on">15 min before</string>
-    <string name="reminder_explanation">Get a notification 15 minutes before scheduled tasks, classes, wake-up and bedtime. Items added with less notice can alert immediately. Items that have already started are skipped.</string>
+    <string name="reminder_on">Notifications allowed</string>
+    <string name="reminder_explanation">Rules are saved even when notifications are off. Past reminder times are not backfilled. If you force-stop StackLife, open it again to schedule future reminders.</string>
     <string name="reminder_failed">Scheduling failed</string>
     <string name="reminder_retry">Try scheduling reminders again</string>
     <string name="reminder_blocked_hint">Notifications are off. Allow them to receive reminders.</string>
@@ -13,9 +13,29 @@
     <string name="reminder_allow_exact">Allow precise reminders</string>
     <string name="reminder_settings_missing">This device cannot open that settings page. Check StackLife in Android Settings.</string>
     <string name="reminder_starts_at">Starts at %1$s</string>
-    <string name="reminder_group_at">%1$s · %2$s</string>
-    <plurals name="reminder_count">
-        <item quantity="one">%d upcoming item</item>
-        <item quantity="other">%d upcoming items</item>
-    </plurals>
+    <string name="reminder_complete">Mark complete</string>
+    <string name="reminder_rules">Reminders</string>
+    <string name="reminder_course_defaults">Default class reminders</string>
+    <string name="reminder_occurrence_rules">Reminders for this occurrence</string>
+    <string name="reminder_inherit">Use default rules for this occurrence</string>
+    <string name="reminder_no_rules">No reminders</string>
+    <string name="reminder_add">Add reminder</string>
+    <string name="reminder_edit">Edit reminder</string>
+    <string name="reminder_remove">Remove reminder</string>
+    <string name="reminder_when">Notify me</string>
+    <string name="reminder_start">At start</string>
+    <string name="reminder_minutes_before">%1$d min before</string>
+    <string name="reminder_hours_before">%1$d h before</string>
+    <plurals name="reminder_days_before"><item quantity="one">%d day before</item><item quantity="other">%d days before</item></plurals>
+    <string name="reminder_millis_before">%1$d ms before</string>
+    <string name="reminder_custom">Custom lead time</string>
+    <string name="reminder_absolute">Specific date and time</string>
+    <string name="reminder_amount">Amount</string>
+    <string name="reminder_unit">Unit</string>
+    <string name="reminder_days">Days</string>
+    <string name="reminder_date">Reminder date</string>
+    <string name="reminder_clock">Reminder time</string>
+    <string name="reminder_duplicate">This reminder already exists.</string>
+    <string name="reminder_expired">This time has passed. No notification will be sent.</string>
+    <string name="reminder_read_failed">Could not read reminders.</string>
 </resources>

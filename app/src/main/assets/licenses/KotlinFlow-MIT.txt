@@ -1,3 +1,8 @@
+KotlinFlow 1.0.1 (https://repo.maven.apache.org/maven2/io/github/joaonart/kotlinflow/1.0.1/)
+StackLife uses KotlinFlow's directed edges and read-only pan/zoom. The local proposal overview adapts
+components/MiniMap.kt: fit both snapshots to one logical bounding box; draw changed nodes and edges
+without viewport controls. The full diagram uses the library, not a second editable canvas.
+
 MIT License
 
 Copyright (c) 2026 João Alves

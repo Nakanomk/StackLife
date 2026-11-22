@@ -20,6 +20,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.WorkspaceViewModel
+import io.github.nakanomk.stacklife.courses.ScheduledCourse
+import io.github.nakanomk.stacklife.planner.AgendaOccurrence
+import io.github.nakanomk.stacklife.planner.OccurrenceKey
 import io.github.nakanomk.stacklife.planner.DayPlan
 import io.github.nakanomk.stacklife.planner.PlannerQuery
 import io.github.nakanomk.stacklife.planner.PlannerCommand
@@ -27,28 +30,38 @@ import io.github.nakanomk.stacklife.workspace.rememberSubmission
 
 @Composable
 internal fun EventDay(
-    plan: DayPlan, entries: List<AxisEntry>, model: WorkspaceViewModel, onEdit: (String) -> Unit, onAdd: () -> Unit,
-    revealStart: Long?, onRevealed: () -> Unit, top: Dp, bottom: Dp, trayOpen: Boolean, toggleTray: () -> Unit,
+    plan: DayPlan, placement: TimeGridPlacement, model: WorkspaceViewModel, editTray: (String) -> Unit, onEdit: (AgendaOccurrence) -> Unit, openCourse: (ScheduledCourse) -> Unit, onMore: (TimeGridPlacement.Overflow) -> Unit, onAdd: () -> Unit,
+    focused: String?, revealKey: OccurrenceKey?, onRevealed: () -> Unit, top: Dp, bottom: Dp, trayOpen: Boolean, toggleTray: () -> Unit,
 ) {
-    val rows = remember(plan.day, entries) { dayEventRows(plan.day, entries) }
+    val rows = remember(plan.day, placement) { dayEventRows(plan.day, placement) }
     val submission = rememberSubmission(model)
     val list = rememberLazyListState()
-    LaunchedEffect(revealStart, rows) {
-        if (revealStart != null) {
-            val index = rows.indexOfFirst { it is DayEventRow.Event && it.entry is AxisEntry.Task && it.entry.startMillis == revealStart }
+    val wheel = dayWheelEnabled()
+    LaunchedEffect(revealKey, rows) {
+        if (revealKey != null) {
+            val index = rows.indexOfFirst { when (it) {
+                is DayEventRow.Event -> it.entry.key == revealKey
+                is DayEventRow.More -> it.group.hidden.any { item -> item.key == revealKey }
+                is DayEventRow.Gap -> false
+            } }
             if (index >= 0) { list.scrollToItem(index); onRevealed() }
         }
     }
     var gapStart by rememberSaveable { mutableStateOf<Long?>(null) }
     var gapEnd by rememberSaveable { mutableLongStateOf(0L) }
     var gapRevision by rememberSaveable { mutableLongStateOf(0L) }
-    DayWithTray(plan, null, true, onEdit, onAdd, top, bottom, trayOpen, toggleTray) { spine, tail ->
+    DayWithTray(plan, null, true, editTray, onAdd, top, bottom, trayOpen, toggleTray) { spine, tail ->
         LazyColumn(Modifier.fillMaxSize().padding(top = top).testTag("day-events"), state = list,
             contentPadding = PaddingValues(bottom = tail)) {
-            items(rows.size) { index ->
+            items(rows.size, key = { index -> when (val row = rows[index]) {
+                is DayEventRow.Event -> row.entry.stableKey
+                is DayEventRow.More -> "more:${row.start}"
+                is DayEventRow.Gap -> "gap:${row.start}"
+            } }) { index ->
                 val row = rows[index]
                 key(row) {
-                    EventRow(row, plan.day, spine, plan.revision, !submission.busy, onEdit, { submission.send(it) }) { gap ->
+                    EventRow(row, plan.day, spine, plan.revision, !submission.busy, focused,
+                        Modifier.listWheel(wheel && row !is DayEventRow.Gap, list, index), onEdit, openCourse, onMore, { submission.send(it) }) { gap ->
                         gapStart = gap.start; gapEnd = gap.end; gapRevision = plan.revision
                     }
                 }
@@ -66,8 +79,8 @@ internal fun EventDay(
 }
 
 @Composable
-private fun EventRow(row: DayEventRow, day: PlannerQuery.Day, spine: Dp, revision: Long, enabled: Boolean, onEdit: (String) -> Unit,
-    complete: (PlannerCommand) -> Unit, onGap: (DayEventRow.Gap) -> Unit) {
+private fun EventRow(row: DayEventRow, day: PlannerQuery.Day, spine: Dp, revision: Long, enabled: Boolean, focused: String?, wheel: Modifier, onEdit: (AgendaOccurrence) -> Unit,
+    openCourse: (ScheduledCourse) -> Unit, onMore: (TimeGridPlacement.Overflow) -> Unit, complete: (PlannerCommand) -> Unit, onGap: (DayEventRow.Gap) -> Unit) {
     val colors = MaterialTheme.colorScheme
     val entry = (row as? DayEventRow.Event)?.entry
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 0.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -75,7 +88,7 @@ private fun EventRow(row: DayEventRow, day: PlannerQuery.Day, spine: Dp, revisio
             textAlign = TextAlign.End, color = colors.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
         Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
             if (entry != null) {
-                val course = entry is AxisEntry.Course
+                val course = entry.course != null
                 Box(Modifier.fillMaxSize().background(if (course) colors.tertiaryContainer else colors.secondaryContainer, CircleShape),
                     contentAlignment = Alignment.Center) {
                     Icon(painterResource(if (course) R.drawable.ic_calendar_view_week else R.drawable.ic_schedule), null,
@@ -85,9 +98,10 @@ private fun EventRow(row: DayEventRow, day: PlannerQuery.Day, spine: Dp, revisio
         }
         val body = Modifier.weight(1f).padding(start = 4.dp, end = 8.dp).heightIn(min = 48.dp)
         when (row) {
-            is DayEventRow.Event -> AgendaEventCard(row.entry, day, revision, enabled, onEdit, complete, body, wrap = true)
+            is DayEventRow.Event -> AgendaEventCard(row.entry, day, revision, enabled, onEdit, openCourse, complete, body.then(wheel), wrap = true, focused = row.entry.stableKey == focused)
+            is DayEventRow.More -> MoreEventsButton(row.group, onMore, body.then(wheel))
             is DayEventRow.Gap -> {
-                val canAdd = row.end - row.start >= MINUTE_MS
+                val canAdd = row.end > row.start
                 val label = stringResource(R.string.today_free_duration, elapsedLabel(row.end - row.start))
                 val add = if (canAdd) Modifier.clickable(onClickLabel = stringResource(R.string.today_add_in_gap), role = Role.Button) { onGap(row) } else Modifier
                 Row(body.testTag("day-gap:${row.start}").then(add).padding(horizontal = 4.dp),

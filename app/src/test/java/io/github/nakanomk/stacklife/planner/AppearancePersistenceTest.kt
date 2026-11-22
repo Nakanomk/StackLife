@@ -8,6 +8,27 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppearancePersistenceTest {
+    @Test fun fourTabSettingsAndStoredChatSnapshotsDecodeBeforeStrictConstruction() {
+        val old = """{"order":["GRAPHS","TODAY","COURSES","WORKSPACE"],"start":"COURSES","unknownPreference":3}"""
+        val order = listOf(Destination.GRAPHS, Destination.TODAY, Destination.COURSES, Destination.WORKSPACE, Destination.COUNTDOWN)
+        val a = decodeAppearance(old)
+        assertEquals(order, a.visibleOrder); assertEquals(Destination.COURSES, a.start)
+        val snapshot = kotlinx.serialization.json.Json.decodeFromString<ChangeSnapshot>("""{"type":"appearance","value":$old}""")
+        assertEquals(AppearanceSnapshot(a), snapshot)
+        val selected = a.withVisible(setOf(Destination.COUNTDOWN,Destination.GRAPHS))
+        assertEquals(Destination.COUNTDOWN, selected.start); assertEquals(selected, decodeAppearance(encodeAppearance(selected)))
+        val future = decodeAppearance("""{"order":["FUTURE","COURSES"],"visible":["FUTURE","GRAPHS"],"start":"FUTURE","pageBackgrounds":{"FUTURE":{"other":true}}}""")
+        assertEquals(listOf(Destination.GRAPHS), future.visibleOrder); assertEquals(Destination.GRAPHS, future.start)
+    }
+    @Test fun emptyVisibilityHiddenStartAndDuplicateOrderAreRejectedOnWrite() {
+        val base = Appearance()
+        for (json in listOf("""{"visible":[]}""", """{"visible":["GRAPHS"]}""",
+            """{"order":["GRAPHS","TODAY","TODAY","COURSES","WORKSPACE"]}""")) {
+            val patch = AppearanceFields(AppearanceGroup.LAYOUT, kotlinx.serialization.json.Json.parseToJsonElement(json) as kotlinx.serialization.json.JsonObject)
+            assertTrue(runCatching { patch.applyTo(base) }.exceptionOrNull() is IllegalArgumentException)
+        }
+    }
+
     @Test fun missingGlassPreferenceEnablesGlassAndAnExplicitOptOutSurvivesUpgrade() {
         assertTrue(decodeAppearance("{}").glass)
         val legacy = decodeAppearance("""{"compact":true}""")

@@ -1,14 +1,23 @@
 package io.github.nakanomk.stacklife.transitions
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
@@ -47,6 +56,29 @@ internal fun DetailCard(
     Box(propagateMinConstraints = true) {
         Surface(onClick = link?.open ?: open, modifier = modifier.then(link?.modifier ?: Modifier),
             shape = shape, color = color, shadowElevation = shadowElevation, content = content)
-        CardBoundsAnchor("$kind:$id", Modifier.matchParentSize())
+        CardBoundsAnchor("$kind:$id", Modifier.matchParentSize(), shape)
     }
+}
+
+@Composable
+internal fun CardTitle(title: String, modifier: Modifier = Modifier) {
+    Text(title, modifier, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun CardMetadata(content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+        ProvideTextStyle(MaterialTheme.typography.labelMedium) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                content()
+            }
+        }
+    }
+}
+
+@Composable
+internal fun CardSummary(text: String) {
+    Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 2, overflow = TextOverflow.Ellipsis)
 }

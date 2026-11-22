@@ -8,6 +8,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -25,12 +26,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -44,12 +43,16 @@ import io.github.nakanomk.stacklife.appearance.StackLifeSurface
 import io.github.nakanomk.stacklife.AddTaskFab
 import io.github.nakanomk.stacklife.taskFabClearance
 import io.github.nakanomk.stacklife.R
+import io.github.nakanomk.stacklife.markdown.markdownSummary
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.planner.Workspace
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
+import io.github.nakanomk.stacklife.transitions.CardMetadata
+import io.github.nakanomk.stacklife.transitions.CardSummary
+import io.github.nakanomk.stacklife.transitions.CardTitle
 import io.github.nakanomk.stacklife.transitions.DetailCard
 import io.github.nakanomk.stacklife.transitions.LocalCardList
 import io.github.nakanomk.stacklife.transitions.noCardBounds
@@ -163,7 +166,7 @@ private fun QueueList(
     tasks: List<QueueTask>, scroll: LazyListState, actions: WorkspaceActions, onTask: (String) -> Unit,
     onPush: (List<String>) -> String?, shared: SharedModifier, topClearance: Dp, bottomClearance: Dp, revision: Long,
 ) {
-    val appearance = LocalAppearance.current
+    val compact = LocalAppearance.current.compact
     val source = detailListSource(scroll, topClearance, bottomClearance, revision)
     var order by remember(tasks) { mutableStateOf(tasks) }
     val settledSource = if (source != null && order != tasks) null else source
@@ -188,13 +191,16 @@ private fun QueueList(
         }
     }
     LazyColumn(Modifier.fillMaxSize().then(source?.modifier ?: Modifier).testTag("queue"), state = scroll,
-        contentPadding = dockListPadding(topClearance, bottomClearance)) {
+        contentPadding = dockListPadding(topClearance, bottomClearance), verticalArrangement = listSpacing) {
         item {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                 val selected = selection
-                Text(if (selected == null) stringResource(R.string.ui_queue_summary, tasks.size, tasks.sumOf { it.minutes.toLong() })
-                    else stringResource(R.string.ui_selected_count, selected.size), Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(Modifier.weight(1f)) { CardMetadata {
+                    if (selected == null) {
+                        Text(stringResource(R.string.queue_unfinished_count, tasks.size))
+                        Text(stringResource(R.string.queue_estimate_minutes, tasks.sumOf { it.minutes.toLong() }))
+                    } else Text(stringResource(R.string.ui_selected_count, selected.size))
+                } }
                 if (tasks.size > 1 || selected != null) TextButton(modifier = Modifier.testTag("queue-select"), enabled = !action.busy,
                     onClick = { selection = if (selected == null) arrayListOf() else null }) {
                     Text(if (selected == null) stringResource(R.string.ui_select_multiple) else stringResource(R.string.ui_cancel))
@@ -217,37 +223,30 @@ private fun QueueList(
         }
         itemsIndexed(order, key = { _, task -> task.id }) { index, task ->
             val selected = selection
+            val verticalInset = if (compact) 4.dp else 8.dp
+            val row = Modifier.fillMaxWidth().heightIn(min = if (compact) 52.dp else 64.dp)
+                .padding(start = 16.dp, end = 8.dp, top = verticalInset, bottom = verticalInset)
             if (selected != null) {
-                CheckRow(task.title, task.id in selected, enabled = !action.busy) { selection = ArrayList(selected.toggle(task.id)) }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                val checked = task.id in selected
+                Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                    Row(Modifier.toggleable(checked, enabled = !action.busy, role = Role.Checkbox) {
+                        selection = ArrayList(selected.toggle(task.id))
+                    }.then(row), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Checkbox(checked, onCheckedChange = null, enabled = !action.busy)
+                        QueueTaskInfo(task, index, Modifier.weight(1f))
+                    }
+                }
                 return@itemsIndexed
             }
             ReorderableItem(reorder, key = task.id) { dragging ->
-                val head = index == 0
                 DetailCard(
                     source = if (dragging) null else settledSource, kind = "task", id = task.id, onDetail = onTask,
                     modifier = shared("task:${task.id}").fillMaxWidth().testTag("task:${task.id}"),
-                    shape = RectangleShape, color = MaterialTheme.colorScheme.surface,
+                    shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow,
                     shadowElevation = if (dragging) 6.dp else 0.dp,
                 ) {
-                    val muted = MaterialTheme.colorScheme.onSurfaceVariant
-                    Row(Modifier.fillMaxWidth().heightIn(min = if (appearance.compact) 52.dp else 64.dp)
-                        .padding(vertical = if (appearance.compact) 4.dp else 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            if (head) Text(stringResource(R.string.ui_current_priority), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
-                            Text(task.title, shared.title("task:${task.id}"), style = MaterialTheme.typography.bodyLarge,
-                                maxLines = 3, overflow = TextOverflow.Ellipsis)
-                            val duration = if (appearance.showDuration) stringResource(R.string.ui_minutes_value, task.minutes) else null
-                            val note = task.notes.takeIf { appearance.showNotes && it.isNotBlank() }
-                            val meta = remember(duration, note) {
-                                when { duration == null -> note.orEmpty(); note == null -> duration; else -> "$duration · $note" }
-                            }
-                            if (meta.isNotEmpty()) Text(meta, color = muted, style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            if (task.scheduledStartMillis != null && task.scheduledEndMillis != null)
-                                Text(stringResource(R.string.ui_scheduled_range, scheduledRange(task.scheduledStartMillis, task.scheduledEndMillis)), color = muted,
-                                    style = MaterialTheme.typography.bodySmall)
-                        }
+                    Row(row, verticalAlignment = Alignment.CenterVertically) {
+                        QueueTaskInfo(task, index, Modifier.weight(1f), shared.title("task:${task.id}"))
                         if (order.size > 1) MoveMenu(
                             modifier = Modifier.longPressDraggableHandle(enabled = !action.busy, interactionSource = drags),
                             title = task.title, index = index, lastIndex = order.lastIndex, enabled = !action.busy,
@@ -255,12 +254,25 @@ private fun QueueList(
                         )
                     }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
         }
     }
 }
 
+@Composable
+private fun QueueTaskInfo(task: QueueTask, index: Int, modifier: Modifier, titleModifier: Modifier = Modifier) {
+    val appearance = LocalAppearance.current
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        CardTitle(task.title, titleModifier)
+        CardMetadata {
+            if (index == 0) Text(stringResource(R.string.ui_current_priority), color = MaterialTheme.colorScheme.primary)
+            else Text(stringResource(R.string.ui_queue_position, index + 1))
+            if (appearance.showDuration) Text(stringResource(R.string.ui_duration_estimate, task.minutes))
+            task.schedule?.let { Text(stringResource(R.string.ui_scheduled_range, scheduleText(it))) }
+        }
+        if (appearance.showNotes && task.notes.isNotBlank()) CardSummary(remember(task.notes) { markdownSummary(task.notes) })
+    }
+}
 
 private fun <T> List<T>.moved(from: Int, to: Int): List<T> = toMutableList().apply { add(to, removeAt(from)) }
 

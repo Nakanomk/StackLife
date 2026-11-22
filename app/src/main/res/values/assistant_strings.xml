@@ -14,8 +14,6 @@
     <string name="assistant_notice_description">"%1$s and details"</string>
     <string name="assistant_expanded">"Expanded"</string>
     <string name="assistant_collapsed">"Collapsed"</string>
-    <string name="assistant_collapse">"Collapse conversation"</string>
-    <string name="assistant_expand">"Expand conversation"</string>
     <string name="assistant_close">"Close"</string>
     <string name="assistant_hide_scope">"Hide data scope"</string>
     <string name="assistant_edit_scope">"Adjust data scope"</string>

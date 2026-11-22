@@ -1,0 +1,4 @@
+<resources>
+    <string name="provider_images_toggle">支持图片输入</string>
+    <string name="provider_images_hint">仅当这个服务地址和模型支持在 Chat Completions 中接收图片时开启。保存配置不会联网。</string>
+</resources>

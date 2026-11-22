@@ -223,6 +223,7 @@ class SceneMotionTest {
         ui.runOnUiThread { input.backCancelled() }
         ui.mainClock.advanceTimeBy(600)
         assertEquals("Cancel must keep the original detail fully open", open.box, bounds(detail))
+        assertUncoveredPixels(open.pixels, pixels(), Rect.Zero)
         start(input); seek(input, .55f); complete(input)
         assertEquals("Return must restore this ID at its old scroll position", row, bounds(key))
         ui.onNodeWithTag(detail).assertDoesNotExist()
@@ -586,11 +587,22 @@ class SceneMotionTest {
         runBlocking { store.apply(PlannerCommand.TaskFinish(a.id)) }
         ui.waitUntil(12_000) { ui.onAllNodesWithText("这项任务已不在队列中。").fetchSemanticsNodes().size == 1 }
         val full = bounds(key)
+        val before = pixels()
         withClockAndBack { input ->
             start(input); seek(input, .50f)
             val outgoing = ui.onNodeWithTag(key).fetchSemanticsNode()
             assertEquals("No source: do not contract toward its replacement", full, outgoing.boundsInRoot)
+            val midway = pixels()
             complete(input)
+            val after = pixels()
+            var blended = 0
+            val trim = (28 * ui.density.density).roundToInt()
+            for (y in trim until before.height - trim step 3) for (x in 3 until before.width - 3 step 3) {
+                val old = before[x, y]
+                val new = after[x, y]
+                if (delta(old, new) > .3f && delta(midway[x, y], old) > .04f && delta(midway[x, y], new) > .04f) blended++
+            }
+            assertTrue("An absent origin must fade the detail in place, not hold an opaque page until disposal", blended > 30)
         }
         ui.onNodeWithTag("task:${b.id}").assertIsDisplayed()
         ui.onNodeWithTag("task:${a.id}").assertDoesNotExist()

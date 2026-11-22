@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="slot_point_at">%1$s 单点</string>
+    <string name="slot_daily">每日重复</string>
+    <string name="slot_complete_this">完成这次的%1$s</string>
+    <string name="slot_finish_series">结束整个系列</string>
+    <string name="slot_more_events">另有 %1$d 项，查看全部重叠事件</string>
+    <string name="slot_overlapping">重叠事件（%1$d 项）</string>
+    <string name="slot_repeat">重复</string>
+    <string name="slot_once">不重复</string>
+    <string name="slot_scope">修改范围</string>
+    <string name="slot_this">仅这次</string>
+    <string name="slot_following">这次及以后</string>
+    <string name="slot_all">整个系列</string>
+    <string name="slot_end_date">截止日期</string>
+    <string name="slot_unbounded">不设截止日期</string>
+    <string name="slot_zone">时区</string>
+    <string name="slot_follow_zone">跟随设备时区</string>
+    <string name="slot_last_invalid">截止日期早于开始日期。</string>
+    <string name="slot_missing">这次事件已不在日程中。</string>
+    <string name="slot_cancel_this">仅取消这次事件</string>
+    <string name="slot_cancel_following">取消这次及以后的事件</string>
+    <string name="slot_disable_series">停用整个系列</string>
+    <string name="slot_duration_type">事件类型</string>
+    <string name="slot_point">单点事件</string>
+    <string name="slot_span">持续事件</string>
+    <string name="slot_series_notes">整个系列共用这份笔记。</string>
+    <string name="slot_stale">事件已更新，请重新打开后编辑。</string>
+    <string name="slot_shared_reminders">这些提醒规则适用于整个系列。</string>
+    <string name="slot_search_zone">搜索时区</string>
+    <string name="slot_kept_exceptions">保留的单次例外：%1$d</string>
+    <string name="slot_overlap_notice">此时段与其他 %1$d 项重叠。</string>
+    <string name="slot_pick_zone">选择 IANA 时区</string>
+    <string name="slot_choose_shorter">请为每日系列选择滚轮范围内的时长。</string>
+    <string name="slot_this_completed">已完成这次事件</string>
+    <string name="slot_release_this">松手仅调整这次事件</string>
+</resources>

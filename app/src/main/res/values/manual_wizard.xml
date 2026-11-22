@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="manual_step_term">Choose a timetable</string>
+    <string name="manual_step_course">Class and time</string>
+    <string name="manual_next">Next</string>
+    <string name="manual_progress">Step %1$d of 4</string>
+    <string name="manual_show_bell">Show bell schedule options</string>
+    <string name="manual_hide_bell">Hide bell schedule options</string>
+    <string name="manual_draft_error">Cannot read or save the local draft. Check device storage before continuing.</string>
+    <string name="manual_interrupted">The previous save could not be verified. Nothing will be submitted again. Close this sheet and check your timetable.</string>
+    <string name="manual_missing_class">This class no longer exists. Close this sheet and select a class again.</string>
+    <string name="manual_read_class_failed">Cannot read the class. Close this sheet and open it again.</string>
+    <string name="manual_no_changes">There are no changes to save.</string>
+    <string name="manual_read_term_failed">Could not read the timetable.</string>
+</resources>

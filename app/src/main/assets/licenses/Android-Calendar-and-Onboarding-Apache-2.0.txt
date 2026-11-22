@@ -1,0 +1,13 @@
+Etar / Android Calendar · EditEventHelper.java
+Copyright (C) 2010 The Android Open Source Project. Apache License, Version 2.0.
+https://github.com/Etar-Group/Etar-Calendar/blob/0bee79a44e10b074d6638e2d113a7d0002696b5e/app/src/main/java/com/android/calendar/event/EditEventHelper.java
+
+StackLife 0.10.12: planner/AgendaModels.kt (EditScope, OccurrenceKey), storage/AgendaDraft.kt (override), and today/ScheduleFields.kt adapt the single/this-and-following/entire-series editing behavior. The original day remains the identity when an occurrence moves. Persistence is through the local PlannerApi and Room, not CalendarProvider. No calendar artwork is included.
+
+Now in Android · ForYouScreen.kt
+Copyright 2022 The Android Open Source Project. Apache License, Version 2.0.
+https://github.com/android/nowinandroid/blob/2982e63cb691ad49cd009aab43dc206fee6699c2/feature/foryou/impl/src/main/kotlin/com/google/samples/apps/nowinandroid/feature/foryou/impl/ForYouScreen.kt
+
+StackLife 0.10.12: onboarding/OnboardingScreen.kt adapts actual selectable items and explicit completion. Completion and skip are stored locally; no account, interest data, telemetry, sample tasks or NiA resources are included.
+
+Full Apache License, Version 2.0: see the license text in Backdrop-Miuix-Apache-2.0.txt in this directory.

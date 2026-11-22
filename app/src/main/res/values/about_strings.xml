@@ -21,11 +21,13 @@
     <string name="about_help_workspace">Pause work without losing your place</string>
     <string name="about_help_workspace_body">Push the queue when interrupted, or select a few tasks to push. Open the frame to edit or restore tasks. Once empty, the frame can be deleted from its details; Clear history removes only empty frames, not their tasks.</string>
     <string name="about_help_today">Give a task a time</string>
-    <string name="about_help_today_body">Drag a queued task onto the timeline or tap it to set a time. The checkbox at the right marks an item complete; tap again to undo. Class and routine checkmarks apply to that occurrence only. Set your wake-up time, bedtime and 15-minute reminders at the top of Settings.</string>
+    <string name="about_help_today_body">Drag a task onto the timeline or tap to set a time. Use zero duration for a point in time. Tap +N to see all overlapping events. Checking a daily event completes only that occurrence. The schedule editor supports multiple reminders, including a specific time for one occurrence. Check notification permissions in Settings.</string>
     <string name="about_help_graphs">Work backwards from a goal</string>
-    <string name="about_help_graphs_body">Create a graph and add one node per step. Draw each arrow from a prerequisite to the step that needs it. Choose the goal and review the ordered steps. Add to queue appends those steps; Save as frame keeps them on the stack for later.</string>
+    <string name="about_help_graphs_body">Draw arrows from prerequisites towards a goal. Create template nodes or link existing tasks and specific daily occurrences. Add to queue creates tasks only for templates. Linked tasks stay in place; saving a frame keeps a read-only snapshot of each link.</string>
     <string name="about_help_courses">Reserve class times</string>
     <string name="about_help_courses_body">Add classes manually or import your school timetable. Review the term, first Monday, weeks and periods before saving. Imported classes appear on Today. Importing again replaces only that school’s classes in the selected term.</string>
+    <string name="about_help_countdowns">Keep track of a date</string>
+    <string name="about_help_countdowns_body">Choose a calendar date to count days until or since it. Countdowns do not reserve time or schedule notifications. Hide a tab in Settings → Layout without losing access to its page under Feature shortcuts.</string>
     <string name="about_help_assistant">Review assistant changes</string>
     <string name="about_help_assistant_body">The planner works without a model. To chat, configure your service and key in Settings. Tapping Send contacts that service. Sharing other pages or notes requires permission; a proposed change does not alter your schedule until you review and apply it.</string>
     <string name="about_frames">Foreground frame measurement</string>

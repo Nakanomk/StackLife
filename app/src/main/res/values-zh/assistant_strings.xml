@@ -14,12 +14,10 @@
     <string name="assistant_notice_description">"%1$s与说明"</string>
     <string name="assistant_expanded">"已展开"</string>
     <string name="assistant_collapsed">"已收起"</string>
-    <string name="assistant_collapse">"收起对话"</string>
-    <string name="assistant_expand">"展开对话"</string>
     <string name="assistant_close">"关闭"</string>
     <string name="assistant_hide_scope">"收起数据范围"</string>
     <string name="assistant_edit_scope">"调整数据范围"</string>
-    <string name="assistant_share_notes">"发送任务及节点备注"</string>
+    <string name="assistant_share_notes">"发送任务及节点笔记"</string>
     <string name="assistant_share_reasons">"发送栈帧原因"</string>
     <string name="assistant_share_classes">"发送课程名与地点"</string>
     <string name="assistant_not_connected">"尚未连接模型服务"</string>
@@ -37,7 +35,7 @@
     <string name="assistant_open_importer">"打开本地课表导入器"</string>
     <string name="assistant_user">"你"</string>
     <string name="assistant_model_reply">"模型答复"</string>
-    <string name="assistant_notes">"备注"</string>
+    <string name="assistant_notes">"笔记"</string>
     <string name="assistant_reasons">"栈帧原因"</string>
     <string name="assistant_classes">"课程名与地点"</string>
     <string name="assistant_none">"无"</string>
@@ -49,7 +47,7 @@
     <string name="assistant_model_name">"模型名称"</string>
     <string name="assistant_keep_key">"API Key（留空保留原密钥）"</string>
     <string name="assistant_anthropic_key">"使用绑定工作区的 Anthropic API Key。"</string>
-    <string name="assistant_service_privacy">"保存配置不会联网。点发送时，消息将直接发往%1$s；默认只开放当前页面，不含备注、栈帧原因或课程详情。密钥仅在本机加密保存。"</string>
+    <string name="assistant_service_privacy">"保存配置不会联网。点发送时，消息将直接发往%1$s；默认只开放当前页面，不含笔记、栈帧原因或课程详情。密钥仅在本机加密保存。"</string>
     <string name="assistant_save_service">"保存服务配置"</string>
     <string name="assistant_remove_service">"移除本机配置"</string>
     <string name="assistant_remove_service_title">"移除模型服务？"</string>

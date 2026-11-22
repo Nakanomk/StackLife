@@ -16,6 +16,7 @@ import io.github.nakanomk.stacklife.courses.HUB_LOGIN_URL
 import io.github.nakanomk.stacklife.courses.HUB_URL
 import io.github.nakanomk.stacklife.courses.TermSpec
 import io.github.nakanomk.stacklife.courses.meeting
+import io.github.nakanomk.stacklife.courses.dateRangeLabel
 import io.github.nakanomk.stacklife.planner.CourseWeek
 import io.github.nakanomk.stacklife.planner.PlannerQuery
 import io.github.nakanomk.stacklife.planner.Terms
@@ -90,7 +91,7 @@ class HubMobileImportTest {
 
         await(hasTestTag("termMonday")).assertTextContains(term.firstMonday.toString())
         assertNotImported()
-        ui.onNodeWithTag("termId").performScrollTo().performTextInput(term.id)
+        ui.onNodeWithTag("importTerm:new").assertIsSelected()
         ui.chooseNumber("termWeeks", term.weeks)
         ui.onNodeWithTag("reviewCourseRows").performScrollTo().performClick()
         val list = await(hasTestTag("courseIssues"))
@@ -98,6 +99,12 @@ class HubMobileImportTest {
         await(preview).assertIsDisplayed().assertIsNotEnabled()
         list.performScrollToNode(hasTestTag("previewCourseImport"))
         ui.onNodeWithTag("previewCourseImport").assertIsNotEnabled()
+        list.performScrollToNode(hasTestTag("excludeIssue-0"))
+        ui.onNodeWithTag("issueRaw-0").assertDoesNotExist()
+        list.performScrollToNode(hasTestTag("issueRaw-0-toggle"))
+        ui.onNodeWithTag("issueRaw-0-toggle").performClick()
+        ui.onNodeWithTag("issueRaw-0").assertTextContains("实践", substring = true)
+        ui.onNodeWithTag("issueRaw-0-toggle").performClick()
         list.performScrollToNode(hasTestTag("excludeIssue-0"))
         ui.onNodeWithTag("excludeIssue-0").performClick()
         list.performScrollToNode(preview)
@@ -107,10 +114,11 @@ class HubMobileImportTest {
         assertNotImported()
         ui.onNode(confirm).performClick()
 
-        await(hasTestTag("course-week") and hasText(term.id)).assertIsDisplayed()
+        await(hasTestTag("course-week") and hasText(term.dateRangeLabel())).assertIsDisplayed()
         ui.onNodeWithTag("course-week").assertTextContains("第 1 周")
-        val week = store.api.observe(PlannerQuery.Week(term.id, 1)).first() as CourseWeek
-        assertEquals(term, week.term)
+        val created = (store.api.observe(PlannerQuery.Terms).first() as Terms).terms.single()
+        val week = store.api.observe(PlannerQuery.Week(created.id, 1)).first() as CourseWeek
+        assertEquals(term.copy(id = created.id), week.term)
         assertEquals(listOf(term.meeting(1, 3, title, room, 5, 6)), week.classes.map { it.meeting })
         assertEquals(before + 1, store.state().revision)
     }

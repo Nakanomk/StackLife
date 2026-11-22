@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import io.github.nakanomk.stacklife.appearance.wallpaperBackground
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
@@ -28,6 +29,7 @@ import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.transitions.LocalRouteOriginsEnabled
 import io.github.nakanomk.stacklife.transitions.routeOrigin
 
+internal val LocalFeatureBack = compositionLocalOf<(() -> Unit)?> { null }
 internal val LocalRootBottom = compositionLocalOf { 0.dp }
 internal val chromeGutter = 16.dp
 
@@ -51,7 +53,7 @@ internal fun RootPane(header: @Composable () -> Unit,
     val source = rememberPlannerBackdrop()
     val bottom = LocalRootBottom.current
     Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), topBar = {
-        Box(Modifier.fillMaxWidth().then(if (source == null) Modifier.background(MaterialTheme.colorScheme.surface) else Modifier)) {
+        Box(Modifier.fillMaxWidth().then(if (source == null) Modifier.wallpaperBackground(MaterialTheme.colorScheme.surface) else Modifier)) {
             if (source != null && !contentDrawsTopEdge) ScrollEdge(source, Modifier.matchParentSize())
             CompositionLocalProvider(LocalCapsuleBackdrop provides source) { header() }
         }
@@ -59,7 +61,7 @@ internal fun RootPane(header: @Composable () -> Unit,
         val top = insets.calculateTopPadding()
         Box(Modifier.fillMaxSize()) {
             val plane = Modifier.fillMaxSize()
-            Box(plane.plannerBackdrop(source)) { content(top, bottom) }
+            Box(plane.plannerBackdrop(source).wallpaperBackground(MaterialTheme.colorScheme.surface)) { content(top, bottom) }
             CompositionLocalProvider(LocalCapsuleBackdrop provides source) { overlay(top, bottom) }
         }
     }
@@ -88,7 +90,9 @@ internal fun RootToolbar(onSettings: () -> Unit, leading: (@Composable () -> Uni
     controls: @Composable RowScope.() -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = chromeGutter, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.width(48.dp), contentAlignment = Alignment.Center) { leading?.invoke() }
+        val back = LocalFeatureBack.current
+        if (back != null) GlassIcon(R.drawable.ic_arrow_back, stringResource(R.string.ui_back), back)
+        if (leading != null || back == null) Box(Modifier.width(48.dp), contentAlignment = Alignment.Center) { leading?.invoke() }
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             StackLifeSurface(CapsuleScene.CHROME, Modifier.testTag("root-toolbar"), MaterialTheme.colorScheme.surfaceContainer, elevation = 1.dp) {
                 Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically,

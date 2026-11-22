@@ -27,7 +27,7 @@ class ManualCourseTest {
     @Test fun manualCalendarIsAtomicAndSharesTimetableColorDayAndSlotRulesAcrossReopen() = runBlocking {
         val add = ManualCourse(term.id, null, series, term)
         val discarded = store.proposal(add)
-        assertEquals(3, discarded.changes.count { it.field.startsWith("新增课程") })
+        assertEquals(series.weeks, (discarded.changes.single().after as CourseSetSnapshot).meetings.map { it.week }.toSet())
         store.api.discard(discarded.proposalId); assertNull(week(1).term)
         assertTrue(store.api.preview(listOf(add.copy(after = series.copy(weeks = setOf(0))))) is PreviewResult.Rejected)
         assertNull(week(1).term)
@@ -39,22 +39,23 @@ class ManualCourseTest {
         assertEquals(MANUAL_SOURCE, morning.source)
         assertEquals(term.firstMonday.atTime(14, 30).atZone(campusZone).toInstant().toEpochMilli(), morning.meeting.startMillis)
         assertEquals(nov.atTime(14, 0).atZone(campusZone).toInstant().toEpochMilli(), winter.meeting.startMillis)
-        assertEquals(winter, day(nov).courses.single())
+        assertEquals(winter, day(nov).occurrences.mapNotNull { it.course }.single())
         assertTrue(store.api.preview(listOf(add)) is PreviewResult.Rejected)
         assertTrue(store.api.preview(listOf(add.copy(createTerm = null))) is PreviewResult.Rejected)
         store.apply(TaskAdd(TaskInput("排程")))
         val task = store.state().queue.single().id
         val start = nov.atTime(15, 0).atZone(campusZone).toOffsetDateTime()
-        assertTrue(store.api.preview(listOf(SlotSet(task, start, 30))) is PreviewResult.Rejected)
-        store.apply(SlotSet(task, start.plusMinutes(35), 30))
-        assertEquals(task, day(nov).blocks.single().taskId)
+        store.apply(exact(task,start,30)); assertEquals(listOf(winter.meeting.title),day(nov).occurrences.single { it.taskId == task }.conflicts)
+        store.apply(exact(task, start.plusMinutes(35), 30))
+        assertEquals(task, day(nov).occurrences.single { it.taskId == task }.taskId)
     }
 
     @Test fun identicalHubAndManualOccurrencesStayIndividuallyOwnedOnEditReimportAndRemove() = runBlocking {
         hub(term, "实验") { store.apply(it) }
         val add = ManualCourse(term.id, null, series)
         val proposed = store.proposal(add)
-        assertTrue(proposed.changes.any { it.field.startsWith("冲突") })
+        val conflict = (proposed.changes.single().after as CourseSetSnapshot).conflicts.single()
+        assertEquals(MANUAL_SOURCE, conflict.occurrence.source); assertEquals(HUST_SOURCE, conflict.other.course?.source)
         assertTrue(store.api.commit(proposed.proposalId) is CommitResult.Applied)
         val overlapping = week(9)
         assertEquals(setOf(MANUAL_SOURCE, HUST_SOURCE), overlapping.classes.map { it.source }.toSet())
@@ -63,13 +64,31 @@ class ManualCourseTest {
         hub(term.copy(firstMonday = term.firstMonday.plusWeeks(1)), "错误校历") {
             assertTrue(store.api.preview(listOf(it)) is PreviewResult.Rejected)
         }
+        val initial = overlapping.classes.single { it.source == MANUAL_SOURCE }
+        val key = OccurrenceKey.Course(CourseOccurrenceId.of(term.id,initial.source,initial.meeting))
+        val custom = ReminderPolicy(false,listOf(ReminderRule("before-lab",ReminderWhen.BeforeStart(90*60_000L))))
+        store.apply(SetOccurrenceCompletion(key,true),SetReminders(ReminderSubject.Occurrence(key),custom))
         val changed = ManualSeries(CoursePattern("实训", "B", 2, 7, 8), setOf(2, 9))
-        store.apply(ManualCourse(term.id, series, changed))
+        val edit = store.proposal(ManualCourse(term.id, series, changed))
+        val linkage = edit.changes.mapNotNull { it.after as? CourseSetSnapshot }.single().replacements.single()
+        assertEquals(9, linkage.old.week); assertEquals(9, linkage.new.week)
+        assertEquals(series.pattern.title, linkage.old.title); assertEquals(changed.pattern.title, linkage.new.title)
+        assertTrue(store.api.commit(edit.proposalId) is CommitResult.Applied)
+        store.reopen()
+        val replacement = OccurrenceKey.Course(linkage.new)
+        assertTrue(week(9).classes.single { it.source == MANUAL_SOURCE }.completed)
+        assertFalse(week(9).classes.single { it.source == HUST_SOURCE }.completed)
+        assertEquals(custom,(store.api.observe(PlannerQuery.Reminders(ReminderSubject.Occurrence(replacement))).first() as ReminderView).policy)
+        assertNull((store.api.observe(PlannerQuery.Occurrence(key,campusZone)).first() as OccurrenceView).occurrence)
+        assertFalse(week(2).classes.single { it.source == MANUAL_SOURCE }.completed)
         assertTrue(store.api.preview(listOf(ManualCourse(term.id, series, null))) is PreviewResult.Rejected)
         hub(term, "导入课") { store.apply(it) }
         assertEquals(setOf("实训", "导入课"), week(9).classes.map { it.meeting.title }.toSet())
-        val read = store.api.observe(PlannerQuery.ManualWeeks(term.id, changed.pattern)).first() as ManualWeeksView
+        val read = store.api.observe(PlannerQuery.CourseWeeks(term.id, MANUAL_SOURCE, changed.pattern)).first() as CourseWeeksView
         assertEquals(changed.weeks, read.weeks)
+        val other = week(9).classes.single { it.source == HUST_SOURCE }
+        val imported = store.api.observe(PlannerQuery.CourseWeeks(term.id, HUST_SOURCE, other.meeting.pattern())).first() as CourseWeeksView
+        assertEquals(setOf(9), imported.weeks)
         store.apply(TermRemove(term.id)); assertEquals(MANUAL_SOURCE, week(9).classes.single().source)
         hub(term, "独立课") { store.apply(it) }
         store.apply(ManualCourse(term.id, changed, null)); store.reopen()

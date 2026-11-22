@@ -3,7 +3,14 @@ package io.github.nakanomk.stacklife.acceptance
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Canvas
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.unit.LayoutDirection
@@ -13,6 +20,8 @@ import io.github.nakanomk.stacklife.StackLifeApp
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.planner.*
 import kotlinx.coroutines.runBlocking
+import kotlin.math.roundToInt
+import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -48,12 +57,38 @@ class LiquidDockGestureTest {
     }
 
     @Test fun largeFontGrowsFloatingDockWithoutDuplicatingLabelsOrLosingTargets() {
+        runBlocking { store.apply(PlannerCommand.EditAppearance(AppearancePatch.Replace(Appearance(theme = ThemeMode.LIGHT, glass = false)))) }
         launch(fontScale = 2f)
         ui.onNodeWithTag("navigation-capsule").assertHeightIsAtLeast(57.dp)
+        tab("countdown").performTouchInput { click() }; tab("countdown").assertIsSelected()
+        val painted = ui.onRoot().captureToImage().toPixelMap()
         for (destination in Destination.entries) {
             tab(destination.key).assertHeightIsAtLeast(48.dp).assertWidthIsAtLeast(48.dp)
-            ui.onAllNodes(hasText(destination.label) and hasAnyAncestor(hasTestTag("nav:${destination.key}")),
-                useUnmergedTree = true).assertCountEquals(1)
+            val matcher = hasText(destination.label) and hasAnyAncestor(hasTestTag("nav:${destination.key}"))
+            ui.onAllNodes(matcher, useUnmergedTree = true).assertCountEquals(1)
+            val caption = ui.onNode(matcher, useUnmergedTree = true)
+            val origin = caption.fetchSemanticsNode().positionInRoot
+            val layouts = mutableListOf<TextLayoutResult>()
+            caption.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+            val text = layouts.single()
+            assertFalse("${destination.label} ellipsized or clipped by layout", text.hasVisualOverflow)
+            // A round clipping parent can erase the last glyph even though the text measures
+            // and exposes its full string. Compare each glyph's opaque ink to the actual screen.
+            val mask = ImageBitmap(text.size.width, text.size.height)
+            text.multiParagraph.paint(Canvas(mask), Color.Black)
+            val expected = mask.toPixelMap()
+            for (i in destination.label.indices) {
+                val glyph = text.getBoundingBox(i)
+                var strokes = 0; var drawn = 0
+                for (y in glyph.top.toInt().coerceAtLeast(0) until glyph.bottom.toInt().coerceAtMost(mask.height)) {
+                    for (x in glyph.left.toInt().coerceAtLeast(0) until glyph.right.toInt().coerceAtMost(mask.width)) {
+                        if (expected[x, y].alpha < .85f) continue
+                        strokes++
+                        if (painted[origin.x.roundToInt() + x, origin.y.roundToInt() + y].luminance() < .45f) drawn++
+                    }
+                }
+                assertTrue("${destination.label}[$i] lost strokes: $drawn / $strokes", strokes > 0 && drawn >= .9f * strokes)
+            }
         }
         tab("courses").performClick().assertIsSelected()
     }

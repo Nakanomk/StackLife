@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -50,6 +51,11 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
     val keyFocus = remember { FocusRequester() }
     val profile = remember(base, model) {
         try { serviceProfile(base, model) } catch (_: IllegalArgumentException) { null }
+    }
+    // An opt-in belongs to this endpoint AND model, never the next value typed into either field.
+    var supportsImages by remember(profile, stored) {
+        mutableStateOf(profile?.supportsImages == true || (stored?.supportsImages == true &&
+            stored?.baseUrl == profile?.baseUrl && stored?.model == profile?.model))
     }
     val keepKey = stored != null && stored?.origin == profile?.origin
     val scope = rememberCoroutineScope()
@@ -121,6 +127,17 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
                 TextField(model, { model = it }, Modifier.fillMaxWidth().testTag("provider-model"),
                     enabled = !busy, singleLine = true, colors = lineFieldColors(), label = { Text(stringResource(R.string.assistant_model_name)) })
             }
+            if (profile != null && !profile.supportsImages) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(
+                    value = supportsImages, enabled = !busy, role = Role.Switch, onValueChange = { supportsImages = it },
+                ).testTag("provider-images"), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.provider_images_toggle), style = MaterialTheme.typography.bodyLarge)
+                        Hint(stringResource(R.string.provider_images_hint))
+                    }
+                    Switch(checked = supportsImages, enabled = !busy, onCheckedChange = null)
+                }
+            }
             TextField(key, { key = it }, Modifier.fillMaxWidth().focusRequester(keyFocus).testTag("provider-key"),
                 enabled = !busy, singleLine = true, colors = lineFieldColors(),
                 label = { Text(if (keepKey) stringResource(R.string.assistant_keep_key) else stringResource(R.string.assistant_key)) },
@@ -129,7 +146,7 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
             Hint(stringResource(R.string.assistant_service_privacy, profile?.origin ?: stringResource(R.string.assistant_selected_service)))
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             ActionPill(stringResource(R.string.assistant_save_service), enabled = !busy && profile != null && (key.isNotBlank() || keepKey), prominent = true, onClick = {
-                run { store.save(base, model, key.takeIf { it.isNotBlank() }); key = ""; back() }
+                run { store.save(base, model, key.takeIf { it.isNotBlank() }, supportsImages); key = ""; back() }
             }, modifier = Modifier.testTag("provider-save"))
             if (stored != null || error != null) {
                 Secondary(stringResource(R.string.assistant_remove_service), enabled = !busy) { clear = true }

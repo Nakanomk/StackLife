@@ -1,0 +1,12 @@
+BiliPai — GPL-3.0. Source: https://github.com/jay3-yy/BiliPai/tree/5893c2c80739e3759ac64ae5f232cf03a94da7f8
+Full GNU General Public License version 3: StackLife-GPL-3.0-or-later.txt, bundled in this same licenses directory.
+
+Adaptations in StackLife 0.10.12 (paths relative to app/src/main/java/io/github/nakanomk/stacklife):
+
+appearance/WallpaperHost.kt (WallpaperHost, wallpaperBackground) ← design-system/src/main/java/com/android/purebilibili/core/ui/wallpaper/GlobalWallpaperBackdrop.kt: independently record the wallpaper, then replay it in screen coordinates. No video player, foreground capture, or Android-13-only effect in the fallback path.
+appearance/WallpaperPolicy.kt and BackgroundPhoto.kt ← the same upstream wallpaper directory, WallpaperTransformPolicy.kt, WallpaperReadabilityPolicy.kt and WallpaperPaletteStore.kt: visible crop geometry, five local luminance bands and a 4.5:1 contrast target. Private still images only; increased contrast or reduced transparency uses a solid page surface.
+appearance/BackgroundStore.kt, images/StaticPhoto.kt and appearance/WallpaperControls.kt ← app/src/main/java/com/android/purebilibili/feature/profile/WallpaperImageImport.kt: copy and validate while the picker permission is valid. StackLife normalizes the static image and manages its draft and committed owners locally; imported URIs are not persisted or sent to a model.
+appearance/NavigationFields.kt and AppearanceEditor.kt ← app/src/main/java/com/android/purebilibili/feature/settings/screen/BottomBarSettingsScreen.kt: separate complete order from visibility, preserve a visible start destination, and support reordering. Persistence, undo on cancel, and navigation are StackLife's own.
+today/DayWheel.kt (projectDayWheel) ← app/src/main/java/com/android/purebilibili/feature/settings/screen/ThemeTimeWheelPicker.kt: visible position drives alpha, scale and perspective. Applied during drawing to freely scrollable events, without snapping, selection haptics or a repeating list.
+
+Earlier BiliPai references used for sheet layout, grouped preferences and card handoff are documented in docs/roadmap.md. LiquidLens.kt has a separate Apache-2.0 notice in Backdrop-Miuix-Apache-2.0.txt. No BiliPai logos, photographs or fonts are included.

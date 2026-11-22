@@ -20,14 +20,18 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
 import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
+import io.github.nakanomk.stacklife.transitions.CardMetadata
+import io.github.nakanomk.stacklife.transitions.CardSummary
+import io.github.nakanomk.stacklife.transitions.CardTitle
 import io.github.nakanomk.stacklife.transitions.routeOrigin
+import io.github.nakanomk.stacklife.markdown.PlannerMarkdown
+import io.github.nakanomk.stacklife.markdown.markdownSummary
 import androidx.compose.ui.unit.Dp
 import io.github.nakanomk.stacklife.assistant.*
 import io.github.nakanomk.stacklife.ReadState
@@ -36,13 +40,14 @@ import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.*
 
 @Composable
-internal fun GraphEditorRoute(model: WorkspaceViewModel, graphId: String, onBack: () -> Unit, onFrame: (String) -> Unit) = key(graphId) {
+internal fun GraphEditorRoute(model: WorkspaceViewModel, graphId: String, onBack: () -> Unit,
+    onSource: (GraphLink) -> Unit, onFrame: (String) -> Unit) = key(graphId) {
     val state by remember(model, graphId) { model.graph(graphId) }.collectAsStateWithLifecycle(ReadState.Loading)
     var reviewing by rememberSaveable { mutableStateOf(false) }
     var goal by rememberSaveable { mutableStateOf<String?>(null) }
     ReadPanel(state) { detail ->
         if (detail.graph == null) MissingDetail(stringResource(R.string.ui_graph), stringResource(R.string.ui_graph_missing), onBack)
-        else GraphEditor(model, detail, onBack, onGoal = { selected ->
+        else GraphEditor(model, detail, onBack, onSource, onGoal = { selected ->
             goal = selected ?: run {
                 val predecessors = detail.edges.mapTo(HashSet()) { it.from }
                 detail.nodes.singleOrNull { it.id !in predecessors }?.id
@@ -51,11 +56,13 @@ internal fun GraphEditorRoute(model: WorkspaceViewModel, graphId: String, onBack
         })
     }
     if (reviewing) GoalReview(model, graphId, state, goal, onGoal = { goal = it }, onClose = { reviewing = false },
+        onSource = { reviewing = false; onSource(it) },
         onFrame = { reviewing = false; onFrame(it) })
 }
 
 @Composable
-private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: () -> Unit, onGoal: (String?) -> Unit) {
+private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: () -> Unit,
+    onSource: (GraphLink) -> Unit, onGoal: (String?) -> Unit) {
     val graph = checkNotNull(detail.graph)
     val currentRevision by rememberUpdatedState(detail.revision)
     var listMode by rememberSaveable { mutableStateOf(false) }
@@ -94,19 +101,43 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
                 GoalReviewAction(stringResource(R.string.ui_topological_order), { onGoal(selected?.id) },
                     Modifier.testTag("graph-goal"), enabled = detail.nodes.isNotEmpty() && !submission.busy, prominent = true,
                     anchor = Modifier.routeOrigin("generated-frame", CircleShape).testTag("graph-goal-pill"))
-                GoalReviewAction(stringResource(R.string.ui_add_node), { form("add") }, Modifier.testTag("graph-add"),
-                    enabled = !submission.busy, anchor = Modifier.testTag("graph-add-pill"))
+                var adding by remember { mutableStateOf(false) }
+                Box {
+                    GoalReviewAction(stringResource(R.string.ui_add_node), { adding = true }, Modifier.testTag("graph-add"),
+                        enabled = !submission.busy, anchor = Modifier.testTag("graph-add-pill"))
+                    PlannerDropdownMenu(adding, { adding = false }) {
+                        DropdownMenuItem({ Text(stringResource(R.string.graph_new_node)) }, { adding = false; form("add") },
+                            modifier = Modifier.testTag("graph-new-node"))
+                        DropdownMenuItem({ Text(stringResource(R.string.graph_link_existing)) }, { adding = false; form("existing") },
+                            modifier = Modifier.testTag("graph-existing"))
+                    }
+                }
                 if (selected != null) {
                     var menu by remember { mutableStateOf(false) }
                     Box {
                         ActionPill(stringResource(R.string.ui_node_actions), { menu = true }, Modifier.testTag("graph-node-actions"))
                         PlannerDropdownMenu(menu, { menu = false }) {
+                            val link = selected.link
+                            if (link != null) {
+                                val state = selected.linkState
+                                Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                                    GraphSourceLabel(link)
+                                    GraphLinkStatus(state)
+                                }
+                                DropdownMenuItem({ Text(stringResource(R.string.graph_open_source)) }, { menu = false; onSource(link) },
+                                    enabled = state?.missing == false, modifier = Modifier.testTag("graph-open-source"))
+                                DropdownMenuItem({ Text(stringResource(if (state?.completed == true) R.string.graph_mark_incomplete else R.string.graph_mark_complete)) }, {
+                                    menu = false; patch(GraphEdit.SetLinkedCompletion(selected.id, state?.completed != true), detail.revision)
+                                }, enabled = state?.missing == false && !submission.busy, modifier = Modifier.testTag("graph-source-completion"))
+                            }
                             DropdownMenuItem({ Text(stringResource(R.string.ui_link_from_node)) }, { menu = false; linkFrom(selected.id) })
                             DropdownMenuItem({ Text(stringResource(R.string.ui_remove_link)) }, { menu = false; form("edges") },
                                 enabled = detail.edges.any { it.from == selected.id || it.to == selected.id })
-                            DropdownMenuItem({ Text(stringResource(R.string.ui_edit_node)) }, { menu = false; form("edit") })
+                            DropdownMenuItem({ Text(stringResource(R.string.ui_edit_node)) }, { menu = false; form("edit") },
+                                enabled = link == null || selected.linkState?.let { !it.missing && !it.system } == true)
                             DropdownMenuItem({ Text(stringResource(R.string.ui_move_node)) }, { menu = false; form("move") })
-                            DropdownMenuItem({ Text(stringResource(R.string.ui_delete_node)) }, { menu = false; form("remove") })
+                            DropdownMenuItem({ Text(stringResource(if (link == null) R.string.ui_delete_node else R.string.graph_unlink)) },
+                                { menu = false; form("remove") })
                         }
                     }
                 }
@@ -118,8 +149,8 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     ToolbarIcon(io.github.nakanomk.stacklife.R.drawable.ic_arrow_back, stringResource(R.string.ui_back), onClick = onBack)
-                    Text(graph.title, Modifier.weight(1f).semantics { heading() }, maxLines = 1,
-                        overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
+                    Text(graph.title, Modifier.weight(1f).horizontalScroll(rememberScrollState()).semantics { heading() },
+                        softWrap = false, style = MaterialTheme.typography.titleLarge)
                     ActionPill(if (listMode) stringResource(R.string.ui_canvas) else stringResource(R.string.ui_dependencies), { listMode = !listMode }, Modifier.testTag("graph-toggle-view"))
                 }
                 tools()
@@ -135,11 +166,14 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
     }
     when (editing) {
         "add" -> NodeForm(model, graph.id, editRevision, null, detail.nodes, ::dismiss)
+        "existing" -> GraphEventPicker(model, graph.id, detail.nodes, detail.revision, ::dismiss)
         "edit" -> if (selected != null) NodeForm(model, graph.id, editRevision, selected, detail.nodes, ::dismiss)
         "move" -> if (selected != null) MoveForm(model, graph.id, editRevision, selected, ::dismiss)
-        "remove" -> if (selected != null) GraphSaveDialog(model, stringResource(R.string.ui_delete_named, selected.title), stringResource(R.string.ui_delete_node), true,
+        "remove" -> if (selected != null) GraphSaveDialog(model,
+            stringResource(if (selected.link == null) R.string.ui_delete_named else R.string.graph_unlink_named, selected.title),
+            stringResource(if (selected.link == null) R.string.ui_delete_node else R.string.graph_unlink), true,
             command = { PlannerCommand.GraphPatch(graph.id, listOf(GraphEdit.RemoveNode(selected.id)), editRevision) }, onClose = ::dismiss) {
-            Text(stringResource(R.string.ui_node_delete_hint))
+            Text(stringResource(if (selected.link == null) R.string.ui_node_delete_hint else R.string.graph_unlink_hint))
         }
         "edges" -> if (selected != null) {
             val incident = remember(detail.edges, selected.id) { detail.edges.filter { it.from == selected.id || it.to == selected.id } }
@@ -170,27 +204,41 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GraphDependencies(detail: GraphDetail, selected: String?, onSelect: (String) -> Unit, top: Dp, bottom: Dp, onRemove: (GraphEdge) -> Unit) {
     val byId = remember(detail.nodes) { detail.nodes.associateBy { it.id } }
-    LazyColumn(Modifier.fillMaxSize().testTag("graph-list"), contentPadding = dockListPadding(top, bottom), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    LazyColumn(Modifier.fillMaxSize().testTag("graph-list"), contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
         item { SectionTitle(stringResource(R.string.ui_node_count, detail.nodes.size)) }
         items(detail.nodes, key = { it.id }) { node ->
-            Surface(shape = MaterialTheme.shapes.medium,
-                color = if (node.id == selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer) {
+            Surface(shape = MaterialTheme.shapes.large,
+                color = if (node.id == selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow) {
                 Column(Modifier.fillMaxWidth().testTag("list-node:${node.id}").selectable(node.id == selected, role = Role.RadioButton) { onSelect(node.id) }
-                    .heightIn(min = 52.dp).padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.Center) {
-                    Text(node.title, style = MaterialTheme.typography.titleSmall)
-                    Hint(stringResource(R.string.ui_minutes_value, node.minutes) + if (node.notes.isBlank()) "" else " · ${node.notes}")
+                    .heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    CardTitle(node.title)
+                    CardMetadata { Text(stringResource(R.string.ui_duration_estimate, node.minutes)) }
+                    node.link?.let { link ->
+                        GraphLinkStatus(node.linkState)
+                        if (node.id == selected) GraphSourceLabel(link)
+                    }
+                    if (node.notes.isNotBlank()) {
+                        if (node.id == selected) PlannerMarkdown(node.notes, Modifier.fillMaxWidth())
+                        else CardSummary(remember(node.notes) { markdownSummary(node.notes) })
+                    }
                 }
             }
         }
         item { SectionTitle(stringResource(R.string.ui_dependency_count, detail.edges.size)); if (detail.edges.isEmpty()) Hint(stringResource(R.string.ui_no_dependencies)) }
         items(detail.edges, key = { "edge:${it.from}:${it.to}" }) { edge ->
             val from = byId[edge.from]; val to = byId[edge.to]
-            if (from != null && to != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.ui_dependency_order, from.title, to.title), Modifier.weight(1f))
-                TextButton(onClick = { onRemove(edge) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.ui_remove_dependency)) }
+            if (from != null && to != null) Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), itemVerticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.ui_dependency_order, from.title, to.title), style = MaterialTheme.typography.bodyMedium)
+                    TextButton(onClick = { onRemove(edge) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text(stringResource(R.string.ui_remove_dependency))
+                    }
+                }
             }
         }
     }

@@ -29,7 +29,7 @@ internal sealed interface ReadState<out T> {
 }
 
 internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), WorkspaceActions {
-    private inline fun <reified T : QueryResult> read(query: PlannerQuery) = planner.observe(query)
+    internal inline fun <reified T : QueryResult> read(query: PlannerQuery) = planner.observe(query)
         .map<QueryResult, ReadState<T>> { ReadState.Loaded(it as T) }
         .catch { cause ->
             if (cause !is SQLiteException) throw cause
@@ -44,6 +44,7 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
     fun day(query: PlannerQuery.Day) = read<DayPlan>(query)
     fun terms() = read<Terms>(PlannerQuery.Terms)
     fun week(query: PlannerQuery.Week) = read<CourseWeek>(query)
+    fun courseWeeks(query: PlannerQuery.CourseWeeks) = read<CourseWeeksView>(query)
     fun graphs() = read<GraphList>(PlannerQuery.Graphs)
     fun graph(id: String) = read<GraphDetail>(PlannerQuery.Graph(id))
     fun goal(graphId: String, goalId: String) = read<GoalOrder>(PlannerQuery.Goal(graphId, goalId))
@@ -71,7 +72,7 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
     fun reviewedRef(requestId: String, ref: String): String? = latest?.takeIf { it.id == requestId }?.refs?.get(ref)
 
     /** A hover or editor check never leaves a committable proposal behind. */
-    suspend fun checkSlot(command: PlannerCommand.SlotSet): String? = try {
+    suspend fun checkSchedule(command: PlannerCommand): String? = try {
         when (val preview = planner.preview(listOf(command))) {
             is PreviewResult.Rejected -> preview.message
             is PreviewResult.Ready -> { planner.discard(preview.proposalId); null }

@@ -1,0 +1,8 @@
+<resources>
+    <string name="appearance_image_cleanup_failed">Could not finish releasing draft images. Tap Cancel to retry leaving.</string>
+    <string name="appearance_grid_lines">Show timetable grid lines</string>
+    <string name="appearance_day_scroll">Day scrolling</string>
+    <string name="appearance_scroll_flat">Flat</string>
+    <string name="appearance_scroll_wheel">Wheel</string>
+    <string name="appearance_move_tab">Move %1$s</string>
+</resources>

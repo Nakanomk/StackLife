@@ -33,6 +33,15 @@ import io.github.kotlinflow.models.*
 import io.github.kotlinflow.types.BackgroundVariant
 import io.github.kotlinflow.utils.KotlinFlowInstance
 import io.github.nakanomk.stacklife.planner.*
+import io.github.kotlinflow.types.EdgeStyle
+
+internal val graphNodeWidth = 150.dp
+internal val graphNodeHeight = 56.dp
+internal fun GraphNode.canvasNode(scale: Float, inset: Float = 0f, selected: Boolean = false) =
+    Node(id, XYPosition(x * scale, y * scale + inset), this, selected = selected)
+internal fun GraphEdge.directedEdge(scale: Float, style: EdgeStyle? = null) =
+    Edge<Unit>(id = "$from:$to", source = from, target = to, style = style,
+        markerEnd = EdgeMarker(MarkerType.ARROW_CLOSED, 9f * scale, 9f * scale))
 
 private data class Moving(val id: String, val revision: Long, val position: Offset)
 private data class Wire(val source: String, val revision: Long, val start: Offset, val tip: Offset)
@@ -68,7 +77,7 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
     // Keep stored graph coordinates independent of the toolbar: only the presentation origin moves.
     val originY = with(LocalDensity.current) { headerInset.toPx() }
     val fixed = remember(detail.nodes, selected, scale, originY) { detail.nodes.map { node ->
-        Node(node.id, XYPosition(node.x * scale, node.y * scale + originY), node, selected = node.id == selected)
+        node.canvasNode(scale, originY, node.id == selected)
     } }
     val drag = moving
     val index = remember(fixed, drag?.id) { if (drag == null) -1 else fixed.indexOfFirst { it.id == drag.id } }
@@ -76,10 +85,7 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
         if (drag == null || index < 0) fixed
         else DragFrame(fixed, index, fixed[index].copy(position = XYPosition(drag.position.x * scale, drag.position.y * scale + originY)))
     }
-    val edges = remember(detail.edges, scale) { detail.edges.map {
-        Edge<Unit>(id = "${it.from}:${it.to}", source = it.from, target = it.to,
-            markerEnd = EdgeMarker(MarkerType.ARROW_CLOSED, 9f * scale, 9f * scale))
-    } }
+    val edges = remember(detail.edges, scale) { detail.edges.map { it.directedEdge(scale) } }
     val theme = remember(colors, scale) { KotlinFlowTheme(canvasBackgroundColor = colors.surfaceContainerLow,
         edgeColor = colors.onSurfaceVariant, edgeWidth = 2f * scale, nodeSelectedBorderColor = colors.primary,
         gridColor = colors.outlineVariant, gridSpacing = 22f) }
@@ -127,9 +133,9 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
             val node = rendered.data
             DisposableEffect(node.id) { onDispose { boxes.remove(node.id) } }
             Surface(color = if (rendered.selected) colors.primaryContainer else colors.surfaceContainerHighest,
-                shape = MaterialTheme.shapes.medium, modifier = Modifier.width(150.dp).onGloballyPositioned { boxes[node.id] = it }) {
+                shape = MaterialTheme.shapes.medium, modifier = Modifier.width(graphNodeWidth).onGloballyPositioned { boxes[node.id] = it }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f).heightIn(min = 56.dp).testTag("canvas-node:${node.id}")
+                    Column(Modifier.weight(1f).heightIn(min = graphNodeHeight).testTag("canvas-node:${node.id}")
                         .clickable(role = Role.Button, onClickLabel = stringResource(R.string.ui_select_node)) { onSelect(node.id) }
                         .pointerInput(node.id, scale) {
                             try {
@@ -149,6 +155,11 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
                         }.padding(start = 12.dp, top = 6.dp, bottom = 6.dp), verticalArrangement = Arrangement.Center) {
                         Text(node.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(stringResource(R.string.ui_minutes_value, node.minutes), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                        if (node.link != null) Text(stringResource(when {
+                            node.linkState?.missing != false -> R.string.graph_source_removed
+                            node.linkState.completed -> R.string.graph_satisfied
+                            else -> R.string.graph_linked_event
+                        }), style = MaterialTheme.typography.labelMedium)
                     }
                     var handle by remember { mutableStateOf<LayoutCoordinates?>(null) }
                     val linkDescription = stringResource(R.string.ui_link_to_successor, node.title)

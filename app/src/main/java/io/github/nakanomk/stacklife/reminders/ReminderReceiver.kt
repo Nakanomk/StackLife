@@ -16,7 +16,7 @@ class ReminderReceiver : BroadcastReceiver() {
                 acquire(9_000L)
             }
         val result = goAsync()
-        reminders.refreshAsync {
+        reminders.receiveAsync(intent) {
             try { if (lock.isHeld) lock.release() } finally { result.finish() }
         }
     }

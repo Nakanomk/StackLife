@@ -1,0 +1,8 @@
+<resources>
+    <string name="note_add">添加笔记</string>
+    <string name="note_edit">编辑笔记</string>
+    <string name="note_discard_question">放弃对这篇笔记的修改？</string>
+    <string name="note_discard">放弃修改</string>
+    <string name="note_keep_editing">继续编辑</string>
+    <string name="note_file_error">无法在此设备上读取或保存这篇笔记草稿。</string>
+</resources>

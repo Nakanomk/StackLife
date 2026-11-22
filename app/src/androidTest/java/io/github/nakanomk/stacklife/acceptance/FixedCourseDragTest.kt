@@ -38,14 +38,14 @@ class FixedCourseDragTest {
         ui.waitUntil(8_000) { ui.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
         return ui.onNode(matcher)
     }
-    @Test fun collisionAtFifteenDoesNotMoveTaskButFifteenThirtyFiveDoes() {
+    @Test fun dragIntoClassSavesBothIdentitiesAndAdjacentDropClearsTheOverlap() {
         val term = TermSpec("秋季", date.minusWeeks(8), 18, BellSchedule.SUMMER, date)
         runBlocking {
             val id = store.api.stageCourseImport(term, listOf(term.meeting(9, 1, "操作系统", "B", 5, 6)))
-            store.apply(CourseImport(id), TaskAdd(TaskInput("报告提纲", ref = "t")), SlotSet("@t", at(16, 0), 30))
+            store.apply(CourseImport(id), TaskAdd(TaskInput("报告提纲", ref = "t")), once("@t", at(16, 0), 30))
             store.api.discardCourseImport(id)
         }
-        val before = readDay(); val task = before.blocks.single()
+        val before = readDay(); val task = before.occurrences.single { it.taskId != null }
         ui.setContent {
             val vm = viewModel { WorkspaceViewModel(store.api) }
             StackLifeTheme { TodayRoute(vm, date, campusZone, {}, {}, {}, null, {}, {}) }
@@ -67,13 +67,16 @@ class FixedCourseDragTest {
         }
         assertEquals("查看固定课程", ui.onNodeWithTag("day-course").fetchSemanticsNode().config[SemanticsActions.OnClick].label)
         drag(time("15:00"))
-        await(hasText("时段冲突：", substring = true) and hasText("操作系统", substring = true)).assertIsDisplayed()
-        root.performTouchInput { up() }; await(hasText("知道了")).performClick(); assertEquals(before, readDay())
+        await(hasText("15:00–15:30 · 松手安排")).assertIsDisplayed()
+        root.performTouchInput { up() }
+        val overlaps = readDay { day -> day.occurrences.any { it.key == task.key && it.startMillis == at(15, 0).toInstant().toEpochMilli() } }
+        assertEquals(before.occurrences.map { it.key }.toSet(), overlaps.occurrences.map { it.key }.toSet())
+        assertTrue(overlaps.occurrences.single { it.course != null }.course!!.conflicts.isNotEmpty())
         drag(time("15:30") + (time("15:45") - time("15:30")) / 3f)
         await(hasText("15:35–16:05 · 松手安排")).assertIsDisplayed()
         root.performTouchInput { up() }
-        val placed = readDay { it.blocks.single().startMillis == at(15, 35).toInstant().toEpochMilli() }
-        assertEquals(before.courses, placed.courses); assertEquals(task.taskId, placed.blocks.single().taskId)
-        assertTrue(placed.conflictingTaskIds.isEmpty())
+        val placed = readDay { day -> day.occurrences.any { it.key == task.key && it.startMillis == at(15, 35).toInstant().toEpochMilli() } }
+        assertEquals(before.occurrences.single { it.course != null }, placed.occurrences.single { it.course != null })
+        assertTrue(placed.occurrences.single { it.key == task.key }.conflicts.isEmpty())
     }
 }

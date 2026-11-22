@@ -17,7 +17,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
@@ -28,6 +30,10 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.nakanomk.stacklife.ReadPanel
+import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.appearance.*
@@ -38,14 +44,11 @@ import io.github.nakanomk.stacklife.planner.PreviewResult
 import io.github.nakanomk.stacklife.transitions.PaneMotion
 import io.github.nakanomk.stacklife.transitions.PaneOrigins
 import io.github.nakanomk.stacklife.transitions.paneOrigin
-import java.io.IOException
-import java.time.LocalDate
-import java.time.format.DateTimeParseException
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 
@@ -62,32 +65,28 @@ private sealed class ImportStep(val key: String, val depth: Int) {
 
 @Composable
 internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onImported: (String) -> Unit) {
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val resolver = context.contentResolver
-    var rows by remember { mutableStateOf<JsonArray?>(null) }
-    var hub by remember { mutableStateOf(false) }
-    var fromHub by remember { mutableStateOf(false) }
+    val state = viewModel<ImportReviewState> {
+        ImportReviewState(createSavedStateHandle(), File(context.applicationContext.noBackupFilesDir, "import-reviews"))
+    }
+    val hub = state.page == ImportPage.HUB
     val origins = remember { PaneOrigins() }
-    var form by remember { mutableStateOf(TermForm()) }
-    var hints by remember { mutableStateOf(emptyList<String>()) }
-    var draft by remember { mutableStateOf<ImportDraft?>(null) }
-    val decisions = remember { mutableStateMapOf<String, IssueDecision>() }
-    var editing by remember { mutableStateOf<ImportIssue?>(null) }
+    val decisions = state.decisions
     var proposal by remember { mutableStateOf<PreviewResult.Ready?>(null) }
     var effective by remember { mutableStateOf<ReviewedTimetable?>(null) }
     var previewOrigin by remember { mutableStateOf("diff-top") }
     var confirmedTerm by rememberSaveable { mutableStateOf<String?>(null) }
-    var message by remember { mutableStateOf<String?>(null) }
-    val submission = rememberSubmission(model, onError = { message = it }) { outcome ->
+    fun finish(termId: String) { state.reset(); onImported(termId) }
+    val submission = rememberSubmission(model, onError = { state.message = it }) { outcome ->
         val term = confirmedTerm
         confirmedTerm = null
         proposal = null
         effective = null
-        if (outcome == SaveOutcome.APPLIED) onImported(checkNotNull(term))
+        if (outcome == SaveOutcome.APPLIED) finish(checkNotNull(term)) else state.page = ImportPage.ENTRIES
     }
     val writing = submission.busy
-    var busy by remember { mutableStateOf(false) }
+    val busy = state.busy || (state.page == ImportPage.DIFF && proposal == null && !writing)
     var attached by remember { mutableStateOf(true) }
     DisposableEffect(model) {
         attached = true
@@ -96,81 +95,82 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
             if (!submission.busy) proposal?.let { model.discardProposal(it.proposalId) }
         }
     }
-    fun receive(data: JsonArray) {
-        fromHub = hub
-        hub = false
-        if (data.isEmpty()) { message = uiText("The raw array is empty. Your existing timetable has not changed.", "原始数组为空，已有课表未更改"); return }
-        hints = firstWeekHints(data)
-        rows = data
-        val hint = hints.singleOrNull()?.let { text ->
-            try { LocalDate.parse(text).takeIf { it.year in 1..9999 } } catch (_: DateTimeParseException) { null }
-        }
-        form = TermForm(monday = hint)
-        message = null
-    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            busy = true
-            scope.launch {
-                try {
-                    val data = withContext(Dispatchers.IO) {
-                        resolver.openInputStream(uri)?.use(::readWeekFile) ?: throw SourceProblem(uiText("Cannot open the selected file.", "无法打开所选文件"))
-                    }
-                    receive(data)
-                } catch (e: SourceProblem) { message = e.message }
-                catch (_: SecurityException) { message = uiText("Read permission denied. Select the raw file again.", "没有读取权限，请重新选择原始文件") }
-                catch (_: IOException) { message = uiText("Cannot read the UTF-8 file. Select the raw JSON again.", "无法读取 UTF-8 文件，请重新选择原始 JSON") }
-                finally { busy = false }
-            }
+        if (uri != null) state.receive(isHub = false) {
+            resolver.openInputStream(uri)?.use(::readWeekFile) ?: throw SourceProblem(uiText("Cannot open the selected file.", "无法打开所选文件"))
         }
     }
     fun chooseFile() {
-        message = null
+        state.message = null
         try { picker.launch(arrayOf("application/json", "text/*", "application/octet-stream")) }
-        catch (_: ActivityNotFoundException) { message = uiText("No system file picker is available on this device.", "设备没有可用的系统文件选择器") }
+        catch (_: ActivityNotFoundException) { state.message = uiText("No system file picker is available on this device.", "设备没有可用的系统文件选择器") }
     }
     fun openChrome() {
-        message = null
+        state.message = null
         val chrome = CustomTabsClient.getPackageName(context, chromePackages, true)
         if (chrome == null) {
-            message = uiText("No supported Chrome browser was found.", "未找到可用的 Chrome 浏览器")
+            state.message = uiText("No supported Chrome browser was found.", "未找到可用的 Chrome 浏览器")
             return
         }
         val tab = CustomTabsIntent.Builder().build()
         tab.intent.setPackage(chrome)
         try { tab.launchUrl(context, Uri.parse(HUB_LOGIN_URL)) }
-        catch (_: ActivityNotFoundException) { message = uiText("Cannot open Chrome.", "无法打开 Chrome 浏览器") }
-        catch (_: SecurityException) { message = uiText("The system did not allow Chrome to open.", "系统不允许启动 Chrome 浏览器") }
+        catch (_: ActivityNotFoundException) { state.message = uiText("Cannot open Chrome.", "无法打开 Chrome 浏览器") }
+        catch (_: SecurityException) { state.message = uiText("The system did not allow Chrome to open.", "系统不允许启动 Chrome 浏览器") }
     }
     fun leavePreview() {
         if (submission.busy) return
         proposal?.let { model.discardProposal(it.proposalId) }
         proposal = null
         effective = null
-        message = null
+        state.page = ImportPage.ENTRIES
+        state.message = null
     }
     fun cancel() {
-        if (submission.busy || !attached) return
+        if (submission.busy || state.busy || !attached) return
         attached = false
         leavePreview()
+        state.reset()
         onBack()
     }
-    val raw = rows
-    val parsed = draft
+    val raw = state.rows
+    val parsed = state.draft
     val ready = proposal
-    val issue = editing
-    val calendar = remember(raw, fromHub) { raw?.let { ImportStep.Calendar(it, fromHub) } }
+    val calendar = remember(raw, state.fromHub) { raw?.let { ImportStep.Calendar(it, state.fromHub) } }
     val entries = remember(parsed) { parsed?.let { ImportStep.Entries(it) } }
+    val issue = remember(parsed, state.editing) { parsed?.issues?.firstOrNull { it.position == state.editing } }
     val fix = remember(issue, parsed) {
-        if (issue == null || parsed == null) null else ((decisions[issue.position] as? IssueDecision.Correct)?.fields ?: issue.fields)?.let {
-            ImportStep.Fix(issue, it, parsed.term)
-        }
+        if (issue == null || parsed == null) null else issue.fields?.let { ImportStep.Fix(issue, it, parsed.term) }
     }
     val reviewed = effective
     val diff = remember(ready, reviewed, previewOrigin) {
         if (ready == null || reviewed == null) null else ImportStep.Diff(reviewed, ready, previewOrigin)
     }
-    val step = if (hub) ImportStep.Hub else fix ?: diff ?: entries ?: calendar ?: ImportStep.Source
+    // A restored difference is rebuilt against today's revision; restoring never executes a command.
+    LaunchedEffect(state.page, parsed) {
+        if (state.page != ImportPage.DIFF || parsed == null || proposal != null || submission.busy) return@LaunchedEffect
+        try {
+            val choices = decisions.toMap()
+            val result = withContext(Dispatchers.Default) { parsed.resolve(choices) }
+            val owner = currentCoroutineContext()
+            withContext(NonCancellable) {
+                when (val preview = model.previewImport(result.term, result.meetings, result.source)) {
+                    is PreviewResult.Ready -> if (owner.isActive && attached && state.page == ImportPage.DIFF) {
+                        effective = result; proposal = preview
+                    } else model.discardProposal(preview.proposalId)
+                    is PreviewResult.Rejected -> if (owner.isActive && attached) { state.message = preview.message; state.page = ImportPage.ENTRIES }
+                }
+            }
+        } catch (e: IllegalArgumentException) { state.message = e.message; state.page = ImportPage.ENTRIES }
+    }
+    val step = when (state.page) {
+        ImportPage.SOURCE -> ImportStep.Source
+        ImportPage.HUB -> ImportStep.Hub
+        ImportPage.CALENDAR -> calendar
+        ImportPage.ENTRIES -> entries
+        ImportPage.FIX -> fix
+        ImportPage.DIFF -> diff ?: entries
+    } ?: ImportStep.Source
     val previous = when (step) {
         is ImportStep.Diff, is ImportStep.Fix -> entries
         is ImportStep.Entries -> calendar
@@ -181,9 +181,9 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
         if (busy || writing) return
         when (step) {
             is ImportStep.Diff -> leavePreview()
-            is ImportStep.Fix -> editing = null
-            is ImportStep.Entries -> { draft = null; decisions.clear(); message = null }
-            is ImportStep.Calendar -> { rows = null; hints = emptyList(); message = null }
+            is ImportStep.Fix -> { state.editing = null; state.working = null; state.page = ImportPage.ENTRIES }
+            is ImportStep.Entries -> { state.page = ImportPage.CALENDAR; state.message = null }
+            is ImportStep.Calendar -> state.reset()
             else -> cancel()
         }
     }
@@ -194,15 +194,15 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
         PaneMotion(step, origins, depth = { it.depth }, originKey = { it.key }, modifier = Modifier.fillMaxSize(),
             parent = previous.takeUnless { busy || writing }, onBack = ::backStep) { shown ->
         when (shown) {
-            ImportStep.Hub -> HubWebView(onRows = ::receive, onBack = { hub = false }, onFile = { hub = false; chooseFile() },
-                extractOrigin = Modifier.paneOrigin(origins, "hub-calendar"))
-            ImportStep.Source -> if (!writing) {
+            ImportStep.Hub -> HubWebView(onRows = { rows -> state.page = ImportPage.SOURCE; state.receive(true) { rows } }, onBack = { if (!state.busy) state.page = ImportPage.SOURCE },
+                onFile = { state.page = ImportPage.SOURCE; chooseFile() }, extractOrigin = Modifier.paneOrigin(origins, "hub-calendar"))
+            ImportStep.Source -> if (!writing && !busy) {
                 ImportPane(composer = { if (!busy && !hub) AssistantComposer(AssistantPage.Terms) }) { bottom ->
                     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, bottom))) {
                         SectionTitle(stringResource(R.string.courses_choose_source))
                         FormGroup {
                             PreferenceRow(stringResource(R.string.courses_hub_extract), modifier = Modifier.paneOrigin(origins, "hub")
-                                .paneOrigin(origins, "hub-calendar").testTag("importCourseHub"), enabled = !busy) { message = null; hub = true }
+                                .paneOrigin(origins, "hub-calendar").testTag("importCourseHub"), enabled = !busy) { state.message = null; state.page = ImportPage.HUB }
                             HorizontalDivider()
                             PreferenceRow(stringResource(R.string.courses_browse_chrome), modifier = Modifier.testTag("browseHubChrome"), enabled = !busy, onClick = ::openChrome)
                             HorizontalDivider()
@@ -212,77 +212,93 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
                 }
             } else Unit
             is ImportStep.Calendar -> Column(Modifier.fillMaxSize().verticalScroll(calendarScroll).padding(dockListPadding(top, 0.dp)), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(R.string.courses_confirm_calendar), style = MaterialTheme.typography.titleLarge)
-                Text(stringResource(R.string.courses_confirm_calendar_hint))
-                if (hints.isNotEmpty()) Text(stringResource(R.string.courses_week_hint, hints.joinToString(stringResource(R.string.courses_list_separator))))
-                TermFields(form, !busy) { form = it }
-                ActionPill(stringResource(R.string.courses_review_entries), enabled = !busy, prominent = true, modifier = Modifier.paneOrigin(origins, "entries").testTag("reviewCourseRows"), onClick = {
-                    if (busy) return@ActionPill
-                    busy = true; message = null
-                    scope.launch {
-                        try {
-                            val term = form.term()
-                            draft = withContext(Dispatchers.Default) { HustCourseImporter.parse(shown.rows, term) }
-                            decisions.clear()
-                        } catch (e: IllegalArgumentException) { message = e.message }
-                        finally { busy = false }
+                SectionTitle(stringResource(R.string.import_choose_timetable))
+                val terms by remember(model) { model.terms() }.collectAsState(ReadState.Loading)
+                ReadPanel(terms) { result ->
+                    val existing = result.terms.firstOrNull { it.id == state.selectedId }
+                    val useNew = state.selectedId == state.form.id || (result.terms.isEmpty() && state.selectedId == null)
+                    FormGroup(Modifier.selectableGroup()) {
+                        result.terms.forEach { spec ->
+                            val sources = result.importedSources[spec.id].orEmpty()
+                            val sourceNames = if (sources.isEmpty()) sourceLabel(MANUAL_SOURCE) else
+                                sources.map { sourceLabel(it) }.joinToString(stringResource(R.string.courses_list_separator))
+                            TermChoice(spec.dateRangeLabel(), existing == spec, !busy, "importTerm:${spec.id}", sourceNames) { state.selectedId = spec.id }
+                        }
+                        TermChoice(stringResource(R.string.courses_new_term), useNew, !busy, "importTerm:new") { state.selectedId = state.form.id }
                     }
-                })
-                Secondary(stringResource(R.string.courses_choose_new_source), !busy) { rows = null; hints = emptyList(); message = null }
+                    if (useNew) {
+                        val hints = remember(shown.rows) { firstWeekHints(shown.rows) }
+                        if (hints.isNotEmpty()) Hint(stringResource(R.string.courses_week_hint, hints.joinToString(stringResource(R.string.courses_list_separator))))
+                        TermFields(state.form, !busy) { state.form = it }
+                    }
+                    val selected = existing?.asForm() ?: state.form.takeIf { useNew }
+                    ActionPill(stringResource(R.string.courses_review_entries), enabled = !busy && selected != null, prominent = true,
+                        modifier = Modifier.paneOrigin(origins, "entries").testTag("reviewCourseRows"), onClick = { selected?.let(state::review) })
+                }
+                Secondary(stringResource(R.string.courses_choose_new_source), !busy) { state.reset() }
             }
             is ImportStep.Entries -> {
                 val parsed = shown.draft
                 val canPreview = !busy && !writing && proposal == null && decisions.size == parsed.issues.size
                 fun preview(origin: String) {
-                    if (busy || submission.busy || proposal != null || !attached || decisions.size != parsed.issues.size) return
+                    if (!canPreview || !attached || state.page != ImportPage.ENTRIES) return
                     previewOrigin = origin
-                    busy = true; message = null
-                    val choices = decisions.toMap()
-                    scope.launch {
-                        try {
-                            val reviewed = withContext(Dispatchers.Default) { parsed.resolve(choices) }
-                            val owner = currentCoroutineContext()
-                            withContext(NonCancellable) {
-                                when (val preview = model.previewImport(reviewed.term, reviewed.meetings, reviewed.source)) {
-                                    is PreviewResult.Ready -> if (owner.isActive && attached) {
-                                        effective = reviewed; proposal = preview
-                                    } else model.discardProposal(preview.proposalId)
-                                    is PreviewResult.Rejected -> if (attached) message = preview.message
-                                }
-                            }
-                        } catch (e: IllegalArgumentException) { message = e.message }
-                        finally { busy = false }
-                    }
+                    state.message = null; state.page = ImportPage.DIFF
                 }
+                val groups = remember(parsed) { parsed.groups() }
+                var showSource by remember { mutableStateOf(false) }
                 LazyColumn(Modifier.fillMaxSize().testTag("courseIssues"), state = entriesScroll, contentPadding = dockListPadding(top, 0.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     Text(stringResource(R.string.courses_review_source), style = MaterialTheme.typography.titleLarge)
-                    Text(stringResource(R.string.courses_review_counts, parsed.term.id, parsed.validCount, parsed.issues.size - decisions.size))
-                    Text(stringResource(R.string.courses_issue_counts, decisions.values.count { it is IssueDecision.Correct }, decisions.values.count { it == IssueDecision.Exclude }))
+                    Text(parsed.term.dateRangeLabel(), style = MaterialTheme.typography.bodyLarge)
+                    Hint(stringResource(R.string.import_valid_count, parsed.validCount))
+                    if (parsed.issues.isNotEmpty()) {
+                        Hint(stringResource(R.string.import_unresolved, parsed.issues.size - decisions.size))
+                        Hint(stringResource(R.string.import_corrected_count, decisions.values.count { it is IssueDecision.Correct }))
+                        Hint(stringResource(R.string.import_excluded_count, decisions.values.count { it == IssueDecision.Exclude }))
+                    }
                     ActionPill(stringResource(R.string.courses_preview_import), { preview("diff-top") },
                         Modifier.paneOrigin(origins, "diff-top").testTag("previewCourseImportTop"), enabled = canPreview, prominent = true)
-                    Secondary(stringResource(R.string.courses_edit_term), !busy) { draft = null; decisions.clear(); message = null }
+                    Secondary(stringResource(R.string.import_choose_timetable), !busy) { state.page = ImportPage.CALENDAR; state.message = null }
                 }
+                if (parsed.issues.isNotEmpty()) item { SectionTitle(stringResource(R.string.import_flagged)) }
                 itemsIndexed(parsed.issues, key = { _, issue -> issue.position }) { index, issue ->
                     val decision = decisions[issue.position]
-                    OutlinedCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(issue.label, style = MaterialTheme.typography.titleSmall)
-                            Text(issue.reason)
-                            issue.fields?.let { Text(stringResource(R.string.courses_raw_entry, it.week.ifEmpty { "?" }, it.title.ifEmpty { stringResource(R.string.courses_no_name) }, it.period, it.room.ifEmpty { stringResource(R.string.courses_no_location) })) }
-                            when (decision) {
-                                null -> Unit
-                                IssueDecision.Exclude -> Text(stringResource(R.string.courses_excluded))
-                                is IssueDecision.Correct -> Text(stringResource(R.string.courses_corrected_entry, decision.fields.week, decision.fields.title, decision.fields.period, decision.fields.room.ifEmpty { stringResource(R.string.courses_no_location) }))
-                            }
-                            Actions {
-                                if (issue.fields != null) TextButton(enabled = !busy, onClick = { editing = issue },
-                                    modifier = Modifier.paneOrigin(origins, "issue:${issue.position}").testTag("correctIssue-$index")) { Text(stringResource(R.string.courses_correct)) }
-                                if (decision == null || decision is IssueDecision.Correct) TextButton(enabled = !busy,
-                                    onClick = { decisions[issue.position] = IssueDecision.Exclude; message = null }, modifier = Modifier.testTag("excludeIssue-$index")) { Text(stringResource(R.string.courses_exclude)) }
-                                if (decision != null) TextButton(enabled = !busy, onClick = { decisions.remove(issue.position); message = null }) { Text(stringResource(R.string.courses_undo)) }
-                            }
+                    FormGroup {
+                        IssueLocation(issue)
+                        Text(issue.reason, style = MaterialTheme.typography.bodyMedium)
+                        if (decision == IssueDecision.Exclude) Hint(stringResource(R.string.courses_excluded))
+                        if (decision is IssueDecision.Correct) {
+                            val f = decision.fields
+                            Text(f.title, style = MaterialTheme.typography.bodyLarge)
+                            if (f.room.isNotBlank()) Hint(stringResource(R.string.courses_room, f.room))
+                            Hint(stringResource(R.string.courses_week, f.week.trim().toInt()))
+                            f.periodRange()?.let { Hint(stringResource(R.string.import_period_range, it.first, it.last)) }
+                        }
+                        raw?.let { RawDisclosure(it, issue, "issueRaw-$index") }
+                        Actions {
+                            if (issue.fields != null) TextButton(enabled = !busy, onClick = {
+                                state.editing = issue.position; state.working = (decision as? IssueDecision.Correct)?.fields ?: issue.fields
+                                state.page = ImportPage.FIX
+                            }, modifier = Modifier.paneOrigin(origins, "issue:${issue.position}").testTag("correctIssue-$index")) { Text(stringResource(R.string.courses_correct)) }
+                            if (decision != IssueDecision.Exclude) TextButton(enabled = !busy,
+                                onClick = { decisions[issue.position] = IssueDecision.Exclude; state.message = null }, modifier = Modifier.testTag("excludeIssue-$index")) { Text(stringResource(R.string.courses_exclude)) }
+                            if (decision != null) TextButton(enabled = !busy, onClick = { decisions.remove(issue.position); state.message = null }) { Text(stringResource(R.string.courses_undo)) }
+                        }
+                    }
+                }
+                reviewGroups(groups)
+                if (raw != null) {
+                    item {
+                        TextButton(onClick = { showSource = !showSource }, modifier = Modifier.testTag("allSourceRows")) {
+                            Text(stringResource(if (showSource) R.string.import_hide_raw else R.string.import_show_raw))
+                        }
+                    }
+                    if (showSource) items(raw.size) { index ->
+                        FormGroup {
+                            Text(stringResource(R.string.import_row, index + 1), style = MaterialTheme.typography.bodyLarge)
+                            Text(remember(raw, index) { raw[index].toString() }, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
@@ -292,15 +308,16 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
                 }
             }
             }
-            is ImportStep.Fix -> Correction(shown.issue, shown.fields, shown.term, top, onClose = { editing = null }, onSave = {
-                decisions[shown.issue.position] = IssueDecision.Correct(it); editing = null; message = null
-            })
+            is ImportStep.Fix -> Correction(shown.issue, state.working ?: shown.fields, shown.term, raw, top, onChange = { state.working = it },
+                onClose = ::backStep, onSave = {
+                    decisions[shown.issue.position] = IssueDecision.Correct(it); state.message = null; backStep()
+                })
             is ImportStep.Diff -> {
                 val ready = shown.ready
-                ReviewedImport(model, shown.draft, ready, busy || writing, top, onImported, onEdit = ::leavePreview, onConfirm = {
+                ReviewedImport(model, shown.draft, ready, busy || writing, top, ::finish, onEdit = ::leavePreview, onConfirm = {
                     if (!busy && attached && proposal?.proposalId == ready.proposalId && submission.submit { model.confirmProposal(ready.proposalId) }) {
                         confirmedTerm = shown.draft.term.id
-                        message = null
+                        state.message = null
                     }
                 })
             }
@@ -316,9 +333,9 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         SectionTitle(stringResource(R.string.courses_import))
                         Spacer(Modifier.weight(1f))
-                        ActionPill(stringResource(R.string.courses_cancel_import), ::cancel, Modifier.testTag("cancelCourseImport"), enabled = !writing)
+                        ActionPill(stringResource(R.string.courses_cancel_import), ::cancel, Modifier.testTag("cancelCourseImport"), enabled = !writing && !state.busy)
                     }
-                    message?.let { Text(it, color = MaterialTheme.colorScheme.error,
+                    state.message?.let { Text(it, color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("courseImportError")) }
                     if (writing) Text(stringResource(R.string.courses_saving_import), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -330,31 +347,59 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
 }
 
 @Composable
-private fun Correction(issue: ImportIssue, source: CourseFields, term: TermSpec, top: Dp, onClose: () -> Unit, onSave: (CourseFields) -> Unit) =
-    CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
-    var fields by remember(issue.position) { mutableStateOf(source) }
+private fun Correction(issue: ImportIssue, fields: CourseFields, term: TermSpec, rows: JsonArray?, top: Dp,
+    onChange: (CourseFields) -> Unit, onClose: () -> Unit, onSave: (CourseFields) -> Unit) {
     val problem = remember(fields, term) { fields.problem(term) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, 0.dp)),
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
             SectionTitle(stringResource(R.string.courses_correct_entry))
-            Text(issue.label)
-            issue.fields?.let { raw ->
-                Text(stringResource(R.string.courses_raw_entry, raw.week.ifEmpty { "?" }, raw.title.ifEmpty { stringResource(R.string.courses_no_name) },
-                    raw.period, raw.room.ifEmpty { stringResource(R.string.courses_no_location) }), Modifier.testTag("fixOriginal"))
-            }
+            IssueLocation(issue)
+            rows?.let { RawDisclosure(it, issue, "fixOriginal") }
             NumberWheelField(stringResource(R.string.courses_week_number), fields.weekNumber(term), 1..term.weeks, true, Modifier.testTag("fixWeek")) {
-                fields = fields.copy(week = it.toString())
+                onChange(fields.copy(week = it.toString()))
             }
-            ImportField(stringResource(R.string.courses_name), fields.title, "fixTitle") { fields = fields.copy(title = it) }
-            ImportField(stringResource(R.string.courses_location), fields.room, "fixRoom") { fields = fields.copy(room = it) }
+            ImportField(stringResource(R.string.courses_name), fields.title, "fixTitle") { onChange(fields.copy(title = it)) }
+            ImportField(stringResource(R.string.courses_location), fields.room, "fixRoom") { onChange(fields.copy(room = it)) }
             PeriodWheelField(fields.periodRange(), Modifier.testTag("fixPeriod")) {
-                fields = fields.copy(period = if (it.first == it.last) it.first.toString() else "${it.first}-${it.last}")
+                onChange(fields.copy(period = if (it.first == it.last) it.first.toString() else "${it.first}-${it.last}"))
             }
             problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Actions {
                 Secondary(stringResource(R.string.courses_cancel), onClick = onClose)
                 Primary(stringResource(R.string.courses_save_correction), enabled = problem == null) { onSave(fields) }
             }
+    }
+}
+
+@Composable
+private fun TermChoice(label: String, selected: Boolean, enabled: Boolean, tag: String, source: String? = null, choose: () -> Unit) {
+    Row(Modifier.fillMaxWidth().testTag(tag).selectable(selected, enabled = enabled, role = Role.RadioButton, onClick = choose)
+        .heightIn(min = 48.dp).padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        RadioButton(selected, onClick = null, enabled = enabled)
+        Column {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            source?.let { Hint(it) }
+        }
+    }
+}
+
+@Composable
+private fun IssueLocation(issue: ImportIssue) {
+    Text(stringResource(R.string.import_row, issue.row), style = MaterialTheme.typography.bodyLarge)
+    issue.day?.let { Hint(weekday(it)) }
+    issue.item?.let { Hint(stringResource(R.string.import_item, it)) }
+}
+
+@Composable
+private fun RawDisclosure(rows: JsonArray, issue: ImportIssue, tag: String) {
+    var expanded by remember(issue.position) { mutableStateOf(false) }
+    TextButton(onClick = { expanded = !expanded }, modifier = Modifier.testTag("$tag-toggle")) {
+        Text(stringResource(if (expanded) R.string.import_hide_raw else R.string.import_show_raw))
+    }
+    if (expanded) {
+        issue.fields?.week?.let { Hint(stringResource(R.string.import_raw_week, it)) }
+        Text(remember(rows, issue) { rows.sourceValue(issue).toString() }, Modifier.testTag(tag), style = MaterialTheme.typography.bodyMedium)
     }
 }
 

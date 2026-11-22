@@ -1,5 +1,8 @@
 package io.github.nakanomk.stacklife.acceptance
 
+import android.content.ContextWrapper
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.Bitmap
 import android.graphics.Point
 import androidx.activity.ComponentActivity
@@ -12,18 +15,22 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.SavedStateHandle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.StackLifeApp
 import io.github.nakanomk.stacklife.StackLifeTheme
 import io.github.nakanomk.stacklife.WorkspaceViewModel
@@ -31,6 +38,9 @@ import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
 import io.github.nakanomk.stacklife.appearance.PlannerPopupHost
 import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
 import io.github.nakanomk.stacklife.courses.*
+import io.github.nakanomk.stacklife.appearance.BackgroundStore
+import io.github.nakanomk.stacklife.appearance.LocalBackgroundStore
+import io.github.nakanomk.stacklife.storage.RoomPlannerApi
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.assistant.Disclosure
@@ -77,11 +87,9 @@ class ManualCourseEntryTest {
         await(tag).performScrollTo().assertIsDisplayed().performTextReplacement(value)
         await(tag).assertTextContains(value)
     }
-    private fun period(tag: String, n: Int) {
-        await(tag).performScrollTo().performClick()
-        await("$tag:$n").performScrollTo().performClick()
-    }
-    private suspend fun week(n: Int) = store.api.observe(PlannerQuery.Week("手动学期", n)).first() as CourseWeek
+    private suspend fun terms() = (store.api.observe(PlannerQuery.Terms).first() as Terms).terms
+    private suspend fun week(n: Int) = store.api.observe(PlannerQuery.Week(terms().single().id, n)).first() as CourseWeek
+    private fun next() { await("manual-next").performClick() }
 
     private fun point(node: SemanticsNodeInteraction, x: Float, y: Float): Point {
         val target = node.assertIsDisplayed().fetchSemanticsNode()
@@ -94,12 +102,20 @@ class ManualCourseEntryTest {
     // Sample the composed display, including separate popup windows, rather than the sampled layer itself.
     private fun colorsAt(points: List<Point>, name: String? = null): List<Int> {
         val inst = InstrumentationRegistry.getInstrumentation()
+        inst.uiAutomation.waitForIdle(200, 5_000)
         val shot = checkNotNull(inst.uiAutomation.takeScreenshot())
         val bitmap = if (shot.config == Bitmap.Config.HARDWARE) shot.copy(Bitmap.Config.ARGB_8888, false).also { shot.recycle() } else shot
         try {
-            val label = InstrumentationRegistry.getArguments().getString("courseChromeCapture")
-            if (name != null && label in listOf("before", "after")) {
-                File(inst.targetContext.getExternalFilesDir(null), "course-chrome-$label-$name.png").outputStream().use {
+            val args = InstrumentationRegistry.getArguments()
+            val label = args.getString("courseChromeCapture")
+            val file = when {
+                name == null -> null
+                name.startsWith("u8-") -> name.takeIf { args.getString("captureU8") == "yes" }
+                label in listOf("before", "after") -> "course-chrome-$label-$name"
+                else -> null
+            }
+            if (file != null) {
+                File(checkNotNull(inst.targetContext.getExternalFilesDir(null)), "$file.png").outputStream().use {
                     check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
                 }
             }
@@ -174,6 +190,136 @@ class ManualCourseEntryTest {
         ui.onNodeWithText("关闭").performClick()
     }
 
+    @Test fun gridSwitchRemovesBothRulesFromPreviewAndRealWeekWithoutMovingTheCourse() {
+        val term = TermSpec("秋季实验", LocalDate.of(2026, 9, 7), 1, BellSchedule.SUMMER)
+        val optics = term.meeting(1, 1, "光学实验", "A101", 1, 3)
+        runBlocking {
+            val draft = store.api.stageCourseImport(term, listOf(optics,
+                term.meeting(1, 4, "设计", "B202", 2, 3), term.meeting(1, 5, "研讨", "C301", 3, 4)))
+            try { store.apply(PlannerCommand.CourseImport(draft), PlannerCommand.EditAppearance(
+                AppearancePatch.Replace(Appearance(start = Destination.COURSES, theme = ThemeMode.LIGHT, palette = PaletteMode.SEED)))) }
+            finally { store.api.discardCourseImport(draft) }
+        }
+        ui.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
+        val dp = ui.density.density
+        fun delta(a: Int, b: Int) = maxOf(abs((a ushr 16 and 255) - (b ushr 16 and 255)),
+            abs((a ushr 8 and 255) - (b ushr 8 and 255)), abs((a and 255) - (b and 255)))
+        fun probe(preview: Boolean, lines: Boolean): Int {
+            val scope = hasTestTag(if (preview) "course-timetable-preview" else "week-grid")
+            val tile = ui.onNode(hasTestTag("grid-course:0") and hasAnyAncestor(scope)).assertIsDisplayed()
+            val origin = point(tile, 0f, 0f)
+            val size = tile.fetchSemanticsNode().size
+            val column = size.width + 2 * dp
+            val period = (size.height + 2 * dp) / (if (preview) 2 else 3)
+            val x = origin.x - dp
+            val y = origin.y - dp
+            // Cross Tue/Wed halfway through the first period and periods 1/2 in the free Wed column.
+            val vertical = Point((x + 2 * column).roundToInt(), (y + .5f * period).roundToInt())
+            val horizontal = Point((x + 2.5f * column).roundToInt(), (y + period).roundToInt())
+            val span = (3 * dp).roundToInt().coerceAtLeast(3)
+            val points = (-span..span).map { Point(vertical.x + it, vertical.y) } +
+                (-span..span).map { Point(horizontal.x, horizontal.y + it) } +
+                listOf(Point(vertical.x + (column / 3).roundToInt(), vertical.y),
+                    Point(horizontal.x, horizontal.y + (period / 3).roundToInt()), point(tile, .65f, .83f))
+            val surface = if (preview) "grid-preview" else "week-grid"
+            val pixels = colorsAt(points, "u8-$surface-${if (lines) "on" else "off"}")
+            val width = 2 * span + 1
+            for (i in 0..1) {
+                val strength = (0 until width).maxOf { delta(pixels[i * width + it], pixels[2 * width + i]) }
+                assertTrue("$surface: ${if (i == 0) "vertical" else "horizontal"} rule ΔRGB=$strength, lines=$lines",
+                    if (lines) strength > 12 else strength < 5)
+            }
+            return pixels.last()
+        }
+        val course = await("grid-course:0").assertTextContains(optics.title)
+        fun box() = course.fetchSemanticsNode().boundsInRoot
+        val original = box()
+        val dates = await("week-dates").fetchSemanticsNode().boundsInRoot
+        val hit = original.center
+        fun openAtSamePosition() {
+            ui.onRoot().performTouchInput { click(hit) }
+            await("course-detail")
+            ui.onNode(hasText(optics.title) and hasAnyAncestor(hasTestTag("course-detail"))).assertIsDisplayed()
+            ui.onNodeWithText(ui.activity.getString(R.string.courses_close)).performClick()
+            ui.waitUntil(10_000) { ui.onAllNodesWithTag("course-detail").fetchSemanticsNodes().isEmpty() }
+        }
+        val on = probe(preview = false, lines = true)
+        openAtSamePosition()
+        ui.onNodeWithContentDescription("设置").performClick()
+        ui.onNode(hasText(ui.activity.getString(R.string.ui_material_motion)) and hasClickAction()).performClick()
+        val list = await("appearance-scroll")
+        val toggle = hasText(ui.activity.getString(R.string.appearance_grid_lines)) and hasClickAction()
+        val preview = hasTestTag("course-timetable-preview")
+        list.performScrollToNode(preview); ui.onNode(preview).performScrollTo()
+        probe(preview = true, lines = true)
+        list.performScrollToNode(toggle)
+        ui.onNode(toggle).performScrollTo().assertIsOn().performTouchInput { click() }
+        ui.onNode(toggle).assertIsOff()
+        ui.onNode(preview).performScrollTo()
+        probe(preview = true, lines = false)
+        ui.onNodeWithText(ui.activity.getString(R.string.ui_save_appearance)).performClick()
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("appearance-scroll").fetchSemanticsNodes().isEmpty() }
+        ui.onNodeWithContentDescription("返回").performClick()
+        await("week-grid")
+        val off = probe(preview = false, lines = false)
+        val rgb = listOf(off ushr 16 and 255, off ushr 8 and 255, off and 255)
+        assertTrue("Course lost its pigment with grid disabled: #${off.toUInt().toString(16)}",
+            rgb.max() - rgb.min() > 24 && delta(on, off) < 16)
+        assertEquals(original, box()); assertEquals(dates, await("week-dates").fetchSemanticsNode().boundsInRoot)
+        openAtSamePosition()
+        assertEquals(optics, runBlocking { week(1).classes.first().meeting })
+    }
+
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 33)
+    @Test fun courseGlassSamplesThePageWallpaperEvenWhenGridRulesAreHidden() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val dir = java.nio.file.Files.createTempDirectory(context.cacheDir.toPath(), "week-wallpaper-").toFile()
+        val id = java.util.UUID.randomUUID().toString()
+        val photos = BackgroundStore(object : ContextWrapper(context) { override fun getNoBackupFilesDir() = dir }) { setOf(id) }
+        val api = RoomPlannerApi(store.db, imageExists = photos::exists)
+        val term = TermSpec("光学", LocalDate.of(2026, 9, 7), 1, BellSchedule.SUMMER)
+        fun crop(x: Float) = runBlocking {
+            val a = Appearance(theme = ThemeMode.LIGHT, start = Destination.COURSES, showCourseGrid = false,
+                pageBackgrounds = mapOf(Destination.COURSES to WallpaperSpec(id, offsetX = x, tint = 0f)))
+            val preview = api.preview(listOf(PlannerCommand.EditAppearance(AppearancePatch.Replace(a)))) as PreviewResult.Ready
+            assertTrue(api.commit(preview.proposalId) is CommitResult.Applied)
+        }
+        try {
+            runBlocking {
+                photos.recover()
+                val draft = store.api.stageCourseImport(term, listOf(term.meeting(1, 1, "光学实验", "", 1, 3)))
+                try { store.apply(PlannerCommand.CourseImport(draft)) } finally { store.api.discardCourseImport(draft) }
+            }
+            val bitmap = Bitmap.createBitmap(256, 40, Bitmap.Config.ARGB_8888)
+            try {
+                bitmap.eraseColor(android.graphics.Color.RED)
+                Canvas(bitmap).drawRect(128f, 0f, 256f, 40f, Paint().apply { color = android.graphics.Color.BLUE })
+                File(File(dir, "background-images"), id).outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+            } finally { bitmap.recycle() }
+            crop(-1f)
+            ui.setContent { CompositionLocalProvider(LocalBackgroundStore provides photos) {
+                StackLifeApp(viewModel { WorkspaceViewModel(api) })
+            } }
+            val tile = await("grid-course:0")
+            assumeTrue("Requires the real optical renderer", ui.onAllNodes(hasStateDescription("折射胶囊")).fetchSemanticsNodes().isNotEmpty())
+            val inside = point(tile, .55f, .8f)
+            val empty = Point(inside.x + tile.fetchSemanticsNode().size.width, inside.y)
+            val points = listOf(inside, empty)
+            fun bias(c: Int) = android.graphics.Color.red(c) - android.graphics.Color.blue(c)
+            fun sample(sign: Int, label: String): Int {
+                ui.waitUntil(10_000) { sign * bias(colorsAt(points).last()) > 60 }
+                return colorsAt(points, "u8-wallpaper-course-$label").first()
+            }
+            val red = sample(1, "red")
+            crop(1f)
+            val blue = sample(-1, "blue")
+            assertTrue("An opaque tile would not transmit the wallpaper change: #${red.toUInt().toString(16)} → #${blue.toUInt().toString(16)}",
+                bias(red) - bias(blue) > 32)
+            tile.performClick(); await("course-detail")
+            ui.onNode(hasText("光学实验") and hasAnyAncestor(hasTestTag("course-detail"))).assertIsDisplayed()
+        } finally { dir.deleteRecursively() }
+    }
+
     @Test fun editorWeeksAndReviewTransmitChangesFromTheActualWindow() = sheetMaterial(live = true)
     @Test fun highContrastEditorWeeksAndReviewStayOpaqueAndUsable() = sheetMaterial(live = false)
 
@@ -181,16 +327,17 @@ class ManualCourseEntryTest {
         val host = mutableStateOf(Color.Red)
         val appearance = Appearance(theme = ThemeMode.LIGHT, glass = true, highContrast = !live)
         var available = false
+        val editor = ManualEditorModel(SavedStateHandle(), ui.activity).apply {
+            open(null, 1)
+            checkNotNull(form).update { it.copy(newTerm = it.newTerm.copy(monday = LocalDate.of(2026, 9, 7), weeks = 4),
+                pattern = it.pattern.copy(title = "测试课")) }
+        }
         ui.setContent { StackLifeTheme(appearance) {
             available = glassUnavailableReason(appearance) == null
             CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
                 PlannerPopupHost {
                     Spacer(Modifier.fillMaxSize().background(host.value).testTag("chrome-source"))
-                    val form = remember { ManualCourseForm(null, 1).apply {
-                        newTerm = TermForm(id = "手动学期", monday = LocalDate.of(2026, 9, 7), weeks = 4)
-                        pattern = pattern.copy(title = "测试课")
-                    } }
-                    ManualCourseSheet(viewModel { WorkspaceViewModel(store.api) }, form, emptyList(), {}, { _, _ -> })
+                    editor.form?.let { ManualCourseSheet(viewModel { WorkspaceViewModel(store.api) }, it, emptyList(), editor::close, { _, _ -> editor.close() }) }
                 }
             }
         } }
@@ -224,21 +371,21 @@ class ManualCourseEntryTest {
             if (!live) assertEquals("Opaque controls changed at $stage: before ${describe(red)}, after ${describe(blue)}",
                 red.drop(1), blue.drop(1))
         }
-        checkPlane("editor", point(await("termId"), .85f, .50f))
-        await("manual-weeks").performScrollTo().performClick()
+        checkPlane("editor", point(await("termMonday"), .84f, .20f))
+        next(); await("manual-title").assertTextContains("测试课"); next()
         val first = await("manual-week:1")
         checkPlane("weeks", point(first, .74f, .53f))
         first.assertIsSelected().performClick()
-        ui.onNodeWithTag("manual-weeks-done").assertIsNotEnabled()
+        ui.onNodeWithTag("manual-preview").assertIsNotEnabled()
         await("manual-week:2").assertIsNotSelected().performClick()
-        await("manual-weeks-done").performClick()
         await("manual-preview").performClick()
         await("manual-review").assertIsDisplayed()
-        val change = ui.onAllNodesWithTag("manual-change")[0]
-        checkPlane("review", point(change, .97f, .5f))
-        assertNull(runBlocking { week(1).term })
-        await("manual-cancel").performClick()
-        await("manual-weeks").assertTextContains("第 2 周")
+        val change = await("manual-change")
+        checkPlane("review", point(change, .97f, .10f))
+        assertTrue(runBlocking { terms().isEmpty() })
+        await("manual-back").performClick()
+        await("manual-week:2").assertIsSelected()
+        await("manual-cancel").performScrollTo().performClick()
     }
 
     @Test fun authorizedAssistantSeriesAppearsOnTodaysAxisAfterLocalConfirmationAndReopen(): Unit = runBlocking {
@@ -253,7 +400,7 @@ class ManualCourseEntryTest {
         val plan = PlannerTools(store.api, AssistantPage.Terms, Disclosure(courseDetails = true)).proposal(args) as ToolPlan.Commands
         val ready = store.api.preview(plan.commands) as PreviewResult.Ready
         val day = PlannerQuery.Day(today, zone)
-        assertTrue((store.api.observe(day).first() as DayPlan).courses.isEmpty())
+        assertTrue((store.api.observe(day).first() as DayPlan).occurrences.mapNotNull { it.course }.isEmpty())
         assertTrue(store.api.commit(ready.proposalId) is CommitResult.Applied)
         store.reopen()
         val privateRead = PlannerTools(store.api, AssistantPage.Day(today, zone), Disclosure())
@@ -263,45 +410,147 @@ class ManualCourseEntryTest {
             StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
         } }
         val course = await("day-course").performScrollTo()
-        // Center the actual touch above the floating queue, not just inside the scroller.
+        val toggle = await("day-tray-toggle")
+        if (toggle.fetchSemanticsNode().config[SemanticsProperties.StateDescription] == ui.activity.getString(io.github.nakanomk.stacklife.R.string.today_expanded)) toggle.performClick()
+        val activeCard = course.fetchSemanticsNode().id
+        val label = ui.onNode(hasText("现场课程") and hasAnyAncestor(SemanticsMatcher("visible course card") { it.id == activeCard }), useUnmergedTree = true).performScrollTo()
+        val bounds = label.fetchSemanticsNode().boundsInRoot
         val viewport = await("day-drop-area").fetchSemanticsNode().boundsInRoot
-        val tray = await("day-tray-container").fetchSemanticsNode().boundsInRoot
-        val center = course.fetchSemanticsNode().boundsInRoot.center
-        val floor = if (center.x in tray.left..tray.right) minOf(tray.top, viewport.bottom) else viewport.bottom
-        val shift = center.y - (viewport.top + floor) / 2
-        await("day-axis").performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, shift) }
-        ui.waitForIdle()
-        assertTrue("Course tap must land in the uncovered axis", viewport.contains(course.fetchSemanticsNode().boundsInRoot.center))
-        course.performTouchInput { click() }
+        val hit = bounds.intersect(viewport).center
+        assertTrue("Visible course title must receive a real touch", bounds.contains(hit) && viewport.contains(hit))
+        label.performTouchInput { click(hit - bounds.topLeft) }
         await("course-detail").assertIsDisplayed()
         ui.onNode(hasText("现场课程") and hasAnyAncestor(hasTestTag("course-detail"))).assertIsDisplayed()
     }
 
+    @Test fun restoredPrivateDraftKeepsScrollAndNeverReplaysAConfirmedWrite() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val scenario = ui.activityRule.scenario
+        var handle = SavedStateHandle()
+        val editor = mutableStateOf(ManualEditorModel(handle, context).apply { open(null, 1) })
+        val committed = java.util.concurrent.atomic.AtomicInteger()
+        val api = object : PlannerApi by store.api {
+            override suspend fun commit(proposalId: String): CommitResult {
+                committed.incrementAndGet()
+                return store.api.commit(proposalId)
+            }
+        }
+        val receipts = java.util.concurrent.atomic.AtomicInteger()
+        ui.setContent { StackLifeTheme {
+            val current = editor.value
+            current.form?.let { form -> key(form) {
+                ManualCourseSheet(viewModel { WorkspaceViewModel(api) }, form, emptyList(), current::close,
+                    // Leave the file at the exact boundary after Room applied the command but before close/delete.
+                    { _, _ -> receipts.incrementAndGet(); Unit })
+            } }
+        } }
+        fun restoreFromIdentity() {
+            scenario.moveToState(Lifecycle.State.CREATED)
+            val keys = handle.keys()
+            assertEquals(1, keys.size)
+            val id = checkNotNull(handle.get<String>(keys.single()))
+            assertEquals(id, java.util.UUID.fromString(id).toString())
+            handle = SavedStateHandle(mapOf(keys.single() to id))
+            scenario.onActivity { editor.value = ManualEditorModel(handle, context) }
+            scenario.moveToState(Lifecycle.State.RESUMED)
+        }
+        try {
+            ui.chooseDate("termMonday", LocalDate.of(2026, 9, 7))
+            ui.chooseNumber("termWeeks", 53); next()
+            field("manual-title", "实际草稿"); field("manual-room", "B")
+            next()
+            ui.onNodeWithText(ui.activity.getString(io.github.nakanomk.stacklife.R.string.courses_select_all)).performScrollTo().performClick()
+            await("manual-week:52").performScrollTo().performClick().assertIsNotSelected()
+            await("manual-back").performClick()
+            await("manual-title").assertTextContains("实际草稿")
+            await("manual-room").assertTextContains("B")
+            next(); await("manual-week:53").assertIsSelected()
+            await("manual-preview").performClick(); await("manual-change")
+            val proposal = ui.runOnIdle { checkNotNull(editor.value.form?.ready).proposalId }
+            fun offset() = await("manual-review").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+            await("manual-review").performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 550f) }
+            val scrolled = offset()
+            assertTrue("Review of 52 real meetings must scroll", scrolled > 0f)
+            restoreFromIdentity()
+            await("manual-change"); assertEquals(scrolled, offset(), 1f)
+            await("manual-back").performClick(); await("manual-week:52").assertIsNotSelected()
+            await("manual-preview").performClick(); await("manual-change")
+            assertEquals(scrolled, offset(), 1f)
+            restoreFromIdentity()
+            await("manual-change")
+            assertNotEquals(proposal, ui.runOnIdle { checkNotNull(editor.value.form?.ready).proposalId })
+            assertEquals(0, committed.get())
+            val top = await("manual-save").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+            val bottom = await("manual-save-bottom").performScrollTo().fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+            // Both real click handlers run in the same frame, before Compose can disable either button.
+            ui.onNodeWithTag("manual-save").assertIsDisplayed()
+            ui.runOnIdle { top(); bottom() }
+            ui.waitUntil(10_000) { receipts.get() == 1 }
+            assertEquals(1, committed.get())
+            restoreFromIdentity()
+            await("manual-error").assertTextContains(ui.activity.getString(io.github.nakanomk.stacklife.R.string.manual_interrupted))
+            ui.onNodeWithTag("manual-save").assertIsNotEnabled()
+            ui.onNodeWithTag("manual-save-bottom").assertDoesNotExist()
+            runBlocking {
+                assertEquals("实际草稿", week(1).classes.single().meeting.title)
+                assertEquals("B", week(53).classes.single().meeting.room)
+                assertTrue(week(52).classes.isEmpty())
+            }
+            assertEquals(1, committed.get())
+            val file = File(context.noBackupFilesDir, "manual-course-drafts/${handle.get<String>(handle.keys().single())}")
+            await("manual-cancel").performClick(); awaitClosed()
+            assertTrue(handle.keys().isEmpty())
+            assertFalse(file.exists())
+        } finally { ui.runOnIdle { editor.value.close() } }
+    }
+
     @Test fun emptyTimetableToRealSeriesThenMenuCancelEditAndRemove() = runBlocking {
-        ui.activityRule.scenario.onActivity { activity -> activity.setContent {
+        val scenario = ui.activityRule.scenario
+        fun attach() = scenario.onActivity { activity -> activity.setContent {
             StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
         } }
+        attach()
         await("nav:courses").performClick()
         await("course-add").assertIsDisplayed().performClick()
-        field("termId", "手动学期"); ui.chooseDate("termMonday", LocalDate.of(2026, 9, 7)); ui.chooseNumber("termWeeks", 3)
+        await("manual-course-sheet").assertIsDisplayed()
+        ui.exerciseSheetAnchors("manual")
+        ui.onNodeWithTag("termId").assertDoesNotExist()
+        ui.onNodeWithTag("manual-title").assertDoesNotExist()
+        ui.onNodeWithTag("manual-week:1").assertDoesNotExist()
+        ui.onNodeWithTag("manual-next").assertIsNotEnabled()
+        ui.chooseDate("termMonday", LocalDate.of(2026, 9, 7)); ui.chooseNumber("termWeeks", 3)
+        await("termAdvanced").performScrollTo().performClick()
         ui.onNodeWithText("冬令").performScrollTo().performClick().assertIsSelected()
+        next()
         field("manual-title", "线性代数"); field("manual-room", "东101")
-        await("manual-weeks").performScrollTo().assertIsDisplayed().performClick()
-        await("manual-week:3").performScrollTo().assertIsDisplayed().performClick()
-        await("manual-weeks-done").assertIsDisplayed().performClick()
-        await("manual-weeks").assertTextContains("第 1、3 周")
         await("manual-day").performScrollTo().performClick()
         await("manual-day:1").assertIsSelected()
         await("manual-day:2").assertIsNotSelected().performClick()
-        period("manual-first", 5); period("manual-last", 6)
-        await("manual-preview").performClick(); await("manual-review").assertExists()
-        assertNull(week(1).term)
+        await("manual-periods").performScrollTo().performClick()
+        ui.adjustWheel("wheel-first", 5); ui.adjustWheel("wheel-last", 6)
+        ui.onNodeWithTag("wheel-confirm").performClick()
+        next()
+        await("manual-week:1").assertIsSelected()
+        await("manual-week:3").performScrollTo().performClick()
+        await("manual-back").performClick()
+        await("manual-title").assertTextContains("线性代数")
+        await("manual-periods").assertTextContains("5–6")
+        next()
+        scenario.recreate(); attach()
+        await("manual-week:3").assertIsSelected()
+        await("manual-preview").performClick()
+        await("manual-change").assertExists()
+        assertTrue(terms().isEmpty())
         await("manual-save").performClick(); awaitClosed(); await("grid-course:0").performClick()
         await("course-detail").assertExists()
+        ui.exerciseSheetAnchors("course-detail")
         ui.onNode(hasText("线性代数") and hasAnyAncestor(hasTestTag("course-detail"))).assertExists()
         val firstWeek = week(1)
-        val terms = store.api.observe(PlannerQuery.Terms).first() as Terms
-        assertEquals("Saved under a different term: ${terms.terms}", listOf("手动学期"), terms.terms.map { it.id })
+        val generated = terms().single()
+        assertEquals(LocalDate.of(2026, 9, 7), generated.firstMonday)
+        assertEquals(BellSchedule.WINTER, generated.initial)
+        assertEquals(3, generated.weeks)
+        assertEquals(generated.id, java.util.UUID.fromString(generated.id).toString())
         assertNotNull("Saved term missing from the week query", firstWeek.term)
         assertEquals("Wrong occurrences after confirming weeks 1 and 3: ${firstWeek.classes}; week 3: ${week(3).classes}",
             1, firstWeek.classes.size)
@@ -310,20 +559,28 @@ class ManualCourseEntryTest {
         assertEquals(5, class1.meeting.firstPeriod); assertEquals(6, class1.meeting.lastPeriod)
         assertEquals("东101", class1.meeting.room); assertTrue(week(2).classes.isEmpty()); assertEquals("线性代数", week(3).classes.single().meeting.title)
         val day = store.api.observe(PlannerQuery.Day(LocalDate.parse("2026-09-08"), campusZone)).first() as DayPlan
-        assertEquals(class1, day.courses.single())
+        assertEquals(class1, day.occurrences.mapNotNull { it.course }.single())
+        // A school occurrence with the exact same pattern in week 3 must survive the manual edit and removal.
+        val schoolMeeting = week(3).classes.single().meeting
+        val importId = store.api.stageCourseImport(generated, listOf(schoolMeeting), HUST_SOURCE)
+        try { store.apply(PlannerCommand.CourseImport(importId)) } finally { store.api.discardCourseImport(importId) }
         ui.onNodeWithText("关闭").performClick(); await("course-options").performClick(); await("course-add").performClick()
-        field("manual-title", "不保存"); await("manual-cancel").performClick(); awaitClosed()
-        await("course-options").performClick(); await("course-add").performClick(); field("manual-title", "本周新课")
-        await("manual-preview").performClick(); await("manual-save").performClick(); awaitClosed()
+        await("manual-term:${generated.id}").assertIsSelected(); next()
+        field("manual-title", "不保存"); await("manual-cancel").performScrollTo().performClick(); awaitClosed()
+        await("course-options").performClick(); await("course-add").performClick(); next(); field("manual-title", "本周新课")
+        next(); await("manual-preview").performClick(); await("manual-save-bottom").performScrollTo().performClick(); awaitClosed()
         assertEquals(listOf("本周新课", "线性代数"), week(1).classes.map { it.meeting.title })
-        await("grid-course:1").performClick(); await("manual-edit").performClick(); field("manual-title", "数值分析")
-        await("manual-preview").performClick(); await("manual-save").performClick()
+        await("grid-course:1").performClick(); await("manual-edit").performClick(); next(); field("manual-title", "数值分析")
+        next(); await("manual-preview").performClick(); await("manual-save").performClick()
         awaitClosed()
-        assertEquals("数值分析", week(3).classes.single().meeting.title)
-        await("grid-course:1").performClick(); await("manual-edit").performClick()
+        val updated = week(3).classes.associateBy { it.source }
+        assertEquals("数值分析", updated.getValue(MANUAL_SOURCE).meeting.title)
+        assertEquals(schoolMeeting, updated.getValue(HUST_SOURCE).meeting)
+        await("grid-course:1").performClick(); await("manual-edit").performClick(); next()
         await("manual-remove").performScrollTo().assertIsDisplayed().performClick()
         await("manual-save").performClick(); awaitClosed()
         assertEquals("本周新课", week(1).classes.single().meeting.title)
-        assertTrue(week(3).classes.isEmpty())
+        val kept = week(3).classes.single()
+        assertEquals(HUST_SOURCE, kept.source); assertEquals(schoolMeeting, kept.meeting)
     }
 }

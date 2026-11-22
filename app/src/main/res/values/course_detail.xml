@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="course_detail_location">Location</string>
+    <string name="course_detail_repeat">Recurrence</string>
+    <string name="course_detail_reminders">Reminders</string>
+    <string name="course_detail_lead">%1$d minutes before class</string>
+    <string name="goal_execution_heading">Execution order</string>
+    <string name="goal_order_count">Tasks in this order: %1$d</string>
+    <string name="goal_queue_policy">Queue: append %1$d new tasks after existing items.</string>
+    <string name="goal_frame_policy">Frame: save %1$d restorable tasks without moving the queue.</string>
+    <string name="frames_available">Available: %1$d</string>
+    <string name="frames_emptied">Emptied: %1$d</string>
+    <string name="frame_restore_order">Restore in the original order.</string>
+    <string name="frame_item_number">Item %1$d</string>
+    <string name="frame_saved_snapshot">When saved</string>
+    <string name="queue_unfinished_count">Unfinished: %1$d</string>
+    <string name="queue_estimate_minutes">Estimated: %1$d min</string>
+</resources>

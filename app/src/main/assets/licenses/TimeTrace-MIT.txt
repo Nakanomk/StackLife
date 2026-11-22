@@ -1,0 +1,30 @@
+Adapted from TimeTrace / KIPPU_Trace, revision eec74a1a37dea740b55c63319ccafb881585b3f2.
+Upstream paths below are under app/src/main/java/com/kippu/trace/; local paths are under app/src/main/java/io/github/nakanomk/stacklife/.
+planner/CountdownModels.kt (Countdown, amount) ← model/DateEvent.kt, utils/TimeUtils.kt (getDayCount): Gregorian epoch days and explicit today/elapsed/past directions.
+countdown/CountdownCards.kt (CountdownCard, CountdownFace) ← ui/components/NormalEventCard.kt and PinnedEventCard.kt: title/date and day count, stacked long text, 16:9 pinned image. Uses theme typography, private photos, contrast protection and expandable height.
+countdown/CountdownRoute.kt (CountdownRoute, CountdownDetail) ← ui/screens/HomeScreen.kt and DetailScreen.kt: pinned first, 600dp two-column breakpoint and vertical event paging. Uses stable planner identities and root navigation, not global Activity window changes.
+countdown/CountdownEditor.kt (CountdownForm) ← ui/screens/EditorScreen.kt: preview the actual card above local editable fields. Writes only on confirmation through StackLife's PlannerApi and transaction-local storage/CountdownDraft.kt.
+No upstream brand assets, photographs, themes, lunar/anniversary calculations or repository/database are included.
+https://github.com/KIPPUDESU/KIPPU_Trace/tree/eec74a1a37dea740b55c63319ccafb881585b3f2
+
+MIT License
+
+Copyright (c) 2026 切符
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

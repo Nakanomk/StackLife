@@ -3,6 +3,23 @@ package io.github.nakanomk.stacklife.appearance
 import androidx.compose.ui.res.stringResource
 import io.github.nakanomk.stacklife.R
 
+import android.content.res.Configuration
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.collapse
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.expand
+import kotlin.math.roundToInt
 import android.view.View
 import android.view.ViewTreeObserver
 import androidx.compose.foundation.clickable
@@ -16,9 +33,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.InterceptPlatformTextInput
+import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.semantics.dismiss
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 private val LocalPanelReaders = compositionLocalOf<MutableIntState?> { null }
@@ -94,15 +114,32 @@ internal fun PlannerAlertDialog(onDismissRequest: () -> Unit, confirmButton: @Co
 @Composable
 internal fun PlannerModalBottomSheet(onDismissRequest: () -> Unit, nested: Boolean = false,
     onNestedBack: (() -> Unit)? = null, canDismiss: Boolean = true,
-    dragHandle: (@Composable (close: () -> Unit) -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
+    content: @Composable ColumnScope.() -> Unit) {
     val scope = rememberCoroutineScope()
     val motion = LocalMotionEnabled.current
     val dismissible = rememberUpdatedState(canDismiss && !nested)
     val requestDismiss by rememberUpdatedState(onDismissRequest)
-    val sheetState = rememberBottomSheetState(
-        initialValue = if (motion) SheetValue.Hidden else SheetValue.Expanded,
-        enabledValues = remember { setOf(SheetValue.Hidden, SheetValue.Expanded) },
-        confirmValueChange = remember { { target -> target != SheetValue.Hidden || dismissible.value } })
+    val config = LocalConfiguration.current
+    val fullHeightOnly = config.orientation == Configuration.ORIENTATION_LANDSCAPE || config.screenHeightDp < 480
+    var lastVisible by rememberSaveable { mutableStateOf<SheetValue?>(null) }
+    val freshWindow = remember { lastVisible == null }
+    // A restored portrait half anchor isn't legal in a short window. Keep the content
+    // outside this key so changing window classes doesn't replace the editor or its list.
+    val sheetState = key(fullHeightOnly) {
+        rememberBottomSheetState(
+            initialValue = when {
+                fullHeightOnly && lastVisible != null -> SheetValue.Expanded
+                lastVisible != null -> checkNotNull(lastVisible)
+                motion -> SheetValue.Hidden
+                fullHeightOnly -> SheetValue.Expanded
+                else -> SheetValue.PartiallyExpanded
+            },
+            enabledValues = remember { if (fullHeightOnly) setOf(SheetValue.Hidden, SheetValue.Expanded) else SheetValue.entries.toSet() },
+            confirmValueChange = remember { { target -> target != SheetValue.Hidden || dismissible.value } })
+    }
+    LaunchedEffect(sheetState) {
+        snapshotFlow { sheetState.currentValue }.collect { if (it != SheetValue.Hidden) lastVisible = it }
+    }
     val close = {
         if (canDismiss) {
             if (nested) onNestedBack?.invoke()
@@ -113,17 +150,65 @@ internal fun PlannerModalBottomSheet(onDismissRequest: () -> Unit, nested: Boole
     }
     ModalBottomSheet(onDismissRequest = { if (dismissible.value) requestDismiss() },
         sheetState = sheetState, shape = sheetShape, containerColor = Color.Transparent,
-        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = !nested && canDismiss, shouldDismissOnClickOutside = !nested && canDismiss),
-        sheetGesturesEnabled = !nested && canDismiss, contentColor = MaterialTheme.colorScheme.onSurface, dragHandle = null, contentWindowInsets = { WindowInsets(0) }) {
-        PopupPanel(sheetShape, Modifier.fillMaxWidth()) {
-            Column(Modifier.fillMaxWidth().windowInsetsPadding(BottomSheetDefaults.modalWindowInsets)) {
-                Box(Modifier.align(Alignment.CenterHorizontally)) {
-                    if (dragHandle != null) dragHandle(close)
-                    else Box(Modifier.heightIn(min = 48.dp).clickable(onClickLabel = stringResource(R.string.ui_close_panel), onClick = close)
-                        .semantics { dismiss { close(); true } }, contentAlignment = Alignment.Center) { BottomSheetDefaults.DragHandle() }
+        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false, shouldDismissOnClickOutside = !nested && canDismiss),
+        sheetGesturesEnabled = true, contentColor = MaterialTheme.colorScheme.onSurface, dragHandle = null, contentWindowInsets = { WindowInsets(0) }) {
+        BackHandler(onBack = close)
+        val inputWindow = remember(sheetState) { PlatformTextInputInterceptor { request, next ->
+            // A dialog has its own insets dispatch. Expand before the IME covers the
+            // half-height footer, not after a visibility notification from the other window.
+            snapshotFlow { sheetState.currentValue }.first { it != SheetValue.Hidden }
+            if (sheetState.currentValue != SheetValue.Expanded) sheetState.expand()
+            next.startInputMethod(request)
+        } }
+        PopupPanel(sheetShape, Modifier.fillMaxSize().testTag("planner-sheet-shell")) {
+            // Material positions the full-height shell at its drag offset. Only the
+            // visible part may measure the list/footer; otherwise the IME or the
+            // partial anchor puts bottom actions below the physical screen.
+            Column(Modifier.fillMaxSize().layout { measurable, constraints ->
+                val offset = if (sheetState.hasExpandedState) sheetState.requireOffset().roundToInt() else 0
+                val visible = constraints.maxHeight - offset.coerceIn(0, constraints.maxHeight)
+                val child = measurable.measure(constraints.copy(minHeight = visible, maxHeight = visible))
+                layout(child.width, constraints.maxHeight) { child.placeRelative(0, 0) }
+            }.windowInsetsPadding(WindowInsets.safeDrawing)) {
+                val expanded = sheetState.currentValue == SheetValue.Expanded
+                val resize: () -> Unit = {
+                    scope.launch { if (expanded) sheetState.partialExpand() else sheetState.expand() }
                 }
-                CompositionLocalProvider(LocalPanelBack provides close) { content() }
+                val firstFocus = remember { FocusRequester() }
+                LaunchedEffect(firstFocus) { if (freshWindow) firstFocus.requestFocus() }
+                SheetHandle(Modifier.align(Alignment.CenterHorizontally).focusRequester(firstFocus).focusProperties { canFocus = true }, expanded, fullHeightOnly,
+                    canDismiss, resize, close)
+                CompositionLocalProvider(LocalPanelBack provides close) {
+                    InterceptPlatformTextInput(inputWindow) { content() }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun SheetHandle(modifier: Modifier, expanded: Boolean, fullHeightOnly: Boolean, canDismiss: Boolean,
+    resize: () -> Unit, close: () -> Unit) {
+    val description = stringResource(when {
+        fullHeightOnly -> R.string.ui_close_panel
+        expanded -> R.string.ui_sheet_collapse
+        else -> R.string.ui_sheet_fullscreen
+    })
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    val colors = MaterialTheme.colorScheme
+    val ink = if (pressed || focused) colors.onSurface else colors.outline
+    Box(modifier.size(56.dp, 48.dp).testTag("planner-sheet-handle")
+        .clickable(interactionSource = interaction, indication = null, enabled = !fullHeightOnly || canDismiss,
+            role = Role.Button, onClickLabel = description, onClick = if (fullHeightOnly) close else resize)
+        .semantics {
+            contentDescription = description
+            if (!fullHeightOnly) {
+                if (expanded) collapse(description) { resize(); true } else expand(description) { resize(); true }
+            }
+            if (canDismiss) dismiss { close(); true }
+        }, contentAlignment = Alignment.Center) {
+        StackLifeSurface(CapsuleScene.INSET, Modifier.size(36.dp, 5.dp).testTag("planner-sheet-grip"), ink, tint = ink.copy(alpha = .80f)) {}
     }
 }

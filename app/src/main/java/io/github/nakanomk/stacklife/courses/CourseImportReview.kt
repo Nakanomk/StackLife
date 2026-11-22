@@ -19,8 +19,10 @@ import io.github.nakanomk.stacklife.appearance.GlassBacking
 import io.github.nakanomk.stacklife.assistant.AssistantComposer
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.assistant.LocalAssistant
+import io.github.nakanomk.stacklife.assistant.ChangePreview
 import io.github.nakanomk.stacklife.planner.PreviewResult
 import io.github.nakanomk.stacklife.workspace.*
+import java.time.LocalDate
 import java.time.Instant
 import java.time.ZoneId
 
@@ -50,44 +52,76 @@ internal fun ReviewedImport(model: WorkspaceViewModel, draft: ReviewedTimetable,
         AssistantPage.CourseDraft(id, draft.term.id)
     }, onEdit, onConfirm)
 }
-private data class CourseGroup(val title: String, val room: String, val day: Int, val first: Int, val last: Int, val start: String, val end: String)
+internal data class ReviewedGroup(val pattern: CoursePattern, val time: PeriodTime, val weeks: List<Int>, val firstDate: LocalDate)
+
+private data class MeetingSlot(val pattern: CoursePattern, val time: PeriodTime)
+
+private fun Map<MeetingSlot, List<Int>>.ordered(term: TermSpec): List<ReviewedGroup> = map { (slot, weeks) ->
+    val orderedWeeks = weeks.sorted()
+    ReviewedGroup(slot.pattern, slot.time, orderedWeeks, term.firstMonday.plusWeeks(orderedWeeks.first() - 1L).plusDays(slot.pattern.day - 1L))
+}.sortedWith(compareBy({ it.firstDate }, { it.pattern.firstPeriod }, { it.pattern.lastPeriod }, { it.pattern.title }, { it.pattern.room }))
+
+internal fun ImportDraft.groups(): List<ReviewedGroup> = valid.groupBy({ entry ->
+    val date = term.firstMonday.plusWeeks(entry.week - 1L).plusDays(entry.day - 1L)
+    val bells = provider.calendar.periods(term, date)
+    MeetingSlot(CoursePattern(entry.title, entry.room, entry.day, entry.first, entry.last),
+        PeriodTime(bells[entry.first - 1].start, bells[entry.last - 1].end))
+}, { it.week }).ordered(term)
+
+@Composable
+internal fun ReviewCourseCard(group: ReviewedGroup) {
+    val course = group.pattern
+    FormGroup {
+        Text(course.title, style = MaterialTheme.typography.bodyLarge)
+        if (course.room.isNotBlank()) Hint(stringResource(R.string.courses_room, course.room))
+        Text(weekday(course.day), style = MaterialTheme.typography.bodyMedium)
+        Hint(stringResource(R.string.import_period_range, course.firstPeriod, course.lastPeriod))
+        Hint("${group.time.start}–${group.time.end}")
+        Hint(stringResource(R.string.courses_weeks_list, group.weeks.joinToString(stringResource(R.string.courses_list_separator))))
+    }
+}
+
+internal fun androidx.compose.foundation.lazy.LazyListScope.reviewGroups(groups: List<ReviewedGroup>) {
+    for ((date, entries) in groups.groupBy { it.firstDate }) {
+        item { SectionTitle(stringResource(R.string.import_starts_on, date.toString())) }
+        items(entries) { ReviewCourseCard(it) }
+    }
+}
 
 @Composable
 private fun ImportDiff(draft: ReviewedTimetable, proposal: PreviewResult.Ready, busy: Boolean, top: Dp,
     ask: () -> AssistantPage.CourseDraft, onEdit: () -> Unit, onConfirm: () -> Unit) {
     val meetings = draft.meetings
-    val calendar = calendarFor(draft.source)
-    val groups = remember(meetings, calendar) { meetings.groupBy {
-        fun time(millis: Long) = Instant.ofEpochMilli(millis).atZone(calendar?.zone ?: ZoneId.systemDefault()).toLocalTime().toString()
-        CourseGroup(it.title, it.room, it.day, it.firstPeriod, it.lastPeriod, time(it.startMillis), time(it.endMillis))
-    }.entries.toList() }
-    val locations = remember(groups) { groups.groupBy { it.key.title }.mapValues { (_, entries) -> entries.map { it.key.room }.distinct() }.filterValues { it.size > 1 } }
+    val groups = remember(draft) {
+        val zone = calendarFor(draft.source)?.zone ?: ZoneId.systemDefault()
+        meetings.groupBy({ meeting ->
+            fun clock(millis: Long) = Instant.ofEpochMilli(millis).atZone(zone).toLocalTime()
+            MeetingSlot(meeting.pattern(), PeriodTime(clock(meeting.startMillis), clock(meeting.endMillis)))
+        }, { it.week }).ordered(draft.term)
+    }
     ImportPane(composer = { if (!busy) AssistantComposer(ask) }) { bottom ->
-        LazyColumn(Modifier.fillMaxSize().testTag("courseImportDiff"), contentPadding = dockListPadding(top, bottom),
+        Column(Modifier.fillMaxSize().padding(top = top)) {
+        ActionPill(stringResource(R.string.courses_confirm_import), onConfirm,
+            Modifier.padding(horizontal = 16.dp).testTag("confirmCourseImportTop"), enabled = !busy, prominent = true)
+        LazyColumn(Modifier.fillMaxSize().testTag("courseImportDiff"), contentPadding = dockListPadding(0.dp, bottom),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item {
-                Text(stringResource(R.string.courses_confirm_import_diff), style = MaterialTheme.typography.titleLarge)
-                Text(stringResource(R.string.courses_import_summary, draft.term.id, meetings.size, groups.size, sourceLabel(draft.source)))
-                ActionPill(stringResource(R.string.courses_confirm_import), onConfirm, Modifier.testTag("confirmCourseImportTop"), enabled = !busy, prominent = true)
-                Text(draft.term.calendarSummary(calendar))
-                if (locations.isNotEmpty()) Text(stringResource(R.string.courses_different_locations), style = MaterialTheme.typography.titleMedium)
-            }
-            items(locations.entries.toList()) { (title, rooms) ->
-                val noLocation = stringResource(R.string.courses_no_location)
-                Text(stringResource(R.string.courses_room_list, title, rooms.joinToString(stringResource(R.string.courses_list_separator)) { it.ifEmpty { noLocation } }))
-            }
-            items(groups) { (g, classes) ->
-                Text(stringResource(R.string.courses_group_summary, g.title, g.room.ifEmpty { stringResource(R.string.courses_no_location) }, classes.joinToString(stringResource(R.string.courses_list_separator)) { it.week.toString() }, weekday(g.day), g.first, g.last, g.start, g.end))
+                SectionTitle(stringResource(R.string.courses_confirm_import_diff))
+                Text(draft.term.dateRangeLabel(), style = MaterialTheme.typography.bodyLarge)
+                Hint(stringResource(R.string.import_source_scope, sourceLabel(draft.source)))
+                Hint(stringResource(R.string.import_meeting_count, meetings.size))
             }
             item { Text(stringResource(R.string.courses_database_diff), style = MaterialTheme.typography.titleMedium)
                 if (proposal.changes.isEmpty()) Text(stringResource(R.string.courses_unchanged)) }
-            items(proposal.changes) { change -> Text(stringResource(R.string.courses_field_change, change.field, change.before ?: stringResource(R.string.courses_none), change.after ?: stringResource(R.string.courses_none))) }
+            items(proposal.changes, key = { it.entityId }) { ChangePreview(it) }
+            reviewGroups(groups)
             item {
                 Actions {
                     Secondary(stringResource(R.string.courses_back_to_review), !busy, onEdit)
                     ActionPill(stringResource(R.string.courses_confirm_import), onConfirm, Modifier.testTag("confirmCourseImport"), enabled = !busy, prominent = true)
                 }
             }
+        }
         }
     }
 }

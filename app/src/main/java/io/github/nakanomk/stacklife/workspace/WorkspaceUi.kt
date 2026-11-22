@@ -22,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
+import io.github.nakanomk.stacklife.appearance.wallpaperBackground
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
@@ -40,6 +41,9 @@ import io.github.nakanomk.stacklife.i18n.AppLanguage
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.planner.NavStyle
 import io.github.nakanomk.stacklife.planner.PlannerCommand
+import io.github.nakanomk.stacklife.planner.SchedulePattern
+import io.github.nakanomk.stacklife.planner.ScheduleSummary
+import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.transitions.LocalDetailChrome
 import java.time.Instant
 import java.time.ZoneId
@@ -65,12 +69,12 @@ internal fun dockListPadding(top: Dp, bottom: Dp): PaddingValues {
 internal fun Page(assistantPage: AssistantPage? = null, content: @Composable ColumnScope.() -> Unit) {
     val colors = MaterialTheme.colorScheme
     val docked = LocalAppearance.current.navStyle == NavStyle.DOCKED
-    Surface(modifier = Modifier.fillMaxSize(), color = if (docked) colors.surfaceContainer else colors.surface) {
+    Surface(modifier = Modifier.fillMaxSize().wallpaperBackground(if (docked) colors.surfaceContainer else colors.surface), color = Color.Transparent) {
         Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding(), contentAlignment = Alignment.TopCenter) {
             val page = (if (docked) Modifier else Modifier.widthIn(max = 760.dp)).fillMaxSize()
             // Record the actual page surface, not its descendant buttons. Overlays that float
             // over scrolling data receive the nearer RootPane/DockOverlay content source.
-            GlassBacking(page, background = { Spacer(Modifier.matchParentSize().background(colors.surface)) }) {
+            GlassBacking(page, background = { Spacer(Modifier.matchParentSize().wallpaperBackground(colors.surface)) }) {
                 if (assistantPage == null || LocalAssistant.current == null) Column(Modifier.fillMaxSize(), content = content)
                 else DockOverlay(assistantPage = assistantPage) { clearance ->
                     CompositionLocalProvider(LocalRootBottom provides clearance) { Column(Modifier.fillMaxSize(), content = content) }
@@ -83,7 +87,8 @@ internal fun Page(assistantPage: AssistantPage? = null, content: @Composable Col
 /** Header and optional dock are drawn after the scrolling plane; neither can record itself. */
 @Composable
 internal fun PageChrome(title: String, back: () -> Unit, backEnabled: Boolean = true,
-    footer: (@Composable () -> Unit)? = null, content: @Composable (top: Dp, bottom: Dp) -> Unit) {
+    footer: (@Composable () -> Unit)? = null, headerAction: (@Composable () -> Unit)? = null,
+    content: @Composable (top: Dp, bottom: Dp) -> Unit) {
     val density = LocalDensity.current
     var footerPixels by remember { mutableIntStateOf(0) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -93,11 +98,11 @@ internal fun PageChrome(title: String, back: () -> Unit, backEnabled: Boolean = 
         val actionWidth = maxWidth * .62f
         RootPane(header = {
             if (short && footer != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { PageTitle(title, back, backEnabled) }
+                Box(Modifier.weight(1f)) { PageTitle(title, back, backEnabled, headerAction) }
                 Box(Modifier.widthIn(max = actionWidth).padding(end = 8.dp).horizontalScroll(rememberScrollState())) {
                     ActionDock(footer)
                 }
-            } else PageTitle(title, back, backEnabled)
+            } else PageTitle(title, back, backEnabled, headerAction)
         }, overlay = { _, bottom ->
             if (!short && footer != null) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = bottom)
                 .onSizeChanged { footerPixels = it.height }.padding(horizontal = 12.dp, vertical = 6.dp)) {
@@ -122,10 +127,10 @@ private fun ActionDock(actions: @Composable () -> Unit) {
 
 @Composable
 internal fun EditorPage(title: String, back: () -> Unit, assistantPage: AssistantPage? = null,
-    backEnabled: Boolean = true, footer: (@Composable () -> Unit)? = null,
+    backEnabled: Boolean = true, footer: (@Composable () -> Unit)? = null, headerAction: (@Composable () -> Unit)? = null,
     content: @Composable (top: Dp, bottom: Dp) -> Unit) {
     Page(assistantPage) {
-        PageChrome(title, back, backEnabled, footer, content)
+        PageChrome(title, back, backEnabled, footer, headerAction, content)
     }
 }
 
@@ -143,13 +148,13 @@ internal fun FormGroup(modifier: Modifier = Modifier, frosted: Boolean = false, 
 }
 
 @Composable
-internal fun PageTitle(title: String, back: () -> Unit, backEnabled: Boolean = true) {
+internal fun PageTitle(title: String, back: () -> Unit, backEnabled: Boolean = true, action: (@Composable () -> Unit)? = null) {
     Row(LocalDetailChrome.current().fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         GlassIcon(R.drawable.ic_arrow_back, stringResource(R.string.ui_back), back, enabled = backEnabled)
         Text(title, Modifier.weight(1f).semantics { heading() }, maxLines = 1, overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.width(48.dp))
+        if (action == null) Spacer(Modifier.width(48.dp)) else action()
     }
 }
 
@@ -265,8 +270,24 @@ internal fun scheduledRange(start: Long, end: Long): String {
     val from = Instant.ofEpochMilli(start).atZone(zone)
     val to = Instant.ofEpochMilli(end).atZone(zone)
     val shortDateTime = if (AppLanguage.locale.language == "zh") shortZh else shortEn
+    if (start == end) return from.format(shortDateTime)
     return "${from.format(shortDateTime)}–${to.format(if (from.toLocalDate() == to.toLocalDate()) shortClock else shortDateTime)}"
 }
+
+internal fun scheduleText(s: ScheduleSummary): String = when (val pattern = s.pattern) {
+    is SchedulePattern.Once -> scheduledRange(pattern.interval.startMillis,pattern.interval.endMillis)
+    is SchedulePattern.Daily -> {
+        pattern.segments.mapIndexed { index, segment ->
+            val start = java.time.LocalDate.ofEpochDay(segment.fromDay)
+            val endDay = listOfNotNull(segment.endDay,pattern.segments.getOrNull(index+1)?.fromDay?.minus(1)).minOrNull()
+            val range = if (endDay == null) uiText("from $start", "自 $start 起") else "$start – ${java.time.LocalDate.ofEpochDay(endDay)}"
+            val time = java.time.LocalTime.ofSecondOfDay(segment.minute * 60L).format(shortClock)
+            val zone = segment.zone ?: uiText("device time zone", "设备时区")
+            val duration = if (segment.minutes == 0) uiText("point","单点") else uiText("${segment.minutes} min", "${segment.minutes} 分钟")
+            uiText("Daily $time ($zone), $duration, $range", "每日 $time（$zone），$duration，$range")
+        }.joinToString("\n")
+    }
+}.let { if (s.enabled) it else uiText("Disabled: $it", "已停用：$it") }
 
 internal class Submission(
     private val actions: WorkspaceActions,

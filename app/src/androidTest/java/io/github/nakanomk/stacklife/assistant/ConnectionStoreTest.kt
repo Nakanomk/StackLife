@@ -38,7 +38,10 @@ class ConnectionStoreTest {
             reopened.save(saved.baseUrl, saved.model, null)
             val second = path.readBytes()
             assertFalse("even identical plaintext is encrypted under a new IV", first.copyOf(12).contentEquals(second.copyOf(12)))
+            reopened.save(saved.baseUrl, saved.model, null, supportsImages = true)
+            assertTrue(store.profile()!!.supportsImages)
             reopened.save("https://one.invalid/new-prefix/v1", "m2", "   ")
+            assertFalse(store.profile()!!.supportsImages)
             assertEquals(key, store.load()?.key)
             for (changed in listOf("https://two.invalid/v1", "https://one.invalid:444/v1")) {
                 assertTrue(runCatching { store.save(changed, "m2", null) }.exceptionOrNull() is IllegalArgumentException)

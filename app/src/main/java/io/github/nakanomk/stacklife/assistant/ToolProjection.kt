@@ -30,6 +30,7 @@ internal class ToolProjection(private val grant: Disclosure, private val seen: T
     }
     private fun JsonObjectBuilder.id(key: String, value: String, disclosed: MutableSet<String>) {
         put(key, value); disclosed += value
+        if (disclosed === seen.tasks) seen.returnedTasks += value
     }
     private fun JsonObjectBuilder.interval(start: Long?, end: Long?, zone: ZoneId) {
         if (start != null && end != null) {
@@ -37,17 +38,44 @@ internal class ToolProjection(private val grant: Disclosure, private val seen: T
             put("end", Instant.ofEpochMilli(end).atZone(zone).toOffsetDateTime().toString())
         }
     }
+    private fun JsonObjectBuilder.schedule(s: ScheduleSummary?, zone: ZoneId) {
+        if (s == null) return
+        put("enabled",s.enabled)
+        when (val p = s.pattern) {
+            is SchedulePattern.Once -> interval(p.interval.startMillis,p.interval.endMillis,zone)
+            is SchedulePattern.Daily -> {
+                put("recurrence","DAILY")
+                val rows = p.segments.takeLast(TOOL_PAGE_SIZE)
+                put("segmentCount",p.segments.size)
+                put("latestSegments",buildJsonArray { for (r in rows) add(buildJsonObject {
+                    put("fromDate",java.time.LocalDate.ofEpochDay(r.fromDay).toString()); put("minuteOfDay",r.minute)
+                    put("zone",r.zone ?: zone.id); put("durationMinutes",r.minutes)
+                    r.endDay?.let { put("throughDate",java.time.LocalDate.ofEpochDay(it).toString()) }
+                }) })
+            }
+        }
+    }
     private fun task(t: QueueTask, zone: ZoneId, kind: String = "task") = buildJsonObject {
         put("kind", kind); id("taskId", t.id, seen.tasks); field("title", t.title); put("minutes", t.minutes)
-        interval(t.scheduledStartMillis, t.scheduledEndMillis, zone)
+        schedule(t.schedule,zone)
         if (grant.notes) field("notes", t.notes)
+    }
+    private fun countdown(c: Countdown) = buildJsonObject {
+        id("countdownId", c.id, seen.countdowns); field("title", c.title)
+        put("date", java.time.LocalDate.ofEpochDay(c.targetDay).toString()); put("mode", c.mode.name)
+        put("pinned", c.pinned); put("position", c.position); put("hasBackground", c.backgroundId != null)
+        put("maskOpacity", c.maskOpacity)
     }
     private fun node(n: GraphNode) = buildJsonObject {
         put("kind", "node"); id("nodeId", n.id, seen.nodes); field("title", n.title); put("minutes", n.minutes)
+        put("nodeType", when (n.link) { null -> "template"; is GraphLink.Task -> "taskLink"; is GraphLink.Occurrence -> "occurrenceLink" })
+        n.linkState?.let { s -> put("sourceRemoved", s.missing); put("completed", s.completed); put("scheduled", s.scheduled); s.owner?.let { put("owner", it.name) } }
         if (grant.notes) field("notes", n.notes)
     }
     private fun course(c: ScheduledCourse, zone: ZoneId) = buildJsonObject {
         put("kind", "busy"); interval(c.meeting.startMillis, c.meeting.endMillis, zone)
+        put("occurrenceId",seen.disclose(OccurrenceKey.Course(CourseOccurrenceId.of(c.termId,c.source,c.meeting))))
+        put("completed",c.completed)
         if (grant.courseDetails) { field("title", c.meeting.title); field("room", c.meeting.room) }
         // Never send source rows, conflict labels, or other attendees' data.
     }
@@ -55,6 +83,9 @@ internal class ToolProjection(private val grant: Disclosure, private val seen: T
     fun project(target: AssistantPage, query: PlannerQuery, result: QueryResult, nodeOnly: Boolean): JsonObject = buildJsonObject {
         val zone = (target as? AssistantPage.Day)?.zone ?: ZoneId.systemDefault()
         when (query) {
+            PlannerQuery.Countdowns -> section((result as CountdownsView).items, ::countdown)
+            is PlannerQuery.Countdown -> section(listOf(requireNotNull((result as CountdownView).value) {
+                uiText("The countdown no longer exists.", "倒数日已不存在。") }), ::countdown)
             PlannerQuery.Queue -> section((result as QueueView).tasks) { task(it, zone) }
             is PlannerQuery.Task -> {
                 val t = requireNotNull((result as TaskView).task) { uiText("The task does not exist or is outside this scope.", "任务不存在或已不在此范围。") }
@@ -73,20 +104,26 @@ internal class ToolProjection(private val grant: Disclosure, private val seen: T
                     if (item.restorable) id("taskId", item.taskId, seen.tasks)
                     val live = item.current
                     field("title", live?.title ?: item.title); put("minutes", live?.minutes ?: item.minutes); put("position", item.originalPosition)
-                    put("restorable", item.restorable)
-                    if (live == null) interval(item.scheduledStartMillis, item.scheduledEndMillis, zone)
-                    else interval(live.scheduledStartMillis, live.scheduledEndMillis, zone)
+                    put("restorable", item.restorable); put("referenceOnly", item.referenceOnly)
+                    schedule(if (live == null) item.schedule else live.schedule, zone)
                     if (grant.notes) field("notes", live?.notes ?: item.notes)
                 } }
             }
             is PlannerQuery.Day -> {
                 val day = result as DayPlan
                 put("date", day.day.date.toString()); put("zone", zone.id)
-                section(day.blocks) { block -> buildJsonObject {
-                    put("kind", "slot"); id("taskId", block.taskId, seen.tasks); field("title", block.title)
-                    put("state", block.state.name); interval(block.startMillis, block.endMillis, zone)
-                } }
-                section(day.courses) { course(it, zone) }; section(day.tray) { task(it, zone, "tray") }
+                section(day.occurrences) { o ->
+                    if (o.course != null) course(o.course, zone) else buildJsonObject {
+                        put("kind", if (o.role != null) "routine" else "event")
+                        id("scheduleId",(o.key as OccurrenceKey.Schedule).scheduleId,seen.schedules)
+                        o.taskId?.let { id("taskId",it,seen.tasks) }
+                        put("occurrenceId",seen.disclose(o.key)); field("title",o.title)
+                        put("daily",o.daily); put("point",o.point); put("completed",o.completed)
+                        interval(o.startMillis,o.endMillis,zone)
+                        if (grant.notes) field("notes",o.notes)
+                    }
+                }
+                section(day.tray) { task(it, zone, "tray") }
             }
             PlannerQuery.Graphs -> section((result as GraphList).graphs) { g -> buildJsonObject {
                 id("graphId", g.id, seen.graphs); field("title", g.title)
@@ -126,11 +163,33 @@ internal class ToolProjection(private val grant: Disclosure, private val seen: T
             }
             PlannerQuery.Settings -> {
                 val settings = result as PolicyView
-                section(listOf(buildJsonObject { put("group", "workspace"); put("restorePolicy", settings.policy.name) }) +
-                    AppearanceGroup.entries.map { group -> buildJsonObject { put("group", group.key); put("values", group.project(settings.appearance)) } }) { it }
+                section(listOf(Unit)) { buildJsonObject { put("group", "workspace"); put("restorePolicy", settings.policy.name) } }
+                section(AppearanceGroup.entries) { group -> buildJsonObject {
+                    val fields = group.project(settings.appearance)
+                    val projected = if (group != AppearanceGroup.MATERIAL) fields else {
+                        seen.material = settings.appearance
+                        JsonObject(fields + mapOf("background" to seen.projectedPhoto(fields.getValue("background").jsonObject),
+                            "pageBackgrounds" to JsonObject(fields.getValue("pageBackgrounds").jsonObject.mapValues { seen.projectedPhoto(it.value.jsonObject) })))
+                    }
+                    put("group", group.key); put("values", projected)
+                } }
+
             }
+            is PlannerQuery.Reminders -> {
+                val data = result as ReminderView
+                put("inherit", data.policy.inherit)
+                section(data.effective) { rule -> buildJsonObject {
+                    field("ruleId",rule.id)
+                    when (val w = rule.time) {
+                        is ReminderWhen.BeforeStart -> { put("kind","before"); put("leadMillis",w.leadMillis) }
+                        is ReminderWhen.AtInstant -> { put("kind","at"); put("instant",Instant.ofEpochMilli(w.instantMillis).toString()) }
+                    }
+                } }
+            }
+            is PlannerQuery.LinkableEvents, is PlannerQuery.Source -> error("The event picker and source resolver are local-only.")
+            is PlannerQuery.Occurrence, is PlannerQuery.Schedule -> error("Read occurrences through a scoped day, week, task or frame.")
             PlannerQuery.Workspace -> error(uiText("The assistant cannot read the entire workspace.", "不允许通过助理读取整个工作台。"))
-            is PlannerQuery.ManualWeeks -> error(uiText("The manual class editor is outside the assistant's read scope.", "手动课程编辑器不属于助理的读取范围。"))
+            is PlannerQuery.CourseWeeks -> error(uiText("Course detail recurrence is a local-only read.", "课程详情的重复范围仅在本机读取。"))
         }
         put("rows", JsonArray(rows)); put("offset", offset); put("total", count)
         when {

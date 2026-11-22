@@ -3,7 +3,6 @@ package io.github.nakanomk.stacklife.planner
 import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.courses.*
 import java.time.LocalDate
-import java.time.OffsetDateTime
 import java.time.ZoneId
 import kotlinx.coroutines.flow.Flow
 
@@ -26,10 +25,20 @@ sealed interface PlannerQuery {
     data object Settings : PlannerQuery
     data object Terms : PlannerQuery
     data class Week(val termId: String, val week: Int) : PlannerQuery
-    data class ManualWeeks(val termId: String, val pattern: CoursePattern) : PlannerQuery
+    data class CourseWeeks(val termId: String, val source: String, val pattern: CoursePattern) : PlannerQuery
+    data class Schedule(val id: String) : PlannerQuery
+    data class Occurrence(val key: OccurrenceKey, val zone: ZoneId) : PlannerQuery
+    data class Reminders(val subject: ReminderSubject) : PlannerQuery
+    data object Countdowns : PlannerQuery
+    data class Countdown(val id: String) : PlannerQuery
     data object Graphs : PlannerQuery
     data class Graph(val graphId: String) : PlannerQuery
     data class Goal(val graphId: String, val goalId: String) : PlannerQuery
+    data class LinkableEvents(val graphId: String, val search: String = "", val sourceFilter: LinkFilter = LinkFilter.ALL,
+        val date: LocalDate, val offset: Int = 0, val limit: Int = 50) : PlannerQuery {
+        init { require(offset >= 0 && limit in 1..50) }
+    }
+    data class Source(val link: GraphLink) : PlannerQuery
     data class Day(val date: LocalDate, val zone: ZoneId) : PlannerQuery {
         val startMillis = date.atStartOfDay(zone).toInstant().toEpochMilli()
         val endMillis = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
@@ -39,7 +48,10 @@ sealed interface PlannerQuery {
 sealed interface QueryResult
 
 data class Terms(val terms: List<TermSpec>, val importedSources: Map<String, List<String>> = emptyMap()) : QueryResult
-data class ManualWeeksView(val weeks: Set<Int>) : QueryResult
+data class CourseWeeksView(val weeks: Set<Int>) : QueryResult
+data class ScheduleView(val revision: Long, val summary: ScheduleSummary?) : QueryResult
+data class OccurrenceView(val revision: Long, val occurrence: AgendaOccurrence?) : QueryResult
+data class ReminderView(val revision: Long, val policy: ReminderPolicy, val effective: List<ReminderRule>) : QueryResult
 data class CourseWeek(val term: TermSpec?, val week: Int, val classes: List<ScheduledCourse>,
     /** Index in this term's distinct title catalog; only this week's keys leave the read transaction. */
     internal val colorIndices: Map<String, Int> = emptyMap()) : QueryResult
@@ -54,20 +66,11 @@ data class Workspace(
 
 data class QueueTask(
     val id: String, val title: String, val notes: String, val minutes: Int,
-    val scheduledStartMillis: Long? = null, val scheduledEndMillis: Long? = null,
-)
-
-enum class ScheduledState { QUEUE, FRAME, DONE }
-
-/** The stored interval is never clipped. Rendering clips it to the requested civil day. */
-data class DayBlock(
-    val taskId: String, val title: String, val startMillis: Long, val endMillis: Long, val state: ScheduledState,
+    val schedule: ScheduleSummary? = null,
 )
 
 data class DayPlan(
-    val day: PlannerQuery.Day, val revision: Long, val tray: List<QueueTask>, val blocks: List<DayBlock>,
-    val courses: List<ScheduledCourse> = emptyList(), val conflictingTaskIds: Set<String> = emptySet(),
-    val completedCourses: Set<CourseOccurrenceId> = emptySet(), val routines: List<RoutineEvent> = emptyList(),
+    val day: PlannerQuery.Day, val revision: Long, val tray: List<QueueTask>, val occurrences: List<AgendaOccurrence>,
 ) : QueryResult
 
 enum class FrameSource { PUSH, MANUAL, SWAP, GRAPH }
@@ -97,11 +100,14 @@ data class FrameEntry(
     val title: String,
     val notes: String,
     val minutes: Int,
-    val scheduledStartMillis: Long?,
-    val scheduledEndMillis: Long?,
+    val schedule: ScheduleSummary?,
     val current: QueueTask?,
+    val referenceOnly: Boolean = false,
+    val occurrenceDay: Long? = null,
+    val occurrenceInterval: ExactInterval? = null,
 ) {
-    val restorable: Boolean get() = current != null
+    val restorable: Boolean get() = !referenceOnly && current != null
+    val link: GraphLink? get() = if (!referenceOnly) null else occurrenceDay?.let { GraphLink.Occurrence(taskId, it) } ?: GraphLink.Task(taskId)
 }
 
 /** A creation ref is batch-local: declare `ref = "a"`, then address it as `@a`. */
@@ -110,12 +116,15 @@ data class TaskInput(val title: String, val notes: String = "", val minutes: Int
 sealed interface PlannerCommand {
     data class TaskAdd(val task: TaskInput) : PlannerCommand
     data class TaskEdit(val taskId: String, val title: String? = null, val notes: String? = null, val minutes: Int? = null,
-        val expectedFrameId: String? = null) : PlannerCommand
+        val expectedFrameId: String? = null, val expectedRevision: Long? = null) : PlannerCommand
     data class TaskFinish(val taskId: String) : PlannerCommand
-    data class SetScheduledCompletion(val taskId: String, val completed: Boolean, val expectedRevision: Long) : PlannerCommand
-    data class SetCourseCompletion(val occurrence: CourseOccurrenceId, val completed: Boolean, val expectedRevision: Long) : PlannerCommand
-    data class SetRoutineCompletion(val kind: RoutineKind, val date: LocalDate, val completed: Boolean, val expectedRevision: Long) : PlannerCommand
-    data class SetRoutineTime(val kind: RoutineKind, val minute: Int?) : PlannerCommand
+    data class SetSchedule(val id: String, val pattern: SchedulePattern?, val enabled: Boolean = true,
+        val expectedRevision: Long? = null) : PlannerCommand
+    data class SetOccurrenceOverride(val key: OccurrenceKey.Schedule, val scope: EditScope, val interval: ExactInterval? = null,
+        val segment: DailySegment? = null, val expectedRevision: Long? = null) : PlannerCommand
+    data class SetOccurrenceCompletion(val key: OccurrenceKey, val completed: Boolean, val expectedRevision: Long? = null,
+        val expectedVersion: Long? = null) : PlannerCommand
+    data class SetReminders(val subject: ReminderSubject, val policy: ReminderPolicy, val expectedRevision: Long? = null) : PlannerCommand
     data class TaskRemove(val taskId: String) : PlannerCommand
     data class QueueOrder(val taskIds: List<String>) : PlannerCommand
     data class FrameCreate(val reason: String, val tasks: List<TaskInput>, val ref: String? = null) : PlannerCommand
@@ -124,26 +133,30 @@ sealed interface PlannerCommand {
     data class FrameRestore(val frameId: String, val mode: RestoreMode, val taskIds: List<String> = emptyList()) : PlannerCommand
     data class DeleteFrameHistory(val frameIds: List<String>) : PlannerCommand
     data class SetRestorePolicy(val policy: RestorePolicy) : PlannerCommand
+    data class CompleteOnboarding(val visible: Set<Destination>? = null, val baseline: Appearance? = null) : PlannerCommand
     data class EditAppearance(val patch: AppearancePatch, val expected: Appearance? = null) : PlannerCommand
-    data class SlotSet(
-        val taskId: String, val start: OffsetDateTime, val durationMinutes: Int, val expectedRevision: Long? = null,
-    ) : PlannerCommand
-    data class SlotClear(val taskId: String, val expectedRevision: Long? = null) : PlannerCommand
     data class CourseImport(val draftId: String) : PlannerCommand
     data class TermRemove(val termId: String, val source: String? = null) : PlannerCommand
     /** Null before = add, null after = remove. New term creation never reuses an existing ID. */
     data class ManualCourse(val termId: String, val before: ManualSeries?, val after: ManualSeries?,
         val createTerm: TermSpec? = null) : PlannerCommand
+    data class CountdownAdd(val title: String, val targetDay: Long, val mode: CountdownMode = CountdownMode.COUNT_DOWN,
+        val pinned: Boolean = false, val backgroundId: String? = null, val maskOpacity: Float = .3f,
+        val ref: String? = null, val expectedRevision: Long? = null) : PlannerCommand
+    data class CountdownEdit(val id: String, val title: String? = null, val targetDay: Long? = null, val mode: CountdownMode? = null,
+        val maskOpacity: Float? = null, val background: BackgroundChange? = null, val expectedRevision: Long? = null) : PlannerCommand
+    data class CountdownRemove(val id: String, val expectedRevision: Long? = null) : PlannerCommand
+    data class CountdownSetPinned(val id: String, val pinned: Boolean, val expectedRevision: Long? = null) : PlannerCommand
+    data class CountdownOrder(val pinned: Boolean, val ids: List<String>, val expectedRevision: Long? = null) : PlannerCommand
     data class GraphCreate(val title: String, val ref: String? = null) : PlannerCommand
     data class GraphPatch(val graphId: String, val edits: List<GraphEdit>, val expectedRevision: Long? = null) : PlannerCommand
     data class GraphRemove(val graphId: String, val expectedRevision: Long? = null) : PlannerCommand
+    data class GraphQueue(val graphId: String, val goalId: String, val expectedRevision: Long? = null) : PlannerCommand
     data class GraphFrame(
         val graphId: String, val goalId: String, val reason: String? = null, val ref: String? = null,
         val taskRefs: Map<String, String> = emptyMap(), val expectedRevision: Long? = null,
     ) : PlannerCommand
 }
-
-data class PlannerChange(val entityId: String, val field: String, val before: String?, val after: String?, val entityLabel: String? = null)
 
 sealed interface PreviewResult {
     data class Ready(val proposalId: String, val baseRevision: Long, val changes: List<PlannerChange>,

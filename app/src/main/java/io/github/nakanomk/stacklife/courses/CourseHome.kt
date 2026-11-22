@@ -18,6 +18,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.createSavedStateHandle
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -42,6 +44,14 @@ import io.github.nakanomk.stacklife.assistant.AssistantComposer
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.planner.Terms
 import io.github.nakanomk.stacklife.workspace.ActionPill
+import io.github.nakanomk.stacklife.workspace.SectionTitle
+import io.github.nakanomk.stacklife.workspace.Hint
+import io.github.nakanomk.stacklife.transitions.CardMetadata
+import io.github.nakanomk.stacklife.planner.CourseOccurrenceId
+import io.github.nakanomk.stacklife.planner.stableKey
+import io.github.nakanomk.stacklife.reminders.ReminderRulesEditor
+import io.github.nakanomk.stacklife.planner.OccurrenceKey
+import io.github.nakanomk.stacklife.planner.ReminderSubject
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.nakanomk.stacklife.planner.CourseWeek
 import io.github.nakanomk.stacklife.planner.PlannerQuery
@@ -75,7 +85,7 @@ private fun RowScope.WeekPicker(term: TermSpec, selected: Int, pager: PagerState
     Box(Modifier.weight(1f, fill = false)) {
         TextButton(onClick = { expanded = true }, contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.testTag("course-week")) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(term.id, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Text(term.dateRangeLabel(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.courses_week, week), maxLines = 1, style = MaterialTheme.typography.titleSmall)
@@ -92,6 +102,22 @@ private fun RowScope.WeekPicker(term: TermSpec, selected: Int, pager: PagerState
     }
 }
 
+/** Each root owns its editor; precomposed pager neighbors must not open a second dialog. */
+@Composable
+internal fun courseEditor(owner: String): ManualEditorModel {
+    val app = LocalContext.current.applicationContext
+    return viewModel(key = "manual-course:$owner") { ManualEditorModel(createSavedStateHandle(), app) }
+}
+
+@Composable
+internal fun CourseEditorHost(model: WorkspaceViewModel, editor: ManualEditorModel, terms: List<TermSpec>, saved: (TermSpec, Int) -> Unit) {
+    editor.form?.let { form ->
+        key(form) { ManualCourseSheet(model, form, terms, close = editor::close, saved = { term, week ->
+            editor.close(); saved(term, week)
+        }) }
+    }
+}
+
 @Composable
 internal fun CourseHome(
     model: WorkspaceViewModel, catalog: Terms, term: TermSpec?, week: Int?,
@@ -102,16 +128,10 @@ internal fun CourseHome(
     val pager = if (term != null && week != null) key(term.id) {
         rememberPagerState(initialPage = week - 1) { term.weeks }
     } else null
-    val editor: ManualEditorModel = viewModel { ManualEditorModel() }
-    val add = { editor.form = ManualCourseForm(term, week ?: 1) }
+    val editor = courseEditor("timetable")
+    val add = { editor.open(term, week ?: 1) }
     val terms = catalog.terms
-    editor.form?.let { form ->
-        key(form) {
-            ManualCourseSheet(model, form, terms, close = { editor.form = null }, saved = { spec, weekNumber ->
-                onWeek(spec, weekNumber); editor.form = null
-            })
-        }
-    }
+    CourseEditorHost(model, editor, terms, onWeek)
     RootPane(contentDrawsTopEdge = term != null && week != null && !listMode, header = {
         RootToolbar(onSettings, leading = {
             if (term != null) {
@@ -131,7 +151,7 @@ internal fun CourseHome(
                             modifier = importLaunch.modifier.testTag("course-import"))
                         if (terms.size > 1) {
                             HorizontalDivider()
-                            for (choice in terms) DropdownMenuItem({ Text(choice.id) }, { menu = false; onTerm(choice) },
+                            for (choice in terms) DropdownMenuItem({ Text(choice.dateRangeLabel()) }, { menu = false; onTerm(choice) },
                                 enabled = choice.id != term.id)
                         }
                         if (sources.isNotEmpty()) {
@@ -166,8 +186,8 @@ internal fun CourseHome(
                 val query = remember(term.id, index) { PlannerQuery.Week(term.id, index + 1) }
                 val data by remember(model, query) { model.week(query) }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
                 ReadPanel(data) { result ->
-                    if (result.term != null) CourseWeekPage(result.term, result, catalog.importedSources[term.id].orEmpty(), listMode, top, bottom) { selected ->
-                        editor.form = ManualCourseForm(result.term, selected.meeting.week, selected.meeting.pattern())
+                    if (result.term != null) CourseWeekPage(model, result.term, result, catalog.importedSources[term.id].orEmpty(), listMode, top, bottom) { selected ->
+                        editor.open(result.term, selected.meeting.week, selected.meeting.pattern())
                     }
                 }
             }
@@ -176,9 +196,9 @@ internal fun CourseHome(
 }
 
 @Composable
-private fun CourseWeekPage(term: TermSpec, week: CourseWeek, sources: List<String>, listMode: Boolean, top: Dp, bottom: Dp, edit: (ScheduledCourse) -> Unit) {
+private fun CourseWeekPage(model: WorkspaceViewModel, term: TermSpec, week: CourseWeek, sources: List<String>, listMode: Boolean, top: Dp, bottom: Dp, edit: (ScheduledCourse) -> Unit) {
     // Store an occurrence key, not a list position: after reimport never show a different course.
-    var selected by remember { mutableStateOf<String?>(null) }
+    var selected by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedDay by rememberSaveable { mutableIntStateOf(0) }
     val chosen = selected?.let { key -> week.classes.firstOrNull { it.occurrenceKey() == key } }
     if (chosen != null || selectedDay != 0) {
@@ -188,7 +208,7 @@ private fun CourseWeekPage(term: TermSpec, week: CourseWeek, sources: List<Strin
             date.format(DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.FULL).withLocale(AppLanguage.locale))
         }
         val classes = remember(day, week.classes) { if (day == null) emptyList() else week.classes.filter { it.meeting.day == day } }
-        CourseReadPanel(chosen, label, classes, open = { selected = it.occurrenceKey() },
+        CourseReadPanel(chosen, label, classes, model = model, open = { selected = it.occurrenceKey() },
             edit = { course -> selected = null; selectedDay = 0; edit(course) },
             close = { if (selected != null) selected = null else selectedDay = 0 })
         if (chosen == null && selected != null) SideEffect { selected = null }
@@ -215,34 +235,34 @@ private fun CourseWeekPage(term: TermSpec, week: CourseWeek, sources: List<Strin
     } else WeekGrid(term, week, top, bottom, sources = sources, openDay = { selectedDay = it }, open = open)
 }
 
-private fun ScheduledCourse.occurrenceKey(): String = with(meeting) {
-    "$source/$day/$firstPeriod/$lastPeriod/${title.length}:$title$room"
-}
+internal fun ScheduledCourse.occurrenceKey(): String = CourseOccurrenceId.of(termId, source, meeting).stableKey()
 
 @Composable
-private fun CourseInfo(course: ScheduledCourse) {
+private fun CourseInfo(course: ScheduledCourse, detail: Boolean = false) {
     val m = course.meeting
     val pattern = stringResource(R.string.courses_date_pattern)
     val locale = AppLanguage.locale
     val zone = calendarFor(course.source)?.zone ?: java.time.ZoneId.systemDefault()
     val campusDate = remember(pattern, locale, zone) { DateTimeFormatter.ofPattern(pattern, locale).withZone(zone) }
     val clock = remember(zone) { courseClock.withZone(zone) }
-    Text(stringResource(R.string.courses_class_date, m.week, campusDate.format(Instant.ofEpochMilli(m.startMillis)), m.periodLabel()), style = MaterialTheme.typography.bodyMedium)
-    Text(stringResource(R.string.courses_class_time_zone, clock.format(Instant.ofEpochMilli(m.startMillis)),
-        clock.format(Instant.ofEpochMilli(m.endMillis)), zone.id), style = MaterialTheme.typography.bodyMedium)
-    Text(stringResource(R.string.courses_room, m.room.ifBlank { stringResource(R.string.courses_not_provided) }), style = MaterialTheme.typography.bodyMedium)
-    if (course.conflicts.isNotEmpty()) Text(stringResource(R.string.courses_conflicts, course.conflicts.joinToString(stringResource(R.string.courses_list_separator))), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-}
-
-@Composable
-internal fun CourseDetails(course: ScheduledCourse, close: () -> Unit) {
-    CourseReadPanel(course, dayLabel = null, dayCourses = emptyList(), close = close)
+    if (detail) SectionTitle(stringResource(R.string.courses_class_time))
+    Text(campusDate.format(Instant.ofEpochMilli(m.startMillis)), style = MaterialTheme.typography.bodyMedium)
+    CardMetadata {
+        Text("${clock.format(Instant.ofEpochMilli(m.startMillis))}–${clock.format(Instant.ofEpochMilli(m.endMillis))}")
+        Text(m.periodLabel())
+        if (detail) Text(zone.id)
+    }
+    if (m.room.isNotBlank()) {
+        if (detail) SectionTitle(stringResource(R.string.course_detail_location))
+        Text(m.room, style = MaterialTheme.typography.bodyMedium)
+    }
+    if (course.conflicts.isNotEmpty()) Hint(stringResource(R.string.courses_conflicts, course.conflicts.joinToString(stringResource(R.string.courses_list_separator))))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun CourseReadPanel(course: ScheduledCourse?, dayLabel: String?, dayCourses: List<ScheduledCourse>,
-    open: ((ScheduledCourse) -> Unit)? = null, edit: ((ScheduledCourse) -> Unit)? = null, close: () -> Unit) {
+    model: WorkspaceViewModel? = null, open: ((ScheduledCourse) -> Unit)? = null, edit: ((ScheduledCourse) -> Unit)? = null, close: () -> Unit) {
     val origins = remember { PaneOrigins() }
     val nested = course != null && dayLabel != null
     val dayList = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -250,17 +270,26 @@ internal fun CourseReadPanel(course: ScheduledCourse?, dayLabel: String?, dayCou
         val back = LocalPanelBack.current ?: close
         PaneMotion<CourseReading>(course?.let { CourseReading.Detail(it) } ?: CourseReading.Day, origins,
             depth = { if (it == CourseReading.Day) 0 else 1 }, originKey = { if (it is CourseReading.Detail) it.course.occurrenceKey() else "day" },
-            parent = CourseReading.Day.takeIf { nested }, onBack = close, modifier = Modifier.fillMaxWidth()) { shown ->
-            Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 16.dp, vertical = 4.dp)
+            parent = CourseReading.Day.takeIf { nested }, onBack = close, modifier = Modifier.fillMaxSize()) { shown ->
+            Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 4.dp)
                 .then(if (shown is CourseReading.Detail) Modifier.testTag("course-detail") else Modifier)) {
                 if (shown is CourseReading.Detail) {
                     val detail = shown.course
-                    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(stringResource(R.string.courses_fixed_class), style = MaterialTheme.typography.titleLarge)
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(detail.meeting.title, style = MaterialTheme.typography.titleLarge)
-                        Text("${detail.termId} · ${sourceLabel(detail.source)}",
-                            style = MaterialTheme.typography.labelLarge)
-                        CourseInfo(detail)
+                        Hint(sourceLabel(detail.source))
+                        CourseInfo(detail, detail = true)
+                        val reader = requireNotNull(model)
+                        val weeks by remember(reader, detail) { reader.courseWeeks(PlannerQuery.CourseWeeks(
+                            detail.termId, detail.source, detail.meeting.pattern())) }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
+                        ReadPanel(weeks) { repeat ->
+                            SectionTitle(stringResource(R.string.course_detail_repeat))
+                            Text(stringResource(R.string.courses_weeks_list, repeat.weeks.sorted().joinToString(stringResource(R.string.courses_list_separator))))
+                        }
+                        SectionTitle(stringResource(R.string.course_detail_reminders))
+                        val subject = remember(detail) { ReminderSubject.Occurrence(OccurrenceKey.Course(
+                            CourseOccurrenceId.of(detail.termId, detail.source, detail.meeting))) }
+                        ReminderRulesEditor(reader, subject)
                         AssistantComposer(AssistantPage.Week(detail.termId, detail.meeting.week))
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -274,9 +303,11 @@ internal fun CourseReadPanel(course: ScheduledCourse?, dayLabel: String?, dayCou
                     if (dayCourses.isEmpty()) Text(stringResource(R.string.courses_no_classes_day))
                     else LazyColumn(Modifier.weight(1f, fill = false), state = dayList) {
                         itemsIndexed(dayCourses, key = { _, c -> c.occurrenceKey() }) { _, row ->
-                            ListItem(headlineContent = { Text(row.meeting.title) }, supportingContent = {
-                                Text("${row.meeting.periodLabel()} · ${row.meeting.room.ifBlank { stringResource(R.string.courses_no_room) }}")
-                            }, modifier = Modifier.fillMaxWidth().paneOrigin(origins, row.occurrenceKey()).clickable { open?.invoke(row) })
+                            ListItem(modifier = Modifier.fillMaxWidth().paneOrigin(origins, row.occurrenceKey()).clickable { open?.invoke(row) },
+                                supportingContent = { CardMetadata {
+                                    Text(row.meeting.periodLabel())
+                                    if (row.meeting.room.isNotBlank()) Text(row.meeting.room)
+                                } }) { Text(row.meeting.title) }
                         }
                     }
                     TextButton(onClick = back, modifier = Modifier.align(Alignment.End)) { Text(stringResource(R.string.courses_close)) }

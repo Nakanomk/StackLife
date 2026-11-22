@@ -1,6 +1,5 @@
 package io.github.nakanomk.stacklife.acceptance
 
-import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.planner.*
@@ -28,7 +27,7 @@ class WorkspaceFixture : ExternalResource() {
     override fun before() = reopen()
     fun reopen() {
         if (::db.isInitialized) db.close()
-        db = Room.databaseBuilder(context, PlannerDatabase::class.java, name).build()
+        db = PlannerDatabase.open(context, name)
         api = RoomPlannerApi(db)
     }
     override fun after() {
@@ -45,6 +44,11 @@ class WorkspaceFixture : ExternalResource() {
         val result = api.commit(proposal(*commands).proposalId)
         assertTrue("Command failed: $result", result is CommitResult.Applied)
     }
+}
+
+internal fun exact(task: String, start: java.time.OffsetDateTime, minutes: Int, revision: Long? = null): SetSchedule {
+    val from = start.toInstant().toEpochMilli()
+    return SetSchedule(task, SchedulePattern.Once(ExactInterval(from,Math.addExact(from,minutes * 60_000L))),expectedRevision = revision)
 }
 
 @RunWith(AndroidJUnit4::class)
@@ -87,7 +91,9 @@ class WorkspaceTest {
         val push = FramePush("  ", listOf(c.id, a.id), ref = "held")
         val preview = store.proposal(push)
         val id = preview.refs.getValue("held")
-        assertTrue(preview.changes.any { it.entityId == id && it.field == "压栈原因" && it.after == "未填写" && it.entityLabel == "暂存的队列" })
+        val frameSnapshot = preview.changes.single { it.entityId == id }.after as FrameSnapshot
+        assertEquals("", frameSnapshot.reason); assertEquals(FrameSource.PUSH, frameSnapshot.source)
+        assertEquals(listOf(a.id, c.id), frameSnapshot.items.filter { it.restorable }.map { it.taskId })
         assertTrue(store.api.commit(preview.proposalId) is CommitResult.Applied)
         assertTrue(store.api.commit(preview.proposalId) is CommitResult.Rejected)
         assertTrue(store.api.preview(listOf(push)) is PreviewResult.Rejected)
@@ -164,7 +170,7 @@ class WorkspaceTest {
         val before = store.state()
         val invalid = listOf(
             FrameCreate("  ", listOf(TaskInput("A"))), FramePush("停", emptyList()), FramePush("停", listOf(a, "missing")),
-            QueueOrder(listOf(a, b, b, d)), TaskAdd(TaskInput(" ")), TaskEdit(a, "A", minutes = 0),
+            QueueOrder(listOf(a, b, b, d)), TaskAdd(TaskInput(" ")), TaskEdit(a, "A", minutes = -1),
             FramePush("停", listOf("@not-declared")),
         )
         for (bad in invalid) {

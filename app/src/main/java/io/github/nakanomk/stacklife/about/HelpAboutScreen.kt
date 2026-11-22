@@ -67,7 +67,7 @@ private fun <T> Load<T>.display(content: @Composable (T) -> Unit) {
 }
 
 @Composable
-internal fun HelpAboutScreen(back: () -> Unit) {
+internal fun HelpAboutScreen(back: () -> Unit, onGuide: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext
     var page by rememberSaveable { mutableStateOf(AboutPage.HOME) }
@@ -138,6 +138,7 @@ internal fun HelpAboutScreen(back: () -> Unit) {
                     }
                 }
                 AboutPage.HELP -> LazyColumn(Modifier.fillMaxSize(), contentPadding = padding, verticalArrangement = listSpacing) {
+                    item { PreferenceRow(stringResource(R.string.guide_reopen), modifier = Modifier.testTag("open-guidance"), onClick = onGuide) }
                     item { HelpSection(R.string.about_help_workspace, R.string.about_help_workspace_body) }
                     item { HelpSection(R.string.about_help_today, R.string.about_help_today_body) }
                     item { HelpSection(R.string.about_help_graphs, R.string.about_help_graphs_body) }
@@ -146,6 +147,7 @@ internal fun HelpAboutScreen(back: () -> Unit) {
                         Text(stringResource(R.string.about_help_courses_body), style = MaterialTheme.typography.bodyMedium)
                         for (provider in SchoolImports.providers) Text(stringResource(provider.help), style = MaterialTheme.typography.bodyMedium)
                     } }
+                    item { HelpSection(R.string.about_help_countdowns, R.string.about_help_countdowns_body) }
                     item { HelpSection(R.string.about_help_assistant, R.string.about_help_assistant_body) }
                 }
                 AboutPage.BUILD -> {

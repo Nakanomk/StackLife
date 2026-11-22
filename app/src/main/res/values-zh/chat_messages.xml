@@ -1,0 +1,18 @@
+<resources>
+    <string name="chat_attach">附加图片</string>
+    <string name="chat_image_message">图片消息</string>
+    <string name="chat_image_label">图片 %1$d，%2$d × %3$d</string>
+    <string name="chat_remove_image">移除图片 %1$d</string>
+    <string name="chat_failed_image">图片 %1$d 准备失败</string>
+    <string name="chat_image_unavailable">图片不可用</string>
+    <string name="chat_retry">重试</string>
+    <string name="chat_view_image">查看图片</string>
+    <string name="chat_zoom_out">缩小</string>
+    <string name="chat_zoom_in">放大</string>
+    <string name="chat_reattach">再次附加</string>
+    <string name="chat_applied">已应用这些更改。</string>
+    <string name="chat_discarded">提案已放弃</string>
+    <string name="chat_stale">预览已过期</string>
+    <string name="chat_failed">更改未获确认</string>
+    <string name="chat_new_messages">新消息</string>
+</resources>

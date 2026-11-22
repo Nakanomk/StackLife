@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="course_detail_location">地点</string>
+    <string name="course_detail_repeat">重复范围</string>
+    <string name="course_detail_reminders">提醒</string>
+    <string name="course_detail_lead">提前 %1$d 分钟</string>
+    <string name="goal_execution_heading">执行顺序</string>
+    <string name="goal_order_count">共 %1$d 项任务</string>
+    <string name="goal_queue_policy">加入队列：在现有任务之后追加 %1$d 项。</string>
+    <string name="goal_frame_policy">存为栈帧：保存 %1$d 项可恢复任务，不移动队列。</string>
+    <string name="frames_available">可恢复：%1$d 帧</string>
+    <string name="frames_emptied">已取空：%1$d 帧</string>
+    <string name="frame_restore_order">按清单原序恢复。</string>
+    <string name="frame_item_number">第 %1$d 项</string>
+    <string name="frame_saved_snapshot">保存时的快照</string>
+    <string name="queue_unfinished_count">未完成：%1$d 项</string>
+    <string name="queue_estimate_minutes">预计 %1$d 分钟</string>
+</resources>

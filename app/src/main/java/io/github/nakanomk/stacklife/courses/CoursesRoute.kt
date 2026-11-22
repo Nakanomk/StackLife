@@ -70,11 +70,18 @@ internal fun RemoveTermReview(id: String, source: String, model: WorkspaceViewMo
         }
     }) { top, bottom ->
         LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
-            item { Text(id, style = MaterialTheme.typography.titleLarge); Hint(stringResource(R.string.courses_remove_term_hint, sourceLabel(source))) }
+            item {
+                val before = ready?.changes?.firstNotNullOfOrNull { it.before as? CourseSetSnapshot }
+                if (before != null) {
+                    val term = with(before) { TermSpec(termId, LocalDate.ofEpochDay(firstMonday), weeks, initial, switchDay?.let(LocalDate::ofEpochDay)) }
+                    Text(term.dateRangeLabel(), style = MaterialTheme.typography.titleLarge)
+                }
+                Hint(stringResource(R.string.courses_remove_term_hint, sourceLabel(source)))
+            }
             when (val result = preview) {
                 null -> item { CircularProgressIndicator() }
                 is PreviewResult.Rejected -> item { Text(result.message) }
-                is PreviewResult.Ready -> items(result.changes) { change -> Text("${change.field}\n${change.before.orEmpty()}") }
+                is PreviewResult.Ready -> items(result.changes, key = { it.entityId }) { io.github.nakanomk.stacklife.assistant.ChangePreview(it) }
             }
         }
     }

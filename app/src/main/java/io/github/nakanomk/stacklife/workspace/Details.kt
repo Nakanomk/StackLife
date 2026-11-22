@@ -20,36 +20,38 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import io.github.nakanomk.stacklife.i18n.AppLocales
 import io.github.nakanomk.stacklife.i18n.LanguageChoice
 import io.github.nakanomk.stacklife.assistant.AssistantPage
-import io.github.nakanomk.stacklife.planner.AppearanceGroup
-import io.github.nakanomk.stacklife.planner.PlannerCommand
-import io.github.nakanomk.stacklife.planner.PolicyView
-import io.github.nakanomk.stacklife.planner.RoutineKind
-import io.github.nakanomk.stacklife.appearance.ClockWheelField
+import io.github.nakanomk.stacklife.WorkspaceViewModel
+import io.github.nakanomk.stacklife.ReadPanel
+import io.github.nakanomk.stacklife.ReadState
+import io.github.nakanomk.stacklife.planner.*
+import io.github.nakanomk.stacklife.today.SlotEditorKey
+import io.github.nakanomk.stacklife.today.deviceDay
+import io.github.nakanomk.stacklife.reminders.ReminderRulesEditor
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.reminders.ReminderPreference
-import java.time.LocalTime
-import io.github.nakanomk.stacklife.planner.RestorePolicy
-import io.github.nakanomk.stacklife.planner.Workspace
 import io.github.nakanomk.stacklife.transitions.title
 import io.github.nakanomk.stacklife.transitions.routeOrigin
+import io.github.nakanomk.stacklife.notes.CurrentTaskNote
 
 @Composable
-internal fun TaskScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: () -> Unit,
+internal fun TaskScreen(id: String, view: SourceView, actions: WorkspaceActions, onBack: () -> Unit,
     shared: SharedModifier, onEdit: () -> Unit) {
-    val index = state.queue.indexOfFirst { it.id == id }
-    val task = state.queue.getOrNull(index)
+    val source = view.source
+    val index = source?.queuePosition
+    val task = source?.let { QueueTask(id, it.title, it.notes, it.minutes, it.schedule) }
     // Room may publish the removal before our receipt arrives. Await it even without a card.
     val action = rememberSubmission(actions) { if (it != SaveOutcome.REJECTED) onBack() }
     val back = { if (!action.busy) onBack() }
     BackHandler(enabled = action.busy) { /* The receipt navigates exactly once. */ }
-    if (task == null) {
-        MissingDetail(stringResource(R.string.ui_task_details), stringResource(R.string.ui_task_not_queued), back)
+    if (source == null || task == null) {
+        MissingDetail(stringResource(R.string.ui_task_details), stringResource(R.string.graph_source_removed), back)
         return
     }
     EditorPage(stringResource(R.string.ui_task_details), back, AssistantPage.Task(id), backEnabled = !action.busy, footer = {
         Actions {
-            Primary(stringResource(R.string.ui_finish_task), enabled = !action.busy) { action.send(PlannerCommand.TaskFinish(id)) }
+            if (source.owner != Owner.DONE) Primary(stringResource(if (task.schedule?.pattern is SchedulePattern.Daily) R.string.slot_finish_series else R.string.ui_finish_task), enabled = !action.busy) { action.send(PlannerCommand.TaskFinish(id)) }
             ActionPill(stringResource(R.string.ui_edit_task), onEdit, Modifier.routeOrigin("edit:$id", CircleShape), enabled = !action.busy)
-            Secondary(stringResource(R.string.ui_remove_from_queue), enabled = !action.busy) { action.send(PlannerCommand.TaskRemove(id)) }
+            if (source.owner == Owner.QUEUE) Secondary(stringResource(R.string.ui_remove_from_queue), enabled = !action.busy) { action.send(PlannerCommand.TaskRemove(id)) }
         }
     }) { top, bottom ->
         LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
@@ -57,17 +59,17 @@ internal fun TaskScreen(id: String, state: Workspace, actions: WorkspaceActions,
                 Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (index == 0) Text(stringResource(R.string.ui_current_priority), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     Text(task.title, shared.title("task:$id"), style = MaterialTheme.typography.titleLarge)
-                    if (index != 0) Text(stringResource(R.string.ui_queue_position, index + 1), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    if (index != null && index != 0) Text(stringResource(R.string.ui_queue_position, index + 1), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    if (source.owner == Owner.FRAME) Text(stringResource(R.string.graph_stays_frame), style = MaterialTheme.typography.labelMedium)
+                    if (source.owner == Owner.DONE) Text(stringResource(R.string.today_done), style = MaterialTheme.typography.labelMedium)
                     Text(stringResource(R.string.ui_duration_estimate, task.minutes), style = MaterialTheme.typography.bodyMedium)
-                    if (task.scheduledStartMillis != null && task.scheduledEndMillis != null) {
-                        Hint(stringResource(R.string.ui_scheduled_range, scheduledRange(task.scheduledStartMillis, task.scheduledEndMillis)))
-                    }
+                    task.schedule?.let { Hint(scheduleText(it)) }
                 }
             }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     SectionTitle(stringResource(R.string.ui_notes))
-                    if (task.notes.isBlank()) Hint(stringResource(R.string.ui_empty_notes)) else Text(task.notes)
+                    CurrentTaskNote(task, view.revision, enabled = !action.busy, frameId = source.frameId)
                 }
             }
         }
@@ -84,24 +86,15 @@ internal fun MissingDetail(title: String, message: String, onBack: () -> Unit) {
 }
 
 @Composable
-internal fun SettingsScreen(settings: PolicyView, actions: WorkspaceActions, onBack: () -> Unit,
-    onConnection: () -> Unit, onAppearance: (AppearanceGroup) -> Unit, onAbout: () -> Unit) {
+internal fun SettingsScreen(settings: PolicyView, actions: WorkspaceViewModel, onBack: () -> Unit,
+    onConnection: () -> Unit, onAppearance: (AppearanceGroup) -> Unit, onAbout: () -> Unit, onFeature: (Destination) -> Unit, onSchedule: (SlotEditorKey) -> Unit) {
     val action = rememberSubmission(actions)
     EditorPage(stringResource(R.string.ui_settings), onBack, AssistantPage.Settings) { top, bottom ->
             LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 item { SettingsGroup(stringResource(R.string.agenda_daily_routine)) {
-                    for (kind in RoutineKind.entries) {
-                        val wake = kind == RoutineKind.WAKE
-                        val time = settings.routine[kind]?.let { LocalTime.ofSecondOfDay(it * 60L) }
-                        ClockWheelField(time, !action.busy, Modifier.testTag(if (wake) "routine-wake" else "routine-sleep"),
-                            label = stringResource(if (wake) R.string.agenda_wake else R.string.agenda_sleep),
-                            initial = LocalTime.of(if (wake) 7 else 23, 0),
-                            onClear = { action.send(PlannerCommand.SetRoutineTime(kind, null)) }) {
-                            action.send(PlannerCommand.SetRoutineTime(kind, it.hour * 60 + it.minute))
-                        }
-                        HorizontalDivider()
-                    }
+                    RoutineScheduleRows(actions, onSchedule)
                     ReminderPreference()
+                    ReminderRulesEditor(actions, ReminderSubject.CourseDefault)
                 } }
                 item { SettingsGroup(stringResource(R.string.ui_appearance)) {
                     PreferenceRow(stringResource(R.string.ui_colors), modifier = Modifier.routeOrigin("appearance:${AppearanceGroup.COLOR.key}"),
@@ -122,6 +115,10 @@ internal fun SettingsScreen(settings: PolicyView, actions: WorkspaceActions, onB
                 item { SettingsGroup(stringResource(R.string.ui_assistant)) {
                     PreferenceRow(stringResource(R.string.ui_model_connection), modifier = Modifier.routeOrigin("model"),
                         leadingIcon = R.drawable.ic_chat, onClick = onConnection)
+                } }
+                item { SettingsGroup(stringResource(R.string.feature_entries)) {
+                    for (dest in settings.appearance.order) PreferenceRow(dest.label, if (dest in settings.appearance.visible) null else stringResource(R.string.feature_hidden),
+                        Modifier.routeOrigin("feature:${dest.key}").testTag("open-feature:${dest.key}")) { onFeature(dest) }
                 } }
                 item { SettingsGroup(stringResource(R.string.ui_restore_policy)) { Column(Modifier.selectableGroup()) {
                     for (policy in RestorePolicy.entries) {
@@ -148,6 +145,24 @@ internal fun SettingsScreen(settings: PolicyView, actions: WorkspaceActions, onB
                     }
                 } } }
             }
+    }
+}
+
+@Composable
+internal fun RoutineScheduleRows(actions: WorkspaceViewModel, onSchedule: (SlotEditorKey) -> Unit) {
+    for (kind in RoutineKind.entries) {
+        val wake = kind == RoutineKind.WAKE
+        val local = deviceDay()
+        val summary by remember(actions, kind) { actions.read<ScheduleView>(PlannerQuery.Schedule(kind.scheduleId)) }
+            .collectAsStateWithLifecycle(initialValue = ReadState.Loading)
+        ReadPanel(summary) { view ->
+            val title = stringResource(if (wake) R.string.agenda_wake else R.string.agenda_sleep)
+            PreferenceRow(title, view.summary?.takeIf { it.enabled }?.let { scheduleText(it) } ?: stringResource(R.string.wheel_unset),
+                Modifier.testTag(if (wake) "routine-wake" else "routine-sleep").routeOrigin("slot:${kind.scheduleId}")) {
+                onSchedule(SlotEditorKey(kind.scheduleId, title, local.date.toEpochDay(), local.zone.id, 0, view.revision, role = kind))
+            }
+        }
+        HorizontalDivider()
     }
 }
 

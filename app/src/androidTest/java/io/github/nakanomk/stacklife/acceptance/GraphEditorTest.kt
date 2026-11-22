@@ -27,8 +27,12 @@ import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
 import io.github.nakanomk.stacklife.appearance.PlannerPopupHost
 import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
 import io.github.nakanomk.stacklife.graphs.GoalReview
+import io.github.nakanomk.stacklife.graphs.GraphEditorRoute
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.planner.PlannerCommand.*
+import java.time.LocalDate
+import java.time.ZoneId
+import java.util.concurrent.ConcurrentLinkedQueue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -94,6 +98,56 @@ class GraphEditorTest {
     private fun bringIntoReview(matcher: SemanticsMatcher): SemanticsNodeInteraction {
         tag("goal-order").performScrollToNode(matcher)
         return await(matcher and hasAnyAncestor(hasTestTag("goal-order")))
+    }
+
+    @Test fun graphCardCountsAndNestedMenuUseTheSelectedGraphId() {
+        seed()
+        runBlocking { store.apply(GraphCreate("期末交付")) }
+        attach()
+        tag("nav:graphs").performClick()
+        val card = hasTestTag("open-graph:${id("g")}")
+        await(card).assertTextContains("节点：5").assertTextContains("依赖：2")
+        await(hasContentDescription("管理") and hasAnyAncestor(card))
+            .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).performTouchInput { click() }
+        await(hasText("重命名")).performClick()
+        tag("graph-title").performTextReplacement("有依赖的图")
+        tag("graph-save").performClick()
+        await(card and hasText("有依赖的图")).performTouchInput { click() }
+        canvas("a").assertIsDisplayed()
+    }
+
+    @Test fun addingNodeEditsAnIndependentNoteDraftAndWritesOnlyOnParentSave() {
+        open()
+        val before = graph()
+        val taskState = runBlocking { store.state() }
+        tag("graph-add").performClick()
+        tag("graph-new-node").performClick()
+        tag("node-title").performTextReplacement("取消的节点")
+        tag("node-notes").performClick()
+        tag("note-source").performTextReplacement("不会落入图")
+        tag("note-save").performClick()
+        tag("node-title").assertTextContains("取消的节点")
+        assertEquals(before, graph())
+        await(hasText("取消") and hasAnyAncestor(isDialog())).performClick()
+        tag("graph-add").performClick()
+        tag("graph-new-node").performClick()
+        tag("node-title").performTextReplacement("保留的节点")
+        tag("node-notes").performClick()
+        tag("note-source").performTextReplacement("草稿中")
+        ui.activityRule.scenario.recreate()
+        attach()
+        tag("note-source").assertTextContains("草稿中")
+        val source = "检查 **发布**\n\n- [ ] 离线核对"
+        tag("note-source").performTextReplacement(source)
+        tag("note-save").performClick()
+        tag("node-title").assertTextContains("保留的节点")
+        assertEquals(before, graph())
+        await(hasTestTag("graph-save") and isEnabled()).performClick()
+        val after = expectGraph("Save new node and its note together") { it.nodes.size == before.nodes.size + 1 }
+        assertEquals(before.revision + 1, after.revision)
+        assertEquals(source, after.nodes.single { it.title == "保留的节点" }.notes)
+        assertFalse(after.nodes.any { it.title == "取消的节点" })
+        assertEquals(taskState.queue, runBlocking { store.state() }.queue)
     }
 
     @Test fun drawDiamondMoveAndGenerateFromTheReviewedGoal() {
@@ -170,8 +224,9 @@ class GraphEditorTest {
         assertEquals(first.top, next.top)
         assertTrue("Independent actions need visible space between the lenses", next.left - first.right >= 8.dp)
         launcher.performClick()
-        val handle = tag("goal-sheet-handle").assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
-        ui.onNodeWithTag("goal-grip", useUnmergedTree = true).assertWidthIsEqualTo(36.dp).assertHeightIsEqualTo(5.dp)
+        val handle = tag("planner-sheet-handle").assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+        ui.exerciseSheetAnchors("goal")
+        ui.onNodeWithTag("planner-sheet-grip", useUnmergedTree = true).assertWidthIsEqualTo(36.dp).assertHeightIsEqualTo(5.dp)
         val x = hasTestTag("goal-choice:${id("x")}")
         bringIntoReview(x).assertIsNotSelected().assertHeightIsAtLeast(48.dp).performClick()
         tag("goal-change").performClick()
@@ -188,10 +243,12 @@ class GraphEditorTest {
         bringIntoReview(hasTestTag("goal-choice:${id("d")}")).assertIsSelected()
         bringIntoReview(x).assertIsNotSelected()
         handle.performSemanticsAction(SemanticsActions.Dismiss)
-        fun awaitClosed() = ui.waitUntil(10_000) { ui.onAllNodesWithTag("goal-sheet-handle").fetchSemanticsNodes().isEmpty() }
+        bringIntoReview(hasText("3. D")).assertIsDisplayed()
+        handle.performSemanticsAction(SemanticsActions.Dismiss)
+        fun awaitClosed() = ui.waitUntil(10_000) { ui.onAllNodesWithTag("planner-sheet-handle").fetchSemanticsNodes().isEmpty() }
         awaitClosed()
         launcher.performClick()
-        tag("goal-sheet-handle").performTouchInput { swipe(center, center + Offset(0f, height * 5f), durationMillis = 180) }
+        tag("planner-sheet-handle").performTouchInput { swipe(center, center + Offset(0f, height * 5f), durationMillis = 180) }
         awaitClosed()
         assertEquals(before, runBlocking { store.state() })
     }
@@ -213,7 +270,7 @@ class GraphEditorTest {
                     PlannerPopupHost {
                         Spacer(Modifier.fillMaxSize().background(donor.value))
                         var goal by remember { mutableStateOf(id("d")) }
-                        GoalReview(viewModel { WorkspaceViewModel(store.api) }, id("g"), state, goal, { goal = it }, {}, {})
+                        GoalReview(viewModel { WorkspaceViewModel(store.api) }, id("g"), state, goal, { goal = it }, {}, {}, {})
                     }
                 }
             }
@@ -221,7 +278,7 @@ class GraphEditorTest {
         if (glass) ui.runOnIdle { assumeTrue("Requires hardware-backed glass", available) }
         tag("goal-change").performClick()
         val row = bringIntoReview(hasTestTag("goal-choice:${id("d")}")).assertIsSelected()
-        val grip = ui.onNodeWithTag("goal-grip", useUnmergedTree = true)
+        val grip = ui.onNodeWithTag("planner-sheet-grip", useUnmergedTree = true)
         fun probe(node: SemanticsNodeInteraction, x: Float): IntOffset {
             val n = node.assertIsDisplayed().fetchSemanticsNode()
             return ui.runOnIdle { IntOffset((n.positionOnScreen.x + n.size.width * x).toInt(),
@@ -286,7 +343,7 @@ class GraphEditorTest {
         bringIntoReview(hasText("1. A 新版")).assertIsDisplayed()
         val click = bringIntoReview(button and isEnabled()).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
         ui.runOnIdle { click(); click() }
-        await(hasText("已按此顺序加入队尾。"))
+        await(hasText("已将 4 个新事件按此顺序加入队尾。"))
         val after = store.state()
         assertEquals(before.revision + 2, after.revision) // one concurrent graph edit + one queue batch
         assertEquals(before.queue, after.queue.take(before.queue.size))
@@ -401,5 +458,192 @@ class GraphEditorTest {
         await(hasText("栈帧详情"))
         await(hasText("为目标〈新目标〉生成"))
         assertEquals(listOf("新目标"), runBlocking { store.state().frames.single().items.map { it.title } })
+    }
+
+    private fun mountEditor(api: PlannerApi = store.api, onSource: (GraphLink) -> Unit = { error("Unexpected source $it") },
+        onFrame: (String) -> Unit = { error("Unexpected frame $it") }) {
+        ui.setContent {
+            StackLifeTheme(Appearance(reduceMotion = true)) {
+                PlannerPopupHost {
+                    GraphEditorRoute(viewModel { WorkspaceViewModel(api) }, id("g"), {}, onSource, onFrame)
+                }
+            }
+        }
+    }
+
+    private fun captureGraph(name: String) {
+        if (InstrumentationRegistry.getArguments().getString("captureGraph") != "yes") return
+        ui.waitForIdle()
+        val inst = InstrumentationRegistry.getInstrumentation()
+        inst.uiAutomation.waitForIdle(450, 5000)
+        val bitmap = checkNotNull(inst.uiAutomation.takeScreenshot())
+        try { java.io.File(inst.targetContext.getExternalFilesDir(null), "u6-$name.png").outputStream().use {
+            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+        } } finally { bitmap.recycle() }
+    }
+
+    @Test fun multiSelectPreservesIdentitiesAcrossPagesFiltersAndOccurrenceDates() = runBlocking {
+        seed()
+        store.apply(*Array(51) { TaskAdd(TaskInput("分页同名")) })
+        val dates = LocalDate.now()
+        store.apply(TaskAdd(TaskInput("分页同名", ref = "framed")), FramePush("归档", listOf("@framed")),
+            TaskAdd(TaskInput("每日练习", ref = "daily")), SetSchedule("@daily", SchedulePattern.Daily(listOf(
+                DailySegment(dates.minusDays(1).toEpochDay(), 12 * 60, ZoneId.systemDefault().id, 0)))))
+        val graphId = id("g")
+        val framed = GraphLink.Task(store.state().frames.single().items.single().taskId)
+        val daily = store.state().queue.single { it.title == "每日练习" }.id
+        val today = GraphLink.Occurrence(daily, dates.toEpochDay())
+        val tomorrow = today.copy(originalDate = today.originalDate + 1)
+        suspend fun page(offset: Int) = store.api.observe(PlannerQuery.LinkableEvents(graphId, "分页同名",
+            LinkFilter.QUEUE, dates, offset)).first() as LinkablePage
+        val first = page(0)
+        assertEquals(51, first.total)
+        assertEquals(50, first.items.size)
+        val duplicate = first.items[0].link
+        val left = first.items[1].link
+        val right = page(50).items.single().link
+        store.apply(GraphPatch(graphId, listOf(GraphEdit.LinkExisting(duplicate))))
+        val before = graph()
+        mountEditor()
+
+        fun picker() {
+            tag("graph-add").performClick(); tag("graph-existing").performClick()
+            val handle = tag("planner-sheet-handle")
+            if (handle.fetchSemanticsNode().config.contains(SemanticsActions.Expand)) handle.performSemanticsAction(SemanticsActions.Expand)
+        }
+        fun top() { tag("graph-candidates").performScrollToIndex(0) }
+        fun filter(choice: LinkFilter) {
+            top(); tag("graph-filter").performClick(); tag("graph-filter:$choice").performClick()
+        }
+        fun search(value: String) { top(); tag("graph-link-search").performTextReplacement(value) }
+        fun option(link: GraphLink): SemanticsNodeInteraction {
+            val item = "graph-option:${link.storageKey()}"
+            val list = tag("graph-candidates")
+            val key = link.storageKey()
+            ui.waitUntil(10_000) {
+                list.fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.IndexForKey](key) >= 0
+            }
+            list.performScrollToKey(key)
+            return tag(item).performScrollTo()
+        }
+        picker()
+        search("分页同名"); filter(LinkFilter.QUEUE)
+        option(duplicate).assertIsOn().assertIsNotEnabled()
+        option(left).assertIsOff().performClick()
+        top(); tag("graph-page-next").performClick()
+        option(right).performClick()
+        top(); tag("graph-page-prev").performClick()
+        option(left).assertIsOn()
+        filter(LinkFilter.FRAME); option(framed).performClick()
+        search("无此事件"); await(hasText("没有匹配的事件，请尝试其他搜索词或来源。"))
+        tag("graph-link-add").assertTextContains("添加 3 项")
+        filter(LinkFilter.DAY); search("每日练习")
+        option(today).performClick()
+        top(); ui.chooseDate("graph-link-date", dates.plusDays(1))
+        option(tomorrow).assertIsOff().performClick()
+        captureGraph("picker")
+        tag("graph-link-add").assertTextContains("添加 5 项").performClick()
+        val linked = expectGraph("Add all selected identities in one patch") { it.nodes.size == before.nodes.size + 5 }
+        assertEquals(before.revision + 1, linked.revision)
+        val added = linked.nodes.filter { node -> before.nodes.none { it.id == node.id } }
+        assertEquals(setOf(left, right, framed, today, tomorrow), added.map { it.link }.toSet())
+        assertEquals(5, added.distinctBy { it.x to it.y }.size)
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("planner-sheet-handle").fetchSemanticsNodes().isEmpty() }
+        picker()
+        search("每日练习"); option(today).assertIsNotEnabled()
+        top(); ui.chooseDate("graph-link-date", dates.plusDays(2))
+        option(today.copy(originalDate = today.originalDate + 2)).performClick()
+        tag("graph-link-add").assertIsEnabled()
+        tag("planner-sheet-handle").performSemanticsAction(SemanticsActions.Dismiss)
+        assertEquals(linked, graph())
+    }
+
+    @Test fun linkedGoalOpensOriginalSourceAndOnlyTemplatesGenerateNewQueueItems() = runBlocking {
+        seed()
+        val source = GraphLink.Task(store.state().queue.single().id)
+        val graphId = id("g")
+        val patch = store.proposal(GraphPatch(graphId, listOf(GraphEdit.LinkExisting(source, ref = "linked"),
+            GraphEdit.AddEdge("@linked", id("a")))))
+        assertTrue(store.api.commit(patch.proposalId) is CommitResult.Applied)
+        val linked = patch.refs.getValue("linked")
+        val opened = mutableListOf<GraphLink>()
+        val received = ConcurrentLinkedQueue<List<PlannerCommand>>()
+        mountEditor(object : PlannerApi by store.api {
+            override suspend fun preview(commands: List<PlannerCommand>): PreviewResult {
+                received.add(commands)
+                return store.api.preview(commands)
+            }
+        }, opened::add)
+        tag("graph-toggle-view").performClick()
+        fun pick(node: String) {
+            tag("graph-list").performScrollToNode(hasTestTag("list-node:$node"))
+            tag("list-node:$node").performClick()
+        }
+        pick(linked); tag("graph-node-actions").performClick(); tag("graph-open-source").performClick()
+        ui.runOnIdle { assertEquals(listOf(source), opened) }
+        tag("graph-goal").performClick()
+        bringIntoReview(hasTestTag("graph-append")).assertIsNotEnabled()
+        bringIntoReview(hasTestTag("graph-generate")).assertIsEnabled()
+        bringIntoReview(hasTestTag("goal-open:$linked")).performClick()
+        ui.runOnIdle { assertEquals(listOf(source, source), opened) }
+
+        pick(id("a")); tag("graph-goal").performClick()
+        bringIntoReview(hasText("保留在队列原位")).assertIsDisplayed()
+        captureGraph("goal")
+        val prior = store.state()
+        bringIntoReview(hasTestTag("graph-append") and isEnabled()).assertTextContains("将 1 个新事件按此顺序加入队列").performClick()
+        await(hasText("已将 1 个新事件按此顺序加入队尾。"))
+        assertEquals(listOf(listOf(GraphQueue(graphId, id("a"), prior.revision))), received.toList())
+        val after = store.state()
+        assertEquals(prior.queue, after.queue.dropLast(1))
+        assertEquals("A", after.queue.last().title)
+        assertEquals(prior.revision + 1, after.revision)
+        goalBack().performClick()
+
+        store.apply(TaskRemove(source.taskId))
+        expectGraph("Keep the missing reference") { it.nodes.single { n -> n.id == linked }.linkState?.missing == true }
+        pick(id("a")); tag("graph-goal").performClick()
+        bringIntoReview(hasText("「眼前的工作」的来源已移除。请先解除此节点的关联。")).assertIsDisplayed()
+        bringIntoReview(hasTestTag("graph-append")).assertIsNotEnabled()
+        bringIntoReview(hasTestTag("graph-generate")).assertIsNotEnabled()
+        assertEquals(1, received.size)
+    }
+
+    @Test fun systemOccurrenceAllowsCompletionAndUnlinkButNotEditingOrDeletingTheSource() = runBlocking {
+        seed()
+        val day = LocalDate.of(2032, 2, 29)
+        val zone = ZoneId.systemDefault()
+        val link = GraphLink.Occurrence(RoutineKind.WAKE.scheduleId, day.toEpochDay())
+        store.apply(SetSchedule(link.scheduleId, SchedulePattern.Daily(listOf(DailySegment(link.originalDate, 7 * 60, null, 0)))))
+        val proposal = store.proposal(GraphPatch(id("g"), listOf(GraphEdit.LinkExisting(link, ref = "wake"))))
+        assertTrue(store.api.commit(proposal.proposalId) is CommitResult.Applied)
+        val nodeId = proposal.refs.getValue("wake")
+        val opened = mutableListOf<GraphLink>()
+        val frames = ConcurrentLinkedQueue<String>()
+        mountEditor(onSource = { opened.add(it) }, onFrame = { frames.add(it) })
+        tag("graph-toggle-view").performClick()
+        tag("graph-list").performScrollToNode(hasTestTag("list-node:$nodeId"))
+        tag("list-node:$nodeId").performClick()
+        tag("graph-node-actions").performClick()
+        await(hasText("编辑节点")).assertIsNotEnabled()
+        tag("graph-open-source").performClick()
+        ui.runOnIdle { assertEquals(listOf(link), opened) }
+        tag("graph-node-actions").performClick(); tag("graph-source-completion").performClick()
+        expectGraph("Complete this leap-day occurrence only") { it.nodes.single { n -> n.id == nodeId }.linkState?.completed == true }
+        suspend fun completed(n: Int) = (store.api.observe(PlannerQuery.Occurrence(
+            link.copy(originalDate = link.originalDate + n).key(), zone)).first() as OccurrenceView).occurrence!!.completed
+        assertTrue(completed(0)); assertFalse(completed(1))
+        tag("graph-goal").performClick()
+        bringIntoReview(hasTestTag("graph-append")).assertIsNotEnabled()
+        bringIntoReview(hasTestTag("graph-generate") and isEnabled()).performClick()
+        ui.waitUntil(10_000) { frames.isNotEmpty() }
+        val snapshot = store.state().frames.single { it.id == frames.single() }
+        assertEquals(0, snapshot.remaining)
+        assertEquals(link, snapshot.items.single().link)
+        assertFalse(snapshot.items.single().restorable)
+        tag("graph-node-actions").performClick(); await(hasText("解除事件关联")).performClick()
+        tag("graph-save").performClick()
+        expectGraph("Unlink without deleting the schedule") { it.nodes.none { n -> n.id == nodeId } }
+        assertTrue(completed(0)); assertFalse(completed(1))
     }
 }

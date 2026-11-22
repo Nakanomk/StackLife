@@ -3,6 +3,10 @@ package io.github.nakanomk.stacklife.acceptance
 import android.graphics.Bitmap
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.ui.platform.ViewRootForTest
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,6 +29,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.StackLifeApp
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.assistant.*
+import io.github.nakanomk.stacklife.courses.dateRangeLabel
 import io.github.nakanomk.stacklife.planner.*
 import java.io.File
 import java.net.InetAddress
@@ -53,6 +58,8 @@ class AssistantProposalTest {
     private val server = MockWebServer()
     private val inst = InstrumentationRegistry.getInstrumentation()
     private val connection = ConnectionStore(inst.targetContext, "proposal-${UUID.randomUUID()}")
+    private val imageDirectory = "proposal-images-${UUID.randomUUID()}"
+    private val images by lazy { AttachmentStore(inst.targetContext, { store.db.conversationHistory().imageIds().toSet() }, imageDirectory) }
     private lateinit var transport: ChatTransport
     private lateinit var assistant: AssistantModel
     private var call = 0
@@ -68,17 +75,30 @@ class AssistantProposalTest {
         attach()
     }
 
-    @After fun teardown() { server.close(); runBlocking { connection.clear() } }
-    private fun attach(file: File? = null) = ui.activityRule.scenario.onActivity { activity ->
-        val owner = file?.let(::pickerReturning) ?: activity
+    @After fun teardown() {
+        server.close()
+        runBlocking { connection.clear() }
+        File(inst.targetContext.noBackupFilesDir, imageDirectory).deleteRecursively()
+    }
+    private fun attach(file: File? = null, photos: (() -> List<android.net.Uri>)? = null) = ui.activityRule.scenario.onActivity { activity ->
+        // Match MainActivity, not the generic instrumentation activity's default pan window.
+        activity.enableEdgeToEdge()
+        activity.window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        val owner = photos?.let(::photoPickerReturning) ?: file?.let(::pickerReturning) ?: activity
         activity.setContent { CompositionLocalProvider(LocalActivityResultRegistryOwner provides owner) {
-            val controller = viewModel { AssistantModel(store.api, connection, transport, store.db.conversationHistory()) }
+            val controller = viewModel { AssistantModel(store.api, connection, transport, store.db.conversationHistory(), images) }
             assistant = controller
             StackLifeApp(viewModel { WorkspaceViewModel(store.api) }, controller)
         } }
     }
     private fun await(matcher: SemanticsMatcher): SemanticsNodeInteraction {
-        ui.waitUntil(10_000) { ui.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
+        try {
+            ui.waitUntil(10_000) { ui.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
+        } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+            val state = assistant.state.value
+            throw AssertionError("Missing $matcher; page=${state.page?.javaClass?.simpleName}, work=${state.work}, " +
+                "events=${state.lines.mapNotNull { it.event?.status }}, requests=${server.requestCount}", timeout)
+        }
         return ui.onNode(matcher)
     }
     private fun tag(value: String) = await(hasTestTag(value))
@@ -96,9 +116,16 @@ class AssistantProposalTest {
         server.enqueue(MockResponse(body = reply))
     }
     private fun graphList() = runBlocking { (store.api.observe(PlannerQuery.Graphs).first() as GraphList).graphs }
-    private fun capture(name: String) {
+    private fun capture(name: String, surface: SemanticsNodeInteraction? = null) {
         if (InstrumentationRegistry.getArguments().getString("captureM5") != "yes") return
         ui.waitForIdle()
+        if (surface != null && android.os.Build.VERSION.SDK_INT >= 29) {
+            val view = (surface.fetchSemanticsNode().root as ViewRootForTest).view
+            val committed = java.util.concurrent.CountDownLatch(1)
+            ui.runOnUiThread { view.viewTreeObserver.registerFrameCommitCallback { committed.countDown() }; view.invalidate() }
+            assertTrue("Dialog frame not submitted", committed.await(4, TimeUnit.SECONDS))
+            inst.uiAutomation.waitForIdle(200, 5_000)
+        }
         val bitmap = inst.uiAutomation.takeScreenshot() ?: throw AssertionError("device screenshot unavailable")
         try { File(inst.targetContext.getExternalFilesDir(null), name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) } }
         finally { bitmap.recycle() }
@@ -116,6 +143,12 @@ class AssistantProposalTest {
         input.performImeAction()
         ui.runOnUiThread { assistant.send() }
         val apply = tag("assistant-apply"); val pending = requireNotNull(assistant.state.value.pending)
+        val eventId = requireNotNull(assistant.state.value.eventId)
+        val history = store.db.conversationHistory()
+        val thread = history.observeConversations().first().single().id
+        val proposed = history.observeMessages(thread).first().single { it.id == eventId }
+        assertEquals(ChatEvent(ProposalStatus.PROPOSED, pending.changes), proposed.event)
+        assertEquals(listOf(HistoryRole.USER, HistoryRole.NOTICE), assistant.state.value.lines.map { it.role })
         tag("assistant-notice").assertContentDescriptionEquals("警告与说明")
         ui.onNodeWithTag("assistant-notice-details").assertDoesNotExist()
         assertEquals(before, store.state()); assertTrue(graphList().isEmpty())
@@ -127,16 +160,29 @@ class AssistantProposalTest {
         val data = outgoing.last().jsonObject
         assertEquals("tool", data["role"]!!.jsonPrimitive.content); assertTrue(data.toString().contains("眼前的工作"))
         assertFalse(outgoing.toString().contains("不可外发的测试备注")); assertFalse(outgoing.toString().contains("only-this-fixture"))
-        capture("m5-proposal.png")
+        val handle = tag("planner-sheet-handle")
+        val expand = androidx.compose.ui.semantics.SemanticsActions.Expand
+        if (handle.fetchSemanticsNode().config.contains(expand)) handle.performSemanticsAction(expand)
+        apply.performScrollTo().assertIsDisplayed()
+        capture("m5-proposal.png", apply)
         apply.performClick(); ui.runOnUiThread { assistant.apply(pending.proposalId) }
-        await(hasText("已应用这些更改。")); capture("m5-receipt.png")
+        val receipt = await(hasText("已应用这些更改。")).performScrollTo().assertIsDisplayed()
+        capture("m5-receipt.png", receipt)
+        val applied = history.observeMessages(thread).first().single { it.event != null }
+        assertEquals(eventId, applied.id)
+        assertEquals(proposed.event!!.copy(status = ProposalStatus.APPLIED), applied.event)
+        val eventJson = store.db.openHelper.readableDatabase.query("SELECT eventJson FROM conversation_messages WHERE id = ?", arrayOf(eventId)).use {
+            check(it.moveToFirst()); it.getString(0)
+        }
+        assertEquals(setOf("status", "changes"), Json.parseToJsonElement(eventJson).jsonObject.keys)
+        assertFalse(pending.proposalId in eventJson || "only-this-fixture" in eventJson || "call-" in eventJson)
         assertEquals(2, server.requestCount)
         val state = store.state(); val frame = state.frames.single()
         assertEquals(before.revision + 1, state.revision)
         assertEquals(listOf("查资料", "眼前的工作"), state.queue.map { it.title })
         assertEquals(listOf("查资料", "写提纲", "交报告"), frame.items.map { it.title }); assertEquals(2, frame.remaining)
         assertEquals(frame.items.first().taskId, state.queue.first().id)
-        assertEquals(localSlot.toInstant().toEpochMilli(), state.queue.first().scheduledStartMillis)
+        assertEquals(localSlot.toInstant().toEpochMilli(), (state.queue.first().schedule!!.pattern as SchedulePattern.Once).interval.startMillis)
         val g = store.api.observe(PlannerQuery.Graph(graphList().single().id)).first() as GraphDetail
         assertEquals(3, g.nodes.size); assertEquals(2, g.edges.size)
         store.reopen(); assertEquals(state, store.state())
@@ -201,10 +247,23 @@ class AssistantProposalTest {
                 checkRim()
                 capture("assistant-dark-$scene-${if (glass) "glass" else "solid"}.png")
                 tag("assistant-input").performClick().assertIsFocused()
+                // Position and focus settle in Compose before Android has presented the IME.
+                // Don't sample its pixels as if they were the composer border.
+                ui.waitUntil(5_000) {
+                    val node = shell.fetchSemanticsNode()
+                    val view = (node.root as ViewRootForTest).view
+                    ui.runOnIdle {
+                        val frame = android.graphics.Rect().also(view::getWindowVisibleDisplayFrame)
+                        ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime()) == true &&
+                            node.positionOnScreen.y + node.size.height <= frame.bottom + 1
+                    }
+                }
+                capture("assistant-dark-$scene-${if (glass) "glass" else "solid"}-focused.png")
                 checkRim()
-                ui.activityRule.scenario.onActivity { activity ->
-                    activity.getSystemService(InputMethodManager::class.java)
-                        .hideSoftInputFromWindow(activity.window.decorView.windowToken, 0)
+                val host = (shell.fetchSemanticsNode().root as ViewRootForTest).view
+                ui.runOnIdle {
+                    host.context.getSystemService(InputMethodManager::class.java)
+                        .hideSoftInputFromWindow(host.windowToken, 0)
                 }
             }
         }
@@ -214,7 +273,7 @@ class AssistantProposalTest {
         val prompt = "安排还是刚才那一天"
         val input = tag("assistant-input")
         input.performClick().performTextInput(prompt)
-        val origin = assistant.state.value.draftPage as AssistantPage.Day
+        val originLabel = input.fetchSemanticsNode().config[SemanticsProperties.ContentDescription].single()
         // Hide the IME, not the field's focus; some compact docks omit navigation while the IME shows.
         ui.activityRule.scenario.onActivity { activity ->
             requireNotNull(activity.getSystemService(InputMethodManager::class.java))
@@ -228,13 +287,13 @@ class AssistantProposalTest {
         val after = input.fetchSemanticsNode()
         assertEquals("Changing root pages must retain the focused editor", before.id, after.id)
         assertEquals("The persistent field must not jump", before.boundsInRoot, after.boundsInRoot)
-        input.assertContentDescriptionContains(origin.date.toString(), substring = true)
-        assertEquals(origin, assistant.state.value.draftPage)
+        input.assertContentDescriptionEquals(originLabel)
         assertEquals(0, server.requestCount)
         capture("assistant-bound-draft.png")
         reply("收到")
         input.performImeAction()
-        assertEquals(origin, assistant.state.value.page)
+        val origin = assistant.state.value.page as AssistantPage.Day
+        assertTrue(origin.date.toString() in originLabel && origin.zone.id in originLabel)
         val answer = await(hasText("收到"))
         val outbound = await(hasText(prompt))
         assertTrue(outbound.fetchSemanticsNode().boundsInRoot.left > answer.fetchSemanticsNode().boundsInRoot.left)
@@ -277,7 +336,10 @@ class AssistantProposalTest {
         val input = tag("assistant-input")
         input.performClick().performTextInput(prompt)
         input.performKeyInput { pressKey(Key.Enter) }
-        await(hasText("配置模型服务")).performClick()
+        input.assertTextContains("$prompt\n")
+        assertEquals(0, server.requestCount)
+        input.performImeAction()
+        await(hasText("配置模型服务")).assertIsDisplayed().performClick()
         val custom = await(hasText("自定义"))
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("assistant-input").fetchSemanticsNodes().isEmpty() }
         custom.performScrollTo().performClick()
@@ -285,15 +347,17 @@ class AssistantProposalTest {
         tag("provider-model").performScrollTo().performTextReplacement("本地验收模型")
         tag("provider-key").performScrollTo().performTextReplacement("only-this-fixture")
         tag("provider-save").performScrollTo().performClick()
-        tag("assistant-input").assertTextContains(prompt)
+        tag("assistant-input").assertTextContains("$prompt\n")
         assertNull(assistant.state.value.page)
         assertTrue(store.db.conversationHistory().observeConversations().first().isEmpty())
         assertEquals(0, server.requestCount)
         reply("已收到")
         tag("assistant-send").performClick()
         await(hasText("已收到")); assertEquals(1, server.requestCount)
+        val request = Json.parseToJsonElement(requireNotNull(server.takeRequest(3, TimeUnit.SECONDS)).body!!.utf8()).jsonObject
+        assertEquals("$prompt\n", request.getValue("messages").jsonArray.last().jsonObject.getValue("content").jsonPrimitive.content)
         inst.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-        tag("assistant-input").assert(hasText(prompt).not())
+        tag("assistant-input").assertTextEquals("")
         assertEquals(1, server.requestCount)
         assertEquals(listOf("眼前的工作"), store.state().queue.map { it.title })
     }
@@ -306,7 +370,8 @@ class AssistantProposalTest {
         await(hasText("服务配置已变更，本条消息未发送。请重新输入。"))
         tag("assistant-notice").assertContentDescriptionEquals("警告与说明")
         val state = assistant.state.value
-        assertTrue(state.lines.isEmpty()); assertTrue(state.draft.isEmpty())
+        assertTrue(state.lines.isEmpty())
+        assertTrue(assistant.draft(requireNotNull(state.composerId)).field.text.isEmpty())
         assertNull(state.pending); assertEquals(1, server.requestCount)
         reply("新答复"); send("给新账户"); await(hasText("新答复"))
         val sent = server.takeRequest(3, TimeUnit.SECONDS)!!
@@ -325,6 +390,157 @@ class AssistantProposalTest {
         tag("assistant-apply").performClick(); await(hasText("重新预览")); assertEquals(changed, store.state()); assertTrue(graphList().isEmpty())
         await(hasText("重新预览")).performClick(); tag("assistant-apply"); assertEquals(changed, store.state()); assertEquals(2, server.requestCount)
         await(hasText("放弃提案")).performClick(); assertTrue(graphList().isEmpty())
+        val history = store.db.conversationHistory()
+        val thread = history.observeConversations().first().single().id
+        val statuses = kotlinx.coroutines.withTimeout(5_000) { history.observeMessages(thread)
+            .first { lines -> lines.count { it.event?.status == ProposalStatus.DISCARDED } == 2 } }.mapNotNull { it.event }
+        assertEquals(listOf(ProposalStatus.DISCARDED, ProposalStatus.STALE, ProposalStatus.DISCARDED), statuses.map { it.status })
+        assertTrue(statuses[1].reason?.isNotBlank() == true)
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test fun expiredCapabilityWithoutAReceiptShowsFailedAndNeverClaimsApplied() = runBlocking {
+        val before = store.state()
+        toolCall("planner_propose", """{"commands":[{"kind":"task_add","title":"不应写入"}]}""")
+        send("生成本地提案")
+        val apply = tag("assistant-apply")
+        val pending = requireNotNull(assistant.state.value.pending)
+        store.api.discard(pending.proposalId)
+        apply.performClick()
+        await(hasText("更改未获确认"))
+        val history = store.db.conversationHistory()
+        val event = history.observeMessages(history.observeConversations().first().single().id).first().single { it.event != null }.event!!
+        assertEquals(ProposalStatus.FAILED, event.status)
+        assertTrue(event.reason?.isNotEmpty() == true)
+        assertEquals(before, store.state()); assertEquals(1, server.requestCount)
+        ui.onNodeWithTag("assistant-apply").assertDoesNotExist()
+    }
+
+    @Test fun overLimitAndFailedPickerResultsRetainTheDraftUntilExplicitRemoval() {
+        var selection = (1..6).map { android.net.Uri.parse("content://stacklife-fixture-missing/item/$it") }
+        attach(photos = { selection })
+        tag("assistant-attach").performClick()
+        await(hasText("本次选择未添加", substring = true))
+        tag("assistant-send").assertIsNotEnabled()
+        selection = selection.take(1)
+        tag("assistant-attach").performClick()
+        val failed = await(hasText("图片 1 准备失败"))
+        tag("assistant-input").performTextReplacement("还在编辑")
+        tag("assistant-send").assertIsNotEnabled()
+        failed.performClick(); await(hasText("重试")).performClick()
+        await(hasText("图片 1 准备失败"))
+        await(hasContentDescription("移除图片 1")).performClick()
+        tag("assistant-send").assertIsEnabled()
+        assertEquals(0, server.requestCount)
+        assertTrue(runBlocking { store.db.conversationHistory().observeConversations().first().isEmpty() })
+    }
+
+    private fun expandTranscriptForCapture() {
+        val handle = tag("planner-sheet-handle")
+        val expand = androidx.compose.ui.semantics.SemanticsActions.Expand
+        if (handle.fetchSemanticsNode().config.contains(expand)) handle.performSemanticsAction(expand)
+        ui.waitForIdle()
+    }
+
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
+    @Test fun undeclaredImageInputDoesNotTransferOwnershipOrSilentlySendOnlyText() {
+        val history = store.db.conversationHistory()
+        withChatPhoto(inst.targetContext, 180) { uri ->
+            attach(photos = { listOf(uri) })
+            tag("assistant-attach").performClick()
+            tag("assistant-input").performTextReplacement("不能省略这张图")
+            await(hasTestTag("assistant-send") and isEnabled()).performClick()
+        }
+        await(hasText("未启用图片输入", substring = true))
+        val draft = assistant.draft(requireNotNull(assistant.state.value.composerId))
+        val image = (draft.images.single().status as ImagePreparation.Ready).image
+        assertTrue(images.file(image.id).isFile)
+        assertTrue(runBlocking { history.observeConversations().first().isEmpty() })
+        await(hasContentDescription("移除图片 1")).performClick()
+        ui.waitUntil(5_000) { !images.file(image.id).exists() }
+        tag("assistant-input").assertTextContains("不能省略这张图")
+        assertEquals(0, server.requestCount)
+    }
+
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
+    @Test fun explicitImageOnlySendHistoryZoomAndReattachHaveIndependentFileOwnership() {
+        val context = inst.targetContext
+        val history = store.db.conversationHistory()
+        runBlocking { connection.save("https://127.0.0.1:${server.port}/acceptance/v1", "本地验收模型", null, supportsImages = true) }
+        withChatPhoto(context, 180) { first -> withChatPhoto(context, 240) { second ->
+            var selection = listOf(first, second)
+            attach(photos = { selection })
+            tag("assistant-attach").performClick()
+            await(hasTestTag("assistant-send") and isEnabled())
+            selection = (1..4).map { android.net.Uri.parse("content://unused/$it") }
+            tag("assistant-attach").performClick()
+            await(hasText("本次选择未添加", substring = true))
+            assertEquals(0, server.requestCount)
+            assertTrue(runBlocking { history.imageIds().isEmpty() })
+            reply("### 看到了两张图片\n\n第一张是**蓝色三角形**，第二张是**绿色圆形**。\n\n- 两张图片都在这条消息中\n- 未更改日程")
+            tag("assistant-send").performClick(); await(hasText("看到了两张图片"))
+        } }
+        val sent = Json.parseToJsonElement(server.takeRequest(3, TimeUnit.SECONDS)!!.body!!.utf8()).jsonObject["messages"]!!.jsonArray
+        val parts = sent.last().jsonObject["content"]!!.jsonArray
+        assertEquals(listOf("image_url", "image_url"), parts.map { it.jsonObject["type"]!!.jsonPrimitive.content })
+        val thread = runBlocking { history.observeConversations().first().single() }
+        assertTrue(thread.title.isNotBlank())
+        val user = runBlocking { history.observeMessages(thread.id).first().first() }
+        assertEquals("", user.text); assertEquals(listOf(180, 240), user.images.map { it.width })
+        assertTrue(user.images.all { images.file(it.id).isFile })
+        expandTranscriptForCapture()
+        tag("assistant-scroll").performScrollToIndex(0)
+        await(hasContentDescription("图片 1，180 × 120")).assertIsDisplayed()
+        await(hasContentDescription("图片 2，240 × 160")).assertIsDisplayed()
+        await(hasText("蓝色三角形", substring = true)).assertIsDisplayed()
+        capture("u3-chat-images-markdown.png")
+        await(hasText("关闭")).performClick()
+        tag("assistant-history").performClick(); tag("assistant-history-thread-${thread.id}").performClick()
+        val image = user.images.first()
+        val transcript = tag("assistant-history-messages")
+        expandTranscriptForCapture()
+        transcript.performScrollToIndex(0)
+        await(hasContentDescription("图片 1，180 × 120")).assertIsDisplayed()
+        await(hasContentDescription("图片 2，240 × 160")).assertIsDisplayed()
+        await(hasText("蓝色三角形", substring = true)).assertIsDisplayed()
+        capture("u3-history-images-markdown.png")
+        transcript.performScrollToNode(hasTestTag("chat-image-${image.id}")); tag("chat-image-${image.id}").performClick()
+        await(hasText("放大")).performClick(); await(hasText("200%"))
+        tag("chat-reattach").performClick()
+        await(hasTestTag("history-reply-send") and isEnabled())
+        assertEquals(1, server.requestCount)
+        val replyDraft = assistant.draft("history:${thread.id}")
+        val duplicate = (replyDraft.images.single().status as ImagePreparation.Ready).image
+        assertNotEquals(image.id, duplicate.id); assertTrue(images.file(duplicate.id).isFile)
+        await(hasContentDescription("移除图片 1")).performClick()
+        ui.waitUntil(5_000) { !images.file(duplicate.id).exists() }
+        assertTrue(images.file(image.id).isFile)
+        tag("history-reply-input").performTextReplacement("只发文字")
+        reply("没有再次发图"); tag("history-reply-send").performClick(); await(hasText("没有再次发图"))
+        val resumed = server.takeRequest(3, TimeUnit.SECONDS)!!.body!!.utf8()
+        assertFalse("image_url" in resumed || "base64" in resumed)
+        assertTrue("只发文字" in resumed && "看到了两张图片" in resumed)
+        await(hasText("关闭")).performClick()
+        tag("assistant-history").performClick(); tag("assistant-history-thread-${thread.id}").performClick()
+        tag("assistant-history-messages").performScrollToNode(hasTestTag("chat-image-${image.id}"))
+        tag("chat-image-${image.id}").performClick(); tag("chat-reattach").performClick()
+        tag("history-reply-input").performTextReplacement("只重发第一张")
+        reply("收到第一张"); await(hasTestTag("history-reply-send") and isEnabled()).performClick(); await(hasText("收到第一张"))
+        val mixed = Json.parseToJsonElement(server.takeRequest(3, TimeUnit.SECONDS)!!.body!!.utf8()).jsonObject["messages"]!!.jsonArray
+        assertTrue(mixed.dropLast(1).all { it.jsonObject["content"] is JsonPrimitive })
+        val attached = mixed.last().jsonObject["content"]!!.jsonArray
+        assertEquals(listOf("text", "image_url"), attached.map { it.jsonObject["type"]!!.jsonPrimitive.content })
+        assertEquals(parts.first(), attached.last())
+        val orderedImages = runBlocking { history.observeMessages(thread.id).first().flatMap { it.images } }
+        assertEquals(listOf(180, 240, 180), orderedImages.map { it.width })
+        assertEquals(3, orderedImages.map { it.id }.distinct().size)
+        await(hasText("关闭")).performClick()
+        tag("assistant-history").performClick(); tag("assistant-history-thread-${thread.id}").performClick()
+        tag("assistant-history-delete").performClick(); tag("assistant-history-confirm-delete").performClick()
+        tag("assistant-history-empty")
+        ui.waitUntil(5_000) { orderedImages.none { images.file(it.id).exists() } }
+        assertTrue(runBlocking { history.imageIds().isEmpty() })
+        assertEquals(3, server.requestCount)
     }
 
     @Test fun deniesUnauthorizedReadsMalformedWritesAndAuthenticationFailuresWithoutMutation() = runBlocking {
@@ -369,11 +585,13 @@ class AssistantProposalTest {
             file.writeText("""[{"ZC":1,"KS":"2026-09-07","MONDAY":[{"KCMC":"本地课程","JSMC":"仅本机地点","JC":"5-6"}]}]""")
             attach(file)
             tag("nav:courses").performClick(); tag("course-import").performClick(); tag("importCourseFile").performClick()
-            tag("termId").performScrollTo().performTextInput("秋季"); ui.chooseNumber("termWeeks", 2)
+            tag("importTerm:new").performClick(); ui.chooseNumber("termWeeks", 2)
             ui.onNodeWithTag("assistant-input").assertDoesNotExist()
             tag("reviewCourseRows").performScrollTo().performClick()
-            tag("courseIssues").performScrollToNode(hasTestTag("previewCourseImport")); tag("previewCourseImport").performClick()
+            tag("previewCourseImportTop").performClick()
+            tag("confirmCourseImportTop")
             toolCall("planner_query", """{"kind":"current"}"""); send("导入刚刚核对的课表")
+            ui.waitUntil(10_000) { assistant.state.value.page is AssistantPage.CourseDraft }
             val draft = assistant.state.value.page as AssistantPage.CourseDraft
             toolCall("planner_propose", """{"commands":[{"kind":"course_import","draftId":"${draft.draftId}"}]}""")
             tag("assistant-apply")
@@ -383,8 +601,10 @@ class AssistantProposalTest {
                 assertTrue(draft.draftId in sent); assertFalse("仅本机地点" in sent || "KCMC" in sent || "本地课程" in sent)
             }
             tag("assistant-apply").performClick(); await(hasText("已应用这些更改。")); await(hasText("关闭")).performClick()
-            await(hasTestTag("course-week") and hasText("秋季")).assertIsDisplayed()
-            val week = store.api.observe(PlannerQuery.Week("秋季", 1)).first() as CourseWeek
+            val savedTerm = (store.api.observe(PlannerQuery.Terms).first() as Terms).terms.single()
+            assertEquals(LocalDate.of(2026, 9, 7), savedTerm.firstMonday)
+            await(hasTestTag("course-week") and hasText(savedTerm.dateRangeLabel())).assertIsDisplayed()
+            val week = store.api.observe(PlannerQuery.Week(savedTerm.id, 1)).first() as CourseWeek
             assertEquals("仅本机地点", week.classes.single().meeting.room); assertEquals(2, store.state().revision)
         } finally { file.delete() }
     }
@@ -426,13 +646,13 @@ class AssistantProposalTest {
     @Test fun historicalFollowUpSendsOnlyRecentTextAndAppendsToTheOriginalThread() = runBlocking {
         val history = store.db.conversationHistory()
         val originalPage = AssistantPage.Day(LocalDate.of(2026, 10, 17), ZoneId.of("Asia/Shanghai"))
-        val id = history.start(originalPage.scopeName(), "最早的旧消息", originalPage.historyKey())
+        val id = history.sendUser(null, originalPage.scopeName(), "最早的旧消息", originalPage.historyKey(), emptyList()).conversationId
         repeat(8) {
             history.append(id, HistoryRole.USER, "问题 $it")
             history.append(id, HistoryRole.ASSISTANT, "答复 $it")
         }
         history.append(id, HistoryRole.NOTICE, "不可执行的旧提案回执")
-        val other = history.start("当前队列", "另一段不应发送的聊天")
+        val other = history.sendUser(null, "当前队列", "另一段不应发送的聊天", null, emptyList()).conversationId
         tag("nav:workspace").performClick()
         tag("assistant-history").performClick(); tag("assistant-history-thread-$id").performClick()
         tag("history-reply-input").performTextReplacement("接着最后一条")
@@ -456,8 +676,8 @@ class AssistantProposalTest {
         server.takeRequest(3, TimeUnit.SECONDS)!!
         tag("assistant-notice").performClick()
         await(hasText("调整数据范围")).performClick()
-        tag("assistant-scroll").performScrollToNode(hasText("发送任务及节点备注"))
-        await(hasText("发送任务及节点备注")).performClick()
+        val notes = hasText(ui.activity.getString(io.github.nakanomk.stacklife.R.string.assistant_share_notes))
+        await(notes).performScrollTo().performClick()
         assertTrue(assistant.state.value.grant.notes); assertEquals(1, server.requestCount)
         tag("assistant-notice").performClick()
         toolCall("planner_query", """{"kind":"current"}"""); reply("读取完成")
@@ -473,5 +693,5 @@ class AssistantProposalTest {
         {"kind":"graph_patch","graphId":"@g","edits":[{"kind":"add_node","title":"查资料","ref":"a"},{"kind":"add_node","title":"写提纲","ref":"b"},{"kind":"add_node","title":"交报告","ref":"c"},{"kind":"add_edge","from":"@a","to":"@b"},{"kind":"add_edge","from":"@b","to":"@c"}]},
         {"kind":"graph_frame","graphId":"@g","goalId":"@c","ref":"f","taskRefs":{"@a":"ta"}},
         {"kind":"frame_restore","frameId":"@f","mode":"selected","taskIds":["@ta"]},
-        {"kind":"slot_set","taskId":"@ta","start":"$localSlot","durationMinutes":30}]}"""
+        {"kind":"set_schedule","scheduleId":"@ta","pattern":{"kind":"once","start":"$localSlot","durationMinutes":30}}]}"""
 }

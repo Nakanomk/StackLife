@@ -47,6 +47,7 @@ import io.github.nakanomk.stacklife.appearance.CapsuleScene
 import io.github.nakanomk.stacklife.appearance.GlassBacking
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.StackLifeSurface
+import io.github.nakanomk.stacklife.appearance.wallpaperBackground
 import io.github.nakanomk.stacklife.ScrollEdge
 import io.github.nakanomk.stacklife.appearance.plannerBackdrop
 import io.github.nakanomk.stacklife.appearance.rememberPlannerBackdrop
@@ -158,7 +159,7 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, sou
         val dayWidth = ((maxWidth - rail) / 7).coerceAtLeast(0.dp)
         val scrollingPlane = rememberPlannerBackdrop()
         Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), topBar = {
-            Box(Modifier.fillMaxWidth().then(if (scrollingPlane == null) Modifier.background(colors.surface) else Modifier)) {
+            Box(Modifier.fillMaxWidth().then(if (scrollingPlane == null) Modifier.wallpaperBackground(colors.surface) else Modifier)) {
                 if (scrollingPlane != null) ScrollEdge(scrollingPlane, Modifier.matchParentSize(), fadeAbove = 24.dp)
                 Row(Modifier.padding(top = top).fillMaxWidth().testTag("week-dates"), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.width(rail), contentAlignment = Alignment.Center) {
@@ -183,7 +184,8 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, sou
                     }
             }
         }) { insets ->
-            Column(Modifier.fillMaxSize().plannerBackdrop(scrollingPlane).verticalScroll(rememberScrollState()).padding(top = insets.calculateTopPadding())) {
+            Column(Modifier.fillMaxSize().plannerBackdrop(scrollingPlane).wallpaperBackground(colors.surface)
+                .verticalScroll(rememberScrollState()).padding(top = insets.calculateTopPadding())) {
                 if (week.classes.isEmpty()) Text(stringResource(R.string.courses_no_classes_week), Modifier.padding(start = rail, top = 4.dp, bottom = 4.dp),
                     style = typography.bodySmall, color = colors.onSurfaceVariant)
                 if (changeover != null) Text(stringResource(R.string.courses_changeover, changeover.format(dateFormat)),
@@ -211,12 +213,14 @@ private fun PeriodGrid(termId: String, week: CourseWeek, periods: List<PeriodTim
         Stroke(with(density) { 1.05.dp.toPx().coerceAtLeast(2f) }, join = StrokeJoin.Round)
     } else null
     val ruleBlend = if (colors.surface.luminance() < .5f) BlendMode.Screen else BlendMode.Multiply
+    val gridLines = LocalAppearance.current.showCourseGrid
     GlassBacking(Modifier.fillMaxWidth().height(periodHeight * periodCount), background = {
-        Box(Modifier.fillMaxSize().background(colors.surface).drawBehind {
+        Box(Modifier.fillMaxSize().wallpaperBackground(colors.surface).drawBehind {
             val x0 = rail.toPx(); val cell = dayWidth.toPx(); val row = periodHeight.toPx()
             drawRect(colors.surfaceContainerLow, size = Size(x0, size.height))
             if (highlightedDay >= 0 && highlightedDay < dayCount) drawRect(colors.primaryContainer.copy(alpha = .28f),
                 Offset(x0 + cell * highlightedDay.toInt(), 0f), Size(cell, size.height))
+            if (!gridLines) return@drawBehind
             val rule = 1.dp.toPx()
             for (i in 0..dayCount) {
                 val x = x0 + cell * i

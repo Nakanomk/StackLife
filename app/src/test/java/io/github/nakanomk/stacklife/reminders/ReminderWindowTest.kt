@@ -1,38 +1,40 @@
 package io.github.nakanomk.stacklife.reminders
 
-import kotlinx.coroutines.runBlocking
+import io.github.nakanomk.stacklife.planner.*
+import java.time.LocalDate
 import org.junit.Assert.*
 import org.junit.Test
 
 class ReminderWindowTest {
-    private val now = 1_800_000_000_000L
-    private fun item(key: String, offset: Long) = ReminderOccurrence(key, key, now + offset)
-
-    @Test fun includesTiesAndNewShortNoticeItemsButNeverStartedItemsOrDistantDates() = runBlocking {
-        val tooLate = item("already started", 0)
-        val soon = item("task", 1)
-        val course = item("course", REMINDER_LEAD_MILLIS)
-        val routine = course.copy(key = "wake-up")
-        val nextWeek = item("next week", 7 * 86_400_000L)
-        val groups = listOf(listOf(tooLate), listOf(soon), listOf(course, routine), listOf(nextWeek))
-        val cursors = mutableListOf<Long>()
-        val window = reminderWindow(now) { cursor ->
-            cursors += cursor
-            groups.firstOrNull { it.first().startMillis >= cursor }.orEmpty()
+    @Test fun leadWindowStartsAtTriggerPlusLeadWithoutWrappingEpoch() {
+        val start = 1_800_000_000_000L
+        for (minutes in listOf(0, 5, 90)) {
+            val lead = minutes * 60_000L
+            assertEquals(start - lead, ReminderWhen.BeforeStart(lead).triggerOrNull(start))
+            assertEquals(start, startAtOrAfter(start - lead, lead))
         }
-        assertEquals(listOf(listOf(soon), listOf(course, routine)), window.due)
-        assertEquals(nextWeek.startMillis - REMINDER_LEAD_MILLIS, window.nextAlarmMillis)
-        assertEquals(listOf(now + 1, soon.startMillis + 1, course.startMillis + 1), cursors)
+        assertNull(startAtOrAfter(Long.MAX_VALUE, 1))
+        assertNull(ReminderWhen.BeforeStart(1).triggerOrNull(Long.MIN_VALUE))
+        assertEquals(Long.MIN_VALUE, ReminderWhen.AtInstant(Long.MIN_VALUE).triggerOrNull(Long.MAX_VALUE))
     }
 
-    @Test fun movingTheFirstItemLaterReplacesItsDeadlineAndRemovingLastItemDisarms() = runBlocking {
-        var starts = listOf(item("A", 30 * 60_000), item("B", 50 * 60_000))
-        suspend fun next() = reminderWindow(now) { cursor -> starts.filter { it.startMillis >= cursor }
-            .minByOrNull { it.startMillis }?.let { listOf(it) }.orEmpty() }.nextAlarmMillis
-        assertEquals(now + 15 * 60_000, next())
-        starts = listOf(starts[0].copy(startMillis = now + 100 * 60_000), starts[1])
-        assertEquals(now + 35 * 60_000, next())
-        starts = emptyList()
-        assertNull(next())
+    @Test fun legacyDecoderPreservesDelimitersEmojiFullCourseAndOriginalDailyDate() {
+        val id = CourseOccurrenceId("term:1", "😀:hub", 12, 3, 2, 4, "A:B😀", "")
+        fun field(s: String) = "${s.length}:$s"
+        val legacy = "course:12:3:2:4:" + listOf(id.termId, id.source, id.title, id.room).joinToString("", transform = ::field)
+        assertEquals(OccurrenceKey.Course(id), legacyOccurrence(legacy))
+        assertEquals(OccurrenceKey.Schedule("a:b"), legacyOccurrence("task:a:b"))
+        assertEquals(OccurrenceKey.Schedule(RoutineKind.SLEEP.scheduleId, LocalDate.of(2026, 11, 4).toEpochDay()),
+            legacyOccurrence("routine:SLEEP:2026-11-04"))
+        assertThrows(IllegalArgumentException::class.java) { legacyOccurrence("$legacy:extra") }
+        assertThrows(IllegalArgumentException::class.java) { legacyOccurrence("course:1:2:3:4:999:bad") }
+    }
+
+    @Test fun tiedTriggersUseExactlyTheAgendaOrderingThenStableRuleId() {
+        fun item(key: String, start: Long, end: Long, rule: String) = ReminderOccurrence(
+            AgendaOccurrence(OccurrenceKey.Schedule(key), "Same title", "", start, end, false, 1), ReminderRule(rule, ReminderWhen.AtInstant(0)), 0)
+        val sorted = listOf(item("b", 7, 9, "b"), item("b", 7, 9, "a"), item("b", 7, 7, "c"),
+            item("a", 7, 9, "d"), item("z", 3, 8, "e")).sortedWith(reminderOrder)
+        assertEquals(listOf("e", "c", "d", "a", "b"), sorted.map { it.rule.id })
     }
 }

@@ -1,13 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="courses_add">Add class</string>
-    <string name="courses_after">After: %1$s</string>
     <string name="courses_assigned_term">Class term</string>
     <string name="courses_assistant_hint">If you set up the assistant, you can describe your classes and times, then review its proposed changes.</string>
     <string name="courses_back">Back</string>
     <string name="courses_back_to_review">Back to review</string>
-    <string name="courses_before">Before: %1$s</string>
-    <string name="courses_class_time_zone">%1$s–%2$s · %3$s</string>
     <string name="courses_browse_chrome">Browse HUB in Chrome</string>
     <string name="courses_cancel">Cancel</string>
     <string name="courses_cancel_import">Cancel import</string>
@@ -18,7 +15,6 @@
     <string name="courses_choose_new_source">Choose another source</string>
     <string name="courses_choose_source">Choose timetable source</string>
     <string name="courses_choose_weeks">Select class weeks</string>
-    <string name="courses_class_date">Week %1$d · %2$s · %3$s</string>
     <string name="courses_class_info">Class details</string>
     <string name="courses_class_name">Class name</string>
     <string name="courses_class_time">Class times</string>
@@ -33,7 +29,6 @@
     <string name="courses_conflicts">Time conflicts: %1$s</string>
     <string name="courses_correct">Correct</string>
     <string name="courses_correct_entry">Correct course entry</string>
-    <string name="courses_corrected_entry">Corrected: Week %1$s · %2$s · Period %3$s · %4$s</string>
     <string name="courses_database_diff">Changes and time conflicts</string>
     <string name="courses_date_pattern">EEE, MMM d</string>
     <string name="courses_different_locations">Same course name, different locations</string>
@@ -46,19 +41,14 @@
     <string name="courses_excluded">Entry excluded</string>
     <string name="courses_extract">Import</string>
     <string name="courses_extracting">Extracting</string>
-    <string name="courses_field_change">%1$s: %2$s → %3$s</string>
     <string name="courses_first_monday">First Monday</string>
     <string name="courses_first_period">First period</string>
-    <string name="courses_fixed_class">Fixed class</string>
-    <string name="courses_group_summary">%1$s · %2$s\nWeeks: %3$s · %4$s · Periods %5$d–%6$d · %7$s–%8$s</string>
     <string name="courses_hub_extract">Extract timetable from HUB</string>
     <string name="courses_hub_source">HUST HUB</string>
     <string name="courses_hub_help">HUST HUB: sign in on the school page, open the full timetable, select your term and tap Import. If sign-in is unavailable, choose an exported HUB week-array JSON file instead.</string>
     <string name="courses_hub_timetable">Timetable</string>
     <string name="courses_import">Import timetable</string>
-    <string name="courses_import_summary">Only the %4$s timetable for %1$s will be replaced. Other sources and scheduled tasks are kept. Classes: %2$d · Time groups: %3$d.</string>
     <string name="courses_initial_bell">Starting bell schedule</string>
-    <string name="courses_issue_counts">Corrected: %1$d · Excluded: %2$d</string>
     <string name="courses_last_period">Last period</string>
     <string name="courses_list">Class list</string>
     <string name="courses_list_separator">,\u0020</string>
@@ -73,10 +63,7 @@
     <string name="courses_no_location">No location provided</string>
     <string name="courses_no_name">No course name</string>
     <string name="courses_no_room">Room not provided</string>
-    <string name="courses_no_switch">\u0020· No change this term</string>
     <string name="courses_no_timetable">No timetable yet</string>
-    <string name="courses_none">None</string>
-    <string name="courses_not_provided">Not provided</string>
     <string name="courses_odd_weeks">Odd weeks</string>
     <string name="courses_ok">Done</string>
     <string name="courses_open_auth">Open verification app</string>
@@ -89,13 +76,11 @@
     <string name="courses_preview_again">Preview again</string>
     <string name="courses_preview_import">Preview import changes</string>
     <string name="courses_previous_week">Previous week</string>
-    <string name="courses_raw_entry">Original: Week %1$s · %2$s · JC “%3$s” · %4$s</string>
     <string name="courses_remove_class">Remove class</string>
     <string name="courses_remove_source">Remove this term’s %1$s timetable</string>
     <string name="courses_remove_term">Remove term timetable</string>
     <string name="courses_remove_term_hint">Only the %1$s timetable for this term will be removed. Other sources, terms and tasks will not change.</string>
     <string name="courses_review_changes">Review class changes</string>
-    <string name="courses_review_counts">%1$s · Valid classes after deduplication: %2$d · To review: %3$d</string>
     <string name="courses_review_entries">Confirm term and review entries</string>
     <string name="courses_review_source">Review source entries</string>
     <string name="courses_room">Room: %1$s</string>
@@ -107,11 +92,8 @@
     <string name="courses_saving_import">Saving confirmed timetable…</string>
     <string name="courses_select_all">Select all</string>
     <string name="courses_summer">Summer</string>
-    <string name="courses_switch_on">\u0020· Changes on %1$s</string>
     <string name="courses_term">Term</string>
-    <string name="courses_term_id">Term ID</string>
     <string name="courses_term_setup_hint">Enter your academic calendar. Class dates use the first Monday and number of weeks; class times use Beijing time.</string>
-    <string name="courses_term_summary">%1$s · From %2$s, %3$d weeks · %4$s schedule</string>
     <string name="courses_tile_conflict">, time conflicts: %1$s</string>
     <string name="courses_tile_description">%1$s, %2$s, %3$s, %4$s</string>
     <string name="courses_unchanged">The timetable is unchanged. Nothing will be added or removed.</string>

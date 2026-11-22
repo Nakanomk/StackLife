@@ -2,11 +2,11 @@ package io.github.nakanomk.stacklife.assistant
 
 import io.github.nakanomk.stacklife.i18n.AppLanguage
 import io.github.nakanomk.stacklife.planner.Appearance
-import io.github.nakanomk.stacklife.planner.AppearancePatch
+import io.github.nakanomk.stacklife.planner.appearanceDifferences
 import io.github.nakanomk.stacklife.planner.FrameSource
 import io.github.nakanomk.stacklife.planner.frameLabel
 import io.github.nakanomk.stacklife.planner.Destination
-import io.github.nakanomk.stacklife.planner.PlannerChange
+import io.github.nakanomk.stacklife.planner.appearanceLabel
 import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -22,17 +22,15 @@ class AssistantLocaleTest {
             assertEquals("流程图", graph.label)
             assertEquals("警告", NoticeLevel.WARNING.label)
             val before = Appearance()
-            fun preview() = buildList<PlannerChange> { AppearancePatch.changes(before, before.copy(compact = true), this) }.single()
-            val chinese = preview()
-            assertEquals("紧凑留白", chinese.field)
+            val change = appearanceDifferences(before, before.copy(compact = true)).single()
+            assertEquals("紧凑留白", change.label())
 
             AppLanguage.update(listOf(Locale.ENGLISH))
             assertEquals("Graphs", graph.label)
             assertEquals("Warning", NoticeLevel.WARNING.label)
-            val english = preview()
-            assertEquals("Compact spacing", english.field)
-            assertEquals(chinese.entityId, english.entityId)
-            assertEquals("On", english.after)
+            assertEquals("Compact spacing", change.label())
+            assertEquals("compact", change.key)
+            assertEquals("On", appearanceLabel(change.after))
             assertEquals("Queue saved before switching frames", frameLabel("切换栈帧前自动保存", FrameSource.SWAP))
             assertEquals("切换栈帧前自动保存", frameLabel("切换栈帧前自动保存", FrameSource.MANUAL))
             assertEquals(page, row.resumePage(AssistantPage.Queue))

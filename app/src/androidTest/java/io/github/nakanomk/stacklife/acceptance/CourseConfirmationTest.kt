@@ -15,6 +15,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.core.app.ActivityOptionsCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.room.withTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -92,6 +93,45 @@ class CourseConfirmationTest {
     }
 
     private suspend fun week(id: String) = store.api.observe(PlannerQuery.Week(id, 1)).first() as CourseWeek
+    private suspend fun terms() = (store.api.observe(PlannerQuery.Terms).first() as Terms).terms
+
+    @Test fun freshStateHolderReopensPrivateInputAndUnfinishedCorrectionFromOnlyAnId() {
+        val root = java.nio.file.Files.createTempDirectory(ui.activity.noBackupFilesDir.toPath(), "restore-import-").toFile()
+        try {
+            val source = """[{"ZC":1,"MONDAY":[42,{"KCMC":"本地课程","JC":"未识别"}]}]"""
+            val first = ui.runOnUiThread {
+                ImportReviewState(SavedStateHandle(), root).also { state ->
+                    state.receive(false) { source.byteInputStream().use(::readWeekFile) }
+                }
+            }
+            ui.waitUntil(10_000) { ui.runOnUiThread { first.page == ImportPage.CALENDAR } }
+            ui.runOnUiThread { first.selectedId = term.id; first.review(term.asForm()) }
+            ui.waitUntil(10_000) { ui.runOnUiThread { first.page == ImportPage.ENTRIES } }
+            val restored = ui.runOnUiThread {
+                val (malformed, correction) = first.draft!!.issues
+                first.decisions[malformed.position] = IssueDecision.Exclude
+                first.editing = correction.position
+                first.working = correction.fields!!.copy(period = "5-6", room = "未保存的教室")
+                first.page = ImportPage.FIX
+                val bundle = first.checkpoint()
+                assertEquals(setOf("id"), bundle.keySet())
+                java.util.UUID.fromString(bundle.getString("id"))
+                ImportReviewState(SavedStateHandle(mapOf("import-review" to bundle)), root)
+            }
+            ui.waitUntil(10_000) { ui.runOnUiThread { !restored.busy } }
+            ui.runOnUiThread {
+                assertEquals(ImportPage.FIX, restored.page)
+                assertEquals(first.rows, restored.rows)
+                assertEquals(term, restored.draft!!.term)
+                assertEquals(first.selectedId, restored.selectedId)
+                assertEquals(first.decisions.toMap(), restored.decisions.toMap())
+                assertEquals(first.editing, restored.editing)
+                assertEquals(first.working, restored.working)
+                restored.reset()
+                assertTrue(root.listFiles()!!.isEmpty())
+            }
+        } finally { root.deleteRecursively() }
+    }
 
     @Test fun invalidSourceWeekAndPracticeRequireExplicitWheelConfirmations() = runBlocking {
         val before = store.state().revision
@@ -102,7 +142,7 @@ class CourseConfirmationTest {
             await(hasTestTag("nav:courses")).performClick()
             await(hasTestTag("course-import")).performClick()
             await(hasTestTag("importCourseFile")).performClick()
-            await(hasTestTag("termId")).performScrollTo().performTextInput(term.id)
+            await(hasTestTag("importTerm:new")).assertIsSelected()
             ui.chooseNumber("termWeeks", term.weeks)
             ui.onNodeWithTag("reviewCourseRows").performScrollTo().performClick()
             await(hasTestTag("previewCourseImportTop")).assertIsNotEnabled()
@@ -111,7 +151,10 @@ class CourseConfirmationTest {
 
             val unset = ui.activity.getString(R.string.wheel_unset)
             val save = ui.onNodeWithText(ui.activity.getString(R.string.courses_save_correction))
-            await(hasTestTag("fixOriginal")).assertTextContains("99", substring = true).assertTextContains("实践", substring = true)
+            ui.onNodeWithTag("fixOriginal").assertDoesNotExist()
+            await(hasTestTag("fixOriginal-toggle")).performScrollTo().performClick()
+            ui.onNodeWithTag("fixOriginal").assertTextContains("实践", substring = true)
+            ui.onNodeWithTag("fixOriginal-toggle").performClick()
             ui.onNodeWithTag("fixWeek").assertTextContains(unset).performScrollTo().performClick()
             ui.adjustWheel("wheel-number", 2)
             ui.onNodeWithTag("wheel-cancel").performClick()
@@ -128,7 +171,11 @@ class CourseConfirmationTest {
             ui.adjustWheel("wheel-first", 5)
             ui.adjustWheel("wheel-last", 6)
             ui.onNodeWithTag("wheel-confirm").performClick()
-            ui.onNodeWithTag("fixOriginal").assertTextContains("实践", substring = true)
+            ui.activityRule.scenario.recreate()
+            attach(file)
+            await(hasTestTag("fixPeriod"))
+            ui.onNodeWithTag("fixOriginal").assertDoesNotExist()
+            save.assertIsEnabled()
             save.performScrollTo().performClick()
 
             await(hasTestTag("courseIssues")).performScrollToNode(hasTestTag("previewCourseImportTop"))
@@ -136,17 +183,19 @@ class CourseConfirmationTest {
             await(hasTestTag("confirmCourseImportTop"))
             assertEquals(before, store.state().revision)
             ui.onNodeWithTag("confirmCourseImportTop").performClick()
-            await(hasTestTag("course-week") and hasText(term.id))
-            assertTrue(week(term.id).classes.isEmpty())
-            val second = store.api.observe(PlannerQuery.Week(term.id, 2)).first() as CourseWeek
-            assertEquals(listOf(term.meeting(2, 1, "实验", "A", 5, 6)), second.classes.map { it.meeting })
+            await(hasTestTag("course-week") and hasText(term.dateRangeLabel()))
+            val created = terms().single()
+            assertEquals(term.copy(id = created.id), created)
+            assertTrue(week(created.id).classes.isEmpty())
+            val second = store.api.observe(PlannerQuery.Week(created.id, 2)).first() as CourseWeek
+            assertEquals(listOf(created.meeting(2, 1, "实验", "A", 5, 6)), second.classes.map { it.meeting })
             assertEquals(before + 1, store.state().revision)
         } finally { file.delete() }
     }
 
     @Test fun recreatingDuringConfirmedImportOpensTheReviewedTermExactlyOnce() = runBlocking {
         // Without the receipt's target, CourseHome would default to this other term.
-        val other = term.copy(id = "A-other")
+        val other = term.copy(id = "A-other", firstMonday = term.firstMonday.minusWeeks(12))
         seed(other, other.meeting(1, 2, "另一门", "B", 1, 1))
         val before = store.state().revision
         val file = File.createTempFile("course-confirmation", ".json", InstrumentationRegistry.getInstrumentation().targetContext.cacheDir)
@@ -154,11 +203,11 @@ class CourseConfirmationTest {
             file.writeText("""[{"ZC":1,"KS":"2026-09-07","MONDAY":[{"KCMC":"回执课","JSMC":"A","JC":"5-6"}]}]""")
             attach(file)
             await(hasTestTag("nav:courses")).performClick()
-            await(hasTestTag("course-week")).assertTextContains(other.id)
+            await(hasTestTag("course-week")).assertTextContains(other.dateRangeLabel())
             ui.onNodeWithContentDescription("课表选项").performClick()
             ui.onNodeWithTag("course-import").performClick()
             await(hasTestTag("importCourseFile")).performClick()
-            await(hasTestTag("termId")).performScrollTo().performTextInput(term.id)
+            await(hasTestTag("importTerm:new")).performScrollTo().performClick()
             ui.chooseNumber("termWeeks", term.weeks)
             ui.onNodeWithTag("reviewCourseRows").performScrollTo().performClick()
             await(hasTestTag("courseIssues")).performScrollToNode(hasTestTag("previewCourseImport"))
@@ -168,19 +217,66 @@ class CourseConfirmationTest {
             withWriterHeld {
                 ui.onNode(confirm).performClick()
                 ui.onNodeWithTag("cancelCourseImport").assertIsNotEnabled()
-                ui.onNodeWithTag("courseImportDiff").performScrollToNode(hasTestTag("confirmCourseImportTop"))
-                ui.onNodeWithTag("confirmCourseImportTop").assertIsNotEnabled()
+                ui.onNodeWithTag("confirmCourseImportTop").assertIsDisplayed().assertIsNotEnabled()
                 ui.activityRule.scenario.recreate()
                 attach(file)
                 await(hasTestTag("cancelCourseImport")).assertIsNotEnabled()
                 ui.onNodeWithTag("courseImportDiff").assertDoesNotExist()
                 ui.onNodeWithTag("importCourseFile").assertDoesNotExist()
             }
-            await(hasTestTag("course-week") and hasText(term.id)).assertIsDisplayed()
+            await(hasTestTag("course-week") and hasText(term.dateRangeLabel())).assertIsDisplayed()
             ui.onNodeWithTag("course-week").assertTextContains("第 1 周")
-            assertEquals(listOf(meeting), week(term.id).classes.map { it.meeting })
+            val created = terms().single { it.firstMonday == term.firstMonday }
+            assertEquals(listOf(meeting), week(created.id).classes.map { it.meeting })
             assertEquals(other, week(other.id).term)
             assertEquals(before + 1, store.state().revision)
+        } finally { file.delete() }
+    }
+
+    @Test fun repeatedThreeWeekFileUsesTheChosenTimetableWithoutAddingMeetings() = runBlocking {
+        val selected = term.copy(weeks = 3)
+        val other = selected.copy(id = "other", firstMonday = selected.firstMonday.minusWeeks(4))
+        seed(selected, selected.meeting(1, 4, "被替换", "", 3, 4))
+        val untouched = other.meeting(1, 4, "保留", "B", 7, 8)
+        seed(other, untouched)
+        val file = File.createTempFile("three-weeks", ".json", ui.activity.cacheDir)
+        try {
+            file.writeText((1..3).joinToString(",", "[", "]") { w ->
+                """{"ZC":$w,"MONDAY":[{"KCMC":"每周课程","JSMC":"A","JC":"1-2"}],"FRIDAY":[{"KCMC":"每周课程","JSMC":"B","JC":"3-4"}]}"""
+            })
+            attach(file)
+            await(hasTestTag("nav:courses")).performClick()
+            repeat(2) { pass ->
+                val before = store.state().revision
+                await(hasTestTag("course-options")).performClick()
+                await(hasTestTag("course-import")).performClick()
+                await(hasTestTag("importCourseFile")).performClick()
+                await(hasTestTag("importTerm:${selected.id}")).performScrollTo().performClick()
+                ui.onNodeWithTag("termWeeks").assertDoesNotExist()
+                if (pass == 0) {
+                    ui.activityRule.scenario.recreate()
+                    attach(file)
+                    await(hasTestTag("importTerm:${selected.id}")).assertIsSelected()
+                }
+                ui.onNodeWithTag("reviewCourseRows").performScrollTo().performClick()
+                await(hasTestTag("previewCourseImportTop")).performClick()
+                await(hasTestTag("confirmCourseImportTop"))
+                if (pass == 1) await(hasText(ui.activity.getString(R.string.courses_unchanged)))
+                ui.activityRule.scenario.recreate()
+                attach(file)
+                val list = await(hasTestTag("courseImportDiff"))
+                list.performScrollToNode(hasTestTag("confirmCourseImport"))
+                assertEquals(before, store.state().revision)
+                await(hasTestTag("confirmCourseImportTop")).assertIsDisplayed().performClick()
+                await(hasTestTag("course-week") and hasText(selected.dateRangeLabel()))
+                assertEquals(setOf(selected, other), terms().toSet())
+                assertEquals(listOf(untouched), week(other.id).classes.map { it.meeting })
+                for (w in 1..3) {
+                    val classes = (store.api.observe(PlannerQuery.Week(selected.id, w)).first() as CourseWeek).classes
+                    assertEquals(listOf(selected.meeting(w, 1, "每周课程", "A", 1, 2), selected.meeting(w, 5, "每周课程", "B", 3, 4)),
+                        classes.map { it.meeting })
+                }
+            }
         } finally { file.delete() }
     }
 

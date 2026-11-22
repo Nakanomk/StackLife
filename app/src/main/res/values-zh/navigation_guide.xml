@@ -1,0 +1,14 @@
+<resources>
+    <string name="feature_entries">功能入口</string>
+    <string name="feature_hidden">未在底栏显示</string>
+    <string name="guide_reopen">重新打开使用引导</string>
+    <string name="guide_features">选择使用的功能</string>
+    <string name="guide_features_hint">请至少保留一项。隐藏的功能仍可从设置打开。</string>
+    <string name="guide_routines">设置日常作息</string>
+    <string name="guide_routines_hint">此步可跳过。选择一项即可打开已有的时间编辑器。</string>
+    <string name="guide_first">添加第一个事件</string>
+    <string name="guide_first_hint">可新建任务或核对导入的课表。只有你确认保存，才会写入数据。</string>
+    <string name="guide_later">稍后</string>
+    <string name="guide_next">下一步</string>
+    <string name="guide_countdown_hint">倒数日按日历天数计算，不创建待办或提醒。</string>
+</resources>

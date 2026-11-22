@@ -26,7 +26,8 @@ class AppearanceTest {
     private suspend fun preferences() = store.api.observe(PlannerQuery.Settings).first() as PolicyView
     private fun show() = ui.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
     private fun visible(matcher: SemanticsMatcher): SemanticsNodeInteraction {
-        ui.waitUntil(timeoutMillis = 12_000) { ui.onAllNodes(matcher).fetchSemanticsNodes().size == 1 }
+        try { ui.waitUntil(12_000) { ui.onAllNodes(matcher).fetchSemanticsNodes().size == 1 } }
+        catch (failure: ComposeTimeoutException) { throw AssertionError("$matcher\n${ui.onRoot().printToString()}", failure) }
         return ui.onNode(matcher)
     }
     private fun editor(label: String) { visible(hasContentDescription("设置") and hasClickAction()).performClick(); visible(hasText(label) and hasClickAction()).performClick() }
@@ -45,7 +46,7 @@ class AppearanceTest {
         assertTrue(runBlocking { preferences().appearance.glass })
         ui.onNodeWithText("取消").performClick(); visible(hasText("材质与动态") and hasClickAction()).performClick()
         field("启用液态玻璃").assertIsOn(); field("减少透明度").assertIsOff().performClick()
-        ui.onNodeWithText("保存外观").performClick(); visible(hasText("模型服务配置"))
+        ui.onNodeWithText("保存外观").performClick(); visible(hasText("材质与动态") and hasClickAction())
         val saved = runBlocking { preferences() }
         assertTrue(saved.appearance.glass && saved.appearance.reduceTransparency); assertEquals(RestorePolicy.SWAP, saved.policy)
         ui.onNodeWithContentDescription("返回").performClick()
@@ -61,7 +62,7 @@ class AppearanceTest {
         ui.onNodeWithText("23 分钟").assertDoesNotExist()
         assertTrue(ui.onNodeWithTag("nav:courses").fetchSemanticsNode().boundsInRoot.left < ui.onNodeWithTag("nav:today").fetchSemanticsNode().boundsInRoot.left)
         task.performClick(); visible(hasText("任务详情")).assertIsDisplayed(); ui.onNodeWithContentDescription("返回").performClick(); visible(hasText("持久队列"))
-        editor("色彩"); field("恢复默认设置").performClick(); ui.onNodeWithText("保存外观").performClick(); visible(hasText("模型服务配置"))
+        editor("色彩"); field("恢复默认设置").performClick(); ui.onNodeWithText("保存外观").performClick(); visible(hasText("色彩") and hasClickAction())
         assertEquals(layout.copy(theme = ThemeMode.SYSTEM, palette = PaletteMode.DYNAMIC, seed = Appearance().seed), runBlocking { preferences().appearance })
     }
 
@@ -78,20 +79,60 @@ class AppearanceTest {
             }
         }
         val toggle = visible(hasTestTag("day-tray-toggle")).assert(hasStateDescription("已展开"))
+        fun assertSafeTargets() {
+            val header = visible(hasContentDescription("设置") and hasClickAction()).fetchSemanticsNode().boundsInRoot
+            val axis = visible(hasTestTag("day-drop-area")).fetchSemanticsNode().boundsInRoot
+            for (tag in listOf("day-tray-toggle", "add-task")) {
+                val button = visible(hasTestTag(tag)).assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+                val target = button.fetchSemanticsNode().boundsInRoot
+                assertFalse("$tag overlaps Settings: $target, $header", target.overlaps(header))
+                assertTrue("$tag escapes the touchable day viewport: $target, $axis",
+                    target.top >= axis.top - 1f && target.bottom <= axis.bottom + 1f)
+            }
+        }
+        assertSafeTargets()
         ui.assertFloatingAxisMeetsDock()
         toggle.assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).performTouchInput { click() }
-        toggle.assert(hasStateDescription("已收起"))
+        visible(hasTestTag("day-tray-toggle") and hasStateDescription("已收起")).assertIsDisplayed()
+        assertSafeTargets()
         ui.assertFloatingAxisMeetsDock()
-        toggle.performTouchInput { click() }
+        ui.onNodeWithTag("day-tray-toggle").performTouchInput { click() }
         val tray = visible(hasTestTag("tray:$id"))
         val fab = ui.onNodeWithTag("add-task").fetchSemanticsNode().boundsInRoot
         assertFalse("新增任务遮住了待排任务的时间操作", fab.overlaps(tray.fetchSemanticsNode().boundsInRoot))
         val panel = ui.onNodeWithTag("day-tray-container").fetchSemanticsNode().boundsInRoot
         assertFalse(panel.overlaps(fab))
-        assertFalse(panel.overlaps(ui.onNodeWithTag("assistant-input").fetchSemanticsNode().boundsInRoot))
+        assertFalse(panel.overlaps(ui.onNodeWithTag("assistant-composer").fetchSemanticsNode().boundsInRoot))
         assertFalse(panel.overlaps(ui.onNodeWithTag("navigation-capsule").fetchSemanticsNode().boundsInRoot))
-        tray.performTouchInput { click() }
+        val exposed = tray.fetchSemanticsNode().boundsInRoot.intersect(panel)
+        assertFalse("The queue toggle occludes its first task", exposed.overlaps(toggle.fetchSemanticsNode().boundsInRoot))
+        val minimum = with(tray.fetchSemanticsNode().layoutInfo.density) { 48.dp.toPx() }
+        assertTrue("Visible scheduling target: $exposed, tray $panel", exposed.width + 1 >= minimum && exposed.height + 1 >= minimum)
+        ui.onRoot().performTouchInput { click(exposed.center) }
         visible(hasTestTag("slot:time")).assertExists()
+    }
+
+    @Test fun reorderAndHideKeepTheDestinationAndRootDraftAndHiddenFeatureReturnsToSettings() = runBlocking {
+        val initial = Appearance(start = Destination.WORKSPACE)
+        store.apply(PlannerCommand.TaskAdd(TaskInput("独立入口的原任务")), PlannerCommand.EditAppearance(AppearancePatch.Replace(initial)))
+        show()
+        visible(hasText("独立入口的原任务")).assertIsDisplayed()
+        visible(hasTestTag("assistant-input")).performTextInput("未发送的跨页草稿")
+        val reordered = initial.copy(order = listOf(Destination.GRAPHS,Destination.WORKSPACE,Destination.COUNTDOWN,Destination.TODAY,Destination.COURSES))
+        store.apply(PlannerCommand.EditAppearance(AppearancePatch.Replace(reordered)))
+        visible(hasTestTag("nav:workspace") and isSelected()).assertIsDisplayed()
+        val hidden = reordered.withVisible(setOf(Destination.COUNTDOWN))
+        store.apply(PlannerCommand.EditAppearance(AppearancePatch.Replace(hidden)))
+        visible(hasTestTag("nav:countdown") and isSelected()).assertIsDisplayed(); visible(hasTestTag("countdown-add"))
+        ui.onNodeWithTag("nav:workspace").assertDoesNotExist()
+        visible(hasTestTag("assistant-input")).assertTextContains("未发送的跨页草稿")
+        visible(hasContentDescription("设置") and hasClickAction()).performClick()
+        val jump = hasTestTag("open-feature:workspace")
+        ui.onNode(hasScrollToIndexAction()).performScrollToNode(jump); visible(jump).performClick()
+        visible(hasText("独立入口的原任务")).assertIsDisplayed(); ui.onNodeWithTag("navigation-capsule").assertDoesNotExist()
+        visible(hasTestTag("assistant-input")).assertTextContains("未发送的跨页草稿")
+        visible(hasContentDescription("返回") and hasClickAction()).performClick()
+        visible(jump).assertIsDisplayed(); assertEquals(hidden, preferences().appearance)
     }
 
     @Test fun groupedResetKeepsOtherGroupsAndConcurrentEditCannotOverwriteThem() = runBlocking {
@@ -99,7 +140,10 @@ class AppearanceTest {
         store.apply(PlannerCommand.SetRestorePolicy(RestorePolicy.APPEND), PlannerCommand.EditAppearance(AppearancePatch.Replace(a)))
         val update = PlannerCommand.EditAppearance(AppearanceFields(AppearanceGroup.COLOR, null))
         val proposed = store.proposal(update)
-        assertEquals(setOf("色彩来源", "种子色"), proposed.changes.map { it.field }.toSet()); assertEquals(a, preferences().appearance)
+        val change = proposed.changes.single()
+        assertEquals(AppearanceSnapshot(a), change.before)
+        assertEquals(AppearanceSnapshot(a.copy(palette = Appearance().palette, seed = Appearance().seed)), change.after)
+        assertEquals(a, preferences().appearance)
         assertTrue(store.api.commit(proposed.proposalId) is CommitResult.Applied)
         assertTrue(store.api.preview(listOf(PlannerCommand.EditAppearance(AppearancePatch.Replace(a.copy(haptics = false)), expected = a))) is PreviewResult.Rejected)
         store.reopen()

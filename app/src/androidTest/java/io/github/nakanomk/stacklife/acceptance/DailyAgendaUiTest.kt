@@ -33,7 +33,7 @@ class DailyAgendaUiTest {
     private fun day() = runBlocking { store.api.observe(query).first() as DayPlan }
     @Test fun checkboxDoesNotLaunchEditorAndRoutineChangesAreVisibleAcrossDates() {
         val start = query.date.atTime(10,0).atZone(query.zone).toOffsetDateTime()
-        runBlocking { store.apply(TaskAdd(TaskInput("校对", ref = "t")), SlotSet("@t", start, 30)) }
+        runBlocking { store.apply(TaskAdd(TaskInput("校对", ref = "t")), once("@t", start, 30)) }
         show()
         val checkbox = await(hasContentDescription("将校对标记为已完成")).performScrollTo()
         val viewport = ui.onNodeWithTag("day-drop-area").fetchSemanticsNode().boundsInRoot
@@ -41,22 +41,30 @@ class DailyAgendaUiTest {
         val shift = checkbox.fetchSemanticsNode().boundsInRoot.center.y - (viewport.top + minOf(tray.top, viewport.bottom)) / 2f
         ui.onNodeWithTag("day-axis").performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, shift) }
         checkbox.assertIsOff().performTouchInput { click() }
-        await(hasContentDescription("将校对标记为未完成")).assertIsOn(); assertEquals(ScheduledState.DONE, day().blocks.single().state)
+        await(hasContentDescription("将校对标记为未完成")).assertIsOn(); assertEquals(Owner.DONE, day().occurrences.single().owner)
         ui.onNodeWithTag("day-view").performClick(); ui.onNodeWithTag("day-view-events").performClick()
         await(hasContentDescription("将校对标记为未完成")).performScrollTo().performClick()
-        await(hasContentDescription("将校对标记为已完成")).assertIsOff(); assertEquals(ScheduledState.QUEUE, day().blocks.single().state)
+        await(hasContentDescription("将校对标记为已完成")).assertIsOff(); assertEquals(Owner.QUEUE, day().occurrences.single().owner)
         ui.onNode(hasContentDescription("设置") and hasClickAction()).performClick()
-        await(hasTestTag("routine-wake")).assertIsDisplayed(); ui.chooseClock("routine-wake", 6, 25); ui.chooseClock("routine-sleep", 23, 0)
+        fun setRole(tag: String, hour: Int, minute: Int) {
+            await(hasTestTag(tag)).performScrollTo().performClick()
+            await(hasTestTag("slot:time")); ui.chooseClock("slot:time", hour, minute)
+            ui.onNodeWithTag("slot:length").assertTextContains("单点事件")
+            await(hasText("保存时段") and hasClickAction() and isEnabled()).performScrollTo().performClick()
+            await(hasTestTag(tag))
+        }
+        setRole("routine-wake", 6, 25); setRole("routine-sleep", 23, 0)
         val back = ui.activity.onBackPressedDispatcher
         ui.runOnIdle { back.onBackPressed() }
-        val wake = hasContentDescription("将起床标记为已完成")
+        val wake = hasContentDescription(ui.activity.getString(io.github.nakanomk.stacklife.R.string.slot_complete_this, "起床"))
         await(wake).performScrollTo().performClick(); await(hasContentDescription("将起床标记为未完成")).assertIsOn()
-        val routine = day().routines.single { it.kind == RoutineKind.WAKE }
+        val routine = day().occurrences.single { it.role == RoutineKind.WAKE }
         assertTrue(routine.completed); assertEquals(query.date.atTime(6,25).atZone(query.zone).toInstant().toEpochMilli(), routine.startMillis)
         ui.onNodeWithContentDescription("后一天").performClick(); await(wake).assertIsOff()
         ui.onNode(hasContentDescription("设置") and hasClickAction()).performClick(); await(hasTestTag("routine-wake")).performClick()
-        ui.onNodeWithTag("wheel-clear").performClick(); ui.runOnIdle { back.onBackPressed() }
-        ui.waitUntil(8_000) { day().routines.map { it.kind } == listOf(RoutineKind.SLEEP) }
+        await(hasText("停用整个系列") and hasClickAction()).performScrollTo().performClick()
+        await(hasTestTag("routine-wake")); ui.runOnIdle { back.onBackPressed() }
+        ui.waitUntil(8_000) { day().occurrences.mapNotNull { it.role } == listOf(RoutineKind.SLEEP) }
     }
     @Test fun deletingFromDetailsThenClearingHistoryLeavesTasksAndLiveFrameUntouched() {
         runBlocking {

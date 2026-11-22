@@ -13,6 +13,11 @@ single foreground row as in Miuix GlassNavigationBar so glyphs are not refracted
 https://github.com/compose-miuix-ui/miuix/tree/d27cbb0b375912cdf42670553fdb564d8ff7fc23/example/shared/src/commonMain/kotlin/component/liquid
 Elastic press motion: Copyright 2025 Kyant, AndroidLiquidGlass (Apache-2.0).
 
+Workspace and graph entry layouts use the content hierarchy and padding of Miuix
+Card; StackLife retains native Material surfaces, fonts and navigation.
+https://github.com/compose-miuix-ui/miuix/blob/d27cbb0b375912cdf42670553fdb564d8ff7fc23/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/basic/Card.kt
+Copyright 2025, compose-miuix-ui contributors
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/

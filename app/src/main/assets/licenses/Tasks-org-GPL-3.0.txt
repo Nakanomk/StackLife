@@ -1,0 +1,9 @@
+Tasks.org · Tasks.org contributors · GNU General Public License, version 3.
+Pinned source: https://github.com/tasks/tasks/tree/9c92bb8140aec777054f4244259843a718eee991
+License: https://github.com/tasks/tasks/blob/9c92bb8140aec777054f4244259843a718eee991/LICENSE
+
+Reference files: data/src/commonMain/kotlin/org/tasks/data/entity/Alarm.kt; kmp/src/commonMain/kotlin/com/todoroo/astrid/alarms/AlarmCalculator.kt; kmp/src/commonMain/kotlin/org/tasks/compose/pickers/AddReminder.kt.
+
+StackLife 0.10.12: planner/AgendaModels.kt (ReminderRule, ReminderWhen) and reminders/ReminderRulesEditor.kt (ReminderRuleFields, RuleDialog) adapt the choice of multiple relative and absolute reminders and individual editing. storage/AgendaReminders.kt selects the first actual trigger across rules. Occurrence identity, inheritance, permission handling, Android alarm coordination, delivery receipts, and PlannerApi preview/commit are implemented for StackLife. No Tasks.org icons, sounds, sync service or database are bundled.
+
+The complete GNU GPL version 3 text is included as StackLife-GPL-3.0-or-later.txt in this directory.

@@ -32,11 +32,13 @@ class FixtureActivity : ComponentActivity() {
                     else check(queue.size == 30 && queue.first().title == "基准任务 01") { "请清理专用 .bench 包后再运行。" }
                     add(PlannerCommand.CourseImport(staged))
                     add(PlannerCommand.EditAppearance(AppearancePatch.Replace(Appearance(start = Destination.WORKSPACE, glass = glass))))
+                    add(PlannerCommand.CompleteOnboarding())
                 }
                 val preview = planner.preview(commands)
                 if (preview is PreviewResult.Ready) check(planner.commit(preview.proposalId) is CommitResult.Applied)
                 val persisted = planner.observe(PlannerQuery.Settings).first() as PolicyView
                 val stored = planner.observe(PlannerQuery.Week(term.id, 1)).first() as CourseWeek
+                check(persisted.onboardingVersion == 1)
                 check(stored.classes.map { it.meeting } == courses && persisted.appearance.start == Destination.WORKSPACE && persisted.appearance.glass == glass)
                 check((planner.observe(PlannerQuery.Queue).first() as QueueView).tasks.size == 30)
                 status.text = "fixture:30:5:$glass"

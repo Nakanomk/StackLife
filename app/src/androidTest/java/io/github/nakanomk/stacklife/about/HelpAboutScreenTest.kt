@@ -23,7 +23,7 @@ class HelpAboutScreenTest {
         val last = context.assets.open("licenses/$file").bufferedReader().use { it.readLines().joinToString("\n") }
             .trimEnd().substringAfterLast("\n\n")
         assertTrue(last.isNotBlank())
-        ui.setContent { StackLifeTheme(Appearance()) { HelpAboutScreen {} } }
+        ui.setContent { StackLifeTheme(Appearance()) { HelpAboutScreen(back = { error("Unexpected exit") }, onGuide = { error("Unexpected guide") }) } }
         ui.waitUntil(8_000) { ui.onAllNodesWithTag("about-version").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithTag("about-version").assertTextEquals(context.getString(R.string.about_version, version.name, version.code))
         ui.onNodeWithTag("about-licenses").performScrollTo().performClick()
@@ -38,7 +38,7 @@ class HelpAboutScreenTest {
     }
 
     @Test fun projectLicenseReturnsToItsActualLauncherAndEachAboutChildReturnsHome() {
-        ui.setContent { StackLifeTheme(Appearance()) { HelpAboutScreen {} } }
+        ui.setContent { StackLifeTheme(Appearance()) { HelpAboutScreen(back = { error("Unexpected exit") }, onGuide = { error("Unexpected guide") }) } }
         fun await(tag: String) {
             ui.waitUntil(8_000) { ui.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
         }

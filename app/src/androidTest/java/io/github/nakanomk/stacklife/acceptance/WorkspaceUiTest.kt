@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife.acceptance
 
+import android.os.Bundle
+import android.os.Parcel
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.geometry.Offset
@@ -9,10 +11,17 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.room.withTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.StackLifeApp
+import io.github.nakanomk.stacklife.StackLifeTheme
+import io.github.nakanomk.stacklife.notes.NoteEditorKey
+import io.github.nakanomk.stacklife.notes.NoteEditorScreen
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.planner.*
 import kotlinx.coroutines.CompletableDeferred
@@ -55,6 +64,29 @@ class WorkspaceUiTest {
                 (result as Workspace).queue.map { it.title } == titles.toList()
             } as Workspace
         }
+    }
+
+    @Test fun referenceFrameOpensCompletedTaskAndDatedOccurrenceWithoutChangingTheSnapshot() = runBlocking {
+        val date = java.time.LocalDate.now().plusDays(2); val zone = java.time.ZoneId.systemDefault()
+        val p = store.proposal(PlannerCommand.TaskAdd(TaskInput("已完成原项", "源笔记", ref="done")),
+            PlannerCommand.TaskFinish("@done"), PlannerCommand.TaskAdd(TaskInput("每日原项", ref="d")),
+            PlannerCommand.SetSchedule("@d", SchedulePattern.Daily(listOf(DailySegment(date.toEpochDay(),600,zone.id,0)))),
+            PlannerCommand.GraphCreate("依赖", "g"), PlannerCommand.GraphPatch("@g",listOf(
+                GraphEdit.LinkExisting(GraphLink.Task("@done"),ref="a"),GraphEdit.LinkExisting(GraphLink.Occurrence("@d",date.toEpochDay()),ref="b"),GraphEdit.AddEdge("@a","@b"))),
+            PlannerCommand.GraphFrame("@g","@b","引用快照",ref="f"))
+        assertTrue(store.api.commit(p.proposalId) is CommitResult.Applied)
+        val frame=store.state().frames.single(); assertEquals(0, frame.remaining)
+        ui.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }, initialDetail=io.github.nakanomk.stacklife.transitions.DetailTarget("frame",frame.id)) }
+        await(hasTestTag("frame-source:0")).performScrollTo().performClick()
+        await(hasText("已完成原项")).assertIsDisplayed(); await(hasText("已完成")).assertIsDisplayed()
+        await(hasText("编辑任务") and hasClickAction()).performClick()
+        await(hasTestTag("title:0")).performTextReplacement("编辑后的原项")
+        await(hasText("保存修改") and hasClickAction()).performClick()
+        await(hasText("编辑后的原项")).assertIsDisplayed()
+        ui.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        ui.waitForIdle(); scrollTo(hasTestTag("frame-source:1")); await(hasTestTag("frame-source:1")).performClick()
+        await(hasTestTag("slot:scope")).assertTextContains("仅这次")
+        assertEquals(frame,store.state().frames.single()); assertEquals(1,store.state().queue.size)
     }
 
     @Test fun addTaskFloatsAboveCenteredNavigationOnTodayAndInTheQueue() {
@@ -168,8 +200,12 @@ class WorkspaceUiTest {
         scrollTo(edit)
         ui.onNode(edit).performClick()
         await(hasTestTag("title:0")).performTextReplacement("新标题")
-        ui.onNodeWithTag("notes:0").performTextReplacement("新备注")
-        ui.onNodeWithText("保存修改").performClick()
+        ui.onNodeWithTag("notes:0").performClick()
+        await(hasTestTag("note-source")).performTextReplacement("新备注")
+        ui.onNodeWithTag("note-save").performClick()
+        await(hasTestTag("title:0")).assertTextContains("新标题")
+        assertEquals("旧备注", runBlocking { store.state() }.frames.single().items.single().current!!.notes)
+        await(hasText("保存修改") and isEnabled()).performClick()
         await(hasText("帧内任务"))
         scrollTo(hasText("新备注"))
         ui.onNodeWithText("新备注").assertIsDisplayed()
@@ -177,14 +213,108 @@ class WorkspaceUiTest {
         assertEquals("旧标题", item.title)
         assertEquals("旧备注", item.notes)
         assertEquals(QueueTask(id, "新标题", "新备注", 35), item.current)
+        val direct = hasTestTag("task-note:$id")
+        scrollTo(direct)
+        ui.onNode(direct).performClick()
+        await(hasTestTag("note-source")).performTextReplacement("**帧内修改**")
+        ui.onNodeWithTag("note-save").performClick()
+        await(hasText("帧内任务"))
+        val edited = runBlocking { store.state() }.frames.single().items.single()
+        assertEquals(item.copy(current = item.current!!.copy(notes = "**帧内修改**")), edited)
         val restore = hasText("全部恢复") and hasClickAction()
         scrollTo(restore)
         ui.onNode(restore).performClick()
         val restored = awaitQueue("新标题")
-        assertEquals(item.current, restored.queue.single())
-        assertEquals(item.copy(current = null), restored.frames.single().items.single())
+        assertEquals(edited.current, restored.queue.single())
+        assertEquals(edited.copy(current = null), restored.frames.single().items.single())
         scrollTo(hasText("旧标题"))
         ui.onNode(edit).assertDoesNotExist()
+        ui.onNode(direct).assertDoesNotExist()
+    }
+
+    @Test fun missingPrivateDraftDisablesSaveInsteadOfPresentingAnEmptyReplacement() {
+        val before = runBlocking {
+            store.apply(PlannerCommand.TaskAdd(TaskInput("原任务", "**保持原样**")))
+            store.state()
+        }
+        val key = NoteEditorKey(java.util.UUID.randomUUID().toString(), before.queue.single().id, revision = before.revision)
+        ui.setContent {
+            StackLifeTheme(Appearance()) {
+                NoteEditorScreen(key, viewModel { WorkspaceViewModel(store.api) }) { error("Unexpected navigation") }
+            }
+        }
+        await(hasText("无法在此设备上读取或保存这篇笔记草稿。")).assertIsDisplayed()
+        ui.onNodeWithTag("note-source").assertDoesNotExist()
+        ui.onNodeWithTag("note-save").assertIsNotEnabled()
+        assertEquals(before, runBlocking { store.state() })
+    }
+
+    @Test fun creatingTaskKeepsAcceptedNoteWhileNestedChangesAreRestoredThenDiscarded() {
+        val scenario = ui.activityRule.scenario
+        fun attach() = scenario.onActivity { activity ->
+            activity.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
+        }
+        fun back() = scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        attach()
+        await(hasTestTag("add-task")).performClick()
+        await(hasTestTag("title:0")).performTextInput("本机笔记测试")
+        ui.onNodeWithTag("notes:0").performClick()
+        val accepted = "## 标题\n\n**保留内容** 📝\n\n" + "已接受的本机长笔记。".repeat(12_000)
+        await(hasTestTag("note-source")).performTextReplacement(accepted)
+        ui.onNodeWithTag("note-save").performClick()
+        await(hasTestTag("notes:0") and isEnabled()).performClick()
+        val working = "未接受的子页修改\n\n" + "单独保留在草稿文件。".repeat(12_000)
+        await(hasTestTag("note-source")).performTextReplacement(working)
+        scenario.onActivity { activity ->
+            val bundle = Bundle()
+            InstrumentationRegistry.getInstrumentation().callActivityOnSaveInstanceState(activity, bundle)
+            val parcel = Parcel.obtain()
+            try {
+                bundle.writeToParcel(parcel, 0)
+                assertTrue("Neither long source belongs in Activity state (${parcel.dataSize()} bytes)",
+                    parcel.dataSize() < minOf(accepted.length, working.length))
+            } finally { parcel.recycle() }
+        }
+        scenario.recreate()
+        attach()
+        await(hasTestTag("note-source")).assertTextContains("未接受的子页修改", substring = true)
+        back()
+        await(hasText("继续编辑")).performClick()
+        ui.onNodeWithTag("note-source").assertTextContains("未接受的子页修改", substring = true)
+        back()
+        await(hasTestTag("note-discard")).performClick()
+        await(hasTestTag("title:0")).assertTextContains("本机笔记测试")
+        assertTrue(runBlocking { store.state() }.queue.isEmpty())
+        await(hasText("添加到队列") and isEnabled()).performClick()
+        assertEquals(accepted, awaitQueue("本机笔记测试").queue.single().notes)
+
+        await(hasTestTag("add-task")).performClick()
+        await(hasTestTag("notes:0")).performClick()
+        await(hasTestTag("note-source")).performTextReplacement("不要创建")
+        ui.onNodeWithTag("note-save").performClick()
+        await(hasTestTag("title:0"))
+        back()
+        await(hasTestTag("add-task"))
+        assertEquals(listOf("本机笔记测试"), runBlocking { store.state().queue.map { it.title } })
+    }
+
+    @Test fun directNoteRejectsAnOutdatedRevisionWithoutLosingTheEditableText() {
+        val task = runBlocking {
+            store.apply(PlannerCommand.TaskAdd(TaskInput("打开时的任务", "原文")))
+            store.state().queue.single()
+        }
+        show()
+        await(hasTestTag("task:${task.id}")).performClick()
+        await(hasTestTag("task-note:${task.id}")).performClick()
+        await(hasTestTag("note-source")).performTextReplacement("我的修改")
+        runBlocking { store.apply(PlannerCommand.TaskEdit(task.id, notes = "同时保存的笔记")) }
+        ui.onNodeWithTag("note-save").performClick()
+        await(hasText("日程已变更", substring = true))
+        ui.onNodeWithTag("note-source").assertIsEnabled().assertTextContains("我的修改")
+        assertEquals(task.copy(notes = "同时保存的笔记"), runBlocking { store.state().queue.single() })
+        ui.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        await(hasTestTag("note-discard")).performClick()
+        await(hasTestTag("task-note:${task.id}"))
     }
 
     @Test fun selectedPushKeepsItsReasonTargetAcrossAnotherPushAndRecreation() {
@@ -277,6 +407,42 @@ class WorkspaceUiTest {
         await(hasTestTag("queue")).assertIsDisplayed()
         assertEquals(listOf("只创建一次"), store.state().queue.map { it.title })
         ui.onNodeWithTag("title:0").assertDoesNotExist()
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test fun narrowQueueCardWrapsMetadataAndKeepsItsMoveHandleIndependent() {
+        val title = "核对阶段安排与日期".repeat(5)
+        val note = "核对报名信息后再提交"
+        val id = runBlocking {
+            store.apply(PlannerCommand.TaskAdd(TaskInput(title, note, 45, ref = "first")),
+                exact("@first", java.time.OffsetDateTime.parse("2026-06-12T09:00:00+08:00"), 45),
+                PlannerCommand.TaskAdd(TaskInput("第二项")))
+            store.state().queue.first().id
+        }
+        ui.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(320.dp, 760.dp)) then DeviceConfigurationOverride.FontScale(2f)) {
+                StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
+            }
+        }
+        await(hasTestTag("nav:workspace")).performClick()
+        val card = hasTestTag("task:$id")
+        await(card).assertHeightIsAtLeast(48.dp)
+        fun field(text: String, substring: Boolean = false) =
+            ui.onNode(hasText(text, substring = substring) and hasAnyAncestor(card), useUnmergedTree = true)
+        field(title).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { get ->
+            val layouts = mutableListOf<TextLayoutResult>()
+            assertTrue(get(layouts))
+            assertEquals(2, layouts.single().lineCount)
+            assertTrue(layouts.single().isLineEllipsized(1))
+        }
+        val scheduled = field("已安排", substring = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val estimate = field("预计 45 分钟").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val summary = field(note).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertTrue(estimate.bottom <= scheduled.top && scheduled.bottom <= summary.top)
+        ui.onNodeWithContentDescription("移动${title}，长按拖动或点按选择位置")
+            .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).performTouchInput { click() }
+        await(hasText("移到队尾")).performClick()
+        assertEquals(id, awaitQueue("第二项", title).queue.last().id)
     }
 
     @Test fun draggingAndMenuMoveTheOriginalTasks() {
