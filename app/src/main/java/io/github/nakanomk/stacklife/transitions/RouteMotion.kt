@@ -83,7 +83,8 @@ internal class RouteOrigins : ContainerOrigins() {
                     val link = links[key]?.takeIf { it.site.owner == from }
                     val returning = visibility.transition.currentState == EnterExitState.Visible
                     val driver = pairVisibility(this, link, open, moving, returning)
-                    ContainerPage(this, link, visibility, LocalContainerScope.current, open, driver, returning, depth, moving,
+                    ContainerPage(this, link, driver?.page ?: visibility, LocalContainerScope.current,
+                        open, driver?.open ?: open, returning, front, moving,
                         Modifier.fillMaxSize().testTag("route:$key"), content)
                 } else content()
             }

@@ -1,5 +1,10 @@
 package io.github.nakanomk.stacklife.acceptance
 
+import android.content.ContextWrapper
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.activity.ComponentActivity
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.geometry.Offset
@@ -18,6 +23,10 @@ import androidx.navigationevent.NavigationEvent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.nakanomk.stacklife.StackLifeApp
 import io.github.nakanomk.stacklife.StackLifeTheme
+import io.github.nakanomk.stacklife.R
+import io.github.nakanomk.stacklife.appearance.BackgroundStore
+import io.github.nakanomk.stacklife.appearance.LocalBackgroundStore
+import io.github.nakanomk.stacklife.storage.RoomPlannerApi
 import io.github.nakanomk.stacklife.about.HelpAboutScreen
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.planner.*
@@ -26,6 +35,9 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
+import java.io.File
+import java.nio.file.Files
+import java.util.UUID
 import org.junit.runner.RunWith
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -351,7 +363,8 @@ class SceneMotionTest {
                         val p = Offset(x.toFloat(), y.toFloat())
                         val ink = when {
                             visible.contains(p) && finalHeading.contains(p) && delta(open.pixels[x, y], paper) > .40f ->
-                                open.pixels[x, y].copy(alpha = detailAlpha).compositeOver(paper).also { detailGlyphs++ }
+                                (if (source.contains(p)) open.pixels[x, y].copy(alpha = detailAlpha).compositeOver(rootPixels[x, y])
+                                    else open.pixels[x, y]).also { detailGlyphs++ }
                             !excluded.contains(p) && rootHeader.contains(p) && delta(rootPixels[x, y], paper) > .40f ->
                                 rootPixels[x, y].also { rootGlyphs++ }
                             else -> continue
@@ -512,6 +525,7 @@ class SceneMotionTest {
         }
         val launcher = ui.onNodeWithTag("about-help").performScrollTo()
         val location = launcher.fetchSemanticsNode().boundsInRoot
+        val sourcePixels = pixels()
         val tag = "pane:HELP"
         fun window() = ui.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().singleOrNull()?.boundsInRoot
         withClockAndBack { input ->
@@ -520,6 +534,7 @@ class SceneMotionTest {
             // container. Compare the actual clipped surface with its real row.
             val opening = tracePlacement { window()?.height }
             val full = checkNotNull(window())
+            val helpPixels = pixels()
             checkTweenTravel(opening, location.height, full.height)
             fun checkSeek(progress: Float): Rect {
                 val landing = ui.onNodeWithTag("about-help", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
@@ -534,11 +549,18 @@ class SceneMotionTest {
             start(input); checkSeek(0f)
             seek(input, .75f)
             val held = checkSeek(.75f)
+            val backPixels = pixels()
+            keepFrame("pane-help-source", sourcePixels)
+            keepFrame("pane-help-open", helpPixels)
+            keepFrame("pane-help-back-75", backPixels)
+            assertUncoveredPixels(sourcePixels, backPixels, held)
+            assertLivePatch(sourcePixels, backPixels, location)
             seek(input, .25f); checkSeek(.25f)
             seek(input, .75f); assertEquals(held, checkSeek(.75f))
             ui.runOnUiThread { input.backCancelled() }
             checkTweenTravel(tracePlacement { window()?.height }, held.height, full.height, remaining = .75f)
             assertEquals(full, window())
+            assertUncoveredPixels(helpPixels, pixels(), Rect.Zero)
             start(input); seek(input, .5f); complete(input)
             assertEquals(location, launcher.fetchSemanticsNode().boundsInRoot)
         }
@@ -600,6 +622,131 @@ class SceneMotionTest {
             field.assertDoesNotExist()
         }
         assertTrue(runBlocking { store.state().queue.isEmpty() })
+    }
+
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 33)
+    @Test fun darkWallpaperAndGlassKeepBothPagesPaintedThroughPushBackAndCancel() = wallpaperTrip(glass = true)
+
+    @Test fun darkWallpaperAndSolidControlsKeepBothPagesPaintedThroughPushBackAndCancel() = wallpaperTrip(glass = false)
+
+    private fun wallpaperTrip(glass: Boolean) {
+        val context = ui.activity.applicationContext
+        val folder = Files.createTempDirectory(context.cacheDir.toPath(), "scene-photo-").toFile()
+        val id = UUID.randomUUID().toString()
+        val photos = BackgroundStore(object : ContextWrapper(context) { override fun getNoBackupFilesDir() = folder }) { setOf(id) }
+        val api = RoomPlannerApi(store.db, imageExists = photos::exists)
+        try {
+            runBlocking { photos.recover() }
+            val photo = Bitmap.createBitmap(64, 128, Bitmap.Config.ARGB_8888)
+            try {
+                photo.eraseColor(android.graphics.Color.rgb(128, 12, 18))
+                Canvas(photo).drawRect(32f, 0f, 64f, 128f, Paint().apply { color = android.graphics.Color.rgb(12, 18, 144) })
+                File(File(folder, "background-images"), id).outputStream().use { check(photo.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+            } finally { photo.recycle() }
+            val appearance = Appearance(start = Destination.WORKSPACE, theme = ThemeMode.DARK, glass = glass,
+                pageBackgrounds = mapOf(Destination.WORKSPACE to WallpaperSpec(id, tint = 0f)))
+            runBlocking {
+                val change = api.preview(listOf(PlannerCommand.EditAppearance(AppearancePatch.Replace(appearance)),
+                    PlannerCommand.TaskAdd(TaskInput("Pixel witness / 交接")))) as PreviewResult.Ready
+                assertTrue(api.commit(change.proposalId) is CommitResult.Applied)
+            }
+            ui.setContent { CompositionLocalProvider(LocalBackgroundStore provides photos) {
+                StackLifeApp(viewModel { WorkspaceViewModel(api) })
+            } }
+            val route = "route:settings"
+            val gear = ui.onNode(hasContentDescription(context.getString(R.string.ui_settings)) and hasClickAction())
+            val taskId = runBlocking { store.state().queue.single().id }
+            val queueTitle = ui.onNodeWithTag("row-title/task:$taskId", useUnmergedTree = true)
+            ui.waitUntil(12_000) { ui.onAllNodesWithTag("queue").fetchSemanticsNodes().isNotEmpty() }
+            val material = context.getString(if (glass) R.string.ui_glass_capsule else R.string.ui_solid_capsule)
+            ui.onAllNodes(hasStateDescription(material)).onFirst().assertExists()
+            fun photoVisible(map: PixelMap): Boolean {
+                val left = map[map.width / 4, map.height * 3 / 5]
+                val right = map[map.width * 3 / 4, map.height * 3 / 5]
+                return left.red - left.blue > .18f && right.blue - right.red > .18f
+            }
+            ui.waitUntil(12_000) { photoVisible(pixels()) }
+            val parent = pixels()
+            val row = windowRect(queueTitle)
+            val dock = bounds("navigation-capsule")
+            val launcher = windowRect(gear)
+            gear.performClick()
+            ui.waitForIdle()
+            val settled = pixels()
+            val page = bounds(route)
+            val settingsLabel = ui.onNode(hasAnyAncestor(hasTestTag(route)) and hasText(context.getString(R.string.ui_settings)),
+                useUnmergedTree = true)
+            val label = windowRect(settingsLabel)
+            val wake = windowRect(ui.onNodeWithTag("routine-wake"))
+            assertFalse("Settings must not inherit the workspace-only photo", photoVisible(settled))
+            val capture = "dark-wallpaper-${if (glass) "glass" else "solid"}"
+            keepFrame("$capture-parent", parent)
+            keepFrame("$capture-settings", settled)
+            ui.onNode(hasAnyAncestor(hasTestTag(route)) and hasContentDescription(context.getString(R.string.ui_back)) and hasClickAction()).performClick()
+            ui.waitForIdle()
+
+            // Match pairs of real glyph/control edge pixels, including the neighbour's contrast.
+            // A black frame, a plain theme fill, and the wallpaper alone all score zero.
+            fun matches(reference: PixelMap, patch: Rect, shot: PixelMap, offset: Offset): Int {
+                var matched = 0
+                val dx = offset.x.roundToInt()
+                val dy = offset.y.roundToInt()
+                for (y in patch.top.toInt().coerceAtLeast(0) until patch.bottom.toInt().coerceAtMost(reference.height) step 2)
+                    for (x in patch.left.toInt().coerceAtLeast(0) until patch.right.toInt().coerceAtMost(reference.width - 2) step 2) {
+                        val xx = x + dx; val yy = y + dy
+                        if (xx !in 0 until shot.width - 2 || yy !in 0 until shot.height) continue
+                        val a = reference[x, y]; val b = reference[x + 2, y]
+                        if (delta(a, b) > .3f && delta(a, shot[xx, yy]) < .16f && delta(b, shot[xx + 2, yy]) < .16f) matched++
+                    }
+                return matched
+            }
+            withClockAndBack { input ->
+                fun checkFrame(stage: String) {
+                    val box = ui.onAllNodesWithTag(route).fetchSemanticsNodes().singleOrNull()?.boundsInRoot
+                    val shot = pixels()
+                    if (stage == "push 6" || stage == "back 0.5" || stage == "back 0.98" || stage == "cancel 4")
+                        keepFrame("$capture-${stage.replace(' ', '-')}", shot)
+                    val rootInk = matches(parent, row, shot, Offset.Zero) + matches(parent, dock, shot, Offset.Zero)
+                    val pageInk = if (box == null) 0 else matches(settled, label, shot, box.topLeft - page.topLeft)
+                    assertTrue("$stage: missing actual queue, dock and settings ink ($rootInk/$pageInk), box=$box",
+                        rootInk + pageInk >= 12)
+                    if (box != null && box.width < page.width - 2f && box.height > page.height * .88f) {
+                        assertTrue("$stage: missing settings label inside the nearly open reveal ($pageInk)", pageInk >= 12)
+                    }
+                    if (stage == "back 0.5") {
+                        val reveal = checkNotNull(box).deflate(4f)
+                        val offset = box.topLeft - page.topLeft
+                        val visibleWake = wake.intersect(reveal.translate(-offset))
+                        assertTrue("Need real settings row pixels inside the reveal and outside the launcher",
+                            !visibleWake.isEmpty && !visibleWake.translate(offset).overlaps(launcher))
+                        val evidence = matches(settled, visibleWake, settled, Offset.Zero)
+                        val visible = matches(settled, visibleWake, shot, offset)
+                        assertTrue("50% Back: missing settings row ink in the covered area ($visible/$evidence)",
+                            evidence >= 12 && visible >= evidence * .8f)
+                    }
+                    if (box != null && !box.inflate(3f).overlaps(row)) assertLivePatch(parent, shot, row)
+                    // Compare the photographic material separately, where neither destination nor
+                    // controls can cover it. A still-drawn toolbar must not excuse a lost wallpaper.
+                    for (x in listOf(shot.width / 4, shot.width * 3 / 4)) {
+                        val y = shot.height * 3 / 5
+                        if (box?.inflate(3f)?.contains(Offset(x.toFloat(), y.toFloat())) != true)
+                            assertTrue("$stage: missing uncovered workspace wallpaper at ($x,$y)", delta(parent[x, y], shot[x, y]) < .05f)
+                    }
+                }
+                click(gear)
+                repeat(22) { i -> ui.mainClock.advanceTimeByFrame(); checkFrame("push $i") }
+                ui.mainClock.advanceTimeBy(600)
+                assertLivePatch(settled, pixels(), label)
+                start(input)
+                for (p in listOf(.02f, .20f, .50f, .80f, .98f)) { seek(input, p); checkFrame("back $p") }
+                ui.runOnUiThread { input.backCancelled() }
+                repeat(22) { i -> ui.mainClock.advanceTimeByFrame(); checkFrame("cancel $i") }
+                ui.mainClock.advanceTimeBy(600)
+                assertLivePatch(settled, pixels(), label)
+                start(input); seek(input, .98f); complete(input)
+                assertLivePatch(parent, pixels(), row)
+            }
+        } finally { folder.deleteRecursively() }
     }
 
     @Test fun aSettingsRowExpandsWithoutRetractingSettingsIntoItsOwnGear() {
@@ -720,13 +867,18 @@ class SceneMotionTest {
             complete(input)
             val after = pixels()
             var blended = 0
+            var distinct = 0
             val trim = (28 * ui.density.density).roundToInt()
             for (y in trim until before.height - trim step 3) for (x in 3 until before.width - 3 step 3) {
                 val old = before[x, y]
                 val new = after[x, y]
-                if (delta(old, new) > .3f && delta(midway[x, y], old) > .04f && delta(midway[x, y], new) > .04f) blended++
+                if (delta(old, new) > .3f) {
+                    distinct++
+                    if (delta(midway[x, y], old.copy(alpha = .5f).compositeOver(new)) < .10f) blended++
+                }
             }
-            assertTrue("An absent origin must fade the detail in place, not hold an opaque page until disposal", blended > 30)
+            assertTrue("Missing actual detail and parent at 50% unanchored Back: $blended / $distinct reference pixels",
+                distinct > 30 && blended > distinct * .75f)
         }
         ui.onNodeWithTag("task:${b.id}").assertIsDisplayed()
         ui.onNodeWithTag("task:${a.id}").assertDoesNotExist()

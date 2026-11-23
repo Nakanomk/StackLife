@@ -1,3 +1,4 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="io.github.nakanomk.stacklife.bench.permission.SEED_FIXTURE" />
     <queries><package android:name="io.github.nakanomk.stacklife.bench" /></queries>
 </manifest>

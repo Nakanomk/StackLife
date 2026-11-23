@@ -103,13 +103,13 @@ internal fun rememberPlannerBackdrop(enabled: Boolean = true, acrossWindows: Boo
     }
 }
 
-internal fun Modifier.plannerBackdrop(source: PlannerBackdrop?): Modifier {
+internal fun Modifier.plannerBackdrop(source: PlannerBackdrop?, drawInPlace: Boolean = true): Modifier {
     if (source == null) return this
     return onGloballyPositioned { source.origin = it.localToScreen(Offset.Zero) }.drawWithContent {
         source.layer.record {
             this@drawWithContent.drawContent()
         }
-        drawLayer(source.layer)
+        if (drawInPlace) drawLayer(source.layer)
     }
 }
 

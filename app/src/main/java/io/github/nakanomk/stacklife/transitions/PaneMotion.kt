@@ -106,13 +106,17 @@ internal fun <T : Any> PaneMotion(
     val returning = depth(from) > depth(to)
     val deep = if (returning) from else to
     val moving = from != to
+    val open = remember(state, moving, returning) { derivedStateOf {
+        if (!moving) 1f else if (returning) 1f - state.fraction else state.fraction
+    } }
     // Sheet height is itself animated; a *window* resize, not that intended sizing, invalidates a pair.
     val window = LocalWindowInfo.current.containerSize
     SharedTransitionLayout(modifier.onGloballyPositioned { origins.host = it; origins.size = window }) {
     val shared = this
     hostTransition.AnimatedContent(contentKey = originKey, contentAlignment = Alignment.BottomStart, transitionSpec = {
-        (EnterTransition.None togetherWith ExitTransition.KeepUntilTransitionsFinished).using(
-            SizeTransform(clip = false) { _, _ -> tween(ContainerDuration, easing = LinearEasing) })
+        (EnterTransition.None togetherWith ExitTransition.KeepUntilTransitionsFinished).apply {
+            targetContentZIndex = depth(targetState).toFloat()
+        }.using(SizeTransform(clip = false) { _, _ -> tween(ContainerDuration, easing = LinearEasing) })
     }) { shown ->
         val child = originKey(shown) == originKey(deep)
         val active = shown == page && !moving
@@ -127,9 +131,9 @@ internal fun <T : Any> PaneMotion(
         val pair = if (link == null) null else hostTransition.createChildTransition("pane pair") {
             originKey(it) == owner || depth(it) > depth(shown)
         }.placedPair(link)
-        val open = pair?.open ?: containerOpen(child, LinearEasing)
+        val reveal = if (pair != null) open else containerOpen(child, LinearEasing)
         CompositionLocalProvider(LocalPane provides owner) {
-            ContainerPage(origins, link, this, shared, open, pair, returning, depth(shown), moving && child,
+            ContainerPage(origins, link, pair?.page ?: this, shared, reveal, reveal, returning, child, moving && child,
                 Modifier.testTag("pane:$owner").then(input)) { content(shown) }
         }
     }

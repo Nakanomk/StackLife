@@ -22,6 +22,10 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.*
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.clipPath
+import io.github.nakanomk.stacklife.appearance.LocalCapsuleBackdrop
+import io.github.nakanomk.stacklife.appearance.LocalPanelBack
+import io.github.nakanomk.stacklife.appearance.LocalWallpaperRecording
+import io.github.nakanomk.stacklife.appearance.wallpaperBackground
 import androidx.compose.ui.layout.*
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
@@ -67,11 +71,11 @@ internal class ContainerAnchor(val site: OriginSite, val shape: Shape, val densi
 /** Remembers identity and host metrics, never a rectangle to animate back to. */
 internal class ContainerLink(val site: OriginSite, val hostSize: IntSize, val density: Density, val radius: Float) {
     var destination by mutableStateOf<LayoutCoordinates?>(null)
+    var pageSize by mutableStateOf(IntSize.Zero)
+    var frameSize by mutableStateOf(IntSize.Zero)
     var sourcePlaced by mutableStateOf(false)
     var driver by mutableStateOf<PairVisibility?>(null)
     var open by mutableStateOf<State<Float>?>(null)
-    var returning by mutableStateOf(false)
-    var depth by mutableIntStateOf(0)
     val shape = object : Shape {
         override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
             Outline.Rounded(RoundRect(Rect(Offset.Zero, size), CornerRadius(radius * (1f - (open?.value ?: 0f)))))
@@ -167,6 +171,7 @@ internal open class ContainerOrigins {
     }
 
     fun sourceCoordinates(link: ContainerLink) = anchors[link.site]?.coordinates
+    fun sourceBounds(link: ContainerLink) = anchors[link.site]?.bounds
     fun live(link: ContainerLink): Boolean {
         val a = anchors[link.site] ?: return false
         return a.bounds != null && a.coordinates?.isAttached == true && a.density == link.density && size == link.hostSize
@@ -191,55 +196,114 @@ internal fun Modifier.containerSource(origins: ContainerOrigins, anchor: Contain
 
 @Composable
 internal fun ContainerPage(origins: ContainerOrigins, link: ContainerLink?, visibility: AnimatedVisibilityScope,
-    scope: SharedTransitionScope?, open: State<Float>, driver: PairVisibility?, returning: Boolean, depth: Int, moving: Boolean,
+    scope: SharedTransitionScope?, open: State<Float>, sample: State<Float>, returning: Boolean, front: Boolean, moving: Boolean,
     modifier: Modifier, content: @Composable () -> Unit) {
     val density = LocalDensity.current
-    val side = driver?.page ?: visibility
     val shared = if (link == null || scope == null) null else with(scope) {
         // Keep the resting destination registered while its parent is off-stack. Its
         // own measured bounds start Back; the source separately gates the live match.
-        gatedContent(link) { origins.size == link.hostSize && link.density == density }
+        gatedContent(link) { front && origins.size == link.hostSize && link.density == density }
     }
     if (link != null) {
-        SideEffect { link.open = driver?.open ?: open; link.returning = returning; link.depth = depth }
+        SideEffect { link.open = sample }
         DisposableEffect(link) { onDispose { link.destination = null; link.open = null } }
     }
-    val ink = { containerInk(driver?.open?.value ?: open.value, returning) }
+    val ink = { containerInk(sample.value, returning) }
+    val paired = { moving && link != null && link.drawingMatch(origins, shared) }
     val frame = if (shared == null || scope == null || link?.sourcePlaced != true) Modifier else with(scope) {
-        Modifier.sharedBounds(shared, side,
+        Modifier.sharedBounds(shared, visibility,
             enter = EnterTransition.None, exit = ExitTransition.None, boundsTransform = containerBounds,
             resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds,
-            clipInOverlayDuringTransition = OverlayClip(link.shape), zIndexInOverlay = depth.toFloat(),
-            renderInOverlayDuringTransition = moving).onGloballyPositioned { link.destination = it }
+            // Nav3 / AnimatedContent already own the z-order. Keep the painted page with
+            // its parent and its donor; sharedBounds still places it at the animated rect.
+            renderInOverlayDuringTransition = false).placedPage(link)
     }
-    val paper = androidx.compose.material3.MaterialTheme.colorScheme.surface
     androidx.compose.foundation.layout.Box(frame.then(modifier).graphicsLayer {
-        alpha = if (moving && shared?.isMatchFound != true) open.value else 1f
-        if (link != null) shape = link.shape
-        clip = moving && shared?.isMatchFound == true
-    }.drawWithCache { onDrawWithContent {
-        if (moving && shared?.isMatchFound == true && link != null) {
-            drawContainerPaper(origins, link, paper, ink())
+        alpha = when {
+            !moving -> 1f
+            paired() -> if (sample.value > 0f) 1f else 0f
+            link != null && origins.live(link) && !returning -> sample.value
+            else -> open.value
         }
-        drawContent()
-    } }, propagateMinConstraints = true) {
+        if (link != null) shape = link.shape
+        clip = paired()
+    }.containerPaper(origins, link, moving, paired, ink), propagateMinConstraints = true) {
         val finalSize = if (scope == null || shared == null) Modifier else with(scope) { Modifier.skipToLookaheadSize { shared.isMatchFound } }
-        androidx.compose.foundation.layout.Box(finalSize.graphicsLayer {
-            alpha = if (moving && shared?.isMatchFound == true) ink() else 1f
-        }, propagateMinConstraints = true) { content() }
+        androidx.compose.foundation.layout.Box(finalSize, propagateMinConstraints = true) { content() }
     }
 }
 
-/** An opaque page outside the source; within its real footprint, reveal the actual parent
- * material/ink. No screenshot donor or cached rectangle can outlive its originating row. */
-internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawContainerPaper(origins: ContainerOrigins,
-    link: ContainerLink, paper: Color, coverage: Float) {
-    val source = origins.sourceCoordinates(link)
-    val destination = link.destination
-    if (coverage >= 1f || destination?.isAttached != true || source?.isAttached != true) { drawRect(paper); return }
-    val slot = destination.localBoundingBoxOf(source, clipBounds = false)
-    clipRect(slot.left, slot.top, slot.right, slot.bottom, clipOp = ClipOp.Difference) { drawRect(paper) }
-    if (coverage > 0f) drawRect(paper.copy(alpha = coverage), slot.topLeft, slot.size)
+/** Immediately inside sharedBounds: its lookahead placeholder and the painted child's
+ * approach constraints can differ. onGloballyPositioned on the wrapper isn't a measurement
+ * of that child. Retain only the two currently placed sizes, never a landing position. */
+internal fun Modifier.placedPage(link: ContainerLink): Modifier = layout { measurable, constraints ->
+    val child = measurable.measure(constraints)
+    val measured = IntSize(child.width, child.height)
+    val lookahead = isLookingAhead
+    layout(child.width, child.height) {
+        if (lookahead) link.pageSize = measured else link.frameSize = measured
+        child.place(0, 0)
+    }
+}.onGloballyPositioned { link.destination = it }
+
+internal fun ContainerLink.drawingMatch(origins: ContainerOrigins, shared: SharedTransitionScope.SharedContentState?): Boolean {
+    if (destination?.isAttached != true || !sourcePlaced || !origins.live(this) ||
+        pageSize == IntSize.Zero || frameSize == IntSize.Zero) return false
+    // A held seek can place a real intermediate frame without running the overlay.
+    // Conversely, match-found alone must not cover the whole parent with empty material
+    // while Compose is still acquiring the source (or releasing it at the end of Back).
+    return frameSize != pageSize || shared?.isMatchFound == true &&
+        (frameSize == origins.sourceCoordinates(this)?.size || open?.value == 1f)
+}
+
+/** Mask the actual material within the real source footprint. The parent, not a captured
+ * copy, supplies the text underneath. Sheet donors contain the shell only, never chat text. */
+@Composable
+internal fun Modifier.containerPaper(origins: ContainerOrigins?, link: ContainerLink?, moving: Boolean,
+    paired: () -> Boolean, ink: () -> Float): Modifier {
+    val pane = origins is PaneOrigins
+    val sheet = pane && LocalPanelBack.current != null
+    val colors = androidx.compose.material3.MaterialTheme.colorScheme
+    val paper = if (sheet) colors.surfaceContainerHigh else colors.surface
+    if (!moving) return if (pane) this else wallpaperBackground(paper)
+    val donor = if (sheet) LocalCapsuleBackdrop.current else LocalWallpaperRecording.current
+    var receiver by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var position by remember { mutableStateOf(Offset.Unspecified) }
+    val placement = onGloballyPositioned {
+        receiver = it
+        position = origins?.host?.takeIf { host -> host.isAttached }?.localPositionOf(it, Offset.Zero) ?: Offset.Unspecified
+    }
+    val masked = if (link == null) placement else placement.sourceHandoff({ if (paired()) ink() else 1f }) {
+        if (position.isSpecified) origins?.sourceBounds(link)?.translate(-position) else null
+    }
+    return masked.drawWithCache {
+        onDrawBehind {
+            if (donor == null) drawRect(paper) else with(donor) { drawBackdrop(this@onDrawBehind, receiver, null, 1f) }
+        }
+    }
+}
+
+/** One real page draw. Only its intersection with the real launcher changes opacity;
+ * everywhere else inside the reveal, paper and foreground must already belong to the page. */
+internal fun Modifier.sourceHandoff(coverage: () -> Float, slot: () -> Rect?): Modifier = graphicsLayer {
+    val a = coverage()
+    compositingStrategy = if (a > 0f && a < 1f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+}.drawWithCache {
+    onDrawWithContent {
+        val a = coverage()
+        val overlap = if (a < 1f) slot()?.intersect(Rect(Offset.Zero, size)) else null
+        when {
+            overlap == null || overlap.isEmpty -> drawContent()
+            a <= 0f -> clipRect(overlap.left, overlap.top, overlap.right, overlap.bottom, clipOp = ClipOp.Difference) {
+                this@onDrawWithContent.drawContent()
+            }
+            else -> {
+                drawContent()
+                // DstOut changes only the clipped page layer's alpha, not the parent or its colour.
+                drawRect(Color.White.copy(alpha = 1f - a), overlap.topLeft, overlap.size, blendMode = BlendMode.DstOut)
+            }
+        }
+    }
 }
 
 internal fun Modifier.containerClip(bounds: () -> Rect, radius: () -> Float, enabled: () -> Boolean): Modifier = drawWithCache {

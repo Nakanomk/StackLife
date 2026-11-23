@@ -225,16 +225,15 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
     val animate = LocalMotionEnabled.current
     val privateScreens = remember { mutableIntStateOf(0) }
     var historySource by rememberSaveable { mutableStateOf<String?>(null) }
-    val wallpaperOwner = when (val route = stack.last()) {
-        Preferences, HelpAbout, ModelConnection, Guidance, is EditAppearance -> null
-        is Feature -> route.destination
-        else -> stack.filterIsInstance<Feature>().lastOrNull()?.destination ?: preferences.appearance.nearestVisible(destination)
-    }
     val rootDraft = rememberSaveable { java.util.UUID.randomUUID().toString() }
-    WallpaperHost(preferences.appearance.wallpaper(wallpaperOwner)) {
     CompositionLocalProvider(LocalRootDraftId provides rootDraft, LocalRouteOrigins provides origins, LocalOpenNote provides { navigate(it) },
         LocalOpenChatHistory provides { historySource = it.historyKey() }) {
     PlannerPopupHost(stack.last() != ModelConnection && stack.last() != ImportCourses && privateScreens.intValue == 0) {
+    val latestAppearance by rememberUpdatedState(preferences.appearance)
+    val home = preferences.appearance.nearestVisible(destination)
+    // Keep Home's decoded photo available for the first frame of Back, without painting it
+    // over another entry or using a private wallpaper as the cross-window popup donor.
+    WallpaperHost(preferences.appearance.wallpaper(home), drawBehindContent = false) {
     SharedTransitionLayout {
         val shared: SharedModifier = { key ->
             if (animate && initialDetail == null) cardBoundsModifier(key) else Modifier
@@ -337,7 +336,9 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 entry<ModelConnection> { PrivateScreen(privateScreens) { SettingsHelpHost { ConnectionScreen(assistant.connections, back) } } }
         }
         EntityMotionScope(animate && initialDetail == null) {
-            NavDisplay(backStack = stack, onBack = back, sharedTransitionScope = this,
+            // Single-pane navigation: only our card/control pair may enter the shared overlay.
+            // Nav3's optional shared-entry decorator would lift the entire page as another element.
+            NavDisplay(backStack = stack, onBack = back,
                 modifier = Modifier.onGloballyPositioned { origins.host = it; origins.size = it.size },
                 transitionSpec = { sceneMotion(animate) }, popTransitionSpec = { sceneMotion(animate) },
                 predictivePopTransitionSpec = { sceneMotion(animate) },
@@ -346,17 +347,32 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     NavEntry(navEntry = entry) {
                         val depth = remember(key) { stack.indexOfLast { it == key } }
                         val parent = stack.getOrNull(depth - 1)?.motionKey()
-                        origins.Entry(key.motionKey(), depth, stack.lastIndex, parent, animate,
-                            ordinary = key != Home && key !is TaskDetail && (key !is FrameDetail || key.generated)) { entry.Content() }
+                        // A retained parent must keep its own wallpaper while the next entry reveals
+                        // itself, including the first and last frame of predictive Back.
+                        // Nav3 caches the entry factory while the stack is unchanged.
+                        val appearance = latestAppearance
+                        val owner = when (key) {
+                            Home -> appearance.nearestVisible(destination)
+                            Preferences, HelpAbout, ModelConnection, Guidance, is EditAppearance -> null
+                            is Feature -> key.destination
+                            else -> remember(key) {
+                                (depth - 1 downTo 0).firstNotNullOfOrNull { (stack.getOrNull(it) as? Feature)?.destination }
+                                    ?: appearance.nearestVisible(destination)
+                            }
+                        }
+                        WallpaperHost(appearance.wallpaper(owner), drawBehindContent = false) {
+                            origins.Entry(key.motionKey(), depth, stack.lastIndex, parent, animate,
+                                ordinary = key != Home && key !is TaskDetail && (key !is FrameDetail || key.generated)) { entry.Content() }
+                        }
                     }
                 })
         }
         if (animate) with(origins) { PlacedSources() }
     }
+    }
     val source = historySource
     AssistantPanels(assistant, source?.let { remember(it) { historyPage(it) } }, configuring = stack.last() == ModelConnection,
         onCloseHistory = { historySource = null }, onSettings = { navigate(ModelConnection) }, onImport = { navigate(ImportCourses) })
-    }
     }
     }
 }

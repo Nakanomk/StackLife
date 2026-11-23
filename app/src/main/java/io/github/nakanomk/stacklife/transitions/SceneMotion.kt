@@ -12,21 +12,14 @@ import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.RoundRect
-import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import io.github.nakanomk.stacklife.appearance.wallpaperBackground
 import androidx.compose.ui.layout.AlignmentLine
 import androidx.compose.ui.layout.HorizontalAlignmentLine
 import androidx.compose.ui.layout.VerticalAlignmentLine
@@ -151,7 +144,8 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
     val link = origins?.links?.get(key)
     var titlePlaced by remember { mutableStateOf(false) }
     val density = LocalDensity.current
-    val state = gatedContent(link ?: key) { link != null && origins.size == link.hostSize && link.density == density &&
+    val front = LocalFrontEntry.current
+    val state = gatedContent(link ?: key) { front && link != null && origins.size == link.hostSize && link.density == density &&
         titlePlaced }
     val typography = MaterialTheme.typography
     val compactScale = with(LocalDensity.current) {
@@ -160,7 +154,6 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
     val visibility = LocalNavAnimatedContentScope.current
     // Enlist the landing on Nav3's timeline immediately. Otherwise a lazy origin can
     // be disposed on the first push frame, before the shared match has been established.
-    val front = LocalFrontEntry.current
     val openness = visibility.routeOpen(front)
     val returning = visibility.transition.currentState == EnterExitState.Visible
     val moving = front && visibility.transition.currentState != visibility.transition.targetState
@@ -168,9 +161,10 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
     val sampled = driver?.open ?: openness
     val depth = LocalEntryDepth.current
     val radius = { (rows?.get(key)?.radius ?: 0f) * (1f - sampled.value) }
-    val ink = { if (moving && state.isMatchFound) containerInk(sampled.value, returning) else 1f }
+    val paired = { moving && link != null && link.drawingMatch(origins, state) }
+    val ink = { if (paired()) containerInk(sampled.value, returning) else 1f }
     if (link != null) {
-        SideEffect { link.open = sampled; link.depth = depth; link.returning = returning }
+        SideEffect { link.open = sampled }
         DisposableEffect(link) { onDispose { link.destination = null; link.open = null } }
     }
     val appliedScale = remember(key) { mutableFloatStateOf(1f) }
@@ -182,7 +176,7 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
             val lookahead = isLookingAhead
             layout(chrome.width, chrome.height) {
                 val c = coordinates
-                if (lookahead || c == null || !front || !state.isMatchFound || !isTransitionActive) chrome.place(0, 0)
+                if (lookahead || c == null || !paired()) chrome.place(0, 0)
                 else {
                     val root = lookaheadScopeCoordinates
                     val target = root.localLookaheadPositionOf(c)
@@ -198,54 +192,48 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
                     }
                 }
             }
-        }.renderInSharedTransitionScopeOverlay(zIndexInOverlay = depth + .5f) { front && state.isMatchFound && isTransitionActive }
-            .containerClip({ windowInOverlay.value.translate(-origin) }, radius) { front && state.isMatchFound && isTransitionActive }
-            .graphicsLayer { alpha = ink() }
+        }.renderInSharedTransitionScopeOverlay(zIndexInOverlay = depth + .5f, renderInOverlay = paired)
+            .containerClip({ windowInOverlay.value.translate(-origin) }, radius, paired)
+            .then(if (!moving || link == null) Modifier else Modifier.sourceHandoff(ink) {
+                origins.sourceBounds(link)?.translate(-origin)
+            })
     }
-    val paper = MaterialTheme.colorScheme.surface
-    val clipPath = remember { Path() }
     val sharedFrame = if (link?.sourcePlaced != true || driver == null) Modifier else
         Modifier.sharedBounds(state, driver.page, boundsTransform = containerBounds,
         enter = EnterTransition.None, exit = ExitTransition.None,
         resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds,
-        zIndexInOverlay = depth.toFloat(), renderInOverlayDuringTransition = moving,
-        clipInOverlayDuringTransition = OverlayClip(link.shape)).onGloballyPositioned { link.destination = it }
-    val backing = if (moving && link != null && state.isMatchFound)
-        Modifier.drawBehind { drawContainerPaper(origins, link, paper, ink()) }
-    else Modifier.wallpaperBackground(paper)
+        renderInOverlayDuringTransition = false).placedPage(link)
     Box(sharedFrame.fillMaxSize().then(tag).graphicsLayer {
             // With no live partner, fade in place; never aim at a newly recycled row.
-            alpha = if (front && (!state.isMatchFound || openness.value == 0f)) openness.value else 1f
-            clip = true
-        }.drawWithCache {
-            val bounds = Rect(Offset.Zero, size)
-            onDrawWithContent {
-                if (front && state.isMatchFound && openness.value < 1f) {
-                    clipPath.reset(); clipPath.addRoundRect(RoundRect(bounds, CornerRadius(radius())))
-                    clipPath(clipPath) { this@onDrawWithContent.drawContent() }
-                } else drawContent()
+            alpha = when {
+                !moving -> 1f
+                paired() -> if (sampled.value > 0f) 1f else 0f
+                link != null && origins.live(link) && !returning -> sampled.value
+                else -> openness.value
             }
-        }.then(backing)
-        .approachLayout(isMeasurementApproachInProgress = { state.isMatchFound && isTransitionActive },
-            isPlacementApproachInProgress = { state.isMatchFound && isTransitionActive }) { measurable, window ->
+            if (link != null && paired()) shape = link.shape
+            clip = true
+        }.containerPaper(origins, link, moving, paired, ink)
+        .approachLayout(isMeasurementApproachInProgress = { paired() },
+            isPlacementApproachInProgress = { paired() }) { measurable, window ->
             // Register the bounds in normal composition; lookahead already supplies the
             // final page constraints, so there is no need to subcompose during measure.
             val page = measurable.measure(lookaheadConstraints)
             val w = window.constrainWidth(page.width)
             val h = window.constrainHeight(page.height)
             layout(w, h) {
-                if (state.isMatchFound && isTransitionActive) coordinates?.let {
+                if (paired()) coordinates?.let {
                     val position = lookaheadScopeCoordinates.localPositionOf(it, Offset.Zero)
                     windowInOverlay.value = Rect(position.x, position.y, position.x + w, position.y + h)
                 }
-                val row = if (state.isMatchFound && h != page.height) rows?.get(key) else null
+                val row = if (paired() && h != page.height) rows?.get(key) else null
                 val tx = if (row != null) page[TitleX] else AlignmentLine.Unspecified
                 val ty = if (row != null) page[TitleY] else AlignmentLine.Unspecified
                 if (row == null || row.height !in 1 until page.height ||
                     tx == AlignmentLine.Unspecified || ty == AlignmentLine.Unspecified ||
                     row.x == AlignmentLine.Unspecified || row.y == AlignmentLine.Unspecified) {
                     appliedScale.floatValue = 1f
-                    page.placeWithLayer(0, 0) { alpha = ink() }
+                    page.place(0, 0)
                 } else {
                     val t = sampled.value
                     val scale = lerp(compactScale, 1f, t)
@@ -255,7 +243,6 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
                     page.placeWithLayer(0, 0) {
                         transformOrigin = TransformOrigin(0f, 0f)
                         scaleX = scale
-                        alpha = ink()
                         scaleY = scale
                         translationX = lerp(row.x.toFloat(), tx.toFloat(), t) - tx * scale
                         translationY = lerp(row.y.toFloat(), ty.toFloat(), t) - ty * scale

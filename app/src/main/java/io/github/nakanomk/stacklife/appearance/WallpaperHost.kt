@@ -25,21 +25,29 @@ internal val LocalBackgroundStore = compositionLocalWithComputedDefaultOf {
 }
 
 // Adapted from BiliPai 5893c2c, design-system/.../wallpaper/GlobalWallpaperBackdrop.kt (GPL-3.0).
-private val LocalWallpaperRecording = compositionLocalOf<PlannerBackdrop?> { null }
+internal val LocalWallpaperRecording = compositionLocalOf<PlannerBackdrop?> { null }
+private val LocalWallpaperSpec = compositionLocalOf<WallpaperSpec?> { null }
 
 @Composable
-internal fun WallpaperHost(spec: WallpaperSpec, content: @Composable () -> Unit) {
-    val visible = spec.imageId != null && !wallpaperUsesSolidSurface()
+internal fun WallpaperHost(spec: WallpaperSpec, drawBehindContent: Boolean = true, content: @Composable () -> Unit) {
+    val inherited = !drawBehindContent && LocalWallpaperSpec.current == spec
+    val visible = !inherited && spec.imageId != null && !wallpaperUsesSolidSurface()
     val layer = if (visible) rememberGraphicsLayer() else null
     val base = MaterialTheme.colorScheme.surface
     val recording = remember(layer, base) { layer?.let { PlannerBackdrop(it, base, null, null) } }
+    val donor = if (inherited) LocalWallpaperRecording.current else recording
     // A preview starts a new wallpaper plane, even when embedded in a page with a glass donor.
     // Transparent parts of a plain preview must not show the enclosing page's photo.
-    Box(if (recording == null) Modifier.background(base) else Modifier, propagateMinConstraints = true) {
+    // A navigation entry only supplies material. Painting this full-window sibling would
+    // cover the parent outside the animated destination, before its own clip or alpha runs.
+    Box(if (drawBehindContent && recording == null) Modifier.background(base) else Modifier, propagateMinConstraints = true) {
         if (recording != null) WallpaperPixels(spec, base, MaterialTheme.colorScheme.onSurface, card = false,
-            modifier = Modifier.matchParentSize(), record = Modifier.plannerBackdrop(recording), reportFailure = false)
+            modifier = Modifier.matchParentSize(), record = Modifier.plannerBackdrop(recording, drawInPlace = drawBehindContent),
+            reportFailure = false)
         // Page chrome can still record scroll content over this donor. Never capture that content here.
-        CompositionLocalProvider(LocalWallpaperRecording provides recording, LocalCapsuleBackdrop provides recording, content = content)
+        // Changing crop or owner must not move the editor/navigation subtree to another call site.
+        CompositionLocalProvider(LocalWallpaperSpec provides spec, LocalWallpaperRecording provides donor,
+            LocalCapsuleBackdrop provides donor, content = content)
     }
 }
 
