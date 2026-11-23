@@ -48,10 +48,10 @@ class SceneMotionTest {
     private val ui = createAndroidComposeRule<ComponentActivity>()
     @get:Rule val rules: RuleChain = RuleChain.outerRule(store).around(ui)
     @OptIn(ExperimentalTestApi::class)
-    private fun show(vararg commands: PlannerCommand, reduced: Boolean = false, fontScale: Float? = null) {
+    private fun show(vararg commands: PlannerCommand, reduced: Boolean = false, fontScale: Float? = null, glass: Boolean = true) {
         runBlocking {
             store.apply(PlannerCommand.EditAppearance(AppearancePatch.Replace(
-                Appearance(start = Destination.WORKSPACE, reduceMotion = reduced))), *commands)
+                Appearance(start = Destination.WORKSPACE, reduceMotion = reduced, glass = glass))), *commands)
         }
         ui.setContent {
             val model = viewModel { WorkspaceViewModel(store.api) }
@@ -231,6 +231,7 @@ class SceneMotionTest {
         val middle = frame(key)
         ui.mainClock.advanceTimeBy(600)
         val open = frame(key)
+        ui.onNodeWithTag(key).assertDoesNotExist() // The covered row is not an accessible action.
         between(row, middle.box, open.box)
         assertUncoveredPixels(before, middle.pixels, middle.box)
         assertDetailInk(open, middle)
@@ -265,7 +266,10 @@ class SceneMotionTest {
         show(*(1..18).map { PlannerCommand.TaskAdd(TaskInput("步骤 $it")) }.toTypedArray())
         val queue = runBlocking { store.state().queue }
         ui.onNodeWithTag("queue").performScrollToIndex(7)
+        val originalList = ui.onNodeWithTag("queue").fetchSemanticsNode().id
         withClockAndBack { checkCardTrip("task:${queue[7].id}", it) }
+        assertEquals("Back must return the very same live list, not rebuild it at the saved index",
+            originalList, ui.onNodeWithTag("queue").fetchSemanticsNode().id)
         assertEquals(queue, runBlocking { store.state().queue })
     }
 
@@ -406,8 +410,11 @@ class SceneMotionTest {
         }
     }
 
-    @Test fun backUsesTheNewLocationOfTheSameTaskAfterReorder() {
-        show(*(1..3).map { PlannerCommand.TaskAdd(TaskInput("步骤 $it")) }.toTypedArray())
+    @Test fun backUsesTheNewLocationOfTheSameTaskAfterReorder() = checkReorderedLanding(glass = true)
+    @Test fun solidCardReturnsToTheMovedTask() = checkReorderedLanding(glass = false)
+
+    private fun checkReorderedLanding(glass: Boolean) {
+        show(*(1..3).map { PlannerCommand.TaskAdd(TaskInput("步骤 $it")) }.toTypedArray(), glass = glass)
         val (a, b, c) = runBlocking { store.state().queue }
         val key = "task:${b.id}"
         val old = bounds(key)

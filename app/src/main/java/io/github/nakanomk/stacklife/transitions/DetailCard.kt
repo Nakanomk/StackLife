@@ -1,7 +1,6 @@
 package io.github.nakanomk.stacklife.transitions
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyListState
@@ -53,11 +52,8 @@ internal fun DetailCard(
 ) {
     val open = { onDetail(id) }
     val link = source?.card(remember(kind, id) { DetailTarget(kind, id) }, shape, open)
-    Box(propagateMinConstraints = true) {
-        Surface(onClick = link?.open ?: open, modifier = modifier.then(link?.modifier ?: Modifier),
-            shape = shape, color = color, shadowElevation = shadowElevation, content = content)
-        CardBoundsAnchor("$kind:$id", Modifier.matchParentSize(), shape)
-    }
+    Surface(onClick = link?.open ?: open, modifier = modifier.then(link?.modifier ?: Modifier),
+        shape = shape, color = color, shadowElevation = shadowElevation, content = content)
 }
 
 @Composable

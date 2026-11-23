@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.layer.GraphicsLayer
@@ -55,7 +56,7 @@ import top.yukonga.miuix.kmp.material.drawEdgeStroke
 
 internal val LocalPlannerGlassAllowed = staticCompositionLocalOf { false }
 internal val LocalCapsuleBackdrop = compositionLocalOf<Backdrop?> { null }
-private val LocalParentShell = compositionLocalOf { false }
+internal val LocalParentShell = compositionLocalOf { false }
 internal enum class CapsuleScene { NAVIGATION, ASSISTANT, CHROME, ACTION, COURSE, PANEL, TRAY, FROST, INSET }
 
 private val dockEdge = EdgeStroke(width = 1.dp, bevel = 2.dp, color = Color.White.copy(alpha = .12f),
@@ -74,7 +75,7 @@ internal fun rememberGlassEdge(rotation: Int): State<EdgeStroke> {
 
 @Stable
 internal class PlannerBackdrop(val layer: GraphicsLayer, private val base: Color, private val below: Backdrop?,
-    val windowFrame: MutableIntState?) : Backdrop {
+    private val windowFrame: MutableIntState?) : Backdrop {
     override val isCoordinatesDependent = true
     var origin: Offset by mutableStateOf(Offset.Unspecified)
 
@@ -93,25 +94,25 @@ internal class PlannerBackdrop(val layer: GraphicsLayer, private val base: Color
 }
 
 @Composable
-internal fun rememberPlannerBackdrop(enabled: Boolean = true, acrossWindows: Boolean = false): PlannerBackdrop? {
+internal fun rememberPlannerBackdrop(enabled: Boolean = true): PlannerBackdrop? {
     val a = LocalAppearance.current
     if (!enabled || !LocalPlannerGlassAllowed.current || !a.glass || glassUnavailableReason(a) != null) return null
     val base = MaterialTheme.colorScheme.surface
     val layer = rememberGraphicsLayer()
     val below = LocalCapsuleBackdrop.current
-    return remember(layer, base, below, acrossWindows) {
-        PlannerBackdrop(layer, base, below, if (acrossWindows) mutableIntStateOf(0) else null)
-    }
+    return remember(layer, base, below) { PlannerBackdrop(layer, base, below, null) }
 }
 
 internal fun Modifier.plannerBackdrop(source: PlannerBackdrop?, drawInPlace: Boolean = true): Modifier {
     if (source == null) return this
     return onGloballyPositioned { source.origin = it.localToScreen(Offset.Zero) }.drawWithContent {
-        source.layer.record {
-            this@drawWithContent.drawContent()
-        }
-        if (drawInPlace) drawLayer(source.layer)
+        drawRecordedBackdrop(source, drawInPlace)
     }
+}
+
+internal fun ContentDrawScope.drawRecordedBackdrop(source: PlannerBackdrop, drawInPlace: Boolean = true) {
+    source.layer.record { this@drawRecordedBackdrop.drawContent() }
+    if (drawInPlace) drawLayer(source.layer)
 }
 
 @Composable

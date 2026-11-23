@@ -38,6 +38,7 @@ import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
 import io.github.nakanomk.stacklife.appearance.AppearanceEditor
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
+import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
 import io.github.nakanomk.stacklife.transitions.*
 import io.github.nakanomk.stacklife.appearance.LocalGlassLight
 import io.github.nakanomk.stacklife.appearance.PlannerPopupHost
@@ -223,6 +224,10 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
             uiText("Could not read the event.", "无法读取事件。") else uiText("This event no longer exists.", "该事件已不存在。")) }
     }
     val animate = LocalMotionEnabled.current
+    val canKeepCardList = animate && glassUnavailableReason(preferences.appearance) == null
+    // The source chooses retention at click time. A platform preference changing
+    // must not replace an existing navigation entry or its scroll state.
+    SideEffect { origins.canKeepCardList = canKeepCardList }
     val privateScreens = remember { mutableIntStateOf(0) }
     var historySource by rememberSaveable { mutableStateOf<String?>(null) }
     val rootDraft = rememberSaveable { java.util.UUID.randomUUID().toString() }
@@ -307,7 +312,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                         SlotEditor(editor, model, onBack = back, onSaved = { _, _ -> back() })
                     }
                 } }
-                entry<TaskDetail> { key ->
+                entry<TaskDetail>(metadata = { key -> origins.cardSceneMetadata(key.motionKey()) }) { key ->
                     DetailRoute("task:${key.id}", animate && initialDetail == null) {
                         SourcePanel(model, GraphLink.Task(key.id)) { view ->
                             TaskScreen(key.id, view, model, back, shared) { navigate(EditTask(key.id, view.source?.frameId, view.revision)) }
@@ -321,7 +326,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     else TaskEditor(model, back, original = QueueTask(key.id, task.title, task.notes, task.minutes, task.schedule),
                         frameId = key.frameId, expectedRevision = key.revision ?: rememberSaveable { view.revision })
                 } }
-                entry<FrameDetail> { key ->
+                entry<FrameDetail>(metadata = { key -> origins.cardSceneMetadata(key.motionKey()) }) { key ->
                     DetailRoute("frame:${key.id}", animate && initialDetail == null && !key.generated) {
                         WorkspacePanel(model) { FrameScreen(key.id, it, model, back, shared, openSource) { task -> navigate(EditTask(task, key.id, it.revision)) } }
                     }
@@ -336,9 +341,10 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 entry<ModelConnection> { PrivateScreen(privateScreens) { SettingsHelpHost { ConnectionScreen(assistant.connections, back) } } }
         }
         EntityMotionScope(animate && initialDetail == null) {
-            // Single-pane navigation: only our card/control pair may enter the shared overlay.
-            // Nav3's optional shared-entry decorator would lift the entire page as another element.
+            // Nav3 moves the one live list between its own scene and a matched card scene.
+            // Only the card/control pair uses the shared overlay, not the entire entry.
             NavDisplay(backStack = stack, onBack = back,
+                sceneStrategies = remember { listOf(LiveCardSceneStrategy<NavKey>()) },
                 modifier = Modifier.onGloballyPositioned { origins.host = it; origins.size = it.size },
                 transitionSpec = { sceneMotion(animate) }, popTransitionSpec = { sceneMotion(animate) },
                 predictivePopTransitionSpec = { sceneMotion(animate) },

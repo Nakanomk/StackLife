@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -25,13 +27,22 @@ import kotlinx.coroutines.flow.first
 internal fun ChatMessages(lines: List<ChatLine>, store: AttachmentStore, modifier: Modifier, tag: String,
     emptyText: String? = null, live: Boolean = false, requestedLine: Long? = null, reattach: ((ChatImage) -> Unit)? = null,
     eventActions: @Composable (ChatLine) -> Unit = {}) {
+    if (lines.isEmpty()) {
+        // A real empty transcript has no rows to subcompose, follow, or parse.
+        // Keep the same bottom margin and allow a tall localized hint to scroll.
+        Column(modifier.fillMaxSize().testTag(tag).verticalScroll(rememberScrollState(), reverseScrolling = true)
+            .padding(vertical = 6.dp), verticalArrangement = Arrangement.Bottom) {
+            if (emptyText != null) Text(emptyText, style = MaterialTheme.typography.bodyMedium)
+        }
+        return
+    }
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var follow by rememberSaveable { mutableStateOf(true) }
     var seen by rememberSaveable { mutableStateOf<Long?>(null) }
     var unread by rememberSaveable { mutableStateOf(false) }
     var measuredCount by remember { mutableIntStateOf(-1) }
-    val newest = lines.lastOrNull()
+    val newest = lines.last()
     LaunchedEffect(list) {
         // Item zero is the newest: its edge stays put through IME/pane resizing and asynchronous
         // Markdown measurement. Only consider the viewport of the already presented list here.
@@ -45,8 +56,7 @@ internal fun ChatMessages(lines: List<ChatLine>, store: AttachmentStore, modifie
             }
         }
     }
-    LaunchedEffect(newest?.id) {
-        if (newest == null) return@LaunchedEffect
+    LaunchedEffect(newest.id) {
         if (newest.id == seen) { measuredCount = lines.size; return@LaunchedEffect }
         // Also follow a very fast reply if the sending row and its reply arrived in one frame.
         val ownSend = live && seen != null && lines.asReversed().asSequence().takeWhile { it.id != seen }.any { it.role == HistoryRole.USER }
@@ -71,7 +81,6 @@ internal fun ChatMessages(lines: List<ChatLine>, store: AttachmentStore, modifie
         Box(modifier.fillMaxWidth()) {
             LazyColumn(Modifier.fillMaxSize().testTag(tag), state = list, reverseLayout = true,
                 contentPadding = PaddingValues(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom)) {
-                if (lines.isEmpty() && emptyText != null) item { Text(emptyText, style = MaterialTheme.typography.bodyMedium) }
                 items(lines.asReversed(), key = ChatLine::id) { line ->
                     val event = line.event
                     when {
@@ -101,7 +110,7 @@ internal fun ChatMessages(lines: List<ChatLine>, store: AttachmentStore, modifie
             // The badge must not resize the viewport and scroll the row currently being read.
             if (unread) FilledTonalButton(modifier = Modifier.align(Alignment.BottomCenter), onClick = {
                 follow = true; unread = false
-                scope.launch { if (lines.isNotEmpty()) list.scrollToItem(0) }
+                scope.launch { list.scrollToItem(0) }
             }) { Text(stringResource(R.string.chat_new_messages)) }
         }
     }

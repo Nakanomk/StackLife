@@ -91,11 +91,12 @@ class AppearanceBenchmark(private val glass: Boolean) {
         tag("queue")
     }
 
-    private fun measure(assistant: Boolean = false, prepare: UiDevice.() -> Unit = {}, action: UiDevice.() -> Unit) {
+    private fun measure(assistant: Boolean = false, restart: Boolean = false, reset: UiDevice.() -> Unit = {},
+        prepare: UiDevice.() -> Unit = {}, action: UiDevice.() -> Unit) {
         var seeded = false
         rule.measureRepeated(packageName = TARGET, metrics = listOf(FrameTimingMetric()), compilationMode = CompilationMode.Full(), iterations = 5,
             setupBlock = {
-                val launch = !seeded || !assistant
+                val launch = !seeded || restart
                 if (launch) killProcess()
                 if (!seeded) {
                     val locale = seedFixture()
@@ -107,9 +108,10 @@ class AppearanceBenchmark(private val glass: Boolean) {
                 }
                 if (launch) {
                     startActivityAndWait(Intent().setClassName(TARGET, "io.github.nakanomk.stacklife.MainActivity"))
-                } else if (device.hasWindow(imeWindow)) {
-                    // A measured edit leaves the IME up; reset outside the next trace, on the same activity.
-                    device.closeKeyboard()
+                } else {
+                    device.reset()
+                    // A measured edit leaves the IME up; reset on the same activity outside the trace.
+                    if (device.hasWindow(imeWindow)) device.closeKeyboard()
                 }
                 device.tag("queue"); device.await("first task", firstTask)
                 val material = device.tag("navigation-capsule").stateDescription
@@ -125,7 +127,7 @@ class AppearanceBenchmark(private val glass: Boolean) {
             }, measureBlock = { action(device) })
     }
 
-    @Test fun scroll() = measure {
+    @Test fun scroll() = measure(restart = true) {
         val viewport = tag("queue").bounds
         val x = viewport.left + viewport.width() / 3
         val high = viewport.top + viewport.height() / 5
@@ -135,12 +137,19 @@ class AppearanceBenchmark(private val glass: Boolean) {
         repeat(4) { swipe(x, high, x, low, 32) }
         await("first task", firstTask)
     }
-    @Test fun cardRoundTrip() = measure {
+    private fun UiDevice.openCard() {
         tap(await("first task", firstTask))
         val title = appString("ui_task_details")
         await(title) { text?.toString() == title }
-        pressBack(); tag("queue")
+        automation.waitForIdle(500, 5_000)
     }
+    private fun UiDevice.returnCard() {
+        pressBack()
+        tag("queue"); await("first task", firstTask)
+        automation.waitForIdle(500, 5_000)
+    }
+    @Test fun cardOpen() = measure(reset = { returnCard() }) { openCard() }
+    @Test fun cardReturn() = measure(prepare = { openCard() }) { returnCard() }
     @Test fun assistantKeyboard() = measure(assistant = true) {
         openKeyboard()
         closeKeyboard()
@@ -180,17 +189,30 @@ class AppearanceBenchmark(private val glass: Boolean) {
         }
     }
 
-    @Test fun assistantPanel() = measure(assistant = true, prepare = {
+    private fun UiDevice.preparePanel() {
         tag("assistant-input").replaceText("09:00 09:30")
         tag("assistant-send") { isEnabled }
         awaitIme(false)
-    }) {
+    }
+    private fun UiDevice.openPanel() {
         val offline = appString("assistant_not_connected")
         tap(tag("assistant-send") { isEnabled })
         await(offline) { text?.toString() == offline }
+        automation.waitForIdle(500, 5_000)
+    }
+    private fun UiDevice.closePanel() {
+        val offline = appString("assistant_not_connected")
         pressBack()
         awaitGone(offline, 6_000) { text?.toString() == offline }
         tag("assistant-input"); tag("assistant-send") { !isEnabled }
         tag("navigation-capsule"); tag("queue")
+        automation.waitForIdle(500, 5_000)
+    }
+
+    @Test fun assistantPanelOpen() = measure(assistant = true, reset = { closePanel() }, prepare = { preparePanel() }) {
+        openPanel()
+    }
+    @Test fun assistantPanelClose() = measure(assistant = true, prepare = { preparePanel(); openPanel() }) {
+        closePanel()
     }
 }

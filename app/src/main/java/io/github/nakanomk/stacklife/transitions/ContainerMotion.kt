@@ -63,7 +63,7 @@ internal val LocalContainerScope = staticCompositionLocalOf<SharedTransitionScop
 internal val LocalEntryDepth = compositionLocalOf { 0 }
 
 internal data class OriginSite(val owner: String?, val target: String, val site: Long)
-internal class ContainerAnchor(val site: OriginSite, val shape: Shape, val density: Density, val hosted: Boolean = true) {
+internal class ContainerAnchor(val site: OriginSite, val shape: Shape, val density: Density, val rowVisible: (() -> Boolean)? = null) {
     var coordinates: LayoutCoordinates? = null
     var bounds by mutableStateOf<Rect?>(null)
         private set
@@ -72,7 +72,8 @@ internal class ContainerAnchor(val site: OriginSite, val shape: Shape, val densi
 }
 
 /** Remembers identity and host metrics, never a rectangle to animate back to. */
-internal class ContainerLink(val site: OriginSite, val hostSize: IntSize, val density: Density, val radius: Float) {
+internal class ContainerLink(val site: OriginSite, val hostSize: IntSize, val density: Density, val radius: Float,
+    val keepCardList: Boolean) {
     var destination by mutableStateOf<LayoutCoordinates?>(null)
     var pageSize by mutableStateOf(IntSize.Zero)
     var frameSize by mutableStateOf(IntSize.Zero)
@@ -141,13 +142,13 @@ internal open class ContainerOrigins {
         // buttons' coordinates so a later click can resolve them at that instant.
         anchor.place(node, if (links[anchor.site.target]?.site == anchor.site) host else null)
     }
-    fun capture(target: String, owner: String?, chosen: OriginSite? = null) {
+    fun capture(target: String, owner: String?, chosen: OriginSite? = null, keepCardList: Boolean = false) {
         val a = if (chosen != null) anchors[chosen]?.takeIf { chosen.owner == owner && chosen.target == target }
             else anchors.values.singleOrNull { it.site.owner == owner && it.site.target == target && it.coordinates?.fullBoundsIn(host) != null }
         a?.coordinates?.let { a.place(it, host) }
         val bounds = a?.bounds
-        if (bounds == null) links.remove(target)
-        else links[target] = ContainerLink(a.site, size, a.density, a.radius(bounds))
+        if (bounds == null || a.rowVisible?.invoke() == false) links.remove(target)
+        else links[target] = ContainerLink(a.site, size, a.density, a.radius(bounds), keepCardList = keepCardList && a.rowVisible != null)
     }
     /** The endpoint is geometry only. Moving the painted control through an overlay
      * and counter-translating it still filters its text at fractional display pixels. */
@@ -157,7 +158,7 @@ internal open class ContainerOrigins {
             val anchor = anchors[link.site]
             val bounds = anchor?.bounds
             val side = link.driver?.row
-            if (anchor?.hosted == true && bounds != null && side != null) {
+            if (anchor != null && anchor.rowVisible == null && bounds != null && side != null) {
                 val state = gatedContent(link) { live(link) }
                 Spacer(Modifier.layout { measurable, constraints ->
                     val source = measurable.measure(Constraints.fixed(bounds.width.roundToInt(), bounds.height.roundToInt()))

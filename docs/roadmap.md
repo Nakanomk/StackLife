@@ -4,7 +4,7 @@ StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Andr
 
 **项目许可：** StackLife 采用 [GNU 通用公共许可证第 3 版或任何后续版本](../LICENSE)（`GPL-3.0-or-later`）。第三方代码与资源保留[各自的许可和署名](../app/src/main/assets/licenses/)。
 
-**当前候选版本：v0.10.16（31），Room v12。** 本次[无缝转场与助理性能优化](#v01016-无缝转场与助理性能)不迁移日程或重建库。M1–M6 是历史契约；原本“冲突拒绝写入”“节点都是模板”等规则已由[排程与链接升级](#v01012-排程链接倒数日与外观)替代。普通包不含联盟 SDK。
+**当前候选版本：v0.10.17（32），Room v12。** 本次[卡片返回与消息面板优化](#v01017-卡片返回与消息面板)不迁移日程或重建库。M1–M6 是历史契约；原本“冲突拒绝写入”“节点都是模板”等规则已由[排程与链接升级](#v01012-排程链接倒数日与外观)替代。普通包不含联盟 SDK。
 
 ## 起点与产品决定
 
@@ -382,6 +382,12 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 - **转场。** 沿用 [BiliPai 的共享容器](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/navigation3/SettingsSharedContainerTransition.kt)的来源／目的分工，只为两者重叠的控件范围做透明度合成。被覆盖的静止玻璃页在交叠期间复用[硬件图层](https://developer.android.com/develop/ui/compose/graphics/draw/modifiers#graphicslayer)，页内数据变化仍立即重绘。根页、队列和栈采用 [AndroidX Pager 按需创建](https://developer.android.com/develop/ui/compose/layouts/pager#lazy-creation)；返回工作台不强制构造其他根页，各页按自己的 key 恢复状态。非线性曲线、预测返回、取消和失锚行为不变。
 - **助理。** 按 [Compose 阶段](https://developer.android.com/develop/ui/compose/performance/phases)把键盘净空留给实际可见的页面，保留草稿和今天页末的 16dp。输入框边光单独绘制，文字和光标不参与背景滤镜；半高抽屉不处理屏下大段不可见的玻璃，Material 的全高锚点和手势区不变。普通文字不用逐键建 Markdown 语法树，含有潜在标记的输入仍走原解析器。
 - **对照方法。** 同一台手机、同一档系统刷新率与合成数据，分别预热玻璃／实色，每档五轮：首张任务卡往返、键盘弹起收回、聚焦后连续输入四行、离线消息面板打开关闭。只比较应用 [FrameTimeline](https://perfetto.dev/docs/data-sources/frametimeline) 的帧，不计模型速度。`P95` 超期大于零的场景仍未达到 M6 目标。
+
+### v0.10.17 卡片返回与消息面板
+
+- **从详情返回原卡。** 打开可见的任务卡或栈帧卡时，[Nav3 Scene](https://developer.android.com/guide/navigation/navigation-3/scenes) 可以保留同一份来源列表；两页交叠时才复用其硬件图层。详情停稳后，列表不绘制，也不接受点击、键盘焦点或读屏操作。低内存、省电或关闭动效时沿用单窗格，不保活列表。返回按 Nav3 原进度与当前行的实测边界落位；行换位则跟随，行被删除或裁切则原地淡出，不播放截图。
+- **对话抽屉。** 保留同一个 [Material 底部抽屉](https://developer.android.com/reference/kotlin/androidx/compose/material3/SheetState)。打开和关闭时，正文按目标可见高度排版一次，再跟随抽屉移动；半高与全高之间的拖动和输入法仍按实际可见高度布局。玻璃沿用原有的实时模糊和折射：有弹窗读取时才记录下层活动窗口，背景更新不重建消息列表，最后一个弹窗关闭即释放。不另建整窗模糊纹理。实色、高对比与隐私页不采样。空会话使用可滚动的原提示；非空会话保留历史消息、跳到最新与提案确认。
+- **分段对照。** `AppearanceBenchmark` 将卡片打开、卡片返回、离线消息面板打开和关闭分成四个 `FrameTimingMetric` 场景；另一次动作、键盘准备和夹具造数不混入当前段。固定 30 个任务、5 门课，玻璃与实色分别五轮。窗口帧耗时不是模型首字延迟；模拟器只能用来定位工作量与回归，不能代替下方固定真机 P95 验收。
 
 ### 历史里程碑验收用例（M1–M6）
 

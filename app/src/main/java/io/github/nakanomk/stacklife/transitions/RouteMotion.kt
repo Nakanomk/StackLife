@@ -59,16 +59,23 @@ internal class RouteLaunch(val modifier: Modifier, private val host: RouteOrigin
 
 internal class RouteOrigins : ContainerOrigins() {
     var chosen: OriginSite? = null
+    var canKeepCardList = false
     private val removed = mutableSetOf<String>()
     private val levels = mutableStateMapOf<String, Int>()
 
     fun push(key: String, from: String) {
         removed.remove(key)
-        capture(key, from, chosen)
+        capture(key, from, chosen, canKeepCardList)
         chosen = null
     }
     fun pop(key: String) { removed.add(key) }
     fun isPopped(key: String) = key in removed
+    fun cardSceneMetadata(key: String): Map<String, Any> =
+        if (links[key]?.keepCardList == true) liveCardMetadata else emptyMap()
+
+    // When a deeper editor returns to a disposed detail there is no live list to keep.
+    // Don't build an invisible Home on the way back from editing.
+    fun hasEntryAbove(depth: Int) = levels.values.any { it > depth }
 
     @Composable
     internal fun Entry(key: String, depth: Int, stackTop: Int, from: String?, animate: Boolean,
@@ -112,7 +119,7 @@ private fun EntryWindow(front: Boolean, animate: Boolean, content: @Composable (
     }
     // The covered entry stays at rest. Reuse its composited glass until its contents
     // invalidate, rather than sampling the same toolbar, list and dock for every frame
-    // of the reveal above. The layer belongs to this window and dies with the overlap.
+    // of the reveal above. The card scene skips drawing this layer altogether at rest.
     val appearance = LocalAppearance.current
     val underlay = if (!front && animate && appearance.glass && glassUnavailableReason(appearance) == null)
         Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen } else Modifier
