@@ -1,5 +1,6 @@
 package io.github.nakanomk.stacklife.about
 
+import android.content.ClipboardManager
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
@@ -68,20 +69,28 @@ class HelpAboutScreenTest {
         val context = ui.activity
         val version = installedVersion(context)
         val file = "Apfloat-MIT.txt"
-        val last = context.assets.open("licenses/$file").bufferedReader().use { it.readLines().joinToString("\n") }
-            .trimEnd().substringAfterLast("\n\n")
+        val original = context.assets.open("licenses/$file").bufferedReader().use { it.readText() }
+        val last = original.replace("\r\n", "\n").trimEnd().substringAfterLast("\n\n")
         assertTrue(last.isNotBlank())
         ui.setContent { StackLifeTheme(Appearance()) { HelpAboutScreen(back = { error("Unexpected exit") }, onGuide = { error("Unexpected guide") }) } }
         ui.waitUntil(8_000) { ui.onAllNodesWithTag("about-version").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithTag("about-version").assertTextEquals(context.getString(R.string.about_version, version.name, version.code))
         ui.onNodeWithTag("about-licenses").performScrollTo().performClick()
-        ui.waitUntil(8_000) { ui.onAllNodesWithTag("license:$file").fetchSemanticsNodes().isNotEmpty() }
-        ui.onNodeWithTag("license:$file").performClick()
-        ui.waitUntil(8_000) { ui.onAllNodesWithText("MIT License").fetchSemanticsNodes().isNotEmpty() }
+        ui.waitUntil(8_000) { ui.onAllNodesWithTag("about-license-list").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithTag("about-license-list").performScrollToNode(hasTestTag("license:$file"))
+        ui.onNodeWithTag("license:$file").assertTextContains(file).performClick()
+        val reader = ui.onNodeWithTag("about-license-reader")
+        ui.waitUntil(8_000) { ui.onAllNodesWithTag("about-license-reader").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithText(context.getString(R.string.about_copy_notice)).performClick()
+        val clipboard = context.getSystemService(ClipboardManager::class.java)
+        ui.waitUntil(8_000) {
+            clipboard.primaryClipDescription?.label == file && clipboard.primaryClip?.getItemAt(0)?.text?.toString() == original
+        }
         val disclaimer = hasText(last, substring = true)
-        ui.onNode(hasScrollAction()).performScrollToNode(disclaimer)
+        reader.performScrollToNode(disclaimer)
         ui.onNode(disclaimer).assertIsDisplayed()
         ui.runOnIdle { context.onBackPressedDispatcher.onBackPressed() }
+        ui.waitUntil(8_000) { ui.onAllNodesWithTag("license:$file").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithTag("license:$file").assertIsDisplayed()
     }
 
@@ -95,7 +104,16 @@ class HelpAboutScreenTest {
             await(tag); ui.onNodeWithTag(tag).performScrollTo().performClick()
             if (tag == "about-build" || tag == "about-licenses") {
                 val origin = if (tag == "about-build") "about-project-license" else "license:StackLife-GPL-3.0-or-later.txt"
-                await(origin); ui.onNodeWithTag(origin).performScrollTo().performClick()
+                val list = if (tag == "about-build") "about-build-list" else "about-license-list"
+                await(list)
+                if (tag == "about-build") {
+                    await("about-running-version")
+                    val installed = installedVersion(ui.activity)
+                    ui.onNodeWithTag("about-running-version").assertTextEquals(
+                        ui.activity.getString(R.string.about_version, installed.name, installed.code))
+                }
+                ui.onNodeWithTag(list).performScrollToNode(hasTestTag(origin))
+                ui.onNodeWithTag(origin).performScrollTo().performClick()
                 ui.waitUntil(8_000) { ui.onAllNodes(hasText("GNU GENERAL PUBLIC LICENSE", substring = true)).fetchSemanticsNodes().isNotEmpty() }
                 back(); await(origin); ui.onNodeWithTag(origin).assertIsDisplayed()
             } else {

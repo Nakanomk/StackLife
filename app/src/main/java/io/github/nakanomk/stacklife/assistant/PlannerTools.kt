@@ -250,6 +250,9 @@ internal class ToolIds(page: AssistantPage) {
         val result = fields.toMutableMap()
         fun merge(old: JsonObject, patch: JsonObject): JsonObject {
             val changed = patch.toMutableMap()
+            // A source change replaces the other source; a crop-only patch preserves both fields.
+            if ("imageId" in patch && "preset" !in patch) changed["preset"] = JsonNull
+            if (patch["preset"]?.jsonPrimitive?.contentOrNull != null && "imageId" !in patch) changed["imageId"] = JsonNull
             patch["imageId"]?.jsonPrimitive?.contentOrNull?.let { token -> changed["imageId"] = JsonPrimitive(
                 requireNotNull(privateImages[token]) { uiText("Use a photo reference from this turn only.", "只能使用本轮披露的图片引用。") }) }
             return JsonObject(old + changed)

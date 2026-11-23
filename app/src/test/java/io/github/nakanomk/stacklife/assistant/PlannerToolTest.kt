@@ -161,6 +161,10 @@ class PlannerToolTest {
         assertEquals(a,changes.expected); assertEquals(a.background.copy(tint=.4f), next.background)
         assertEquals(a.background,next.wallpaper(Destination.TODAY)); assertEquals(WallpaperSpec(),next.wallpaper(Destination.WORKSPACE))
         denied { propose("""{"background":{"imageId":"$id"}}""") }
+        val builtIn = propose("""{"background":{"preset":"ORANGE"}}""").patch.applyTo(a)
+        assertEquals(WallpaperSpec(preset = WallpaperPreset.ORANGE, scale = 2f), builtIn.background)
+        assertEquals(WallpaperSpec(), builtIn.wallpaper(Destination.WORKSPACE))
+        denied { propose("""{"background":{"preset":"unknown-file"}}""") }
     }
     @Test fun importerRequiresExactReviewedDraftAndCannotBeMixedWithCommands() = runBlocking {
         val tools = PlannerTools(Reads(), AssistantPage.CourseDraft("d", "term"), Disclosure())

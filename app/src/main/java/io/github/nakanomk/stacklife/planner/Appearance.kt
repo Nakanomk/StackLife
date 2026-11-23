@@ -16,10 +16,19 @@ import kotlinx.serialization.Serializable
 internal val allDestinations = Destination.entries.toSet()
 @Serializable enum class DayScrollEffect { FLAT, WHEEL }
 internal val privatePhotoId = Regex("[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}")
+@Serializable enum class WallpaperPreset(private val en: String, private val zh: String) {
+    BROWN("Cocoa plaid", "可可棕格"), PINK("Rose plaid", "玫瑰粉格"),
+    BLUE("Mist blue plaid", "雾蓝格"), ORANGE("Maple plaid", "枫叶橙格");
+
+    val label: String get() = uiText(en, zh)
+}
+
 @Serializable data class WallpaperSpec(val imageId: String? = null, val scale: Float = 1f,
-    val offsetX: Float = 0f, val offsetY: Float = 0f, val tint: Float = .28f) {
+    val offsetX: Float = 0f, val offsetY: Float = 0f, val tint: Float = .28f, val preset: WallpaperPreset? = null) {
+    val hasImage: Boolean get() = preset != null || imageId != null
     init {
         require(imageId == null || privatePhotoId.matches(imageId)) { uiText("Invalid private image ID.", "背景图片 ID 无效。") }
+        require(imageId == null || preset == null) { uiText("Choose a built-in wallpaper or a private photo, not both.", "内置背景和自选图片不能同时使用。") }
         require(scale in 1f..3f && offsetX in -1f..1f && offsetY in -1f..1f && tint in 0f..1f) {
             uiText("Wallpaper crop or tint is out of range.", "背景裁切或可读性参数超出范围。")
         }
@@ -47,9 +56,9 @@ data class Appearance(
     val courseTextOutline: Boolean = false,
     val floatingDayTray: Boolean = true,
     val visible: Set<Destination> = allDestinations,
-    val background: WallpaperSpec = WallpaperSpec(),
+    val background: WallpaperSpec = WallpaperSpec(preset = WallpaperPreset.BLUE),
     val pageBackgrounds: Map<Destination, WallpaperSpec> = emptyMap(),
-    val showCourseGrid: Boolean = true,
+    val showCourseGrid: Boolean = false,
     val dayScrollEffect: DayScrollEffect = DayScrollEffect.FLAT,
 ) {
     init {

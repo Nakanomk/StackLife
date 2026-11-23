@@ -24,6 +24,8 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityOptionsCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.nakanomk.stacklife.R
@@ -40,6 +42,7 @@ import io.github.nakanomk.stacklife.planner.Destination.*
 import io.github.nakanomk.stacklife.storage.RoomPlannerApi
 import java.io.File
 import java.nio.file.Files
+import kotlin.math.abs
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -88,6 +91,9 @@ class AppearanceEditorInteractionTest {
 
     private fun revision() = runBlocking { fixture.state().revision }
     private fun saved() = runBlocking { (fixture.api.observe(PlannerQuery.Settings).first() as PolicyView).appearance }
+    private fun seedAppearance(value: Appearance) = runBlocking {
+        fixture.apply(PlannerCommand.EditAppearance(AppearancePatch.Replace(value)))
+    }
     private fun row(text: String) = hasText(text) and hasClickAction()
     private fun await(m: SemanticsMatcher): SemanticsNodeInteraction {
         ui.waitUntil(12_000) { ui.onAllNodes(m).fetchSemanticsNodes().size == 1 }
@@ -205,12 +211,13 @@ class AppearanceEditorInteractionTest {
     }
 
     @Test fun wallpaperShortcutStartsAtTheCardAndRestoresTheUsersScroll() {
+        seedAppearance(saved().copy(background = WallpaperSpec()))
         val picker = Selection()
         val original = saved()
         val before = revision()
         attach(selection = picker); openSettings(); openGroup(ui.activity.getString(R.string.wallpaper_title))
 
-        // Read the entire default card in the initial viewport, without scrolling to its controls.
+        // A stored solid choice should still open the compact card, not a preset or its crop controls.
         val window = await(hasTestTag("appearance-scroll")).getUnclippedBoundsInRoot()
         val card = await(hasTestTag("wallpaper-card")).getUnclippedBoundsInRoot()
         assertTrue("Wallpaper card $card outside editor $window", card.top >= window.top && card.bottom <= window.bottom)
@@ -236,6 +243,98 @@ class AppearanceEditorInteractionTest {
     }
 
     @SdkSuppress(minSdkVersion = 29)
+    @Test fun presetPixelsAndPageOverridesOnlyPersistOnSave() {
+        val picker = Selection()
+        val original = saved()
+        val before = revision()
+        val title = ui.activity.getString(R.string.wallpaper_title)
+        val builtIn = ui.activity.getString(R.string.wallpaper_built_in)
+        val zoom = hasContentDescription(ui.activity.getString(R.string.wallpaper_zoom))
+        fun tile(preset: WallpaperPreset) = hasTestTag("wallpaper-preset:${preset.name}")
+        fun select(preset: WallpaperPreset) {
+            field(tile(preset)).assertTextContains(preset.label).assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).performClick()
+            await(tile(preset) and isSelected())
+            ui.onAllNodes(hasAnyAncestor(hasTestTag("wallpaper-presets")) and isSelected()).assertCountEquals(1)
+        }
+        // PixelCopy samples the composed window. The same crop over different rows varies
+        // by about one 8-bit channel step; compare the spatial pattern, not exact RGBA words.
+        fun sameCrop(a: List<Color>, b: List<Color>): Boolean = a.indices.sumOf { i ->
+            (abs(a[i].red - b[i].red) + abs(a[i].green - b[i].green) + abs(a[i].blue - b[i].blue)).toDouble()
+        } / (a.size * 3) <= 3.0 / 255
+        // Sample the actual cropped image, not the checkmark/label or the solid decoding placeholder.
+        fun pixels(ready: (List<Color>) -> Boolean = { true }): List<Color> {
+            val crop = field(hasTestTag("wallpaper-crop-preview"))
+            var colors = emptyList<Color>()
+            ui.waitUntil(12_000) {
+                val image = crop.captureToImage().toPixelMap()
+                colors = List(25) { i -> image[image.width * (i % 5 + 1) / 6, image.height * (i / 5 + 1) / 6] }
+                colors.distinct().size > 1 && ready(colors)
+            }
+            return colors
+        }
+        attach(selection = picker); openSettings(); openGroup(title)
+        await(tile(WallpaperPreset.BLUE)).assertIsSelected()
+        capture("wallpaper-preset-gallery")
+        val blue = pixels()
+        val designs = mutableMapOf<WallpaperPreset, List<Color>>()
+        for (preset in WallpaperPreset.entries) {
+            select(preset)
+            designs[preset] = pixels { sample -> designs.values.none { sameCrop(it, sample) } &&
+                sameCrop(sample, blue) == (preset == WallpaperPreset.BLUE) }
+        }
+        assertEquals(4, designs.values.distinct().size)
+        await(row("取消")).performClick(); await(row("材质与动态"))
+        assertEquals(original, saved()); assertEquals(before, revision())
+
+        openGroup(title); await(tile(WallpaperPreset.BLUE)).assertIsSelected()
+        select(WallpaperPreset.BROWN)
+        choice("应用范围", WORKSPACE.label)
+        field(row("背景")).assertTextContains("继承全局背景")
+        pixels { sameCrop(it, designs.getValue(WallpaperPreset.BROWN)) }
+        ui.onNode(zoom).assertDoesNotExist()
+        choice("背景", builtIn)
+        await(tile(WallpaperPreset.BROWN)).assertIsSelected()
+        select(WallpaperPreset.ORANGE)
+        field(zoom).performSemanticsAction(SemanticsActions.SetProgress) { it(1.5f) }
+        val orangeCrop = pixels { sample -> designs.values.none { sameCrop(it, sample) } }
+        ui.activityRule.scenario.recreate(); attach(selection = picker)
+        field(tile(WallpaperPreset.ORANGE)).assertIsSelected()
+        pixels { sameCrop(it, orangeCrop) }
+        assertEquals(original, saved()); assertEquals(before, revision())
+        await(row("保存外观") and isEnabled()).performClick(); await(row("材质与动态"))
+        assertEquals(original.copy(background = WallpaperSpec(preset = WallpaperPreset.BROWN),
+            pageBackgrounds = mapOf(WORKSPACE to WallpaperSpec(preset = WallpaperPreset.ORANGE, scale = 1.5f))), saved())
+        assertEquals(before + 1, revision())
+
+        ui.activityRule.scenario.recreate(); attach(selection = picker)
+        openGroup(title); field(tile(WallpaperPreset.BROWN)).assertIsSelected()
+        pixels { sameCrop(it, designs.getValue(WallpaperPreset.BROWN)) }
+        choice("应用范围", WORKSPACE.label)
+        field(tile(WallpaperPreset.ORANGE)).assertIsSelected()
+        pixels { sameCrop(it, orangeCrop) }
+        ui.runOnIdle { assertEquals(0, picker.launches) }
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test fun presetLabelsRemainReachableOnANarrowPhoneAtDoubleFontScale() {
+        ui.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(320.dp, 720.dp)) then DeviceConfigurationOverride.FontScale(2f)) {
+                StackLifeApp(viewModel { WorkspaceViewModel(fixture.api) })
+            }
+        }
+        openSettings()
+        val shortcut = hasTestTag("settings-wallpaper")
+        await(hasScrollToIndexAction()).performScrollToNode(shortcut)
+        await(shortcut).performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        await(hasTestTag("appearance-scroll"))
+        for (preset in WallpaperPreset.entries) {
+            val choice = hasText(preset.label) and hasClickAction() and hasAnyAncestor(hasTestTag("wallpaper-presets"))
+            field(choice).assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).performClick()
+            ui.onNode(choice).assertIsSelected()
+        }
+    }
+
+    @SdkSuppress(minSdkVersion = 29)
     @Test fun privatePhotoDraftSurvivesRecreationAndCancelKeepsOnlyCommittedImages() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val folder = Files.createTempDirectory(context.cacheDir.toPath(), "material-editor-").toFile()
@@ -246,6 +345,7 @@ class AppearanceEditorInteractionTest {
         }
         val api = RoomPlannerApi(fixture.db, imageExists = photos::exists, collectBackgrounds = photos::collect)
         val picker = Selection()
+        seedAppearance(saved().copy(background = WallpaperSpec(), showCourseGrid = true))
         val original = saved(); val initialRevision = revision()
         try {
             attach(api, photos, picker); openSettings(); openGroup("材质与动态")

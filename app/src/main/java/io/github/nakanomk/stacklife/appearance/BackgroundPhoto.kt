@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -50,14 +51,19 @@ private class ProtectedCrop(val rect: Rect, val bands: FloatArray)
 internal fun WallpaperPixels(spec: WallpaperSpec, base: Color, foreground: Color, card: Boolean,
     modifier: Modifier = Modifier, record: Modifier = Modifier, reportFailure: Boolean = true) {
     val id = spec.imageId
+    val preset = spec.preset
     var viewport by remember { mutableStateOf(IntSize.Zero) }
-    val store = LocalBackgroundStore.current
+    val store = if (id != null) LocalBackgroundStore.current else null
+    val resources = LocalResources.current
     val longest = maxOf(viewport.width, viewport.height).coerceAtMost(PHOTO_EDGE)
     val edge = if (longest < 2) longest else Integer.highestOneBit(longest - 1) * 2
     // Keep the same decode when only the mask/focal point or the sub-bucket viewport changes.
-    val load = key(id, edge, store) {
+    val load = key(id, preset, edge, store, resources) {
         produceState<PhotoLoad>(PhotoLoad.Loading) {
-            if (id != null && edge > 0) value = try { PhotoLoad.Ready(store.bitmap(id, edge)) }
+            if (edge > 0 && spec.hasImage) value = try {
+                PhotoLoad.Ready(if (preset != null) presetBitmap(resources, preset, edge)
+                    else checkNotNull(store).bitmap(checkNotNull(id), edge))
+            }
             catch (e: CancellationException) { throw e }
             catch (_: Exception) { PhotoLoad.Failed }
         }

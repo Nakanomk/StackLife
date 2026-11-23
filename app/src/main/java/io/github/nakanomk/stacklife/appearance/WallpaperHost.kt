@@ -35,7 +35,7 @@ private val LocalWallpaperSpec = compositionLocalOf<WallpaperSpec?> { null }
 @Composable
 internal fun WallpaperHost(spec: WallpaperSpec, drawBehindContent: Boolean = true, content: @Composable () -> Unit) {
     val inherited = !drawBehindContent && LocalWallpaperSpec.current == spec
-    val visible = !inherited && spec.imageId != null && !wallpaperUsesSolidSurface()
+    val visible = !inherited && spec.hasImage && !wallpaperUsesSolidSurface()
     val layer = if (visible) rememberGraphicsLayer() else null
     val base = MaterialTheme.colorScheme.surface
     val recording = remember(layer, base) { layer?.let { PlannerBackdrop(it, base, null, null) } }

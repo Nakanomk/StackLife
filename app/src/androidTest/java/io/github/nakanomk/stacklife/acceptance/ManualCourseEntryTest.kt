@@ -190,14 +190,15 @@ class ManualCourseEntryTest {
         ui.onNodeWithText("关闭").performClick()
     }
 
-    @Test fun gridSwitchRemovesBothRulesFromPreviewAndRealWeekWithoutMovingTheCourse() {
+    @Test fun gridSwitchAddsBothRulesToPreviewAndRealWeekWithoutMovingTheCourse() {
         val term = TermSpec("秋季实验", LocalDate.of(2026, 9, 7), 1, BellSchedule.SUMMER)
         val optics = term.meeting(1, 1, "光学实验", "A101", 1, 3)
         runBlocking {
             val draft = store.api.stageCourseImport(term, listOf(optics,
                 term.meeting(1, 4, "设计", "B202", 2, 3), term.meeting(1, 5, "研讨", "C301", 3, 4)))
             try { store.apply(PlannerCommand.CourseImport(draft), PlannerCommand.EditAppearance(
-                AppearancePatch.Replace(Appearance(start = Destination.COURSES, theme = ThemeMode.LIGHT, palette = PaletteMode.SEED)))) }
+                AppearancePatch.Replace(Appearance(start = Destination.COURSES, theme = ThemeMode.LIGHT, palette = PaletteMode.SEED,
+                    background = WallpaperSpec())))) }
             finally { store.api.discardCourseImport(draft) }
         }
         ui.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
@@ -243,7 +244,7 @@ class ManualCourseEntryTest {
             ui.onNodeWithText(ui.activity.getString(R.string.courses_close)).performClick()
             ui.waitUntil(10_000) { ui.onAllNodesWithTag("course-detail").fetchSemanticsNodes().isEmpty() }
         }
-        val on = probe(preview = false, lines = true)
+        val off = probe(preview = false, lines = false)
         openAtSamePosition()
         ui.onNodeWithContentDescription("设置").performClick()
         ui.onNode(hasText(ui.activity.getString(R.string.ui_material_motion)) and hasClickAction()).performClick()
@@ -251,17 +252,17 @@ class ManualCourseEntryTest {
         val toggle = hasText(ui.activity.getString(R.string.appearance_grid_lines)) and hasClickAction()
         val preview = hasTestTag("course-timetable-preview")
         list.performScrollToNode(preview); ui.onNode(preview).performScrollTo()
-        probe(preview = true, lines = true)
-        list.performScrollToNode(toggle)
-        ui.onNode(toggle).performScrollTo().assertIsOn().performTouchInput { click() }
-        ui.onNode(toggle).assertIsOff()
-        ui.onNode(preview).performScrollTo()
         probe(preview = true, lines = false)
+        list.performScrollToNode(toggle)
+        ui.onNode(toggle).performScrollTo().assertIsOff().performTouchInput { click() }
+        ui.onNode(toggle).assertIsOn()
+        ui.onNode(preview).performScrollTo()
+        probe(preview = true, lines = true)
         ui.onNodeWithText(ui.activity.getString(R.string.ui_save_appearance)).performClick()
         ui.waitUntil(10_000) { ui.onAllNodesWithTag("appearance-scroll").fetchSemanticsNodes().isEmpty() }
         ui.onNodeWithContentDescription("返回").performClick()
         await("week-grid")
-        val off = probe(preview = false, lines = false)
+        val on = probe(preview = false, lines = true)
         val rgb = listOf(off ushr 16 and 255, off ushr 8 and 255, off and 255)
         assertTrue("Course lost its pigment with grid disabled: #${off.toUInt().toString(16)}",
             rgb.max() - rgb.min() > 24 && delta(on, off) < 16)

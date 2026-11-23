@@ -6,6 +6,7 @@ import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.planner.NavStyle
 import io.github.nakanomk.stacklife.planner.PaletteMode
 import io.github.nakanomk.stacklife.planner.ThemeMode
+import io.github.nakanomk.stacklife.planner.WallpaperPreset
 import kotlinx.serialization.json.*
 
 // The same shapes advertised to the service check its untrusted arguments locally.
@@ -90,7 +91,8 @@ private class Nullable(private val inner: Shape) : Shape() {
     override val schema = buildJsonObject { put("anyOf", JsonArray(listOf(inner.schema, buildJsonObject { put("type", "null") }))) }
     override fun check(value: JsonElement, field: String) { if (value != JsonNull) inner.check(value, field) }
 }
-private val wallpaperShape = Record("imageId?" to Nullable(text), "scale?" to number, "offsetX?" to number, "offsetY?" to number, "tint?" to number)
+private val wallpaperShape = Record("imageId?" to Nullable(text), "preset?" to Nullable(choices(*WallpaperPreset.entries.map { it.name }.toTypedArray())),
+    "scale?" to number, "offsetX?" to number, "offsetY?" to number, "tint?" to number)
 private fun prefField(key: String): Shape = when (key) {
     "theme" -> choices(*ThemeMode.entries.map { it.name }.toTypedArray())
     "palette" -> choices(*PaletteMode.entries.map { it.name }.toTypedArray())

@@ -79,7 +79,7 @@ class CourseTimelineGestureTest {
         val term = TermSpec("Studio-7", LocalDate.of(2026, 11, 16), 1, BellSchedule.SUMMER)
         val meeting = term.meeting(1, 1, "物理", "A", 1, 4)
         val week = CourseWeek(term, 1, listOf(ScheduledCourse(term.id, HUST_SOURCE, meeting)), mapOf(meeting.title to 0))
-        val appearance = mutableStateOf(Appearance(theme = ThemeMode.LIGHT, palette = PaletteMode.SEED))
+        val appearance = mutableStateOf(Appearance(theme = ThemeMode.LIGHT, palette = PaletteMode.SEED, showCourseGrid = true))
         var available = false
         ui.setContent {
             StackLifeTheme(appearance.value) {
@@ -152,7 +152,7 @@ class CourseTimelineGestureTest {
         val classes = listOf(tile(1, "L", 1, 12), tile(2, "I", 2, 7), tile(2, "J", 2, 7),
             tile(3, "T", 2, 5), tile(3, "U", 1, 1), tile(3, "V", 6, 6))
         val week = CourseWeek(term, 1, classes, classes.mapIndexed { i, c -> c.meeting.title to i }.toMap())
-        val appearance = Appearance(theme = ThemeMode.LIGHT, palette = PaletteMode.SEED)
+        val appearance = Appearance(theme = ThemeMode.LIGHT, palette = PaletteMode.SEED, showCourseGrid = true)
         var available = false
         val opened = mutableListOf<ScheduledCourse>()
         ui.setContent {

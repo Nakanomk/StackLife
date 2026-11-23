@@ -38,6 +38,24 @@ class AppearancePersistenceTest {
         assertEquals(optedOut, decodeAppearance(encodeAppearance(optedOut)))
     }
 
+    @Test fun newWallpaperDefaultsOnlyFillMissingPreferencesAndNeverBecomePrivateFileReferences() {
+        val first = decodeAppearance("""{"compact":true}""")
+        assertEquals(WallpaperPreset.BLUE, first.wallpaper(Destination.COURSES).preset)
+        assertFalse(first.showCourseGrid)
+        val id = "dd957e19-e907-4e7c-a513-707fb834162b"
+        val old = decodeAppearance("""{"background":{"imageId":"$id","scale":2.0},"pageBackgrounds":{"COURSES":{}},"showCourseGrid":true,"compact":true}""")
+        assertEquals(WallpaperSpec(), old.wallpaper(Destination.COURSES))
+        assertEquals(WallpaperSpec(imageId = id, scale = 2f), old.wallpaper(Destination.WORKSPACE))
+        assertTrue(old.showCourseGrid)
+        assertEquals(WallpaperSpec(), decodeAppearance("""{"background":{"imageId":null}}""").wallpaper(Destination.COURSES))
+        val perPage = old.copy(pageBackgrounds = mapOf(Destination.COURSES to WallpaperSpec(preset = WallpaperPreset.PINK, offsetX = .5f)))
+        assertEquals(perPage, decodeAppearance(encodeAppearance(perPage)))
+        assertEquals(setOf(id), perPage.backgroundIds())
+        val reset = AppearanceFields(AppearanceGroup.MATERIAL, null).applyTo(perPage)
+        assertEquals(first, reset)
+        assertTrue(reset.backgroundIds().isEmpty())
+    }
+
     @Test fun resettingQueuePresentationRestoresTheFloatingTrayAndKeepsMaterialChoices() {
         val pinned = AppearanceFields(AppearanceGroup.LAYOUT, buildJsonObject { put("floatingDayTray", JsonPrimitive(false)) })
             .applyTo(decodeAppearance("""{"glass":false}"""))

@@ -62,8 +62,11 @@ internal fun appearanceDifferences(before: Appearance, after: Appearance): List<
 internal fun appearanceLabel(value: JsonElement): String = when (value) {
     is JsonObject -> if (value.isEmpty()) uiText("Inherit the global background", "继承全局背景")
         else if ("scale" in value || "imageId" in value) {
-            if (value["imageId"] == null || value["imageId"] == JsonNull) uiText("Theme color", "主题纯色")
-            else uiText("Photo", "图片") + " · " + uiText("Scale", "缩放") + " " + value["scale"] + " · " + uiText("Offset", "偏移") + " (" + value["offsetX"] + ", " + value["offsetY"] + ") · " + uiText("Tint", "遮罩") + " " + value["tint"]
+            val preset = value["preset"]?.jsonPrimitive?.contentOrNull
+            val source = if (preset != null) WallpaperPreset.entries.firstOrNull { it.name == preset }?.label
+                else value["imageId"]?.jsonPrimitive?.contentOrNull?.let { uiText("Photo", "图片") }
+            if (source == null) uiText("Theme color", "主题纯色")
+            else source + " · " + uiText("Scale", "缩放") + " " + value["scale"] + " · " + uiText("Offset", "偏移") + " (" + value["offsetX"] + ", " + value["offsetY"] + ") · " + uiText("Tint", "遮罩") + " " + value["tint"]
         } else value.entries.joinToString("\n") { (key, spec) -> (Destination.entries.firstOrNull { it.name == key }?.label ?: key) + ": " + appearanceLabel(spec) }
     is JsonArray -> value.joinToString(" → ") { appearanceLabel(it) }
     else -> when (val s = value.jsonPrimitive.content) {

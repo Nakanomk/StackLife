@@ -5,6 +5,7 @@
     <string name="wallpaper_source">Background</string>
     <string name="wallpaper_inherit">Use global background</string>
     <string name="wallpaper_solid">Theme color</string>
+    <string name="wallpaper_built_in">Built-in wallpapers</string>
     <string name="wallpaper_photo">Private image</string>
     <string name="wallpaper_replace">Choose another image</string>
     <string name="wallpaper_preparing">Preparing image…</string>

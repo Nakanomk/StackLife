@@ -6,6 +6,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -13,15 +15,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.images.PhotoProblem
 import io.github.nakanomk.stacklife.planner.Appearance
 import io.github.nakanomk.stacklife.planner.Destination
+import io.github.nakanomk.stacklife.planner.WallpaperPreset
 import io.github.nakanomk.stacklife.planner.WallpaperSpec
 import io.github.nakanomk.stacklife.workspace.*
 import kotlinx.coroutines.CancellationException
@@ -29,8 +36,11 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 private enum class WallpaperSource(@StringRes val label: Int) {
-    INHERIT(R.string.wallpaper_inherit), SOLID(R.string.wallpaper_solid), IMAGE(R.string.wallpaper_photo)
+    INHERIT(R.string.wallpaper_inherit), SOLID(R.string.wallpaper_solid),
+    PRESET(R.string.wallpaper_built_in), PHOTO(R.string.wallpaper_photo)
 }
+
+private val globalWallpaperSources = WallpaperSource.entries.filterNot { it == WallpaperSource.INHERIT }
 
 internal fun Appearance.replacingWallpaper(page: Destination?, spec: WallpaperSpec?) = if (page == null)
     copy(background = requireNotNull(spec))
@@ -84,24 +94,38 @@ internal fun WallpaperControls(value: Appearance, change: (Appearance) -> Unit, 
     chooseTarget: (Destination?) -> Unit, picker: WallpaperPicker) {
     val own = if (target == null) value.background else value.pageBackgrounds[target]
     val spec = own ?: value.background
-    val mode = if (own == null) WallpaperSource.INHERIT else if (own.imageId == null) WallpaperSource.SOLID else WallpaperSource.IMAGE
+    val mode = when {
+        own == null -> WallpaperSource.INHERIT
+        own.preset != null -> WallpaperSource.PRESET
+        own.imageId != null -> WallpaperSource.PHOTO
+        else -> WallpaperSource.SOLID
+    }
     FormGroup(Modifier.testTag("wallpaper-card"), frosted = true) {
         SectionTitle(stringResource(R.string.wallpaper_title))
         Choice(stringResource(R.string.wallpaper_target), listOf(null) + Destination.entries, target,
             { it?.label ?: stringResource(R.string.wallpaper_global) }, change = chooseTarget)
         if (picker.preparing) Hint(stringResource(R.string.wallpaper_preparing)) else {
-            Choice(stringResource(R.string.wallpaper_source), if (target == null) listOf(WallpaperSource.SOLID, WallpaperSource.IMAGE) else WallpaperSource.entries,
-                mode, { stringResource(it.label) }) {
+            Choice(stringResource(R.string.wallpaper_source), if (target == null) globalWallpaperSources else WallpaperSource.entries,
+                mode, { stringResource(it.label) }, modifier = Modifier.testTag("wallpaper-source")) {
                 when (it) {
                     WallpaperSource.INHERIT -> change(value.replacingWallpaper(target, null))
                     WallpaperSource.SOLID -> change(value.replacingWallpaper(target, WallpaperSpec()))
-                    WallpaperSource.IMAGE -> if (mode != WallpaperSource.IMAGE) picker.pick(target)
+                    WallpaperSource.PRESET -> if (mode != WallpaperSource.PRESET) {
+                        change(value.replacingWallpaper(target, if (spec.preset != null) spec else WallpaperSpec(preset = WallpaperPreset.BLUE)))
+                    }
+                    WallpaperSource.PHOTO -> if (mode != WallpaperSource.PHOTO) picker.pick(target)
                 }
             }
-            if (mode == WallpaperSource.IMAGE) PreferenceRow(stringResource(R.string.wallpaper_replace), onClick = { picker.pick(target) })
+            if (mode == WallpaperSource.PRESET) {
+                WallpaperPresetChoices(spec.preset) { preset ->
+                    if (preset != spec.preset) change(value.replacingWallpaper(target, WallpaperSpec(preset = preset)))
+                }
+            } else if (mode == WallpaperSource.PHOTO) {
+                PreferenceRow(stringResource(R.string.wallpaper_replace), onClick = { picker.pick(target) })
+            }
         }
         if (picker.target == target) picker.failure?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
-        if (spec.imageId != null) {
+        if (spec.hasImage) {
             if (wallpaperUsesSolidSurface()) Hint(stringResource(R.string.wallpaper_solid_accessibility))
             else {
                 val window = LocalWindowInfo.current.containerSize
@@ -113,7 +137,7 @@ internal fun WallpaperControls(value: Appearance, change: (Appearance) -> Unit, 
                 }
             }
         }
-        if (mode == WallpaperSource.IMAGE && !picker.preparing) {
+        if (own?.hasImage == true && !picker.preparing) {
             fun update(next: WallpaperSpec) = change(value.replacingWallpaper(target, next))
             WallpaperSlider(R.string.wallpaper_zoom, spec.scale, 1f..3f) { update(spec.copy(scale = it)) }
             WallpaperSlider(R.string.wallpaper_horizontal, spec.offsetX, -1f..1f) { update(spec.copy(offsetX = it)) }
@@ -121,6 +145,41 @@ internal fun WallpaperControls(value: Appearance, change: (Appearance) -> Unit, 
             WallpaperSlider(R.string.wallpaper_protection, spec.tint, 0f..1f) { update(spec.copy(tint = it)) }
             TextButton(onClick = { update(spec.copy(scale = 1f, offsetX = 0f, offsetY = 0f)) },
                 enabled = spec.scale != 1f || spec.offsetX != 0f || spec.offsetY != 0f) { Text(stringResource(R.string.wallpaper_reset_crop)) }
+        }
+    }
+}
+
+// The whole labeled thumbnail is the radio target, just as the whole row is in Choice.
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun WallpaperPresetChoices(selected: WallpaperPreset?, choose: (WallpaperPreset) -> Unit) {
+    val gap = 8.dp
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val minimumWidth = 64.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
+        val columns = when {
+            maxWidth >= minimumWidth * 4 + gap * 3 -> 4
+            maxWidth >= minimumWidth * 2 + gap -> 2
+            else -> 1
+        }
+        FlowRow(Modifier.fillMaxWidth().selectableGroup().testTag("wallpaper-presets"), maxItemsInEachRow = columns,
+            horizontalArrangement = Arrangement.spacedBy(gap), verticalArrangement = Arrangement.spacedBy(gap)) {
+            for (preset in WallpaperPreset.entries) {
+                val active = preset == selected
+                Column(Modifier.weight(1f).clip(MaterialTheme.shapes.small)
+                    .testTag("wallpaper-preset:${preset.name}")
+                    .selectable(active, role = Role.RadioButton) { choose(preset) }
+                    .heightIn(min = 48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.fillMaxWidth().height(64.dp).clip(MaterialTheme.shapes.small).clearAndSetSemantics {}) {
+                        WallpaperThumbnail(preset, Modifier.matchParentSize())
+                        if (active) Surface(Modifier.align(Alignment.TopEnd).padding(4.dp),
+                            shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surface) {
+                            RadioButton(selected = true, onClick = null, modifier = Modifier.padding(2.dp))
+                        }
+                    }
+                    Text(preset.label, Modifier.padding(vertical = 4.dp), textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.labelMedium)
+                }
+            }
         }
     }
 }

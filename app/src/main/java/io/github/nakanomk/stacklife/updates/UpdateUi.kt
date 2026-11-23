@@ -37,14 +37,21 @@ internal fun UpdateSettings() {
     val updates = updates() ?: return
     val status by updates.status.collectAsStateWithLifecycle()
     FormGroup(frosted = true) {
-        SectionTitle(stringResource(R.string.update_title))
+        Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            SectionTitle(stringResource(R.string.update_title))
+            Text(statusLabel(status), style = MaterialTheme.typography.bodyMedium,
+                color = if (status.stage == UpdateStage.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         SwitchRow(stringResource(R.string.update_auto_check), updates.autoCheck, help = stringResource(R.string.update_check_help)) {
             updates.setChecking(!updates.autoCheck)
         }
         SwitchRow(stringResource(R.string.update_auto_install), updates.autoInstall, enabled = updates.autoCheck,
             help = stringResource(R.string.update_install_help)) { updates.setInstalling(!updates.autoInstall) }
-        PreferenceRow(stringResource(R.string.update_check_now), statusLabel(status), Modifier.testTag("update-check")) { updates.checkRelease() }
-        if (status.release != null) TextButton(onClick = updates::show) { Text(stringResource(R.string.update_details)) }
+        HorizontalDivider()
+        PreferenceRow(stringResource(R.string.update_check_now), modifier = Modifier.testTag("update-check"),
+            labelMaxLines = Int.MAX_VALUE) { updates.checkRelease() }
+        if (status.release != null) PreferenceRow(stringResource(R.string.update_details),
+            labelMaxLines = Int.MAX_VALUE, onClick = updates::show)
     }
 }
 
