@@ -71,7 +71,9 @@ internal fun SemanticsNodeInteractionsProvider.assertFloatingAxisMeetsDock() {
         minOf(top, midnight.positionInRoot.y + midnight.size.height), rail.bottom, 1f)
     assertEquals(top, box("day-axis").bottom, 1f)
     assertEquals(top, box("day-drop-area").bottom, 1f)
-    assertFalse("Opaque queue must not obscure the rail", rail.overlaps(box("day-tray-container")))
+    onAllNodesWithTag("day-tray-container").fetchSemanticsNodes().forEach {
+        assertFalse("Opaque queue must not obscure the rail", rail.overlaps(it.boundsInRoot))
+    }
 }
 
 internal fun once(id: String, start: OffsetDateTime, minutes: Int): PlannerCommand.SetSchedule = PlannerCommand.SetSchedule(id,
@@ -377,7 +379,8 @@ class DayTimelineTest {
                 scroll.value(), scroll.maxValue(), ui.dayTick("23:45").getUnclippedBoundsInRoot().top)
         }
         val original = geometry()
-        val panel = bounds("day-tray-container")
+        toggle.assertDoesNotExist()
+        ui.onNodeWithTag("add-task").assertDoesNotExist()
         fun assertPaint() {
             ui.assertFloatingAxisMeetsDock()
             val rail = bounds("day-rail")
@@ -400,18 +403,16 @@ class DayTimelineTest {
             assertEquals("There must be no scroll range beyond this boundary", scroll.maxValue(), scroll.value(), 0f)
         }
         assertPaint()
-        ui.mainClock.autoAdvance = false
-        try {
-            toggle.performClick(); ui.mainClock.advanceTimeBy(144)
-            assertNotEquals(panel, bounds("day-tray-container")); assertEquals(original, geometry())
-            ui.mainClock.advanceTimeBy(640)
-            toggle.assert(hasStateDescription("已收起")); ui.onNodeWithTag("day-tray").assertDoesNotExist()
-            assertEquals(original, geometry())
-            toggle.performClick(); ui.mainClock.advanceTimeBy(144)
-            assertEquals(original, geometry())
-            ui.mainClock.advanceTimeBy(640)
-        } finally { ui.mainClock.autoAdvance = true }
-        assertEquals(original, geometry()); assertEquals(panel, bounds("day-tray-container"))
+        axis.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, -180f) }
+        toggle.assertIsDisplayed().assert(hasStateDescription("已展开")).performClick()
+        toggle.assert(hasStateDescription("已收起"))
+        axis.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
+        toggle.assertDoesNotExist(); ui.onNodeWithTag("add-task").assertDoesNotExist()
+        assertEquals(original, geometry())
+        axis.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, -180f) }
+        toggle.assertIsDisplayed().assert(hasStateDescription("已收起")).performClick()
+        axis.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
+        assertEquals(original, geometry())
         assertPaint()
     }
 
@@ -444,20 +445,18 @@ class DayTimelineTest {
         assertEquals(end.bottom, rail.bottom, 1f)
         assertEquals(with(ui.density) { 16.dp.toPx() }, bounds("assistant-composer").top - end.bottom, 1f)
         assertEquals("The 23:30–00:00 task ends at the same boundary", end.bottom, bounds("block:${before.occurrences.single().taskId}").bottom, 1f)
-        val source = bounds("tray:${before.tray.single().id}").center
-        val dock = bounds("assistant-composer").center
-        for (cancelGesture in listOf(true, false)) {
-            pickup(source, dock)
-            ui.onNodeWithTag("drop-preview").assertDoesNotExist()
-            ui.onRoot().performTouchInput { if (cancelGesture) cancel() else up() }
-            assertEquals(before, readDay())
-        }
+        ui.onNodeWithTag("day-tray-toggle").assertDoesNotExist()
+        ui.onNodeWithTag("add-task").assertDoesNotExist()
+        val complete = ui.activity.getString(R.string.agenda_complete, "Late class")
+        ui.onNodeWithContentDescription(complete).performTouchInput { click() }
+        val finished = readDay { it.occurrences.single().completed }
+        assertEquals(before.tray, finished.tray)
         selectDayView("events")
         assertEquals(bounds("assistant-composer").top, bounds("day-rail").bottom, 1f)
         selectDayView("time")
         assertEquals(end, ui.dayMark("time-day-end").fetchSemanticsNode().boundsInRoot)
         assertEquals(rail, bounds("day-rail"))
-        ui.onNodeWithTag("day-tray-toggle").performClick()
+        ui.onNodeWithTag("day-tray-toggle").assertDoesNotExist()
         ui.onNodeWithTag("block:${before.occurrences.single().taskId}").performTouchInput { click() }
         await(hasTestTag("slot:time")).assertIsDisplayed()
     }
@@ -916,6 +915,10 @@ class DayTimelineTest {
         for (mode in listOf("time", "events")) {
             if (mode == "events") { appearance(flat); selectDayView(mode) }
             val card = await(hasTestTag("block:${point.taskId}")).assertIsDisplayed()
+            val viewport = ui.onNodeWithTag(if (mode == "time") "day-axis" else "day-events")
+            val top = if (mode == "time") ui.onNodeWithTag("day-drop-area") else viewport
+            val shift = card.fetchSemanticsNode().boundsInRoot.center.y - top.fetchSemanticsNode().boundsInRoot.top - with(ui.density) { 28.dp.toPx() }
+            viewport.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, shift) }
             val region = card.fetchSemanticsNode().boundsInRoot
             val baseline = painted(region)
             val rail = ui.onNodeWithTag("day-rail").fetchSemanticsNode().boundsInRoot
@@ -973,7 +976,11 @@ class DayTimelineTest {
         ui.onNodeWithTag("day-tray-toggle").performClick()
         val (point, long) = readDay().occurrences
         fun box(tag: String) = await(hasTestTag(tag)).fetchSemanticsNode().boundsInRoot
-        fun y(t: String) = ui.dayTick(t).fetchSemanticsNode().boundsInRoot.top
+        fun y(t: String) = ui.dayTick(t).fetchSemanticsNode().layoutInfo.coordinates.localToRoot(Offset.Zero).y
+        fun proposed(time: String) {
+            ui.onNode(hasAnyAncestor(hasTestTag("drop-preview")) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Text),
+                useUnmergedTree = true).assertTextContains(time, substring = true)
+        }
         fun move(grab: Offset, delta: Float) {
             pickup(grab, grab + Offset(0f, delta))
             await(hasTestTag("drop-preview")).assertIsDisplayed()
@@ -989,12 +996,16 @@ class DayTimelineTest {
         val expected = painted(railSample(firstMid.y))
         assertTrue("Flat reference must contain the painted rail", expected.distinct().size > 1)
         centerTick("00:00")
+        // Sample inside the wheel band, outside the separately tested edge-autoscroll band.
+        val deltaToEdge = box("block:${point.taskId}").center.y - viewport.top - with(ui.density) { 42.dp.toPx() }
+        ui.onNodeWithTag("day-axis").performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, deltaToEdge) }
         val pointRegion = box("block:${point.taskId}")
         val before = painted(pointRegion)
         appearance(wheel)
         ui.waitUntil(10_000) { val after = painted(pointRegion); before.indices.count { before[it] != after[it] } > 100 }
         val pointGrab = box("block:${point.taskId}").center
         move(pointGrab, y("01:00") - y("00:30"))
+        proposed("01:00")
         assertEquals(point, readDay().occurrences.first())
         ui.onRoot().performTouchInput { up() }
         val movedPoint = readDay { it.occurrences.first().startMillis != point.startMillis }.occurrences.first()
@@ -1006,6 +1017,7 @@ class DayTimelineTest {
             expected, painted(railSample(mid.y)))
         val grab = Offset(box("block:${long.taskId}").center.x, mid.y)
         move(grab, y("08:00") - y("07:30"))
+        proposed("02:30–23:30")
         assertEquals(long.startMillis, readDay().occurrences.last().startMillis)
         ui.onRoot().performTouchInput { up() }
         val moved = readDay { it.occurrences.last().startMillis != long.startMillis }.occurrences.last()
@@ -1018,6 +1030,7 @@ class DayTimelineTest {
         val earlier = y("23:15") - y("23:30")
         ui.onRoot().performTouchInput { down(handle); moveTo(handle + Offset(0f, earlier)) }
         await(hasTestTag("drop-preview")).assertIsDisplayed()
+        proposed("02:30–23:15")
         ui.onRoot().performTouchInput { up() }
         val resized = readDay { it.occurrences.last().endMillis != moved.endMillis }.occurrences.last()
         assertEquals(moved.startMillis, resized.startMillis); assertEquals(at(23, 15).toInstant().toEpochMilli(), resized.endMillis)

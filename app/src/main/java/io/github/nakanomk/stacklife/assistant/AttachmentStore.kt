@@ -76,7 +76,7 @@ internal class AttachmentStore(context: Context, private val retainedIds: suspen
     suspend fun prepare(uri: Uri): ChatImage = publish { pending, id ->
         val source = File(root, ".input-$id")
         try {
-            val image = prepareStaticPhoto(app.contentResolver, uri, source, pending)
+            val image = prepareStaticPhoto(app.contentResolver, uri, source, pending, PhotoSourcePolicy.STRICT_STATIC)
             ChatImage(id, image.mime, image.width, image.height, image.bytes)
         } finally { source.unlink() }
     }

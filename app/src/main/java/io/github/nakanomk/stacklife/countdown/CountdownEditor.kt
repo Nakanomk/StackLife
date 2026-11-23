@@ -11,7 +11,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -21,11 +20,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.ReadState
-import io.github.nakanomk.stacklife.StackLifeApplication
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.appearance.DateWheelField
+import io.github.nakanomk.stacklife.appearance.LocalBackgroundStore
 import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 import io.github.nakanomk.stacklife.assistant.AssistantPage
+import io.github.nakanomk.stacklife.images.PhotoProblem
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.today.deviceDay
 import io.github.nakanomk.stacklife.workspace.*
@@ -68,13 +68,14 @@ private fun CountdownForm(model: WorkspaceViewModel, id: String?, saved: Countdo
     var applied by rememberSaveable { mutableStateOf(false) }
     var closing by rememberSaveable { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
-    var photoError by rememberSaveable { mutableStateOf(false) }
+    var photoError by rememberSaveable { mutableStateOf<String?>(null) }
+    val photoFailure = stringResource(R.string.countdown_photo_error)
     var cleanupError by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     val receipt = rememberSubmission(model, onError = { error = it }) { outcome ->
         if (outcome == SaveOutcome.APPLIED) { applied = true; closing = true }
     }
-    val store = (LocalContext.current.applicationContext as StackLifeApplication).backgrounds
+    val store = LocalBackgroundStore.current
     val scope = rememberCoroutineScope()
     val latestBack by rememberUpdatedState(back)
     LaunchedEffect(closing) {
@@ -93,7 +94,7 @@ private fun CountdownForm(model: WorkspaceViewModel, id: String?, saved: Countdo
     BackHandler(onBack = leave)
     val picker = rememberLauncherForActivityResult(PickVisualMedia()) { uri ->
         if (uri != null && editable) {
-            importing = true; photoError = false
+            importing = true; photoError = null
             scope.launch {
                 var incoming: String? = null
                 try {
@@ -104,7 +105,8 @@ private fun CountdownForm(model: WorkspaceViewModel, id: String?, saved: Countdo
                     owned?.let { store.release(it) }
                     image = incoming; owned = incoming; incoming = null
                 } catch (e: CancellationException) { throw e }
-                catch (_: Exception) { photoError = true }
+                catch (problem: PhotoProblem) { photoError = problem.message ?: photoFailure }
+                catch (_: Exception) { photoError = photoFailure }
                 finally {
                     withContext(NonCancellable) { incoming?.let { store.release(it) } }
                     importing = false
@@ -149,7 +151,7 @@ private fun CountdownForm(model: WorkspaceViewModel, id: String?, saved: Countdo
             FormGroup {
                 PreferenceRow(stringResource(if (importing) R.string.countdown_preparing else R.string.countdown_choose_photo),
                     enabled = editable) { picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) }
-                if (photoError) Text(stringResource(R.string.countdown_photo_error), color = MaterialTheme.colorScheme.error)
+                photoError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 if (image != null) {
                     val dimming = stringResource(R.string.countdown_dimming)
                     Text(dimming, style = MaterialTheme.typography.bodyLarge)

@@ -18,9 +18,9 @@ import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 
 @Composable
 internal fun <T> Choice(title: String, options: List<T>, selected: T, label: @Composable (T) -> String,
-    modifier: Modifier = Modifier, leadingIcon: Int? = null, change: (T) -> Unit) {
+    modifier: Modifier = Modifier, leadingIcon: Int? = null, help: String? = null, change: (T) -> Unit) {
     var open by rememberSaveable { mutableStateOf(false) }
-    PreferenceRow(title, label(selected), modifier, leadingIcon = leadingIcon) { open = true }
+    PreferenceRow(title, label(selected), modifier, leadingIcon = leadingIcon, help = help) { open = true }
     if (open) PlannerAlertDialog(onDismissRequest = { open = false }, title = { Text(title) }, text = {
         Column(Modifier.selectableGroup().verticalScroll(rememberScrollState())) {
             for (option in options) Row(Modifier.fillMaxWidth()

@@ -126,8 +126,9 @@ internal object HustCourseImporter : SchoolImportProvider {
     override val label = R.string.courses_hub_source
     override val help = R.string.courses_hub_help
     override val calendar: CourseCalendar = HustCalendar
-    @Composable override fun Import(model: WorkspaceViewModel, onBack: () -> Unit, onImported: (String) -> Unit) =
-        HustImportScreen(model, onBack, onImported)
+    @Composable override fun Import(model: WorkspaceViewModel, entry: ImportEntry, onBack: () -> Unit, onCancel: () -> Unit,
+        onFileEntry: () -> Unit, onImported: (String) -> Unit) =
+        HustImportScreen(model, entry, onBack, onCancel, onFileEntry, onImported)
 
     fun parse(rows: JsonArray, term: TermSpec): ImportDraft {
         term.problem()?.let { throw IllegalArgumentException(it) }

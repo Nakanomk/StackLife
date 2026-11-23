@@ -4,6 +4,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -32,8 +34,7 @@ internal fun DiagnosticsContent(padding: PaddingValues) {
     val eventCount by AppDiagnostics.journal.total.collectAsStateWithLifecycle()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = padding, verticalArrangement = listSpacing) {
         item { FormGroup {
-            SectionTitle(stringResource(R.string.about_frames))
-            Hint(stringResource(R.string.about_frames_intro))
+            SettingLabel(stringResource(R.string.about_frames), stringResource(R.string.about_frames_intro))
             val finished = capture as? CaptureState.Finished
             when (capture) {
                 CaptureState.Idle -> Text(stringResource(R.string.about_no_capture))
@@ -56,26 +57,30 @@ internal fun DiagnosticsContent(padding: PaddingValues) {
             ActionPill(stringResource(if (recording) R.string.about_stop else R.string.about_start),
                 onClick = { if (recording) AppDiagnostics.stop() else AppDiagnostics.start() },
                 modifier = Modifier.testTag(if (recording) "about-stop-frames" else "about-start-frames"), enabled = !busy, prominent = true)
+            Row(verticalAlignment = Alignment.CenterVertically) {
             ActionPill(stringResource(R.string.about_export_frames), onClick = {
                 if (finished != null) {
                     lastExportFrames = true
                     export.pick(DiagnosticDocument.Frames(finished)) { picker.launch(it) }
                 }
             }, modifier = Modifier.testTag("about-export-frames"), enabled = !busy && finished != null && finished.report.frames > 0)
+                SettingInfo(stringResource(R.string.about_export_hint), title = stringResource(R.string.about_export_frames))
+            }
             if (lastExportFrames && status != ExportStatus.IDLE) ExportFeedback(status)
         } }
         item { FormGroup {
-            SectionTitle(stringResource(R.string.about_logs))
-            Hint(stringResource(R.string.about_logs_intro, DiagnosticJournal.CAPACITY))
+            SettingLabel(stringResource(R.string.about_logs), stringResource(R.string.about_logs_intro, DiagnosticJournal.CAPACITY))
             Text(if (eventCount > 0) stringResource(R.string.about_log_count, minOf(eventCount, DiagnosticJournal.CAPACITY.toLong()), eventCount)
                 else stringResource(R.string.about_no_events))
+            Row(verticalAlignment = Alignment.CenterVertically) {
             ActionPill(stringResource(R.string.about_export_logs), onClick = {
                 lastExportFrames = false
                 export.pick(DiagnosticDocument.Events(AppDiagnostics.journal)) { picker.launch(it) }
             }, modifier = Modifier.testTag("about-export-logs"), enabled = !busy && eventCount > 0)
+                SettingInfo(stringResource(R.string.about_export_hint), title = stringResource(R.string.about_export_logs))
+            }
             if (!lastExportFrames && status != ExportStatus.IDLE) ExportFeedback(status)
         } }
-        item { Hint(stringResource(R.string.about_export_hint)) }
     }
 }
 

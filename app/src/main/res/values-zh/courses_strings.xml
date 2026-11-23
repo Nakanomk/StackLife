@@ -5,15 +5,20 @@
     <string name="courses_assistant_hint">配置助理后，也可描述课程和上课时间，授权后核对变更。</string>
     <string name="courses_back">返回</string>
     <string name="courses_back_to_review">返回核对</string>
-    <string name="courses_browse_chrome">用 Chrome 浏览 HUB</string>
+    <string name="courses_browse_website">用浏览器浏览教务网站</string>
+    <string name="courses_browser_missing">没有可用的浏览器</string>
+    <string name="courses_browser_denied">系统不允许打开浏览器</string>
     <string name="courses_cancel">取消</string>
     <string name="courses_cancel_import">取消导入</string>
     <string name="courses_change_date">切换为另一作息的生效日（选填）</string>
     <string name="courses_change_date_hint">从所选日期开始切换；清除日期则整个学期不变。</string>
     <string name="courses_changeover">%1$s起切换作息，点课程查看实际时间。</string>
-    <string name="courses_choose_json">选择原始 JSON 文件</string>
+    <string name="courses_choose_json">选择 JSON 文件</string>
     <string name="courses_choose_new_source">重选来源</string>
-    <string name="courses_choose_source">选择课表来源</string>
+    <string name="courses_choose_source">选择导入方式</string>
+    <string name="courses_choose_school">选择学校</string>
+    <string name="courses_import_web">从教务网页导入</string>
+    <string name="courses_import_file">从文件导入（HUB JSON）</string>
     <string name="courses_choose_weeks">选择上课周</string>
     <string name="courses_class_info">课程信息</string>
     <string name="courses_class_name">课程名称</string>
@@ -43,8 +48,8 @@
     <string name="courses_extracting">提取中</string>
     <string name="courses_first_monday">首周周一</string>
     <string name="courses_first_period">开始节次</string>
-    <string name="courses_hub_extract">从 HUB 网页提取课表</string>
-    <string name="courses_hub_source">华科 HUB</string>
+    <string name="courses_hub_extract">从教务网页提取课表</string>
+    <string name="courses_hub_source">华中科技大学（HUB）</string>
     <string name="courses_hub_help">华科 HUB：在校方页面登录，进入总课表，选择学期后点「导入」。如果无法登录，可以改选本人导出的 HUB 周数组 JSON 文件。</string>
     <string name="courses_hub_timetable">总课表</string>
     <string name="courses_import">导入课表</string>
@@ -74,7 +79,7 @@
     <string name="courses_periods">节次</string>
     <string name="courses_preview">预览</string>
     <string name="courses_preview_again">重新预览</string>
-    <string name="courses_preview_import">预览导入差异</string>
+    <string name="courses_preview_import">浏览导入差异</string>
     <string name="courses_previous_week">上周</string>
     <string name="courses_remove_class">移除课程</string>
     <string name="courses_remove_source">移除本学期的%1$s课表</string>
@@ -110,4 +115,5 @@
     <string name="courses_weeks_count">已选 %1$d 周</string>
     <string name="courses_weeks_list">第 %1$s 周</string>
     <string name="courses_winter">冬令</string>
+    <string name="courses_go_current_week">回到本周</string>
 </resources>

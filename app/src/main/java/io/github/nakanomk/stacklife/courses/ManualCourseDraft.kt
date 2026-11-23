@@ -28,7 +28,7 @@ internal data class ManualDraft(
     val openedWeek: Int,
     val existing: TermSpec?,
     val original: CoursePattern?,
-    val newTerm: TermForm = TermForm(weeks = 16),
+    val newTerm: TermForm = TermForm(id = UUID.randomUUID().toString()),
     val pattern: CoursePattern = original ?: CoursePattern("", "", 1, 1, 2),
     val weeks: Set<Int> = setOf(openedWeek),
     val originalWeeks: Set<Int>? = null,

@@ -13,6 +13,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.appearance.SegmentTrack
@@ -24,9 +25,8 @@ import io.github.nakanomk.stacklife.workspace.*
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
-import java.util.UUID
 
-internal data class TermForm(val id: String = UUID.randomUUID().toString(), val monday: LocalDate? = null, val weeks: Int? = null,
+internal data class TermForm(val id: String = "", val monday: LocalDate? = null, val weeks: Int? = 20,
     val initial: BellSchedule = BellSchedule.SUMMER, val switchDate: LocalDate? = null, val expanded: Boolean = false) {
     fun term(): TermSpec {
         val start = monday ?: throw IllegalArgumentException(uiText("Choose the first Monday of the term.", "请选择学期首周周一。"))
@@ -42,6 +42,25 @@ internal fun TermSpec.dateRangeLabel(): String {
     return "${firstMonday.format(format)} – ${firstMonday.plusWeeks(weeks.toLong()).minusDays(1).format(format)}"
 }
 
+private val uuidId = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+internal fun TermSpec.hasLegacyId(): Boolean = id.length == 36 && uuidId.matches(id)
+internal fun TermSpec.displayLabel(): String = if (hasLegacyId()) dateRangeLabel() else id
+
+@Composable
+internal fun TermChoice(label: String, selected: Boolean, tag: String, enabled: Boolean = true,
+    source: String? = null, dates: String? = null, choose: () -> Unit) {
+    Row(Modifier.fillMaxWidth().testTag(tag).selectable(selected, enabled = enabled, role = Role.RadioButton, onClick = choose)
+        .heightIn(min = 48.dp).padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        RadioButton(selected, onClick = null, enabled = enabled)
+        Column {
+            Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
+            dates?.let { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium) }
+            source?.let { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium) }
+        }
+    }
+}
+
 @Composable
 internal fun TermFields(form: TermForm, enabled: Boolean, frosted: Boolean = false, change: (TermForm) -> Unit) =
     // Keep unconfirmed dates and calendar choices in the editor, not an Activity Bundle.
@@ -53,7 +72,7 @@ internal fun TermFields(form: TermForm, enabled: Boolean, frosted: Boolean = fal
             change(form.copy(monday = it))
         }
         NumberWheelField(stringResource(R.string.courses_week_count), form.weeks, 1..53, enabled, Modifier.testTag("termWeeks"),
-            initial = 16) { change(form.copy(weeks = it)) }
+            initial = 20) { change(form.copy(weeks = it)) }
         TextButton({ change(form.copy(expanded = !form.expanded)) }, enabled = enabled,
             modifier = Modifier.heightIn(min = 48.dp).testTag("termAdvanced")) {
             Text(stringResource(if (form.expanded) R.string.manual_hide_bell else R.string.manual_show_bell))

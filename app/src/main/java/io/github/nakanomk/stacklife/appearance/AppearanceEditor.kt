@@ -117,7 +117,7 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                             if (picker != null) WallpaperControls(draft, { draft = it }, wallpaperTarget, { wallpaperTarget = it }, picker)
                         }
                         item {
-                            Column {
+                            FormGroup(frosted = true) {
                                 SectionTitle(stringResource(R.string.ui_course_preview))
                                 CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
                                     WallpaperHost(preview.wallpaper(Destination.COURSES)) { CourseTimetablePreview() }
@@ -179,20 +179,20 @@ private fun AppearancePreview(value: Appearance, selected: Destination, choose: 
 
 @Composable
 private fun ColorFields(d: Appearance, seed: String, editSeed: (String) -> Unit, update: (Appearance) -> Unit) {
-    Column {
+    FormGroup(frosted = true) {
         Choice(stringResource(R.string.ui_color_theme), ThemeMode.entries, d.theme, { when (it) { ThemeMode.SYSTEM -> stringResource(R.string.ui_follow_system); ThemeMode.LIGHT -> stringResource(R.string.ui_light); ThemeMode.DARK -> stringResource(R.string.ui_dark) } }) { update(d.copy(theme = it)) }
-        Choice(stringResource(R.string.ui_palette), PaletteMode.entries, d.palette, { if (it == PaletteMode.DYNAMIC) stringResource(R.string.ui_dynamic_color) else stringResource(R.string.ui_custom_seed) }) { update(d.copy(palette = it)) }
+        Choice(stringResource(R.string.ui_palette), PaletteMode.entries, d.palette, { if (it == PaletteMode.DYNAMIC) stringResource(R.string.ui_dynamic_color) else stringResource(R.string.ui_custom_seed) },
+            help = stringResource(R.string.ui_dynamic_hint)) { update(d.copy(palette = it)) }
         if (d.palette == PaletteMode.SEED) TextField(colors = lineFieldColors(), value = seed, onValueChange = { text ->
             val normalized = text.uppercase(); editSeed(normalized)
             if (validSeed.matches(normalized)) update(d.copy(seed = normalized))
         }, label = { Text(stringResource(R.string.ui_seed_hex)) }, singleLine = true, isError = !validSeed.matches(seed), modifier = Modifier.fillMaxWidth().testTag("seed-color"))
-        else Hint(stringResource(R.string.ui_dynamic_hint))
     }
 }
 
 @Composable
 private fun LayoutFields(d: Appearance, update: (Appearance) -> Unit) {
-    Column {
+    FormGroup(frosted = true) {
         Choice(stringResource(R.string.ui_spacing), listOf(false, true), d.compact, { if (it) stringResource(R.string.ui_compact) else stringResource(R.string.ui_standard) }) { update(d.copy(compact = it)) }
         Choice(stringResource(R.string.ui_nav_style), NavStyle.entries, d.navStyle, { if (it == NavStyle.FLOATING) stringResource(R.string.ui_floating_nav) else stringResource(R.string.ui_bottom_nav) }) { update(d.copy(navStyle = it)) }
         Choice(stringResource(R.string.ui_backlog), listOf(true, false), d.floatingDayTray, { if (it) stringResource(R.string.ui_floating_button) else stringResource(R.string.ui_persistent_tray) }) { update(d.copy(floatingDayTray = it)) }
@@ -210,19 +210,19 @@ private fun LayoutFields(d: Appearance, update: (Appearance) -> Unit) {
 @Composable
 private fun MaterialFields(d: Appearance, update: (Appearance) -> Unit) {
     val reason = glassUnavailableReason(d)
-    Column {
+    FormGroup(frosted = true) {
         SectionTitle(stringResource(R.string.ui_materials))
-        SwitchRow(stringResource(R.string.ui_liquid_glass), d.glass) { update(d.copy(glass = !d.glass)) }
+        SwitchRow(stringResource(R.string.ui_liquid_glass), d.glass, help = stringResource(R.string.ui_glass_surfaces)) { update(d.copy(glass = !d.glass)) }
         SwitchRow(stringResource(R.string.ui_glass_navigation), d.navGlass, enabled = d.glass) { update(d.copy(navGlass = !d.navGlass)) }
         SwitchRow(stringResource(R.string.ui_glass_assistant), d.assistantGlass, enabled = d.glass) { update(d.copy(assistantGlass = !d.assistantGlass)) }
-        Hint(when { reason != null -> stringResource(R.string.ui_solid_because, reason); !d.glass -> stringResource(R.string.ui_solid_disabled);
-            else -> stringResource(R.string.ui_glass_surfaces) })
+        if (reason != null) Hint(stringResource(R.string.ui_solid_because, reason))
+        else if (!d.glass) Hint(stringResource(R.string.ui_solid_disabled))
     }
 }
 
 @Composable
 private fun AccessibilityFields(d: Appearance, update: (Appearance) -> Unit) {
-    Column {
+    FormGroup(frosted = true) {
         SectionTitle(stringResource(R.string.ui_motion_accessibility))
         SwitchRow(stringResource(R.string.ui_reduce_motion), d.reduceMotion) { update(d.copy(reduceMotion = !d.reduceMotion)) }
         SwitchRow(stringResource(R.string.ui_reduce_transparency), d.reduceTransparency) { update(d.copy(reduceTransparency = !d.reduceTransparency)) }
@@ -233,11 +233,12 @@ private fun AccessibilityFields(d: Appearance, update: (Appearance) -> Unit) {
 
 
 @Composable
-private fun SwitchRow(label: String, checked: Boolean, enabled: Boolean = true, change: () -> Unit) {
+private fun SwitchRow(label: String, checked: Boolean, enabled: Boolean = true, help: String? = null, change: () -> Unit) {
     Row(Modifier.fillMaxWidth().toggleable(checked, enabled = enabled, role = Role.Switch) { change() }
         .heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = if (enabled)
-            MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+        CompositionLocalProvider(LocalContentColor provides if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant) {
+            SettingLabel(label, help, Modifier.weight(1f))
+        }
         Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }

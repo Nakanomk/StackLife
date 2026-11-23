@@ -439,7 +439,7 @@ class WorkspaceUiTest {
         val estimate = field("预计 45 分钟").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val summary = field(note).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         assertTrue(estimate.bottom <= scheduled.top && scheduled.bottom <= summary.top)
-        ui.onNodeWithContentDescription("移动${title}，长按拖动或点按选择位置")
+        ui.onNodeWithContentDescription("移动${title}，拖动排序或点按选择位置")
             .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).performTouchInput { click() }
         await(hasText("移到队尾")).performClick()
         assertEquals(id, awaitQueue("第二项", title).queue.last().id)
@@ -449,18 +449,25 @@ class WorkspaceUiTest {
         runBlocking { store.apply(PlannerCommand.TaskAdd(TaskInput("A")), PlannerCommand.TaskAdd(TaskInput("B"))) }
         val original = runBlocking { store.state().queue }
         show()
-        val handle = ui.onNodeWithContentDescription("移动A，长按拖动或点按选择位置")
+        val handle = ui.onNodeWithContentDescription("移动A，拖动排序或点按选择位置")
         val start = handle.fetchSemanticsNode().boundsInRoot.center
         val target = ui.onNodeWithTag("task:${original.last().id}").fetchSemanticsNode().boundsInRoot.center
         val root = ui.onRoot()
-        root.performTouchInput { down(start); advanceEventTime(700); moveTo(start + Offset(0f, 1f)) }
-        root.performTouchInput {
-            for (i in 1..12) moveTo(Offset(start.x, start.y + (target.y - start.y + 16f) * i / 12), delayMillis = 32)
+        fun dragPastB() {
+            root.performTouchInput { down(start) }
+            root.performTouchInput {
+                for (i in 1..12) moveTo(Offset(start.x, start.y + (target.y - start.y + 16f) * i / 12), delayMillis = 32)
+            }
         }
+        dragPastB()
+        root.performTouchInput { cancel() }
+        assertEquals(original, runBlocking { store.state().queue })
+        assertEquals(start, handle.fetchSemanticsNode().boundsInRoot.center)
+        dragPastB()
         assertEquals(original, runBlocking { store.state().queue })
         root.performTouchInput { up() }
         assertEquals(original.reversed(), awaitQueue("B", "A").queue)
-        ui.onNodeWithContentDescription("移动A，长按拖动或点按选择位置").performClick()
+        ui.onNodeWithContentDescription("移动A，拖动排序或点按选择位置").performTouchInput { click() }
         ui.onNodeWithText("移到队首").performClick()
         assertEquals(original, awaitQueue("A", "B").queue)
     }

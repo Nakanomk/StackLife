@@ -208,7 +208,7 @@
     <string name="ui_push_selected">Push selected</string>
     <string name="ui_empty_queue">Queue is empty</string>
     <string name="ui_empty_queue_hint">Add the next thing to do, or restore tasks from the stack.</string>
-    <string name="ui_move_task_hint">Move %1$s. Hold to drag, or tap to choose a position.</string>
+    <string name="ui_move_task_hint">Move %1$s. Drag to reorder, or tap to choose a position.</string>
     <string name="ui_move_to_front">Move to front</string>
     <string name="ui_move_up_one">Move up one</string>
     <string name="ui_move_down_one">Move down one</string>
@@ -220,4 +220,5 @@
     <string name="ui_taken">Restored</string>
     <string name="ui_move_tab_up">Move %1$s up</string>
     <string name="ui_move_tab_down">Move %1$s down</string>
+    <string name="setting_info">Help: %1$s</string>
 </resources>

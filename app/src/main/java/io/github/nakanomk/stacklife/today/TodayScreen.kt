@@ -63,13 +63,15 @@ internal fun TodayRoute(
         val terms by remember(model) { model.terms() }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
         ReadPanel(terms) { all -> CourseEditorHost(model, editor, all.terms) { _, _ -> } }
     }
-    if (choosingDate) DateWheelDialog(date, { choosingDate = false; onDate(it) }, { choosingDate = false })
+    fun pageOf(day: LocalDate) = (day.toEpochDay() - firstDay.toEpochDay()).toInt()
+    val selection = rememberCalendarSelection(pageOf(date), pageOf(lastDay) + 1) { onDate(firstDay.plusDays(it.toLong())) }
+    val displayed = firstDay.plusDays(selection.displayPage.value.toLong())
+    val choose: (LocalDate) -> Unit = { selection.select(pageOf(it)) }
+    if (choosingDate) DateWheelDialog(displayed, { choosingDate = false; choose(it) }, { choosingDate = false })
     RootPane(header = {
-        DayHeader(date, { choosingDate = true }, onDate, { onDate(LocalDate.now(zone)) }, onSettings, eventView, { eventView = it })
+        DayHeader(displayed, { choosingDate = true }, choose, { choose(LocalDate.now(zone)) }, onSettings, eventView, { eventView = it })
     }) { top, bottom ->
-        CalendarPager((date.toEpochDay() - firstDay.toEpochDay()).toInt(),
-            (lastDay.toEpochDay() - firstDay.toEpochDay() + 1).toInt(),
-            onSelect = { onDate(firstDay.plusDays(it.toLong())) }, modifier = Modifier.fillMaxSize()) { index ->
+        CalendarPager(selection, Modifier.fillMaxSize()) { index ->
             val query = remember(index, zone) { PlannerQuery.Day(firstDay.plusDays(index.toLong()), zone) }
             val state by remember(model, query) { model.day(query) }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
             ReadPanel(state) { plan ->
@@ -145,6 +147,7 @@ private fun DayBody(
         scale.yAt(anchor)
     }
     val scroll = rememberScrollState(initial)
+    val atEnd by remember(scroll) { derivedStateOf { scroll.maxValue in 1 until Int.MAX_VALUE && !scroll.canScrollForward } }
     LaunchedEffect(revealKey, scale) {
         val item = revealKey?.let { key -> plan.occurrences.firstOrNull { it.key == key } } ?: return@LaunchedEffect
         snapshotFlow { scroll.maxValue }.first { it != Int.MAX_VALUE }
@@ -157,7 +160,7 @@ private fun DayBody(
     Box(Modifier.fillMaxSize()) {
         val noticeSource = rememberPlannerBackdrop(drag.dropNotice != null)
         Box(Modifier.fillMaxSize().plannerBackdrop(noticeSource)) {
-            DayWithTray(plan, drag, !submission.busy, editTray, onAdd, top, clearance, trayOpen, toggleTray,
+            DayWithTray(plan, drag, !submission.busy, editTray, onAdd, top, clearance, trayOpen, toggleTray, hideForEnd = atEnd,
                 pickup = { task -> Modifier.slotDrag(SlotSource(OccurrenceKey.Schedule(task.id), task.minutes * MINUTE_MS), drag, plan.revision, !submission.busy && trayOpen, send) }) { spine, _ ->
                 DayAxis(drag, plan.revision, !submission.busy, onEdit, openCourse, send, onMore, focused, Modifier.fillMaxSize(), top, spine, endInGutter = trayOpen)
             }

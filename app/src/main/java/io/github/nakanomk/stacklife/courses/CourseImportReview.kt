@@ -28,7 +28,7 @@ import java.time.ZoneId
 
 @Composable
 internal fun ReviewedImport(model: WorkspaceViewModel, draft: ReviewedTimetable, proposal: PreviewResult.Ready,
-    busy: Boolean, top: Dp, onImported: (String) -> Unit, onEdit: () -> Unit, onConfirm: () -> Unit) {
+    busy: Boolean, top: Dp, inset: Dp, onImported: (String) -> Unit, onEdit: () -> Unit, onCancel: () -> Unit, onConfirm: () -> Unit) {
     val assistant = LocalAssistant.current
     var staged by remember(proposal.proposalId) { mutableStateOf<String?>(null) }
     if (assistant != null) {
@@ -47,10 +47,10 @@ internal fun ReviewedImport(model: WorkspaceViewModel, draft: ReviewedTimetable,
             if (imported && chat.page == null) onImported(draft.term.id)
         }
     }
-    ImportDiff(draft, proposal, busy, top, ask = {
+    ImportDiff(draft, proposal, busy, top, inset, ask = {
         val id = staged ?: model.planner.stageCourseImport(draft.term, draft.meetings, draft.source).also { staged = it }
         AssistantPage.CourseDraft(id, draft.term.id)
-    }, onEdit, onConfirm)
+    }, onEdit, onCancel, onConfirm)
 }
 internal data class ReviewedGroup(val pattern: CoursePattern, val time: PeriodTime, val weeks: List<Int>, val firstDate: LocalDate)
 
@@ -89,8 +89,8 @@ internal fun androidx.compose.foundation.lazy.LazyListScope.reviewGroups(groups:
 }
 
 @Composable
-private fun ImportDiff(draft: ReviewedTimetable, proposal: PreviewResult.Ready, busy: Boolean, top: Dp,
-    ask: () -> AssistantPage.CourseDraft, onEdit: () -> Unit, onConfirm: () -> Unit) {
+private fun ImportDiff(draft: ReviewedTimetable, proposal: PreviewResult.Ready, busy: Boolean, top: Dp, inset: Dp,
+    ask: () -> AssistantPage.CourseDraft, onEdit: () -> Unit, onCancel: () -> Unit, onConfirm: () -> Unit) {
     val meetings = draft.meetings
     val groups = remember(draft) {
         val zone = calendarFor(draft.source)?.zone ?: ZoneId.systemDefault()
@@ -100,14 +100,14 @@ private fun ImportDiff(draft: ReviewedTimetable, proposal: PreviewResult.Ready, 
         }, { it.week }).ordered(draft.term)
     }
     ImportPane(composer = { if (!busy) AssistantComposer(ask) }) { bottom ->
-        Column(Modifier.fillMaxSize().padding(top = top)) {
-        ActionPill(stringResource(R.string.courses_confirm_import), onConfirm,
-            Modifier.padding(horizontal = 16.dp).testTag("confirmCourseImportTop"), enabled = !busy, prominent = true)
-        LazyColumn(Modifier.fillMaxSize().testTag("courseImportDiff"), contentPadding = dockListPadding(0.dp, bottom),
-            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // The header and composer receive input above this plane. Keep them outside the
+        // scroll viewport, so bringing either footer action into view makes it tappable.
+        LazyColumn(Modifier.fillMaxSize().padding(top = top, bottom = bottom).testTag("courseImportDiff"),
+            contentPadding = importListPadding(0.dp, 0.dp, inset), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item {
                 SectionTitle(stringResource(R.string.courses_confirm_import_diff))
-                Text(draft.term.dateRangeLabel(), style = MaterialTheme.typography.bodyLarge)
+                Text(draft.term.displayLabel(), style = MaterialTheme.typography.bodyLarge)
+                if (!draft.term.hasLegacyId()) Hint(draft.term.dateRangeLabel())
                 Hint(stringResource(R.string.import_source_scope, sourceLabel(draft.source)))
                 Hint(stringResource(R.string.import_meeting_count, meetings.size))
             }
@@ -115,13 +115,11 @@ private fun ImportDiff(draft: ReviewedTimetable, proposal: PreviewResult.Ready, 
                 if (proposal.changes.isEmpty()) Text(stringResource(R.string.courses_unchanged)) }
             items(proposal.changes, key = { it.entityId }) { ChangePreview(it) }
             reviewGroups(groups)
+            item { Secondary(stringResource(R.string.courses_back_to_review), !busy, onEdit) }
             item {
-                Actions {
-                    Secondary(stringResource(R.string.courses_back_to_review), !busy, onEdit)
-                    ActionPill(stringResource(R.string.courses_confirm_import), onConfirm, Modifier.testTag("confirmCourseImport"), enabled = !busy, prominent = true)
-                }
+                ImportActionRow(ImportActions.DIFF, !busy, !busy, Modifier.testTag("cancelCourseImportBottom"),
+                    Modifier.testTag("confirmCourseImport"), onCancel, onConfirm)
             }
-        }
         }
     }
 }

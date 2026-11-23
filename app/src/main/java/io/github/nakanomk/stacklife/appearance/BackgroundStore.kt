@@ -21,8 +21,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-// BiliPai 5893c2c, feature/profile/WallpaperImageImport.kt (GPL-3.0): copy during picker grant,
-// validate, publish atomically, clean a cancelled import. No paths or grants leave this private store.
+// BiliPai 5893c2c80739e3759ac64ae5f232cf03a94da7f8, feature/profile/WallpaperImageImport.kt
+// (GPL-3.0): copy during picker grant; StackLife normalizes a private still and cleans cancelled imports.
 internal class BackgroundStore(context: Context, private val retained: suspend () -> Set<String>) {
     private val root = File(context.noBackupFilesDir, "background-images")
     private val resolver = context.applicationContext.contentResolver
@@ -72,7 +72,7 @@ internal class BackgroundStore(context: Context, private val retained: suspend (
                     if (!recovered) sweepLocked()
                     drafts.add(id)
                 }
-                prepareStaticPhoto(resolver, uri, source, pending)
+                prepareStaticPhoto(resolver, uri, source, pending, PhotoSourcePolicy.PRIMARY_STILL)
                 currentCoroutineContext().ensureActive()
                 Files.delete(source.toPath())
                 Files.move(pending.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)

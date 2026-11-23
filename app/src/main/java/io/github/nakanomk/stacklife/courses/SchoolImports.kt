@@ -16,13 +16,16 @@ interface CourseCalendar {
     fun scheduleDescription(term: TermSpec): String
 }
 
+internal enum class ImportEntry { WEB, FILE }
+
 /** A provider owns its acquisition, raw format, correction UI and calendar. Only reviewed meetings leave it. */
 internal interface SchoolImportProvider {
     val id: String
     @get:StringRes val label: Int
     @get:StringRes val help: Int
     val calendar: CourseCalendar
-    @Composable fun Import(model: WorkspaceViewModel, onBack: () -> Unit, onImported: (String) -> Unit)
+    @Composable fun Import(model: WorkspaceViewModel, entry: ImportEntry, onBack: () -> Unit, onCancel: () -> Unit,
+        onFileEntry: () -> Unit, onImported: (String) -> Unit)
 }
 
 internal object SchoolImports {

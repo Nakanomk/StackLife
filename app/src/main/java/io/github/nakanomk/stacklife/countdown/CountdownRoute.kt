@@ -45,7 +45,7 @@ internal fun CountdownRoute(model: WorkspaceViewModel, onOpen: (String) -> Unit,
                 arranging = !arranging; error = null
             }
         }) {
-            TextButton(onClick = onAdd, enabled = !receipt.busy, modifier = Modifier.testTag("countdown-add").routeOrigin("edit-countdown:new")) {
+            TextButton(onClick = onAdd, enabled = !receipt.busy, modifier = Modifier.testTag("countdown-add").routeOrigin("countdown:new")) {
                 Text(stringResource(R.string.countdown_new))
             }
         } }) { top, bottom ->
@@ -104,7 +104,7 @@ internal fun CountdownDetail(model: WorkspaceViewModel, id: String, onEdit: (Str
         }
         EditorPage(stringResource(R.string.countdown_details), onBack, AssistantPage.Countdown(selected), headerAction = {
             TextButton(enabled = !pager.isScrollInProgress, onClick = { onEdit(selected) },
-                modifier = Modifier.testTag("countdown-edit").routeOrigin("edit-countdown:$selected")) { Text(stringResource(R.string.countdown_edit_action)) }
+                modifier = Modifier.testTag("countdown-edit").routeOrigin("countdown:edit:$selected")) { Text(stringResource(R.string.countdown_edit_action)) }
         }) { top, bottom ->
             VerticalPager(state = pager, key = { list[it].id }, modifier = Modifier.fillMaxSize().padding(top = top, bottom = bottom)
                 .testTag("countdown-detail-pager")) { page ->

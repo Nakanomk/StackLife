@@ -23,6 +23,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -52,7 +57,7 @@ import kotlinx.coroutines.awaitCancellation
 @Composable
 internal fun DayWithTray(
     plan: DayPlan, drag: AxisDrag?, enabled: Boolean, onEdit: (String) -> Unit, onAdd: () -> Unit,
-    top: Dp, clearance: Dp, expanded: Boolean, toggle: () -> Unit, pickup: ((QueueTask) -> Modifier)? = null,
+    top: Dp, clearance: Dp, expanded: Boolean, toggle: () -> Unit, hideForEnd: Boolean, pickup: ((QueueTask) -> Modifier)? = null,
     content: @Composable (spine: Dp, eventListPadding: Dp) -> Unit,
 ) {
     val appearance = LocalAppearance.current
@@ -60,6 +65,12 @@ internal fun DayWithTray(
     val target = if (expanded) 1f else 0f
     val progress = if (LocalMotionEnabled.current) animateFloatAsState(target,
         MaterialTheme.motionScheme.defaultSpatialSpec(), label = "queue container").value.coerceIn(0f, 1f) else target
+    var lastTarget by remember(drag) { mutableStateOf(hideForEnd) }
+    val hide = if (drag?.active == true) lastTarget else hideForEnd
+    SideEffect { lastTarget = hide }
+    val endTarget = if (hide) 1f else 0f
+    val exit = if (LocalMotionEnabled.current) animateFloatAsState(endTarget,
+        MaterialTheme.motionScheme.defaultSpatialSpec(), label = "day-end controls").value.coerceIn(0f, 1f) else endTarget
     val density = LocalDensity.current
     val type = MaterialTheme.typography
     val header = with(density) { (type.titleMedium.lineHeight.toDp() + 8.dp).coerceAtLeast(48.dp) } + if (floating) 0.dp else 8.dp
@@ -130,12 +141,27 @@ internal fun DayWithTray(
             }
         }
         CompositionLocalProvider(LocalCapsuleBackdrop provides axisSource) {
-            TaskAddButton(onAdd, Modifier.align(Alignment.BottomEnd).padding(end = fabEnd, bottom = fabBottom).size(actionSize)
-                .onGloballyPositioned { drag?.addBounds = it.boundsInRoot() })
-            QueueTray(plan.tray, expanded, toggle, enabled, onEdit, pickup, progress, floating, axisSource != null, header, openWidth, inlineToggle,
-                Modifier.align(Alignment.BottomEnd).padding(end = end, bottom = bottom).size(width, height)
-                    .onGloballyPositioned { drag?.trayBounds = it.boundsInRoot() }.testTag("day-tray-container"))
+            if (exit == 1f && hide) SideEffect { drag?.addBounds = Rect.Zero; drag?.trayBounds = Rect.Zero }
+            else {
+                EndOverlay(Modifier.align(Alignment.BottomEnd).padding(end = fabEnd, bottom = fabBottom).size(actionSize), exit, taskFabMargin) {
+                    TaskAddButton(onAdd, Modifier.fillMaxSize().onGloballyPositioned { drag?.addBounds = it.boundsInRoot() })
+                }
+                EndOverlay(Modifier.align(Alignment.BottomEnd).padding(end = end, bottom = bottom).size(width, height), exit, end) {
+                    QueueTray(plan.tray, expanded, toggle, enabled, onEdit, pickup, progress, floating, axisSource != null, header, openWidth, inlineToggle,
+                        Modifier.fillMaxSize().onGloballyPositioned { drag?.trayBounds = it.boundsInRoot() }.testTag("day-tray-container"))
+                }
+            }
         }
+    }
+}
+
+/** Measure the resting slot, not the moving control. Absolute placement also exits right in RTL. */
+@Composable
+private fun EndOverlay(modifier: Modifier, fraction: Float, margin: Dp, content: @Composable () -> Unit) {
+    val right = LocalWindowInfo.current.containerSize.width
+    var left by remember { mutableFloatStateOf(0f) }
+    Box(modifier.onGloballyPositioned { left = it.positionInWindow().x }) {
+        Box(Modifier.fillMaxSize().absoluteOffset { IntOffset(((right - left + margin.toPx()) * fraction).roundToInt(), 0) }) { content() }
     }
 }
 

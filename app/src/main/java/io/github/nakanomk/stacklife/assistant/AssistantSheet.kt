@@ -3,6 +3,7 @@ package io.github.nakanomk.stacklife.assistant
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -83,10 +84,12 @@ private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: As
     }
     val openHistory = LocalOpenChatHistory.current
     MessageEditor(model, draft, draft.origin?.scopeName() ?: scope, { model.submitLocal(id, target) },
-        draft.origin?.takeIf { page != null && privateScope == null }?.let { stringResource(R.string.assistant_draft_scope, it.scopeName()) },
+        draft.origin?.takeIf { page != null && it != page && privateScope == null }?.let { stringResource(R.string.assistant_draft_scope, it.scopeName()) },
         active = active, openHistory = { openHistory(page ?: AssistantPage.Terms) })
 }
 
+// Fixed-corner field and decorated text slot adapted from BiliPai AppCompactInputField.kt
+// (5893c2c80739e3759ac64ae5f232cf03a94da7f8, GPL-3.0); keep the native Markdown editor and IME.
 @Composable
 internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: String, onSend: () -> Unit, originHint: String? = null,
     active: Boolean = true, openHistory: (() -> Unit)? = null, tagPrefix: String = "assistant", historyOrigin: Modifier = Modifier) {
@@ -114,34 +117,35 @@ internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: Strin
         }
     }
     Column(if (active) Modifier.testTag("$tagPrefix-composer") else Modifier.clearAndSetSemantics {}) {
-    if (active) DraftImageStrip(model.attachments, draft)
-    StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth(), colors.surfaceContainerHigh, solidBorder = solidBorder) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) }, enabled = active,
-                modifier = Modifier.size(48.dp).testTag("$tagPrefix-attach")) {
-                Icon(painterResource(R.drawable.ic_add), stringResource(R.string.chat_attach))
-            }
-            if (openHistory != null) IconButton(onClick = { keyboard?.hide(); openHistory() }, enabled = active,
-                modifier = historyOrigin.size(48.dp).testTag("assistant-history")) {
-                Icon(painterResource(R.drawable.ic_history), stringResource(R.string.assistant_history), tint = colors.onSurfaceVariant)
-            }
-            Column(Modifier.weight(1f).heightIn(min = 48.dp), verticalArrangement = Arrangement.Center) {
-                if (originHint != null) Text(originHint, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Box(contentAlignment = Alignment.CenterStart) {
-                    if (!active || draft.field.text.isEmpty()) Text(stringResource(R.string.assistant_message_placeholder),
-                        maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
-                    if (active) MarkdownComposer(draft.field, Modifier.fillMaxWidth().testTag("$tagPrefix-input")
-                        .semantics { contentDescription = fieldDescription }.onFocusChanged { editing = it.isFocused }
-                        .heightIn(min = 48.dp).wrapContentHeight(Alignment.CenterVertically), onSend = submit)
+        if (active) DraftImageStrip(model.attachments, draft)
+        if (originHint != null) Text(originHint, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth(), colors.surfaceContainerHigh,
+            shape = RoundedCornerShape(12.dp), solidBorder = solidBorder) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                val button = Modifier.align(Alignment.Bottom).size(48.dp)
+                IconButton(onClick = { picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) }, enabled = active,
+                    modifier = button.testTag("$tagPrefix-attach")) {
+                    Icon(painterResource(R.drawable.ic_add), stringResource(R.string.chat_attach), Modifier.size(24.dp))
+                }
+                if (openHistory != null) IconButton(onClick = { keyboard?.hide(); openHistory() }, enabled = active,
+                    modifier = historyOrigin.then(button).testTag("assistant-history")) {
+                    Icon(painterResource(R.drawable.ic_history), stringResource(R.string.assistant_history), Modifier.size(24.dp), tint = colors.onSurfaceVariant)
+                }
+                val field = Modifier.weight(1f).padding(vertical = 8.dp)
+                val placeholder: @Composable () -> Unit = {
+                    Text(stringResource(R.string.assistant_message_placeholder), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
+                }
+                if (active) MarkdownComposer(draft.field, field.testTag("$tagPrefix-input")
+                    .semantics { contentDescription = fieldDescription }.onFocusChanged { editing = it.isFocused }, submit, placeholder)
+                else Box(field) { placeholder() }
+                IconButton(onClick = submit, enabled = enabled, modifier = button.testTag("$tagPrefix-send"),
+                    colors = IconButtonDefaults.iconButtonColors(contentColor = colors.primary)) {
+                    Icon(painterResource(R.drawable.ic_assistant_send), stringResource(R.string.assistant_send), Modifier.size(24.dp))
                 }
             }
-            IconButton(onClick = submit, enabled = enabled, modifier = Modifier.size(48.dp).testTag("$tagPrefix-send"),
-                colors = IconButtonDefaults.iconButtonColors(contentColor = colors.primary)) {
-                Icon(painterResource(R.drawable.ic_assistant_send), contentDescription = stringResource(R.string.assistant_send))
-            }
         }
-    }
     }
 }
 

@@ -50,7 +50,7 @@ internal fun EventDay(
     var gapStart by rememberSaveable { mutableStateOf<Long?>(null) }
     var gapEnd by rememberSaveable { mutableLongStateOf(0L) }
     var gapRevision by rememberSaveable { mutableLongStateOf(0L) }
-    DayWithTray(plan, null, true, editTray, onAdd, top, bottom, trayOpen, toggleTray) { spine, tail ->
+    DayWithTray(plan, null, true, editTray, onAdd, top, bottom, trayOpen, toggleTray, hideForEnd = false) { spine, tail ->
         LazyColumn(Modifier.fillMaxSize().padding(top = top).testTag("day-events"), state = list,
             contentPadding = PaddingValues(bottom = tail)) {
             items(rows.size, key = { index -> when (val row = rows[index]) {

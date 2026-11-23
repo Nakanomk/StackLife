@@ -25,8 +25,8 @@ android {
         applicationId = "io.github.nakanomk.stacklife"
         minSdk = 26
         targetSdk = 37
-        versionCode = 27
-        versionName = "0.10.12"
+        versionCode = 28
+        versionName = "0.10.13"
         testInstrumentationRunner = "io.github.nakanomk.stacklife.acceptance.StackLifeTestRunner"
     }
     buildTypes {
@@ -77,7 +77,6 @@ dependencies {
     implementation(libs.compose.foundation)
     implementation(libs.compose.animation)
     implementation(libs.activity.compose)
-    implementation(libs.browser)
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.nav.runtime)

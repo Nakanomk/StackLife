@@ -9,7 +9,7 @@
     <string name="wallpaper_replace">Choose another image</string>
     <string name="wallpaper_preparing">Preparing image…</string>
     <string name="wallpaper_unavailable">Image unavailable</string>
-    <string name="wallpaper_import_failed">Could not import this image. Select a still JPEG, PNG or WebP and check storage.</string>
+    <string name="wallpaper_import_failed">Could not import this image. Check that this device can decode it and has enough storage.</string>
     <string name="wallpaper_zoom">Zoom</string>
     <string name="wallpaper_horizontal">Horizontal focus</string>
     <string name="wallpaper_vertical">Vertical focus</string>

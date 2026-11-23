@@ -217,7 +217,6 @@ private fun PeriodGrid(termId: String, week: CourseWeek, periods: List<PeriodTim
     GlassBacking(Modifier.fillMaxWidth().height(periodHeight * periodCount), background = {
         Box(Modifier.fillMaxSize().wallpaperBackground(colors.surface).drawBehind {
             val x0 = rail.toPx(); val cell = dayWidth.toPx(); val row = periodHeight.toPx()
-            drawRect(colors.surfaceContainerLow, size = Size(x0, size.height))
             if (highlightedDay >= 0 && highlightedDay < dayCount) drawRect(colors.primaryContainer.copy(alpha = .28f),
                 Offset(x0 + cell * highlightedDay.toInt(), 0f), Size(cell, size.height))
             if (!gridLines) return@drawBehind

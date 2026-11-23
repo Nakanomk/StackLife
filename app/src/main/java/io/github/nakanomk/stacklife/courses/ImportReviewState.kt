@@ -26,7 +26,7 @@ internal enum class ImportPage { SOURCE, HUB, CALENDAR, ENTRIES, FIX, DIFF }
 // Like the private note drafts, Android retains an identity, never the document or a proposal.
 // Source JSON is written once when acquired, not rewritten when editing a row or rotating the phone.
 @OptIn(ExperimentalSerializationApi::class)
-internal class ImportReviewState(handle: SavedStateHandle, private val root: File) : ViewModel() {
+internal class ImportReviewState(handle: SavedStateHandle, private val root: File, private val termExists: suspend (String) -> Boolean) : ViewModel() {
     var page by mutableStateOf(ImportPage.SOURCE)
     var fromHub by mutableStateOf(false)
     var form by mutableStateOf(TermForm())
@@ -52,7 +52,8 @@ internal class ImportReviewState(handle: SavedStateHandle, private val root: Fil
         fun form() = TermForm(id, monday?.let(LocalDate::ofEpochDay), weeks, initial, switch?.let(LocalDate::ofEpochDay), expanded)
     }
     @Serializable private data class Checkpoint(val page: ImportPage, val fromHub: Boolean, val form: Calendar,
-        val selected: String?, val parsed: Calendar?, val choices: Map<String, Fields?>, val editing: String?, val working: Fields?)
+        val selected: String?, val parsed: Calendar?, val choices: Map<String, Fields?>, val editing: String?, val working: Fields?,
+        val namedSelection: Boolean = false)
 
     init {
         val last = handle.remove<Bundle>("import-review")
@@ -69,7 +70,8 @@ internal class ImportReviewState(handle: SavedStateHandle, private val root: Fil
                         val input = File(dir, "rows").inputStream().buffered().use { Json.decodeFromStream<JsonArray>(it) }
                         Triple(input, checkpoint, checkpoint.parsed?.let { HustCourseImporter.parse(input, it.form().term()) })
                     }
-                    rows = input; fromHub = saved.fromHub; form = saved.form.form(); selectedId = saved.selected; draft = parsed
+                    val legacyNew = !saved.namedSelection && saved.selected == saved.form.id && !termExists(saved.form.id)
+                    rows = input; fromHub = saved.fromHub; form = saved.form.form(); selectedId = saved.selected.takeUnless { legacyNew }; draft = parsed
                     saved.choices.forEach { (position, fields) -> decisions[position] = fields?.let { IssueDecision.Correct(it.value()) } ?: IssueDecision.Exclude }
                     editing = saved.editing; working = saved.working?.value(); page = saved.page
                 } catch (_: IOException) { restoreFailed() } catch (_: IllegalArgumentException) { restoreFailed() }
@@ -86,7 +88,7 @@ internal class ImportReviewState(handle: SavedStateHandle, private val root: Fil
         // If Android saves again during restoration the previous complete checkpoint still applies.
         if (rows == null) return@apply
         val state = Checkpoint(page, fromHub, Calendar(form), selectedId, draft?.term?.let { Calendar(it.asForm()) },
-            decisions.mapValues { (_, v) -> (v as? IssueDecision.Correct)?.let { Fields(it.fields) } }, editing, working?.let(::Fields))
+            decisions.mapValues { (_, v) -> (v as? IssueDecision.Correct)?.let { Fields(it.fields) } }, editing, working?.let(::Fields), namedSelection = true)
         val index = AtomicFile(File(dir, "review"))
         try {
             val out = index.startWrite()
@@ -133,7 +135,7 @@ internal class ImportReviewState(handle: SavedStateHandle, private val root: Fil
         busy = true; message = null
         viewModelScope.launch {
             try {
-                val term = termForm.term()
+                val term = if (selectedId == null) termForm.copy(id = termForm.id.trim()).term() else termForm.term()
                 if (draft?.term != term) {
                     draft = withContext(Dispatchers.Default) { HustCourseImporter.parse(input, term) }
                     decisions.clear()
@@ -146,7 +148,7 @@ internal class ImportReviewState(handle: SavedStateHandle, private val root: Fil
 
     fun reset() {
         directory?.deleteRecursively(); directory = null; rows = null; draft = null; selectedId = null
-        decisions.clear(); editing = null; working = null; message = null; page = ImportPage.SOURCE
+        decisions.clear(); editing = null; working = null; form = TermForm(); fromHub = false; message = null; page = ImportPage.SOURCE
     }
 
     override fun onCleared() { directory?.deleteRecursively() }

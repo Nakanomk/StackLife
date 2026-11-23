@@ -12,6 +12,10 @@ import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.core.app.ActivityOptionsCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -60,11 +64,14 @@ class CourseConfirmationTest {
 
     // Stand in only for the system picker returning the test file. Reading, preview,
     // navigation, the retained activity ViewModel and the file-backed Room are all real.
-    private fun attach(file: File? = null) = ui.activityRule.scenario.onActivity { activity ->
+    @OptIn(ExperimentalTestApi::class)
+    private fun attach(file: File? = null, narrow: Boolean = false) = ui.activityRule.scenario.onActivity { activity ->
         val owner = file?.let(::pickerReturning) ?: activity
         activity.setContent {
             CompositionLocalProvider(LocalActivityResultRegistryOwner provides owner) {
-                StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
+                if (narrow) DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(320.dp, 760.dp)) then DeviceConfigurationOverride.FontScale(2f)) {
+                    StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
+                } else StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
             }
         }
     }
@@ -95,12 +102,140 @@ class CourseConfirmationTest {
     private suspend fun week(id: String) = store.api.observe(PlannerQuery.Week(id, 1)).first() as CourseWeek
     private suspend fun terms() = (store.api.observe(PlannerQuery.Terms).first() as Terms).terms
 
+    private suspend fun termExists(id: String) = terms().any { it.id == id }
+
+    private fun chooseFile() {
+        await(hasTestTag("importMethodFile")).performClick()
+        await(hasTestTag("importCourseFile")).performClick()
+    }
+
+    private fun assertPaired(first: String, second: String) {
+        val a = await(hasTestTag(first)).assertIsDisplayed().assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
+        val b = await(hasTestTag(second)).assertIsDisplayed().assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
+        assertEquals(a.top, b.top, 1f)
+        assertEquals(a.width, b.width, 1f)
+        assertTrue(a.right < b.left)
+    }
+
+    @Test fun narrowImportKeepsBothActionsVisibleAndCancellationDoesNotWrite() = runBlocking {
+        val before = store.state().revision
+        val file = File.createTempFile("narrow-import", ".json", ui.activity.cacheDir)
+        try {
+            file.writeText("""[{"ZC":1,"KS":"2026-09-07","MONDAY":[{"KCMC":"合成课程","JC":"1-2"}]}]""")
+            attach(file, narrow = true)
+            await(hasTestTag("nav:courses")).performClick()
+            await(hasTestTag("course-import")).performClick()
+            chooseFile()
+            val name = "2026秋课表"
+            val field = hasTestTag("importTermName")
+            val reviewRows = hasTestTag("reviewCourseRows")
+            await(reviewRows).assertIsNotEnabled()
+            await(field).performScrollTo().performTextReplacement(name)
+            // Wait for the private form to accept the edit, not just for the IME to receive it:
+            // the review action is enabled by the form's trimmed name, not the text field buffer.
+            await(field and hasText(name)).assertTextContains(name)
+            await(reviewRows and isEnabled())
+            ui.activityRule.scenario.recreate(); attach(file, narrow = true)
+            await(field and hasText(name)).assertTextContains(name)
+            await(hasTestTag("importTerm:new")).assertIsSelected()
+            await(reviewRows and isEnabled()).performScrollTo().performClick()
+            val entries = await(hasTestTag("courseIssues"))
+            entries.performScrollToNode(hasTestTag("previewCourseImportTop"))
+            assertPaired("previewCourseImportTop", "chooseImportTermTop")
+            fun shortLabel(tag: String, full: Int, short: Int) {
+                val label = ui.activity.getString(short)
+                ui.onNodeWithTag(tag).assertContentDescriptionContains(ui.activity.getString(full)).assertTextContains(label)
+                ui.onNode(hasText(label) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)
+                    .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { get ->
+                        val results = mutableListOf<TextLayoutResult>()
+                        assertTrue(get(results))
+                        assertEquals(1, results.single().lineCount)
+                        assertFalse(results.single().isLineEllipsized(0))
+                    }
+            }
+            shortLabel("previewCourseImportTop", R.string.courses_preview_import, R.string.import_short_review)
+            shortLabel("chooseImportTermTop", R.string.import_choose_timetable, R.string.import_short_timetable)
+            entries.performScrollToNode(hasTestTag("previewCourseImport"))
+            assertPaired("previewCourseImport", "chooseImportTerm")
+            ui.onNodeWithTag("chooseImportTerm").performClick()
+            await(hasTestTag("importTermName")).assertTextContains(name)
+            await(hasTestTag("reviewCourseRows")).performScrollTo().performClick()
+            await(hasTestTag("courseIssues")).performScrollToNode(hasTestTag("previewCourseImport"))
+            await(hasTestTag("previewCourseImport")).performClick()
+            await(hasTestTag("confirmCourseImportTop") and isEnabled())
+            assertPaired("cancelCourseImport", "confirmCourseImportTop")
+            val review = await(hasTestTag("courseImportDiff"))
+            review.performScrollToNode(hasTestTag("confirmCourseImport"))
+            ui.onNodeWithTag("cancelCourseImportBottom").performScrollTo()
+            assertPaired("cancelCourseImportBottom", "confirmCourseImport")
+            ui.tapAboveDock(review, hasTestTag("cancelCourseImportBottom"))
+            await(hasTestTag("course-import"))
+            assertTrue(terms().isEmpty()); assertEquals(before, store.state().revision)
+        } finally { file.delete() }
+    }
+
+    @Test fun nameTakenAfterReviewCannotTurnANewTimetableIntoAReplacement() = runBlocking {
+        val file = File.createTempFile("concurrent-import", ".json", ui.activity.cacheDir)
+        try {
+            file.writeText("""[{"ZC":1,"KS":"2026-09-07","MONDAY":[{"KCMC":"不得覆盖","JC":"1-2"}]}]""")
+            attach(file)
+            await(hasTestTag("nav:courses")).performClick()
+            await(hasTestTag("course-import")).performClick()
+            chooseFile()
+            await(hasTestTag("importTermName")).performTextReplacement(term.id)
+            await(hasTestTag("reviewCourseRows")).performScrollTo().performClick()
+            await(hasTestTag("previewCourseImportTop"))
+            seed(term, meeting)
+            val revision = store.state().revision
+            ui.onNodeWithTag("previewCourseImportTop").performClick()
+            await(hasTestTag("courseImportError")).assertTextContains(ui.activity.getString(R.string.import_term_name_conflict))
+            await(hasTestTag("importTerm:new")).assertIsSelected()
+            ui.onNodeWithTag("reviewCourseRows").assertIsNotEnabled()
+            ui.onNodeWithTag("confirmCourseImportTop").assertDoesNotExist()
+            assertEquals(listOf(meeting), week(term.id).classes.map { it.meeting })
+            assertEquals(revision, store.state().revision)
+        } finally { file.delete() }
+    }
+
+    @Test fun oldCheckpointsDistinguishNewAndExistingIdsWithoutChangingSavedWeekCounts() = runBlocking {
+        seed(term, meeting)
+        val root = java.nio.file.Files.createTempDirectory(ui.activity.noBackupFilesDir.toPath(), "legacy-import-").toFile()
+        try {
+            for ((id, weeks) in listOf(term.id to 16, "98daa671-3bae-4600-b975-1cd2e48d4fa5" to null)) {
+                val dir = File(root, java.util.UUID.randomUUID().toString())
+                check(dir.mkdirs())
+                File(dir, "rows").writeText("""[{"ZC":1,"MONDAY":[]}]""")
+                File(dir, "review").writeText("""{"page":"CALENDAR","fromHub":false,"form":{"id":"$id","monday":null,"weeks":$weeks,"initial":"SUMMER","switch":null,"expanded":false},"selected":"$id","parsed":null,"choices":{},"editing":null,"working":null}""")
+                val bundle = android.os.Bundle().apply { putString("id", dir.name) }
+                val restored = ui.runOnUiThread { ImportReviewState(SavedStateHandle(mapOf("import-review" to bundle)), root, ::termExists) }
+                ui.waitUntil(10_000) { ui.runOnUiThread { !restored.busy } }
+                val next = ui.runOnUiThread {
+                    assertEquals(ImportPage.CALENDAR, restored.page)
+                    assertEquals(id.takeIf { it == term.id }, restored.selectedId)
+                    assertEquals(weeks, restored.form.weeks)
+                    restored.selectedId = null
+                    restored.form = restored.form.copy(id = "2026秋课表")
+                    val identity = restored.checkpoint()
+                    assertEquals(setOf("id"), identity.keySet())
+                    ImportReviewState(SavedStateHandle(mapOf("import-review" to identity)), root, ::termExists)
+                }
+                ui.waitUntil(10_000) { ui.runOnUiThread { !next.busy } }
+                ui.runOnUiThread {
+                    assertNull(next.selectedId)
+                    assertEquals("2026秋课表", next.form.id)
+                    assertEquals(weeks, next.form.weeks)
+                    next.reset()
+                }
+            }
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun freshStateHolderReopensPrivateInputAndUnfinishedCorrectionFromOnlyAnId() {
         val root = java.nio.file.Files.createTempDirectory(ui.activity.noBackupFilesDir.toPath(), "restore-import-").toFile()
         try {
             val source = """[{"ZC":1,"MONDAY":[42,{"KCMC":"本地课程","JC":"未识别"}]}]"""
             val first = ui.runOnUiThread {
-                ImportReviewState(SavedStateHandle(), root).also { state ->
+                ImportReviewState(SavedStateHandle(), root, ::termExists).also { state ->
                     state.receive(false) { source.byteInputStream().use(::readWeekFile) }
                 }
             }
@@ -116,7 +251,7 @@ class CourseConfirmationTest {
                 val bundle = first.checkpoint()
                 assertEquals(setOf("id"), bundle.keySet())
                 java.util.UUID.fromString(bundle.getString("id"))
-                ImportReviewState(SavedStateHandle(mapOf("import-review" to bundle)), root)
+                ImportReviewState(SavedStateHandle(mapOf("import-review" to bundle)), root, ::termExists)
             }
             ui.waitUntil(10_000) { ui.runOnUiThread { !restored.busy } }
             ui.runOnUiThread {
@@ -141,8 +276,14 @@ class CourseConfirmationTest {
             attach(file)
             await(hasTestTag("nav:courses")).performClick()
             await(hasTestTag("course-import")).performClick()
-            await(hasTestTag("importCourseFile")).performClick()
+            chooseFile()
             await(hasTestTag("importTerm:new")).assertIsSelected()
+            ui.onNodeWithTag("reviewCourseRows").assertIsNotEnabled()
+            val name = ui.onNodeWithTag("importTermName")
+            name.performTextReplacement("课".repeat(129))
+            ui.onNodeWithTag("reviewCourseRows").assertIsNotEnabled()
+            name.performTextReplacement("  ${term.id}  ")
+            ui.onNodeWithTag("termWeeks").assertTextContains("20")
             ui.chooseNumber("termWeeks", term.weeks)
             ui.onNodeWithTag("reviewCourseRows").performScrollTo().performClick()
             await(hasTestTag("previewCourseImportTop")).assertIsNotEnabled()
@@ -180,12 +321,12 @@ class CourseConfirmationTest {
 
             await(hasTestTag("courseIssues")).performScrollToNode(hasTestTag("previewCourseImportTop"))
             await(hasTestTag("previewCourseImportTop") and isEnabled()).performClick()
-            await(hasTestTag("confirmCourseImportTop"))
+            await(hasTestTag("confirmCourseImportTop") and isEnabled())
             assertEquals(before, store.state().revision)
             ui.onNodeWithTag("confirmCourseImportTop").performClick()
-            await(hasTestTag("course-week") and hasText(term.dateRangeLabel()))
+            await(hasTestTag("course-week") and hasText(term.displayLabel()))
             val created = terms().single()
-            assertEquals(term.copy(id = created.id), created)
+            assertEquals(term, created)
             assertTrue(week(created.id).classes.isEmpty())
             val second = store.api.observe(PlannerQuery.Week(created.id, 2)).first() as CourseWeek
             assertEquals(listOf(created.meeting(2, 1, "实验", "A", 5, 6)), second.classes.map { it.meeting })
@@ -203,19 +344,23 @@ class CourseConfirmationTest {
             file.writeText("""[{"ZC":1,"KS":"2026-09-07","MONDAY":[{"KCMC":"回执课","JSMC":"A","JC":"5-6"}]}]""")
             attach(file)
             await(hasTestTag("nav:courses")).performClick()
-            await(hasTestTag("course-week")).assertTextContains(other.dateRangeLabel())
+            await(hasTestTag("course-week")).assertTextContains(other.displayLabel())
             ui.onNodeWithContentDescription("课表选项").performClick()
             ui.onNodeWithTag("course-import").performClick()
-            await(hasTestTag("importCourseFile")).performClick()
+            chooseFile()
             await(hasTestTag("importTerm:new")).performScrollTo().performClick()
+            ui.onNodeWithTag("importTermName").performTextReplacement(other.id)
+            await(hasText(ui.activity.getString(R.string.import_term_name_conflict)))
+            ui.onNodeWithTag("reviewCourseRows").assertIsNotEnabled()
+            ui.onNodeWithTag("importTermName").performTextReplacement(term.id)
             ui.chooseNumber("termWeeks", term.weeks)
             ui.onNodeWithTag("reviewCourseRows").performScrollTo().performClick()
             await(hasTestTag("courseIssues")).performScrollToNode(hasTestTag("previewCourseImport"))
             ui.onNodeWithTag("previewCourseImport").performClick()
-            val confirm = hasTestTag("confirmCourseImport")
-            await(hasTestTag("courseImportDiff")).performScrollToNode(confirm)
+            val confirm = hasTestTag("confirmCourseImport") and isEnabled()
+            val review = await(hasTestTag("courseImportDiff"))
             withWriterHeld {
-                ui.onNode(confirm).performClick()
+                ui.tapAboveDock(review, confirm)
                 ui.onNodeWithTag("cancelCourseImport").assertIsNotEnabled()
                 ui.onNodeWithTag("confirmCourseImportTop").assertIsDisplayed().assertIsNotEnabled()
                 ui.activityRule.scenario.recreate()
@@ -224,9 +369,10 @@ class CourseConfirmationTest {
                 ui.onNodeWithTag("courseImportDiff").assertDoesNotExist()
                 ui.onNodeWithTag("importCourseFile").assertDoesNotExist()
             }
-            await(hasTestTag("course-week") and hasText(term.dateRangeLabel())).assertIsDisplayed()
+            await(hasTestTag("course-week") and hasText(term.displayLabel())).assertIsDisplayed()
             ui.onNodeWithTag("course-week").assertTextContains("第 1 周")
             val created = terms().single { it.firstMonday == term.firstMonday }
+            assertEquals(term, created)
             assertEquals(listOf(meeting), week(created.id).classes.map { it.meeting })
             assertEquals(other, week(other.id).term)
             assertEquals(before + 1, store.state().revision)
@@ -234,7 +380,7 @@ class CourseConfirmationTest {
     }
 
     @Test fun repeatedThreeWeekFileUsesTheChosenTimetableWithoutAddingMeetings() = runBlocking {
-        val selected = term.copy(weeks = 3)
+        val selected = term.copy(id = "9d38c248-7738-40c2-8cf6-f246ae7acbb7", weeks = 3)
         val other = selected.copy(id = "other", firstMonday = selected.firstMonday.minusWeeks(4))
         seed(selected, selected.meeting(1, 4, "被替换", "", 3, 4))
         val untouched = other.meeting(1, 4, "保留", "B", 7, 8)
@@ -250,9 +396,10 @@ class CourseConfirmationTest {
                 val before = store.state().revision
                 await(hasTestTag("course-options")).performClick()
                 await(hasTestTag("course-import")).performClick()
-                await(hasTestTag("importCourseFile")).performClick()
+                chooseFile()
                 await(hasTestTag("importTerm:${selected.id}")).performScrollTo().performClick()
                 ui.onNodeWithTag("termWeeks").assertDoesNotExist()
+                ui.onNodeWithTag("importTermName").assertDoesNotExist()
                 if (pass == 0) {
                     ui.activityRule.scenario.recreate()
                     attach(file)
@@ -260,14 +407,14 @@ class CourseConfirmationTest {
                 }
                 ui.onNodeWithTag("reviewCourseRows").performScrollTo().performClick()
                 await(hasTestTag("previewCourseImportTop")).performClick()
-                await(hasTestTag("confirmCourseImportTop"))
+                await(hasTestTag("confirmCourseImportTop") and isEnabled())
                 if (pass == 1) await(hasText(ui.activity.getString(R.string.courses_unchanged)))
                 ui.activityRule.scenario.recreate()
                 attach(file)
                 val list = await(hasTestTag("courseImportDiff"))
                 list.performScrollToNode(hasTestTag("confirmCourseImport"))
                 assertEquals(before, store.state().revision)
-                await(hasTestTag("confirmCourseImportTop")).assertIsDisplayed().performClick()
+                await(hasTestTag("confirmCourseImportTop") and isEnabled()).assertIsDisplayed().performClick()
                 await(hasTestTag("course-week") and hasText(selected.dateRangeLabel()))
                 assertEquals(setOf(selected, other), terms().toSet())
                 assertEquals(listOf(untouched), week(other.id).classes.map { it.meeting })

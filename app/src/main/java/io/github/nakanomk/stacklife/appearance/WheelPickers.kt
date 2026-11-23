@@ -125,7 +125,7 @@ private fun PickerField(label: String, display: String, enabled: Boolean, modifi
     var open by rememberSaveable { mutableStateOf(false) }
     val focus = LocalFocusManager.current
     val ime = LocalSoftwareKeyboardController.current
-    PreferenceRow(label, display, modifier, enabled) { focus.clearFocus(); ime?.hide(); open = true }
+    PreferenceRow(label, display, modifier, enabled, valueMaxLines = 1, labelMaxLines = 1) { focus.clearFocus(); ime?.hide(); open = true }
     if (open) dialog { open = false }
 }
 

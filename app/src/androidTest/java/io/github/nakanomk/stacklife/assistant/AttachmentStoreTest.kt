@@ -10,6 +10,10 @@ import androidx.annotation.RequiresApi
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.nakanomk.stacklife.appearance.gainmapPhoto
+import io.github.nakanomk.stacklife.appearance.motionPhoto
+import io.github.nakanomk.stacklife.appearance.photoFixture
+import io.github.nakanomk.stacklife.images.PhotoSourcePolicy
 import io.github.nakanomk.stacklife.images.normalizeStaticPhoto
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
@@ -43,7 +47,7 @@ class AttachmentStoreTest {
     @RequiresApi(29)
     private suspend fun withMedia(type: String, body: ByteArray, block: suspend (Uri) -> Unit) {
         val resolver = context.contentResolver
-        val suffix = when (type) { "image/jpeg" -> "jpg"; "image/webp" -> "webp"; else -> "png" }
+        val suffix = if (type == "image/jpeg") "jpg" else type.substringAfter('/')
         val uri = requireNotNull(resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, "StackLife-test-${UUID.randomUUID()}.$suffix")
             put(MediaStore.MediaColumns.MIME_TYPE, type); put(MediaStore.MediaColumns.IS_PENDING, 1)
@@ -83,6 +87,27 @@ class AttachmentStoreTest {
                 store.remove(image.id); assertFalse(sent.exists())
             }
         } finally { raw.delete(); File(context.noBackupFilesDir, folder).deleteRecursively() }
+    }
+
+    @SdkSuppress(minSdkVersion = 34)
+    @Test fun backgroundOnlyContainersRemainForbiddenForPreparationAndUpload() = runBlocking {
+        val folder = "photo-policy-${UUID.randomUUID()}"
+        val store = AttachmentStore(context, { emptySet() }, folder)
+        val root = File(context.noBackupFilesDir, folder)
+        try {
+            val motion = motionPhoto(pixels(64, 32, Bitmap.CompressFormat.JPEG))
+            for ((declared, bytes) in listOf("image/jpeg" to motion, "image/jpeg" to gainmapPhoto(),
+                "image/heic" to photoFixture("red-blue-cw90.heic.b64"))) {
+                withMedia(declared, bytes) { uri ->
+                    assertTrue(runCatching { store.prepare(uri) }.exceptionOrNull() is ChatProblem)
+                }
+                assertTrue(root.list()!!.isEmpty())
+                val replaced = File(root, UUID.randomUUID().toString()).apply { writeBytes(bytes) }
+                val image = ChatImage(replaced.name, declared, 64, 32, replaced.length())
+                assertFalse(image.matchesPreparedFile(replaced, forUpload = true))
+                assertTrue(replaced.delete())
+            }
+        } finally { root.deleteRecursively() }
     }
 
     @SdkSuppress(minSdkVersion = 29)
@@ -140,7 +165,7 @@ class AttachmentStoreTest {
             }
             val id = UUID.randomUUID().toString()
             val output = File(dir, id)
-            val image = normalizeStaticPhoto(source, "image/png", output)
+            val image = normalizeStaticPhoto(source, "image/png", output, PhotoSourcePolicy.STRICT_STATIC)
             assertEquals(32, image.width); assertEquals(64, image.height)
             val bitmap = android.graphics.BitmapFactory.decodeFile(output.path)
             try {

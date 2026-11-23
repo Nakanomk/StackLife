@@ -26,6 +26,20 @@ class HustImportTest {
         try { action(); fail("expected source error") } catch (_: IOException) { }
     }
 
+    @Test fun namedTimetablesKeepTheirIdentityAndOldGeneratedIdsKeepTheirCalendarLabel() {
+        assertEquals(term.id, term.displayLabel())
+        val legacy = term.copy(id = "7E940AD9-C883-4BE9-BC64-6BD4C44E3A6C")
+        assertEquals(term.dateRangeLabel(), legacy.displayLabel())
+        val notUuid = term.copy(id = "1-2-3-4-5")
+        assertEquals(notUuid.id, notUuid.displayLabel())
+        val fresh = TermForm()
+        assertEquals("", fresh.id)
+        assertEquals(20, fresh.weeks)
+        assertNull(fresh.monday)
+        assertEquals(18, term.asForm().weeks)
+        assertNull(TermForm(weeks = null).weeks)
+    }
+
     @Test fun strictExclusionDeduplicatesOnlyOccurrencesAndUsesActualSeason() {
         val a = item("A", "5–6")
         val b = item("B", "5–6")

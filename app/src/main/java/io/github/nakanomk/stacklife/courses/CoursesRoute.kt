@@ -20,6 +20,9 @@ import io.github.nakanomk.stacklife.workspace.*
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
+internal fun TermSpec.weekAt(date: LocalDate): Int =
+    (ChronoUnit.WEEKS.between(firstMonday, date) + 1).coerceIn(1L, weeks.toLong()).toInt()
+
 @Composable
 internal fun CoursesRoute(model: WorkspaceViewModel, termId: String?, selectedWeek: Int?, onTerm: (TermSpec) -> Unit,
     onWeek: (Int) -> Unit, onImport: () -> Unit, onRemove: (TermSpec, String) -> Unit, onSettings: () -> Unit,
@@ -32,13 +35,12 @@ internal fun CoursesRoute(model: WorkspaceViewModel, termId: String?, selectedWe
             date >= it.firstMonday && date < it.firstMonday.plusWeeks(it.weeks.toLong())
         } ?: all.terms.firstOrNull()
         val week = term?.let {
-            (selectedWeek?.takeIf { term.id == termId } ?: (ChronoUnit.WEEKS.between(term.firstMonday, today(term.id)).toInt() + 1))
-                .coerceIn(1, term.weeks)
+            (selectedWeek?.takeIf { term.id == termId } ?: term.weekAt(today(term.id))).coerceIn(1, term.weeks)
         }
         val scope = if (term != null && week != null) AssistantPage.Week(term.id, week) else AssistantPage.Terms
         SideEffect { onScope(scope) }
         CourseHome(model, all, term, week, onTerm, { selected, n -> onTerm(selected); onWeek(n) },
-            onImport, onRemove, onSettings)
+            onImport, onRemove, onSettings) { it.weekAt(today(it.id)) }
     }
 }
 
@@ -74,7 +76,8 @@ internal fun RemoveTermReview(id: String, source: String, model: WorkspaceViewMo
                 val before = ready?.changes?.firstNotNullOfOrNull { it.before as? CourseSetSnapshot }
                 if (before != null) {
                     val term = with(before) { TermSpec(termId, LocalDate.ofEpochDay(firstMonday), weeks, initial, switchDay?.let(LocalDate::ofEpochDay)) }
-                    Text(term.dateRangeLabel(), style = MaterialTheme.typography.titleLarge)
+                    Text(term.displayLabel(), style = MaterialTheme.typography.titleLarge)
+                    if (!term.hasLegacyId()) Hint(term.dateRangeLabel())
                 }
                 Hint(stringResource(R.string.courses_remove_term_hint, sourceLabel(source)))
             }

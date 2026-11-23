@@ -362,16 +362,17 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     }
                 }
                 entry<Preferences> {
-                    SettingsScreen(preferences, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) }, { navigate(HelpAbout) }, { navigate(Feature(it)) }, navigate)
+                    SettingsHelpHost { SettingsScreen(preferences, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) },
+                        { navigate(HelpAbout) }, { navigate(Feature(it)) }, navigate) }
                 }
                 entry<HelpAbout> { HelpAboutScreen(back) { navigate(Guidance) } }
-                entry<EditAppearance> { key -> AppearanceEditor(preferences.appearance,
-                    AppearanceGroup.entries.first { it.key == key.group }, model, back) }
-                entry<ModelConnection> { PrivateScreen(privateScreens) { ConnectionScreen(assistant.connections, back) } }
+                entry<EditAppearance> { key -> SettingsHelpHost { AppearanceEditor(preferences.appearance,
+                    AppearanceGroup.entries.first { it.key == key.group }, model, back) } }
+                entry<ModelConnection> { PrivateScreen(privateScreens) { SettingsHelpHost { ConnectionScreen(assistant.connections, back) } } }
         }
         EntityMotionScope(animate && initialDetail == null) {
             NavDisplay(backStack = stack, onBack = back, sharedTransitionScope = this,
-                modifier = Modifier.onGloballyPositioned { origins.window = it.localToScreen(Offset.Zero) },
+                modifier = Modifier.onGloballyPositioned { origins.host = it; origins.size = it.size },
                 transitionSpec = { sceneMotion(animate) }, popTransitionSpec = { sceneMotion(animate) },
                 predictivePopTransitionSpec = { sceneMotion(animate) },
                 entryProvider = { key ->
@@ -384,6 +385,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     }
                 })
         }
+        if (animate) with(origins) { PlacedSources() }
     }
     val source = historySource
     AssistantPanels(assistant, source?.let { remember(it) { historyPage(it) } }, configuring = stack.last() == ModelConnection,

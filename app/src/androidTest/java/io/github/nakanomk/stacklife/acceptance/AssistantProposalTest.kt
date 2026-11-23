@@ -29,7 +29,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.StackLifeApp
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.assistant.*
-import io.github.nakanomk.stacklife.courses.dateRangeLabel
+import io.github.nakanomk.stacklife.courses.displayLabel
 import io.github.nakanomk.stacklife.planner.*
 import java.io.File
 import java.net.InetAddress
@@ -102,6 +102,26 @@ class AssistantProposalTest {
         return ui.onNode(matcher)
     }
     private fun tag(value: String) = await(hasTestTag(value))
+    private fun checkReplyFootprint(prefix: String) {
+        val field = tag("$prefix-input")
+        val shell = tag("$prefix-composer")
+        field.performClick()
+        val one = shell.fetchSemanticsNode().size
+        val id = field.fetchSemanticsNode().id
+        field.performTextReplacement("文")
+        assertEquals(one, shell.fetchSemanticsNode().size)
+        field.performTextClearance()
+        assertEquals(one, shell.fetchSemanticsNode().size)
+        field.performTextReplacement("一\n二\n三\n四\n五")
+        val five = shell.fetchSemanticsNode().size
+        assertTrue(five.height > one.height)
+        val long = List(20) { "一" }.joinToString("\n")
+        field.performTextReplacement(long)
+        field.assertTextContains(long)
+        assertEquals(id, field.fetchSemanticsNode().id)
+        assertEquals(five, shell.fetchSemanticsNode().size)
+        field.performTextClearance()
+    }
     private fun send(text: String) {
         tag("assistant-input").performTextReplacement(text)
         await(hasTestTag("assistant-send") and isEnabled()).performClick()
@@ -299,6 +319,7 @@ class AssistantProposalTest {
         assertTrue(outbound.fetchSemanticsNode().boundsInRoot.left > answer.fetchSemanticsNode().boundsInRoot.left)
         assertEquals(1, server.requestCount)
         capture("assistant-chat.png")
+        checkReplyFootprint("assistant")
         val body = server.takeRequest(3, TimeUnit.SECONDS)!!.body!!.utf8()
         assertTrue("selectedDate" in body && origin.date.toString() in body)
     }
@@ -559,8 +580,8 @@ class AssistantProposalTest {
         repeat(5) { toolCall("planner_query", """{"kind":"current"}""") }; send("尝试反复读取")
         await(hasText("四次查询上限", substring = true)); assertEquals(5, server.requestCount)
         toolCall("planner_propose", """{"action":"open_course_import"}"""); send("请帮我导入课表")
-        val button = await(hasText("打开本地课表导入器")); ui.onNodeWithTag("importCourseHub").assertDoesNotExist()
-        button.performClick(); tag("importCourseHub"); tag("assistant-input").assertContentDescriptionContains("课表 · 助理消息")
+        val button = await(hasText("打开本地课表导入器")); ui.onNodeWithTag("importMethodWeb").assertDoesNotExist()
+        button.performClick(); tag("importMethodWeb"); tag("assistant-input").assertContentDescriptionContains("课表 · 助理消息")
         assertEquals(1, store.state().revision); assertEquals(6, server.requestCount)
     }
 
@@ -584,8 +605,9 @@ class AssistantProposalTest {
         try {
             file.writeText("""[{"ZC":1,"KS":"2026-09-07","MONDAY":[{"KCMC":"本地课程","JSMC":"仅本机地点","JC":"5-6"}]}]""")
             attach(file)
-            tag("nav:courses").performClick(); tag("course-import").performClick(); tag("importCourseFile").performClick()
-            tag("importTerm:new").performClick(); ui.chooseNumber("termWeeks", 2)
+            tag("nav:courses").performClick(); tag("course-import").performClick()
+            tag("importMethodFile").performClick(); tag("importCourseFile").performClick()
+            tag("importTerm:new").performClick(); tag("importTermName").performTextReplacement("秋季课表"); ui.chooseNumber("termWeeks", 2)
             ui.onNodeWithTag("assistant-input").assertDoesNotExist()
             tag("reviewCourseRows").performScrollTo().performClick()
             tag("previewCourseImportTop").performClick()
@@ -603,7 +625,7 @@ class AssistantProposalTest {
             tag("assistant-apply").performClick(); await(hasText("已应用这些更改。")); await(hasText("关闭")).performClick()
             val savedTerm = (store.api.observe(PlannerQuery.Terms).first() as Terms).terms.single()
             assertEquals(LocalDate.of(2026, 9, 7), savedTerm.firstMonday)
-            await(hasTestTag("course-week") and hasText(savedTerm.dateRangeLabel())).assertIsDisplayed()
+            await(hasTestTag("course-week") and hasText(savedTerm.displayLabel())).assertIsDisplayed()
             val week = store.api.observe(PlannerQuery.Week(savedTerm.id, 1)).first() as CourseWeek
             assertEquals("仅本机地点", week.classes.single().meeting.room); assertEquals(2, store.state().revision)
         } finally { file.delete() }
@@ -655,6 +677,7 @@ class AssistantProposalTest {
         val other = history.sendUser(null, "当前队列", "另一段不应发送的聊天", null, emptyList()).conversationId
         tag("nav:workspace").performClick()
         tag("assistant-history").performClick(); tag("assistant-history-thread-$id").performClick()
+        checkReplyFootprint("history-reply")
         tag("history-reply-input").performTextReplacement("接着最后一条")
         val baseline = store.state()
         capture("history-continue.png")

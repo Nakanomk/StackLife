@@ -4,12 +4,9 @@ import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.i18n.AppLanguage
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.pager.PagerState
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -56,6 +53,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.nakanomk.stacklife.planner.CourseWeek
 import io.github.nakanomk.stacklife.planner.PlannerQuery
 import io.github.nakanomk.stacklife.today.CalendarPager
+import io.github.nakanomk.stacklife.today.CalendarSelection
+import io.github.nakanomk.stacklife.today.rememberCalendarSelection
 import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch
 import io.github.nakanomk.stacklife.transitions.routeOrigin
 import java.time.Instant
@@ -65,27 +64,17 @@ private val courseClock = DateTimeFormatter.ofPattern("HH:mm", java.util.Locale.
 internal fun CourseMeeting.periodLabel() = if (firstPeriod == lastPeriod) uiText({ "Period $firstPeriod" }, { "第 $firstPeriod 节" }) else uiText({ "Periods $firstPeriod–$lastPeriod" }, { "第 $firstPeriod–$lastPeriod 节" })
 
 @Composable
-private fun RowScope.WeekPicker(term: TermSpec, selected: Int, pager: PagerState, onWeek: (Int) -> Unit) {
-    val dragged by pager.interactionSource.collectIsDraggedAsState()
-    val week by remember(pager, selected) { derivedStateOf {
-        val origin = pager.settledPage
-        when {
-            dragged -> {
-                val travel = pager.currentPage - origin + pager.currentPageOffsetFraction
-                (origin + travel.compareTo(0f)).coerceIn(0, pager.pageCount - 1) + 1
-            }
-            pager.isScrollInProgress && selected == origin + 1 -> pager.targetPage + 1
-            else -> selected
-        }
-    } }
-    IconButton(onClick = { onWeek(week - 1) }, enabled = week > 1, modifier = Modifier.testTag("course-prev")) {
+private fun RowScope.WeekPicker(term: TermSpec, selection: CalendarSelection) {
+    val page by selection.displayPage
+    val week = page + 1
+    IconButton(onClick = { selection.select(selection.displayPage.value - 1) }, enabled = week > 1, modifier = Modifier.testTag("course-prev")) {
         Icon(painterResource(R.drawable.ic_chevron_left), stringResource(R.string.courses_previous_week))
     }
     var expanded by remember { mutableStateOf(false) }
     Box(Modifier.weight(1f, fill = false)) {
         TextButton(onClick = { expanded = true }, contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.testTag("course-week")) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(term.dateRangeLabel(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Text(term.displayLabel(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.courses_week, week), maxLines = 1, style = MaterialTheme.typography.titleSmall)
@@ -94,10 +83,10 @@ private fun RowScope.WeekPicker(term: TermSpec, selected: Int, pager: PagerState
             }
         }
         PlannerDropdownMenu(expanded, { expanded = false }) {
-            for (n in 1..term.weeks) DropdownMenuItem(text = { Text(stringResource(R.string.courses_week, n)) }, onClick = { expanded = false; onWeek(n) })
+            for (n in 1..term.weeks) DropdownMenuItem(text = { Text(stringResource(R.string.courses_week, n)) }, onClick = { expanded = false; selection.select(n - 1) })
         }
     }
-    IconButton(onClick = { onWeek(week + 1) }, enabled = week < term.weeks, modifier = Modifier.testTag("course-next")) {
+    IconButton(onClick = { selection.select(selection.displayPage.value + 1) }, enabled = week < term.weeks, modifier = Modifier.testTag("course-next")) {
         Icon(painterResource(R.drawable.ic_chevron_right), stringResource(R.string.courses_next_week))
     }
 }
@@ -122,11 +111,11 @@ internal fun CourseEditorHost(model: WorkspaceViewModel, editor: ManualEditorMod
 internal fun CourseHome(
     model: WorkspaceViewModel, catalog: Terms, term: TermSpec?, week: Int?,
     onTerm: (TermSpec) -> Unit, onWeek: (TermSpec, Int) -> Unit, onImport: () -> Unit,
-    onRemove: (TermSpec, String) -> Unit, onSettings: () -> Unit,
+    onRemove: (TermSpec, String) -> Unit, onSettings: () -> Unit, currentWeek: (TermSpec) -> Int,
 ) {
     var listMode by rememberSaveable { mutableStateOf(false) }
-    val pager = if (term != null && week != null) key(term.id) {
-        rememberPagerState(initialPage = week - 1) { term.weeks }
+    val selection = if (term != null && week != null) key(term.id) {
+        rememberCalendarSelection(week - 1, term.weeks) { onWeek(term, it + 1) }
     } else null
     val editor = courseEditor("timetable")
     val add = { editor.open(term, week ?: 1) }
@@ -138,20 +127,21 @@ internal fun CourseHome(
                 var menu by remember { mutableStateOf(false) }
                 Box {
                     val sources = catalog.importedSources[term.id].orEmpty()
-                    var owner = Modifier.routeOrigin("course-import", CircleShape)
-                    for (source in sources) owner = owner.routeOrigin("remove-term:${term.id}:$source", CircleShape)
-                    GlassIcon(R.drawable.ic_more_vert, stringResource(R.string.courses_options), { menu = true }, owner.testTag("course-options"))
+                    GlassIcon(R.drawable.ic_more_vert, stringResource(R.string.courses_options), { menu = true }, Modifier.testTag("course-options"))
                     PlannerDropdownMenu(menu, { menu = false }) {
                         DropdownMenuItem({ Text(stringResource(R.string.courses_add)) }, { menu = false; add() }, modifier = Modifier.testTag("course-add"),
                             leadingIcon = { Icon(painterResource(R.drawable.ic_add), null) })
                         DropdownMenuItem({ Text(if (listMode) stringResource(R.string.courses_week_grid) else stringResource(R.string.courses_list)) },
                             { menu = false; listMode = !listMode }, modifier = Modifier.testTag("course-view-toggle"))
+                        DropdownMenuItem({ Text(stringResource(R.string.courses_go_current_week)) },
+                            { menu = false; selection?.select(currentWeek(term) - 1) }, modifier = Modifier.testTag("course-current-week"),
+                            leadingIcon = { Icon(painterResource(R.drawable.ic_today), null) })
                         val importLaunch = rememberRouteLaunch("course-import")
                         DropdownMenuItem({ Text(stringResource(R.string.courses_import)) }, { importLaunch.open { menu = false; onImport() } },
                             modifier = importLaunch.modifier.testTag("course-import"))
                         if (terms.size > 1) {
                             HorizontalDivider()
-                            for (choice in terms) DropdownMenuItem({ Text(choice.dateRangeLabel()) }, { menu = false; onTerm(choice) },
+                            for (choice in terms) DropdownMenuItem({ Text(choice.displayLabel(), maxLines = 1, overflow = TextOverflow.Ellipsis) }, { menu = false; onTerm(choice) },
                                 enabled = choice.id != term.id)
                         }
                         if (sources.isNotEmpty()) {
@@ -167,11 +157,11 @@ internal fun CourseHome(
                 }
             }
         }) {
-            if (term != null && week != null && pager != null) WeekPicker(term, week, pager) { onWeek(term, it) }
+            if (term != null && selection != null) WeekPicker(term, selection)
             else TextButton(onClick = onImport, modifier = Modifier.routeOrigin("course-import", CircleShape).testTag("course-import")) { Text(stringResource(R.string.courses_import)) }
         }
     }) { top, bottom ->
-        if (term == null || week == null || pager == null) {
+        if (term == null || selection == null) {
             Column(Modifier.fillMaxSize().padding(top = top, bottom = bottom).verticalScroll(rememberScrollState())
                 .padding(16.dp)) {
                 Text(stringResource(R.string.courses_no_timetable), style = MaterialTheme.typography.titleMedium)
@@ -182,7 +172,7 @@ internal fun CourseHome(
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else key(term.id) {
-            CalendarPager(week - 1, term.weeks, { onWeek(term, it + 1) }, Modifier.fillMaxSize(), pager) { index ->
+            CalendarPager(selection, Modifier.fillMaxSize()) { index ->
                 val query = remember(term.id, index) { PlannerQuery.Week(term.id, index + 1) }
                 val data by remember(model, query) { model.week(query) }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
                 ReadPanel(data) { result ->

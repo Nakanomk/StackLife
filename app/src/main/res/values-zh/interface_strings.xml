@@ -208,7 +208,7 @@
     <string name="ui_push_selected">压入所选</string>
     <string name="ui_empty_queue">队列是空的</string>
     <string name="ui_empty_queue_hint">添加下一件要做的事，或从栈中恢复任务。</string>
-    <string name="ui_move_task_hint">移动%1$s，长按拖动或点按选择位置</string>
+    <string name="ui_move_task_hint">移动%1$s，拖动排序或点按选择位置</string>
     <string name="ui_move_to_front">移到队首</string>
     <string name="ui_move_up_one">上移一位</string>
     <string name="ui_move_down_one">下移一位</string>
@@ -220,4 +220,5 @@
     <string name="ui_taken">已取走</string>
     <string name="ui_move_tab_up">上移%1$s</string>
     <string name="ui_move_tab_down">下移%1$s</string>
+    <string name="setting_info">说明：%1$s</string>
 </resources>

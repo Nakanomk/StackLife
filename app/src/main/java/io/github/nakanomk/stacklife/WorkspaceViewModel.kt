@@ -40,6 +40,15 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadState.Loading)
     val settings = read<PolicyView>(PlannerQuery.Settings)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadState.Loading)
+    // A returning settings scene must lay out its real rows before sampling the launcher.
+    // Keep only these three fixed summaries; subscriptions still stop when the page leaves.
+    val routineSchedules by lazy { RoutineKind.entries.associateWith {
+        read<ScheduleView>(PlannerQuery.Schedule(it.scheduleId)).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadState.Loading)
+    } }
+    val courseReminders by lazy {
+        read<ReminderView>(PlannerQuery.Reminders(ReminderSubject.CourseDefault))
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadState.Loading)
+    }
 
     fun day(query: PlannerQuery.Day) = read<DayPlan>(query)
     fun terms() = read<Terms>(PlannerQuery.Terms)

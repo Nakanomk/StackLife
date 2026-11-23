@@ -93,6 +93,7 @@ internal fun HelpAboutScreen(back: () -> Unit, onGuide: () -> Unit) {
     PaneMotion(page, origins, depth = { when (it) { AboutPage.HOME -> 0; AboutPage.TEXT -> 2; else -> 1 } },
         originKey = ::origin, modifier = Modifier.fillMaxSize(),
         parent = when (page) { AboutPage.HOME -> null; AboutPage.TEXT -> licenseParent; else -> AboutPage.HOME }, onBack = up) { shown ->
+        SettingsHelpHost {
         EditorPage(stringResource(shown.title), up) { top, bottom ->
         holder.SaveableStateProvider(origin(shown)) {
             val padding = dockListPadding(top, bottom)
@@ -101,7 +102,6 @@ internal fun HelpAboutScreen(back: () -> Unit, onGuide: () -> Unit) {
                 AboutPage.LICENSES -> {
                     val files = localRead(app) { app.assets.list("licenses").orEmpty().filterNot { it == PROJECT_LICENSE }.sorted() }
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
-                        item { Hint(stringResource(R.string.about_license_intro)) }
                         item {
                             PreferenceRow(stringResource(R.string.about_project_license), "GPL-3.0-or-later",
                                 Modifier.paneOrigin(origins, "license:$PROJECT_LICENSE").testTag("license:$PROJECT_LICENSE")) {
@@ -174,9 +174,8 @@ internal fun HelpAboutScreen(back: () -> Unit, onGuide: () -> Unit) {
                             }
                         } }
                         item { FormGroup {
-                            SectionTitle(stringResource(R.string.about_apk))
+                            SettingLabel(stringResource(R.string.about_apk), stringResource(R.string.about_apk_hint))
                             apk.display { SelectionContainer { Text(it, modifier = Modifier.testTag("about-apk-sha256")) } }
-                            Hint(stringResource(R.string.about_apk_hint))
                         } }
                         item { FormGroup {
                             SectionTitle(stringResource(R.string.about_signer))
@@ -201,11 +200,13 @@ internal fun HelpAboutScreen(back: () -> Unit, onGuide: () -> Unit) {
                     item { FormGroup {
                         listOf(AboutPage.HELP, AboutPage.DIAGNOSTICS, AboutPage.BUILD, AboutPage.LICENSES).forEach { entry ->
                             PreferenceRow(stringResource(entry.title), modifier = Modifier.paneOrigin(origins, origin(entry))
-                                .testTag("about-${entry.name.lowercase(java.util.Locale.ROOT)}")) { page = entry }
+                                .testTag("about-${entry.name.lowercase(java.util.Locale.ROOT)}"),
+                                help = if (entry == AboutPage.LICENSES) stringResource(R.string.about_license_intro) else null) { page = entry }
                         }
                     } }
                 }
             }
+        }
         }
         }
     }

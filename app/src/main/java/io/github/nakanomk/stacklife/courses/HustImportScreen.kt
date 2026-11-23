@@ -4,12 +4,11 @@ import io.github.nakanomk.stacklife.R
 import androidx.compose.ui.res.stringResource
 import io.github.nakanomk.stacklife.i18n.uiText
 import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.browser.customtabs.CustomTabsClient
-import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -17,10 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.ui.semantics.Role
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.Dp
@@ -41,18 +37,19 @@ import io.github.nakanomk.stacklife.assistant.AssistantComposer
 import io.github.nakanomk.stacklife.workspace.*
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.planner.PreviewResult
+import io.github.nakanomk.stacklife.planner.CourseSetSnapshot
 import io.github.nakanomk.stacklife.transitions.PaneMotion
 import io.github.nakanomk.stacklife.transitions.PaneOrigins
 import io.github.nakanomk.stacklife.transitions.paneOrigin
 import java.io.File
+import java.io.IOException
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
-
-private val chromePackages = listOf("com.android.chrome", "com.chrome.beta", "com.chrome.dev", "com.chrome.canary")
 
 private sealed class ImportStep(val key: String, val depth: Int) {
     data object Source : ImportStep("source", 0)
@@ -63,12 +60,27 @@ private sealed class ImportStep(val key: String, val depth: Int) {
     class Diff(val draft: ReviewedTimetable, val ready: PreviewResult.Ready, origin: String) : ImportStep(origin, 4)
 }
 
+private fun PreviewResult.Ready.createsTimetable(id: String): Boolean {
+    var added = false
+    for (change in changes) {
+        if ((change.before as? CourseSetSnapshot)?.termId == id) return false
+        val after = change.after as? CourseSetSnapshot
+        if (after != null && after.termId == id && after.meetings.isNotEmpty()) added = true
+    }
+    return added
+}
+
 @Composable
-internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onImported: (String) -> Unit) {
+internal fun HustImportScreen(model: WorkspaceViewModel, entry: ImportEntry, onBack: () -> Unit, onCancel: () -> Unit,
+    onFileEntry: () -> Unit, onImported: (String) -> Unit) {
     val context = LocalContext.current
     val resolver = context.contentResolver
+    suspend fun termExists(id: String): Boolean = when (val catalog = model.terms().first()) {
+        is ReadState.Loaded -> catalog.value.terms.any { it.id == id }
+        else -> throw IOException()
+    }
     val state = viewModel<ImportReviewState> {
-        ImportReviewState(createSavedStateHandle(), File(context.applicationContext.noBackupFilesDir, "import-reviews"))
+        ImportReviewState(createSavedStateHandle(), File(context.applicationContext.noBackupFilesDir, "import-reviews"), ::termExists)
     }
     val hub = state.page == ImportPage.HUB
     val origins = remember { PaneOrigins() }
@@ -76,14 +88,11 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
     var proposal by remember { mutableStateOf<PreviewResult.Ready?>(null) }
     var effective by remember { mutableStateOf<ReviewedTimetable?>(null) }
     var previewOrigin by remember { mutableStateOf("diff-top") }
-    var confirmedTerm by rememberSaveable { mutableStateOf<String?>(null) }
     fun finish(termId: String) { state.reset(); onImported(termId) }
     val submission = rememberSubmission(model, onError = { state.message = it }) { outcome ->
-        val term = confirmedTerm
-        confirmedTerm = null
         proposal = null
         effective = null
-        if (outcome == SaveOutcome.APPLIED) finish(checkNotNull(term)) else state.page = ImportPage.ENTRIES
+        if (outcome == SaveOutcome.APPLIED) finish(checkNotNull(state.draft).term.id) else state.page = ImportPage.ENTRIES
     }
     val writing = submission.busy
     val busy = state.busy || (state.page == ImportPage.DIFF && proposal == null && !writing)
@@ -105,18 +114,11 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
         try { picker.launch(arrayOf("application/json", "text/*", "application/octet-stream")) }
         catch (_: ActivityNotFoundException) { state.message = uiText("No system file picker is available on this device.", "设备没有可用的系统文件选择器") }
     }
-    fun openChrome() {
+    fun openBrowser() {
         state.message = null
-        val chrome = CustomTabsClient.getPackageName(context, chromePackages, true)
-        if (chrome == null) {
-            state.message = uiText("No supported Chrome browser was found.", "未找到可用的 Chrome 浏览器")
-            return
-        }
-        val tab = CustomTabsIntent.Builder().build()
-        tab.intent.setPackage(chrome)
-        try { tab.launchUrl(context, Uri.parse(HUB_LOGIN_URL)) }
-        catch (_: ActivityNotFoundException) { state.message = uiText("Cannot open Chrome.", "无法打开 Chrome 浏览器") }
-        catch (_: SecurityException) { state.message = uiText("The system did not allow Chrome to open.", "系统不允许启动 Chrome 浏览器") }
+        try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(HUB_LOGIN_URL))) }
+        catch (_: ActivityNotFoundException) { state.message = context.getString(R.string.courses_browser_missing) }
+        catch (_: SecurityException) { state.message = context.getString(R.string.courses_browser_denied) }
     }
     fun leavePreview() {
         if (submission.busy) return
@@ -131,7 +133,7 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
         attached = false
         leavePreview()
         state.reset()
-        onBack()
+        onCancel()
     }
     val raw = state.rows
     val parsed = state.draft
@@ -146,6 +148,10 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
     val diff = remember(ready, reviewed, previewOrigin) {
         if (ready == null || reviewed == null) null else ImportStep.Diff(reviewed, ready, previewOrigin)
     }
+    fun confirm(shown: ImportStep.Diff?) {
+        if (shown == null || busy || !attached || state.page != ImportPage.DIFF || proposal?.proposalId != shown.ready.proposalId) return
+        if (submission.submit { model.confirmProposal(shown.ready.proposalId) }) state.message = null
+    }
     // A restored difference is rebuilt against today's revision; restoring never executes a command.
     LaunchedEffect(state.page, parsed) {
         if (state.page != ImportPage.DIFF || parsed == null || proposal != null || submission.busy) return@LaunchedEffect
@@ -154,14 +160,30 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
             val result = withContext(Dispatchers.Default) { parsed.resolve(choices) }
             val owner = currentCoroutineContext()
             withContext(NonCancellable) {
-                when (val preview = model.previewImport(result.term, result.meetings, result.source)) {
-                    is PreviewResult.Ready -> if (owner.isActive && attached && state.page == ImportPage.DIFF) {
-                        effective = result; proposal = preview
-                    } else model.discardProposal(preview.proposalId)
-                    is PreviewResult.Rejected -> if (owner.isActive && attached) { state.message = preview.message; state.page = ImportPage.ENTRIES }
-                }
+                val preview = model.previewImport(result.term, result.meetings, result.source)
+                var retained = false
+                try {
+                    if (!owner.isActive || !attached || state.page != ImportPage.DIFF) return@withContext
+                    // A source-scoped diff cannot by itself see a term owned only by another source.
+                    // Read the catalog *after* preview; writes after this check invalidate its revision.
+                    val conflict = state.selectedId == null && (preview is PreviewResult.Ready && !preview.createsTimetable(result.term.id)
+                        || termExists(result.term.id))
+                    if (owner.isActive && attached && state.page == ImportPage.DIFF) {
+                        if (conflict) {
+                            state.message = context.getString(R.string.import_term_name_conflict)
+                            state.page = ImportPage.CALENDAR
+                        } else when (preview) {
+                            is PreviewResult.Ready -> { effective = result; proposal = preview; retained = true }
+                            is PreviewResult.Rejected -> { state.message = preview.message; state.page = ImportPage.ENTRIES }
+                        }
+                    }
+                } finally { if (preview is PreviewResult.Ready && !retained) model.discardProposal(preview.proposalId) }
             }
-        } catch (e: IllegalArgumentException) { state.message = e.message; state.page = ImportPage.ENTRIES }
+        } catch (e: IllegalArgumentException) {
+            if (attached && state.page == ImportPage.DIFF) { state.message = e.message; state.page = ImportPage.ENTRIES }
+        } catch (_: IOException) {
+            if (attached && state.page == ImportPage.DIFF) { state.message = context.getString(R.string.import_catalog_error); state.page = ImportPage.ENTRIES }
+        }
     }
     val step = when (state.page) {
         ImportPage.SOURCE -> ImportStep.Source
@@ -184,29 +206,31 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
             is ImportStep.Fix -> { state.editing = null; state.working = null; state.page = ImportPage.ENTRIES }
             is ImportStep.Entries -> { state.page = ImportPage.CALENDAR; state.message = null }
             is ImportStep.Calendar -> state.reset()
-            else -> cancel()
+            else -> onBack()
         }
     }
     BackHandler(enabled = !hub && (writing || busy)) { }
     val calendarScroll = rememberScrollState()
     val entriesScroll = androidx.compose.foundation.lazy.rememberLazyListState()
-    val steps: @Composable (Dp) -> Unit = { top ->
+    val steps: @Composable (Dp, Dp) -> Unit = { top, inset ->
         PaneMotion(step, origins, depth = { it.depth }, originKey = { it.key }, modifier = Modifier.fillMaxSize(),
             parent = previous.takeUnless { busy || writing }, onBack = ::backStep) { shown ->
         when (shown) {
             ImportStep.Hub -> HubWebView(onRows = { rows -> state.page = ImportPage.SOURCE; state.receive(true) { rows } }, onBack = { if (!state.busy) state.page = ImportPage.SOURCE },
-                onFile = { state.page = ImportPage.SOURCE; chooseFile() }, extractOrigin = Modifier.paneOrigin(origins, "hub-calendar"))
+                onFile = { state.reset(); onFileEntry() }, extractOrigin = Modifier.paneOrigin(origins, "hub-calendar"))
             ImportStep.Source -> if (!writing && !busy) {
                 ImportPane(composer = { if (!busy && !hub) AssistantComposer(AssistantPage.Terms) }) { bottom ->
                     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, bottom))) {
-                        SectionTitle(stringResource(R.string.courses_choose_source))
+                        SectionTitle(stringResource(if (entry == ImportEntry.WEB) R.string.courses_hub_source else R.string.courses_import_file))
                         FormGroup {
-                            PreferenceRow(stringResource(R.string.courses_hub_extract), modifier = Modifier.paneOrigin(origins, "hub")
-                                .paneOrigin(origins, "hub-calendar").testTag("importCourseHub"), enabled = !busy) { state.message = null; state.page = ImportPage.HUB }
-                            HorizontalDivider()
-                            PreferenceRow(stringResource(R.string.courses_browse_chrome), modifier = Modifier.testTag("browseHubChrome"), enabled = !busy, onClick = ::openChrome)
-                            HorizontalDivider()
-                            PreferenceRow(stringResource(R.string.courses_choose_json), modifier = Modifier.paneOrigin(origins, "file-calendar").testTag("importCourseFile"), enabled = !busy, onClick = ::chooseFile)
+                            if (entry == ImportEntry.WEB) {
+                                PreferenceRow(stringResource(R.string.courses_hub_extract), modifier = Modifier.paneOrigin(origins, "hub")
+                                    .testTag("importCourseHub"), enabled = !busy, labelMaxLines = 1) { state.message = null; state.page = ImportPage.HUB }
+                                HorizontalDivider()
+                                PreferenceRow(stringResource(R.string.courses_browse_website), modifier = Modifier.testTag("browseSchoolWebsite"),
+                                    enabled = !busy, labelMaxLines = 1, onClick = ::openBrowser)
+                            } else PreferenceRow(stringResource(R.string.courses_choose_json), modifier = Modifier.paneOrigin(origins, "file-calendar")
+                                .testTag("importCourseFile"), enabled = !busy, labelMaxLines = 1, onClick = ::chooseFile)
                         }
                     }
                 }
@@ -216,22 +240,32 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
                 val terms by remember(model) { model.terms() }.collectAsState(ReadState.Loading)
                 ReadPanel(terms) { result ->
                     val existing = result.terms.firstOrNull { it.id == state.selectedId }
-                    val useNew = state.selectedId == state.form.id || (result.terms.isEmpty() && state.selectedId == null)
+                    val useNew = state.selectedId == null
+                    val name = state.form.id.trim()
+                    val duplicate = useNew && result.terms.any { it.id == name }
                     FormGroup(Modifier.selectableGroup()) {
                         result.terms.forEach { spec ->
                             val sources = result.importedSources[spec.id].orEmpty()
                             val sourceNames = if (sources.isEmpty()) sourceLabel(MANUAL_SOURCE) else
                                 sources.map { sourceLabel(it) }.joinToString(stringResource(R.string.courses_list_separator))
-                            TermChoice(spec.dateRangeLabel(), existing == spec, !busy, "importTerm:${spec.id}", sourceNames) { state.selectedId = spec.id }
+                            TermChoice(spec.displayLabel(), existing == spec, "importTerm:${spec.id}", !busy, sourceNames,
+                                if (spec.hasLegacyId()) null else spec.dateRangeLabel()) { state.selectedId = spec.id; state.message = null }
                         }
-                        TermChoice(stringResource(R.string.courses_new_term), useNew, !busy, "importTerm:new") { state.selectedId = state.form.id }
+                        TermChoice(stringResource(R.string.courses_new_term), useNew, "importTerm:new", !busy) { state.selectedId = null; state.message = null }
                     }
                     if (useNew) {
+                        ImportField(stringResource(R.string.import_term_name), state.form.id, "importTermName", !busy) {
+                            state.form = state.form.copy(id = it); state.message = null
+                        }
+                        if (duplicate) {
+                            val warning = stringResource(R.string.import_term_name_conflict)
+                            if (state.message != warning) Text(warning, color = MaterialTheme.colorScheme.error)
+                        }
                         val hints = remember(shown.rows) { firstWeekHints(shown.rows) }
                         if (hints.isNotEmpty()) Hint(stringResource(R.string.courses_week_hint, hints.joinToString(stringResource(R.string.courses_list_separator))))
                         TermFields(state.form, !busy) { state.form = it }
                     }
-                    val selected = existing?.asForm() ?: state.form.takeIf { useNew }
+                    val selected = existing?.asForm() ?: state.form.takeIf { useNew && name.length in 1..128 && !duplicate }
                     ActionPill(stringResource(R.string.courses_review_entries), enabled = !busy && selected != null, prominent = true,
                         modifier = Modifier.paneOrigin(origins, "entries").testTag("reviewCourseRows"), onClick = { selected?.let(state::review) })
                 }
@@ -246,21 +280,27 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
                     state.message = null; state.page = ImportPage.DIFF
                 }
                 val groups = remember(parsed) { parsed.groups() }
+                val actionRow: @Composable (Boolean) -> Unit = { atTop ->
+                    val origin = if (atTop) "diff-top" else "diff-bottom"
+                    ImportActionRow(ImportActions.ENTRIES, canPreview, !busy && !writing,
+                        Modifier.paneOrigin(origins, origin).testTag(if (atTop) "previewCourseImportTop" else "previewCourseImport"),
+                        Modifier.testTag(if (atTop) "chooseImportTermTop" else "chooseImportTerm"),
+                        onFirst = { preview(origin) }, onSecond = { state.page = ImportPage.CALENDAR; state.message = null })
+                }
                 var showSource by remember { mutableStateOf(false) }
-                LazyColumn(Modifier.fillMaxSize().testTag("courseIssues"), state = entriesScroll, contentPadding = dockListPadding(top, 0.dp),
+                LazyColumn(Modifier.fillMaxSize().testTag("courseIssues"), state = entriesScroll, contentPadding = importListPadding(top, 0.dp, inset),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     Text(stringResource(R.string.courses_review_source), style = MaterialTheme.typography.titleLarge)
-                    Text(parsed.term.dateRangeLabel(), style = MaterialTheme.typography.bodyLarge)
+                    Text(parsed.term.displayLabel(), style = MaterialTheme.typography.bodyLarge)
+                    if (!parsed.term.hasLegacyId()) Hint(parsed.term.dateRangeLabel())
                     Hint(stringResource(R.string.import_valid_count, parsed.validCount))
                     if (parsed.issues.isNotEmpty()) {
                         Hint(stringResource(R.string.import_unresolved, parsed.issues.size - decisions.size))
                         Hint(stringResource(R.string.import_corrected_count, decisions.values.count { it is IssueDecision.Correct }))
                         Hint(stringResource(R.string.import_excluded_count, decisions.values.count { it == IssueDecision.Exclude }))
                     }
-                    ActionPill(stringResource(R.string.courses_preview_import), { preview("diff-top") },
-                        Modifier.paneOrigin(origins, "diff-top").testTag("previewCourseImportTop"), enabled = canPreview, prominent = true)
-                    Secondary(stringResource(R.string.import_choose_timetable), !busy) { state.page = ImportPage.CALENDAR; state.message = null }
+                    actionRow(true)
                 }
                 if (parsed.issues.isNotEmpty()) item { SectionTitle(stringResource(R.string.import_flagged)) }
                 itemsIndexed(parsed.issues, key = { _, issue -> issue.position }) { index, issue ->
@@ -302,10 +342,7 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
                         }
                     }
                 }
-                item {
-                    ActionPill(stringResource(R.string.courses_preview_import), { preview("diff-bottom") },
-                        Modifier.paneOrigin(origins, "diff-bottom").testTag("previewCourseImport"), enabled = canPreview, prominent = true)
-                }
+                item { actionRow(false) }
             }
             }
             is ImportStep.Fix -> Correction(shown.issue, state.working ?: shown.fields, shown.term, raw, top, onChange = { state.working = it },
@@ -314,12 +351,8 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
                 })
             is ImportStep.Diff -> {
                 val ready = shown.ready
-                ReviewedImport(model, shown.draft, ready, busy || writing, top, ::finish, onEdit = ::leavePreview, onConfirm = {
-                    if (!busy && attached && proposal?.proposalId == ready.proposalId && submission.submit { model.confirmProposal(ready.proposalId) }) {
-                        confirmedTerm = shown.draft.term.id
-                        state.message = null
-                    }
-                })
+                ReviewedImport(model, shown.draft, ready, busy || writing, top, inset, ::finish, onEdit = ::leavePreview,
+                    onCancel = ::cancel, onConfirm = { confirm(shown) })
             }
         }
         }
@@ -328,9 +361,20 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
     CompositionLocalProvider(LocalPlannerGlassAllowed provides (LocalPlannerGlassAllowed.current && !hub)) {
     PlannerPopupHost(enabled = !hub) {
         Page {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+            val inset = if (state.page == ImportPage.ENTRIES || state.page == ImportPage.DIFF)
+                importActionInset(maxWidth, if (state.page == ImportPage.DIFF) ImportActions.DIFF else ImportActions.ENTRIES) else 16.dp
             RootPane(header = {
-                if (!hub) Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                if (!hub) Column(Modifier.fillMaxWidth().padding(horizontal = inset, vertical = 4.dp)) {
+                    if (state.page == ImportPage.DIFF) {
+                        SectionTitle(stringResource(R.string.courses_import))
+                        ImportActionRow(ImportActions.DIFF, !writing && !state.busy, !busy && !writing && diff != null,
+                            Modifier.testTag("cancelCourseImport"), Modifier.testTag("confirmCourseImportTop"), ::cancel, { confirm(diff) })
+                    } else if (step == ImportStep.Source && !writing && !busy) {
+                        PageTitle(stringResource(R.string.courses_import), onBack, action = {
+                            ActionPill(stringResource(R.string.courses_cancel_import), ::cancel, Modifier.testTag("cancelCourseImport"))
+                        })
+                    } else Row(verticalAlignment = Alignment.CenterVertically) {
                         SectionTitle(stringResource(R.string.courses_import))
                         Spacer(Modifier.weight(1f))
                         ActionPill(stringResource(R.string.courses_cancel_import), ::cancel, Modifier.testTag("cancelCourseImport"), enabled = !writing && !state.busy)
@@ -340,7 +384,8 @@ internal fun HustImportScreen(model: WorkspaceViewModel, onBack: () -> Unit, onI
                     if (writing) Text(stringResource(R.string.courses_saving_import), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
-            }) { top, _ -> steps(top) }
+            }) { top, _ -> steps(top, inset) }
+            }
         }
     }
     }
@@ -368,19 +413,6 @@ private fun Correction(issue: ImportIssue, fields: CourseFields, term: TermSpec,
                 Secondary(stringResource(R.string.courses_cancel), onClick = onClose)
                 Primary(stringResource(R.string.courses_save_correction), enabled = problem == null) { onSave(fields) }
             }
-    }
-}
-
-@Composable
-private fun TermChoice(label: String, selected: Boolean, enabled: Boolean, tag: String, source: String? = null, choose: () -> Unit) {
-    Row(Modifier.fillMaxWidth().testTag(tag).selectable(selected, enabled = enabled, role = Role.RadioButton, onClick = choose)
-        .heightIn(min = 48.dp).padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        RadioButton(selected, onClick = null, enabled = enabled)
-        Column {
-            Text(label, style = MaterialTheme.typography.bodyLarge)
-            source?.let { Hint(it) }
-        }
     }
 }
 

@@ -6,6 +6,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PixelMap
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.test.*
@@ -95,6 +96,16 @@ class SceneMotionTest {
         assertTrue("Need real uncovered text or controls in this keyframe", edges > 15)
         assertTrue("Detail/chrome leaked or erased the original scene outside $clip: $changed changed / $edges edges",
             changed <= maxOf(8, edges / 12))
+    }
+
+    private fun keepFrame(name: String, pixels: PixelMap) {
+        if (androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("captureMotion") != "yes") return
+        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        val bitmap = android.graphics.Bitmap.createBitmap(pixels.buffer, pixels.bufferOffset, pixels.stride,
+            pixels.width, pixels.height, android.graphics.Bitmap.Config.ARGB_8888)
+        try { java.io.File(context.getExternalFilesDir(null), "repair-$name.png").outputStream().use {
+            check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+        } } finally { bitmap.recycle() }
     }
 
     /** Compare the row's ink *and* the paper between glyphs. A solid landing tile has
@@ -192,7 +203,7 @@ class SceneMotionTest {
             box.height > origin.height + 2f && box.height < page.height - 2f)
         // All four edges use the same bounds transform, from this particular origin.
         val t = (box.height - origin.height) / (page.height - origin.height)
-        assertEquals(origin.top + (page.top - origin.top) * t, box.top, 3f)
+        assertEquals("Top must interpolate from the actual launcher: $origin / $box / $page", origin.top + (page.top - origin.top) * t, box.top, 3f)
         assertEquals(origin.left + (page.left - origin.left) * t, box.left, 3f)
     }
 
@@ -216,7 +227,9 @@ class SceneMotionTest {
         val nearCard = frame(key)
         between(row, nearCard.box, open.box)
         assertUncoveredPixels(before, nearCard.pixels, nearCard.box)
-        assertDetailInk(open, nearCard)
+        // At 70% Back the destination ink has handed off. The row's paper, title
+        // and controls must already be intact, not a second moving detail title.
+        assertLivePatch(before, nearCard.pixels, row)
         assertTrue("More back progress must contract the same surface", nearCard.box.height < nearDetail.height - 2f)
         seek(input, .30f)
         assertTrue("Dragging the finger back must expand the surface again", bounds(detail).height > nearCard.box.height + 2f)
@@ -249,7 +262,7 @@ class SceneMotionTest {
         withClockAndBack {
             click(ui.onNode(hasContentDescription("返回") and hasClickAction()))
             ui.mainClock.advanceTimeBy(192)
-            val lastFrames = ArrayDeque<PixelMap>(2)
+            val lastFrames = ArrayDeque<Pair<Rect, PixelMap>>(2)
             var disposedFrames = 0
             repeat(18) {
                 ui.mainClock.advanceTimeByFrame()
@@ -264,14 +277,17 @@ class SceneMotionTest {
                     if (moving == null) disposedFrames++
                 } else {
                     assertUncoveredPixels(before, shot, moving)
-                    if (abs(moving.height - original[1].height) < 3f) {
-                        if (lastFrames.size == 2) lastFrames.removeFirst()
-                        lastFrames.addLast(shot)
-                    }
+                    if (lastFrames.size == 2) lastFrames.removeFirst()
+                    lastFrames.addLast(moving to shot)
                 }
             }
             assertEquals("Need the last two frames before the detail is removed", 2, lastFrames.size)
-            for (frame in lastFrames) for (row in original) assertLivePatch(before, frame, row)
+            keepFrame("entity-source", before)
+            for ((i, sample) in lastFrames.withIndex()) keepFrame("entity-landing-$i", sample.second)
+            for ((window, shot) in lastFrames) {
+                assertLivePatch(before, shot, original[1])
+                for (i in listOf(0, 2)) if (!window.overlaps(original[i])) assertLivePatch(before, shot, original[i])
+            }
             assertTrue("Need frames on the other side of detail disposal", disposedFrames >= 2)
         }
     }
@@ -279,6 +295,7 @@ class SceneMotionTest {
     @Test fun chromeIsRevealedInItsOwnSlotNeverCarriedUnderTheRootToolbar() {
         show(PlannerCommand.TaskAdd(TaskInput("报告提纲")), PlannerCommand.TaskAdd(TaskInput("取资料")))
         val key = "task:${runBlocking { store.state().queue.first().id }}"
+        val source = bounds(key)
         val rootHeader = bounds("root-toolbar")
         val rootPixels = pixels()
         val inside = hasAnyAncestor(hasTestTag("detail:$key"))
@@ -311,7 +328,7 @@ class SceneMotionTest {
             var rootGlyphs = 0
             var detailGlyphs = 0
             var checkedBlank = 0
-            fun check(f: DetailFrame, header: Rect, dock: Rect) {
+            fun check(f: DetailFrame, header: Rect, dock: Rect, detailAlpha: Float) {
                 fun assertFixed(label: String, fixed: Rect, now: Rect) {
                     assertEquals(label, fixed.left, now.left, 1f); assertEquals(label, fixed.top, now.top, 1f)
                     assertEquals(label, fixed.right, now.right, 1f); assertEquals(label, fixed.bottom, now.bottom, 1f)
@@ -327,7 +344,7 @@ class SceneMotionTest {
                         val p = Offset(x.toFloat(), y.toFloat())
                         val ink = when {
                             visible.contains(p) && finalHeading.contains(p) && delta(open.pixels[x, y], paper) > .40f ->
-                                open.pixels[x, y].also { detailGlyphs++ }
+                                open.pixels[x, y].copy(alpha = detailAlpha).compositeOver(paper).also { detailGlyphs++ }
                             !excluded.contains(p) && rootHeader.contains(p) && delta(rootPixels[x, y], paper) > .40f ->
                                 rootPixels[x, y].also { rootGlyphs++ }
                             else -> continue
@@ -338,8 +355,8 @@ class SceneMotionTest {
                     }
                 assertTrue("Wrong toolbar visible in ${f.box}: $wrong/$expected glyph samples",
                     wrong <= maxOf(2, expected / 15))
-                // The short fixture texts are left aligned. The center below the fixed
-                // heading is bare paper, even when the real root toolbar is still above it.
+                // Below the fixed heading the page is opaque except for its source
+                // slot: the return is allowed to reveal exactly that row's real ink.
                 val y0 = maxOf(visible.top, finalHeading.bottom + 4f).toInt()
                 val y1 = minOf(visible.bottom, open.box.center.y).toInt()
                 val x0 = maxOf(visible.left.toInt(), glyphLeft)
@@ -349,16 +366,19 @@ class SceneMotionTest {
                 for (y in y0 until y1 step 3) for (x in x0 until x1 step 3) {
                     if (delta(open.pixels[x, y], paper) > .05f) continue
                     probes++
-                    if (delta(f.pixels[x, y], paper) > .28f) ghosts++
+                    val expectedPaper = if (source.contains(Offset(x.toFloat(), y.toFloat())))
+                        paper.copy(alpha = detailAlpha).compositeOver(rootPixels[x, y]) else paper
+                    if (delta(f.pixels[x, y], expectedPaper) > .28f) ghosts++
                 }
                 checkedBlank += probes
                 assertTrue("Displaced heading ink under the fixed toolbar: $ghosts/$probes", ghosts <= maxOf(2, probes / 700))
             }
-            check(push, pushHeading, pushDock)
+            val openAtPush = (push.box.height - source.height) / (open.box.height - source.height)
+            check(push, pushHeading, pushDock, ((openAtPush - .2f) / .2f).coerceIn(0f, 1f))
             start(input)
             for (progress in listOf(.12f, .30f, .45f, .56f, .68f)) {
                 seek(input, progress)
-                check(frame(key), windowRect(heading), windowRect(assistant))
+                check(frame(key), windowRect(heading), windowRect(assistant), ((1f - progress - .6f) / .2f).coerceIn(0f, 1f))
             }
             assertTrue("Need glyphs from both visible toolbars and blank paper between them: $rootGlyphs/$detailGlyphs/$checkedBlank",
                 rootGlyphs > 40 && detailGlyphs > 40 && checkedBlank > 200)
@@ -407,16 +427,24 @@ class SceneMotionTest {
     @Test fun heldAndReversedBackNeverMovesLargeTypeTitleAcrossBackButton() {
         show(PlannerCommand.TaskAdd(TaskInput("A - Outline")), fontScale = 2f)
         val key = "task:${runBlocking { store.state().queue.single().id }}"
+        val source = bounds(key)
+        val before = pixels()
         ui.onNodeWithTag(key).performClick()
         val open = frame(key)
         withClockAndBack { input ->
             start(input)
-            for (progress in listOf(.30f, .45f, .55f, .68f, .42f)) {
+            for (progress in listOf(.12f, .20f, .30f, .50f, .80f, .98f, .50f, .12f)) {
                 seek(input, progress)
                 val moving = frame(key)
-                assertTrue("Large title must stay within the moving surface", moving.box.inflate(1f).contains(moving.title.center))
-                assertFalse("The clipped Back control must never cover the title", moving.title.overlaps(backHit()))
-                assertDetailInk(open, moving)
+                val paintedTitle = if (progress < .4f) moving.title else ui.onNodeWithTag(
+                    "row-title/$key", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                assertTrue("The visible title must stay inside the moving surface at $progress",
+                    moving.box.inflate(1f).contains(paintedTitle.center))
+                assertFalse("The clipped Back control must never cover the painted title", paintedTitle.overlaps(backHit()))
+                keepFrame("large-back-${(progress * 100).roundToInt()}", moving.pixels)
+                assertUncoveredPixels(before, moving.pixels, moving.box)
+                if (progress <= .12f) assertDetailInk(open, moving)
+                if (progress >= .50f) assertLivePatch(before, moving.pixels, source)
             }
             ui.runOnUiThread { input.backCancelled() }
             ui.mainClock.advanceTimeBy(600)
@@ -524,8 +552,12 @@ class SceneMotionTest {
                 assertEquals(parent, bounds("route:settings"))
                 assertEquals(origin, row.fetchSemanticsNode().boundsInRoot)
                 val frame = pixels()
+                keepFrame("settings-source", before)
+                keepFrame("settings-return-${(fraction * 1000).roundToInt()}", frame)
                 assertLivePatch(before, frame, origin)
-                assertLivePatch(before, frame, neighbor)
+                val reveal = bounds(tag)
+                assertUncoveredPixels(before, frame, reveal)
+                assertLivePatch(before, frame, neighbor.copy(bottom = minOf(neighbor.bottom, reveal.top - 2f)))
             }
             seek(input, .45f)
             between(origin, bounds(tag), parent)
@@ -585,7 +617,7 @@ class SceneMotionTest {
         ui.onNodeWithTag("task:${a.id}").performClick()
         val key = "detail:task:${a.id}"
         runBlocking { store.apply(PlannerCommand.TaskFinish(a.id)) }
-        ui.waitUntil(12_000) { ui.onAllNodesWithText("这项任务已不在队列中。").fetchSemanticsNodes().size == 1 }
+        ui.waitUntil(12_000) { ui.onAllNodes(hasText(ui.activity.getString(io.github.nakanomk.stacklife.R.string.today_done)) and hasAnyAncestor(hasTestTag(key))).fetchSemanticsNodes().size == 1 }
         val full = bounds(key)
         val before = pixels()
         withClockAndBack { input ->

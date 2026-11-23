@@ -1,16 +1,9 @@
 package io.github.nakanomk.stacklife.transitions
 
-import androidx.compose.animation.BoundsTransform
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.animation.SharedTransitionScope.SharedContentConfig
-import androidx.compose.animation.core.Easing
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Spacer
@@ -21,6 +14,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -43,13 +40,8 @@ import androidx.compose.ui.util.lerp
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import io.github.nakanomk.stacklife.workspace.SharedModifier
 
-// Use the very same Nav3 progress as the clip and title. At the compact end
-// geometry is already settled while the original row takes back the foreground.
-private val growCard = Easing { containerExpansion(FastOutSlowInEasing.transform(it)) }
-private val landCard = Easing { 1f - containerExpansion(1f - FastOutSlowInEasing.transform(it)) }
-private val cardBounds = BoundsTransform { from, to ->
-    tween(ContainerDuration, easing = if (to.height < from.height) landCard else growCard)
-}
+// Entity bounds and title layout use the same Nav3 timeline as ordinary containers.
+// BiliPai SettingsSharedContainerTransition, 5893c2c80739e3759ac64ae5f232cf03a94da7f8 (GPL-3.0).
 internal val noCardBounds: SharedModifier = { Modifier }
 internal val LocalCardList = compositionLocalOf<LazyListState?> { null }
 internal val LocalDetailChrome = staticCompositionLocalOf<@Composable () -> Modifier> { { Modifier } }
@@ -73,12 +65,11 @@ private class RowAnchor(private val inViewport: () -> Boolean) {
 }
 
 private val LocalAnchors = staticCompositionLocalOf<MutableMap<String, RowAnchor>?> { null }
-private val LocalCardScope = staticCompositionLocalOf<SharedTransitionScope?> { null }
 
 @Composable
 internal fun SharedTransitionScope.EntityMotionScope(enabled: Boolean, content: @Composable () -> Unit) {
     val rows = remember { mutableStateMapOf<String, RowAnchor>() }
-    CompositionLocalProvider(LocalAnchors provides rows, LocalCardScope provides this.takeIf { enabled }, content = content)
+    CompositionLocalProvider(LocalAnchors provides rows, LocalContainerScope provides this.takeIf { enabled }, content = content)
 }
 
 @Composable
@@ -102,11 +93,17 @@ internal fun cardBoundsModifier(key: String): Modifier {
         }
     }
     val rows = LocalAnchors.current
-    DisposableEffect(key, rows) {
+    val registry = LocalRouteOrigins.current
+    val owner = LocalRouteOwner.current
+    val density = LocalDensity.current
+    val shape = MaterialTheme.shapes.large
+    val source = remember(key, owner, density, shape) { ContainerAnchor(OriginSite(owner, key, 0L), shape, density, hosted = false) }
+    DisposableEffect(key, rows, source) {
         rows?.put(key, anchor)
-        onDispose { rows?.remove(key, anchor) }
+        registry?.attach(source)
+        onDispose { rows?.remove(key, anchor); registry?.detach(source) }
     }
-    return Modifier.layout { measurable, constraints ->
+    return Modifier.onGloballyPositioned { source.place(it, registry?.host) }.layout { measurable, constraints ->
         val row = measurable.measure(constraints)
         if (isLookingAhead) {
             anchor.x = row[TitleX]
@@ -122,7 +119,7 @@ internal fun cardBoundsModifier(key: String): Modifier {
  * move or suppress the row whose pixels and list position receive the returning detail. */
 @Composable
 internal fun CardBoundsAnchor(entityKey: String, modifier: Modifier, shape: Shape = RectangleShape) {
-    val scope = LocalCardScope.current ?: return
+    val scope = LocalContainerScope.current ?: return
     if (!LocalRouteOriginsEnabled.current) return
     val rows = LocalAnchors.current ?: return
     val row = rows[entityKey]
@@ -131,15 +128,13 @@ internal fun CardBoundsAnchor(entityKey: String, modifier: Modifier, shape: Shap
             Size(row.width.toFloat(), row.height.toFloat()), LocalDensity.current) ?: 0f
         SideEffect { row.radius = radius }
     }
+    val origins = LocalRouteOrigins.current ?: return
+    val link = origins.links[entityKey] ?: return
+    val sourceSide = link.driver?.row ?: return
     with(scope) {
-        val config = remember(rows, entityKey) {
-            object : SharedContentConfig {
-                override val SharedTransitionScope.SharedContentState.isEnabled get() = rows[entityKey]?.visible() == true
-                override val shouldKeepEnabledForOngoingAnimation get() = false
-            }
-        }
-        val state = rememberSharedContentState(entityKey, config)
-        Spacer(modifier.sharedBounds(state, LocalNavAnimatedContentScope.current, boundsTransform = cardBounds,
+        val state = gatedContent(link) { origins.live(link) &&
+            row?.visible() == true && row.x != AlignmentLine.Unspecified && row.y != AlignmentLine.Unspecified }
+        Spacer(modifier.onGloballyPositioned { link.sourcePlaced = true }.sharedBounds(state, sourceSide, boundsTransform = containerBounds,
             enter = EnterTransition.None, exit = ExitTransition.None, renderInOverlayDuringTransition = false))
     }
 }
@@ -152,7 +147,12 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
         return
     }
     val rows = LocalAnchors.current
-    val state = rememberSharedContentState(key)
+    val origins = LocalRouteOrigins.current
+    val link = origins?.links?.get(key)
+    var titlePlaced by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val state = gatedContent(link ?: key) { link != null && origins.size == link.hostSize && link.density == density &&
+        titlePlaced }
     val typography = MaterialTheme.typography
     val compactScale = with(LocalDensity.current) {
         typography.bodyLarge.fontSize.toPx() / typography.titleLarge.fontSize.toPx()
@@ -161,15 +161,22 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
     // Enlist the landing on Nav3's timeline immediately. Otherwise a lazy origin can
     // be disposed on the first push frame, before the shared match has been established.
     val front = LocalFrontEntry.current
-    val openness = visibility.transition.animateFloat({ if (front) tween(ContainerDuration) else snap() }, label = "entity expansion") {
-        if (it == EnterExitState.Visible) 1f else 0f
+    val openness = visibility.containerOpen(front)
+    val returning = visibility.transition.currentState == EnterExitState.Visible
+    val moving = front && visibility.transition.currentState != visibility.transition.targetState
+    val driver = if (origins == null) null else pairVisibility(origins, link, openness, moving, returning)
+    val sampled = driver?.open ?: openness
+    val depth = LocalEntryDepth.current
+    val radius = { (rows?.get(key)?.radius ?: 0f) * (1f - sampled.value) }
+    val ink = { if (moving && state.isMatchFound) containerInk(sampled.value, returning) else 1f }
+    if (link != null) {
+        SideEffect { link.open = sampled; link.depth = depth; link.returning = returning }
+        DisposableEffect(link) { onDispose { link.destination = null; link.open = null } }
     }
-    val radius = { (rows?.get(key)?.radius ?: 0f) * (1f - containerExpansion(openness.value)) }
     val appliedScale = remember(key) { mutableFloatStateOf(1f) }
     val windowInOverlay = remember(key) { mutableStateOf(Rect.Zero) }
     val fixedChrome: @Composable () -> Modifier = {
         var origin by remember { mutableStateOf(Offset.Zero) }
-        val clipPath = remember { Path() }
         Modifier.layout { measurable, constraints ->
             val chrome = measurable.measure(constraints)
             val lookahead = isLookingAhead
@@ -191,38 +198,34 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
                     }
                 }
             }
-        }.renderInSharedTransitionScopeOverlay(zIndexInOverlay = 1f) { front && state.isMatchFound && isTransitionActive }
-            .drawWithCache {
-                onDrawWithContent {
-                    if (!front || !state.isMatchFound || !isTransitionActive) drawContent() else {
-                        // Fixed controls use the very same rounded window, in overlay coordinates.
-                        drawContainerFrame(windowInOverlay.value.translate(-origin), radius(), openness.value, clipPath)
-                    }
-                }
-            }
+        }.renderInSharedTransitionScopeOverlay(zIndexInOverlay = depth + .5f) { front && state.isMatchFound && isTransitionActive }
+            .containerClip({ windowInOverlay.value.translate(-origin) }, radius) { front && state.isMatchFound && isTransitionActive }
+            .graphicsLayer { alpha = ink() }
     }
-    val card = MaterialTheme.colorScheme.surfaceContainerLow
     val paper = MaterialTheme.colorScheme.surface
     val clipPath = remember { Path() }
-    Box(Modifier.sharedBounds(state, visibility, boundsTransform = cardBounds,
+    val sharedFrame = if (link?.sourcePlaced != true || driver == null) Modifier else
+        Modifier.sharedBounds(state, driver.page, boundsTransform = containerBounds,
         enter = EnterTransition.None, exit = ExitTransition.None,
         resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds,
-        clipInOverlayDuringTransition = OverlayClip(RectangleShape))
-        .fillMaxSize().then(tag).graphicsLayer {
+        zIndexInOverlay = depth.toFloat(), renderInOverlayDuringTransition = moving,
+        clipInOverlayDuringTransition = OverlayClip(link.shape)).onGloballyPositioned { link.destination = it }
+    val backing = if (moving && link != null && state.isMatchFound)
+        Modifier.drawBehind { drawContainerPaper(origins, link, paper, ink()) }
+    else Modifier.wallpaperBackground(paper)
+    Box(sharedFrame.fillMaxSize().then(tag).graphicsLayer {
             // With no live partner, fade in place; never aim at a newly recycled row.
-            alpha = if (front && !state.isMatchFound) openness.value else 1f
+            alpha = if (front && (!state.isMatchFound || openness.value == 0f)) openness.value else 1f
             clip = true
         }.drawWithCache {
             val bounds = Rect(Offset.Zero, size)
             onDrawWithContent {
                 if (front && state.isMatchFound && openness.value < 1f) {
-                    drawContainerFrame(bounds, radius(), openness.value, clipPath)
+                    clipPath.reset(); clipPath.addRoundRect(RoundRect(bounds, CornerRadius(radius())))
+                    clipPath(clipPath) { this@onDrawWithContent.drawContent() }
                 } else drawContent()
             }
-        }.wallpaperBackground(paper).drawBehind {
-            val depth = if (front && state.isMatchFound) containerExpansion(openness.value) else 1f
-            if (depth < 1f) drawRect(card.copy(alpha = 1f - depth))
-        }
+        }.then(backing)
         .approachLayout(isMeasurementApproachInProgress = { state.isMatchFound && isTransitionActive },
             isPlacementApproachInProgress = { state.isMatchFound && isTransitionActive }) { measurable, window ->
             // Register the bounds in normal composition; lookahead already supplies the
@@ -242,9 +245,9 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
                     tx == AlignmentLine.Unspecified || ty == AlignmentLine.Unspecified ||
                     row.x == AlignmentLine.Unspecified || row.y == AlignmentLine.Unspecified) {
                     appliedScale.floatValue = 1f
-                    page.place(0, 0)
+                    page.placeWithLayer(0, 0) { alpha = ink() }
                 } else {
-                    val t = ((h - row.height).toFloat() / (page.height - row.height)).coerceIn(0f, 1f)
+                    val t = sampled.value
                     val scale = lerp(compactScale, 1f, t)
                     appliedScale.floatValue = scale
                     // Pan the fully laid-out page. No nested Scaffold, LazyColumn or
@@ -252,12 +255,17 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
                     page.placeWithLayer(0, 0) {
                         transformOrigin = TransformOrigin(0f, 0f)
                         scaleX = scale
+                        alpha = ink()
                         scaleY = scale
                         translationX = lerp(row.x.toFloat(), tx.toFloat(), t) - tx * scale
                         translationY = lerp(row.y.toFloat(), ty.toFloat(), t) - ty * scale
                     }
                 }
             }
+        }.layout { measurable, constraints ->
+            val page = measurable.measure(constraints)
+            titlePlaced = page[TitleX] != AlignmentLine.Unspecified && page[TitleY] != AlignmentLine.Unspecified
+            layout(page.width, page.height) { page.place(0, 0) }
         }) {
         CompositionLocalProvider(LocalDetailChrome provides fixedChrome, content = content)
     }

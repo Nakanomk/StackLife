@@ -339,7 +339,7 @@ internal fun HubWebView(onRows: (JsonArray) -> Unit, onBack: () -> Unit, onFile:
     var attached by remember { mutableStateOf(true) }
     var leaving by remember { mutableStateOf(false) }
     var extracting by remember { mutableStateOf(false) }
-    var help by rememberSaveable { mutableStateOf(false) }
+    var help by rememberSaveable { mutableStateOf(true) }
     DisposableEffect(session) {
         attached = true
         session?.start()

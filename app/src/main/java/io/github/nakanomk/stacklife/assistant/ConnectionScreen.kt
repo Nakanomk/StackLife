@@ -79,7 +79,8 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
         }
     }
     BackHandler(enabled = busy) {}
-    ConnectionPane(back, !busy) { top, safeChoiceGroup ->
+    ConnectionPane(back, !busy, stringResource(R.string.assistant_service_privacy,
+        profile?.origin ?: stringResource(R.string.assistant_selected_service))) { top, safeChoiceGroup ->
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, 8.dp)),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
             FormGroup(safeChoiceGroup.selectableGroup()) {
@@ -105,13 +106,13 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
             }
             HorizontalDivider()
             if (preset == ServicePreset.Custom) {
+                SettingLabel(stringResource(R.string.assistant_service_address), stringResource(R.string.assistant_service_requirements))
                 TextField(base, {
                     if (it != base) key = ""
                     base = it
                 }, Modifier.fillMaxWidth().testTag("provider-url"), enabled = !busy, singleLine = true,
-                    label = { Text(stringResource(R.string.assistant_service_address)) }, colors = lineFieldColors(),
+                    colors = lineFieldColors(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                Hint(stringResource(R.string.assistant_service_requirements))
             } else {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -131,19 +132,16 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
                 Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(
                     value = supportsImages, enabled = !busy, role = Role.Switch, onValueChange = { supportsImages = it },
                 ).testTag("provider-images"), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.provider_images_toggle), style = MaterialTheme.typography.bodyLarge)
-                        Hint(stringResource(R.string.provider_images_hint))
-                    }
+                    SettingLabel(stringResource(R.string.provider_images_toggle), stringResource(R.string.provider_images_hint), Modifier.weight(1f))
                     Switch(checked = supportsImages, enabled = !busy, onCheckedChange = null)
                 }
             }
+            val keyLabel = stringResource(if (keepKey) R.string.assistant_keep_key else R.string.assistant_key)
+            if (preset == ServicePreset.Claude) SettingLabel(keyLabel, stringResource(R.string.assistant_anthropic_key))
             TextField(key, { key = it }, Modifier.fillMaxWidth().focusRequester(keyFocus).testTag("provider-key"),
                 enabled = !busy, singleLine = true, colors = lineFieldColors(),
-                label = { Text(if (keepKey) stringResource(R.string.assistant_keep_key) else stringResource(R.string.assistant_key)) },
+                label = if (preset == ServicePreset.Claude) null else { { Text(keyLabel) } },
                 visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
-            if (preset == ServicePreset.Claude) Hint(stringResource(R.string.assistant_anthropic_key))
-            Hint(stringResource(R.string.assistant_service_privacy, profile?.origin ?: stringResource(R.string.assistant_selected_service)))
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             ActionPill(stringResource(R.string.assistant_save_service), enabled = !busy && profile != null && (key.isNotBlank() || keepKey), prominent = true, onClick = {
                 run { store.save(base, model, key.takeIf { it.isNotBlank() }, supportsImages); key = ""; back() }
@@ -159,7 +157,7 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
 }
 
 @Composable
-private fun ConnectionPane(back: () -> Unit, backEnabled: Boolean, content: @Composable (androidx.compose.ui.unit.Dp, Modifier) -> Unit) {
+private fun ConnectionPane(back: () -> Unit, backEnabled: Boolean, help: String, content: @Composable (androidx.compose.ui.unit.Dp, Modifier) -> Unit) {
     Page {
         // Never record the key, URL or model fields, even masked; FLAG_SECURE is a separate protection.
         val safeChoices = rememberPlannerBackdrop()
@@ -169,7 +167,7 @@ private fun ConnectionPane(back: () -> Unit, backEnabled: Boolean, content: @Com
             content(with(density) { headerHeight.toDp() }, Modifier.plannerBackdrop(safeChoices))
             Surface(Modifier.fillMaxWidth().onSizeChanged { headerHeight = it.height }, color = MaterialTheme.colorScheme.surface) {
                 CompositionLocalProvider(LocalCapsuleBackdrop provides safeChoices) {
-                    PageTitle(stringResource(R.string.assistant_service_title), back = back, backEnabled = backEnabled)
+                    PageTitle(stringResource(R.string.assistant_service_title), back = back, backEnabled = backEnabled, help = help)
                 }
             }
         }

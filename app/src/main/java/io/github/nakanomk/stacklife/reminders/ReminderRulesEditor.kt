@@ -17,8 +17,6 @@ import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.*
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import java.time.Instant
 import java.time.LocalDate
@@ -52,10 +50,9 @@ private val presets = longArrayOf(0, 5, 15, 30, 60, 1440).map { ReminderWhen.Bef
 /** Stored editor uses the same draft fields as a new schedule, but owns its own explicit save. */
 @Composable
 internal fun ReminderRulesEditor(model: WorkspaceViewModel, subject: ReminderSubject) = key(subject) {
-    val read = remember(model, subject) {
-        model.planner.observe(PlannerQuery.Reminders(subject)).map<QueryResult, ReadState<ReminderView>> { ReadState.Loaded(it as ReminderView) }
-            .catch { if (it !is SQLiteException) throw it; emit(ReadState.ReadFailed) }
-    }.collectAsStateWithLifecycle(ReadState.Loading).value
+    val read = if (subject == ReminderSubject.CourseDefault) model.courseReminders.collectAsStateWithLifecycle().value
+        else remember(model, subject) { model.read<ReminderView>(PlannerQuery.Reminders(subject)) }
+            .collectAsStateWithLifecycle(ReadState.Loading).value
     when (read) {
         ReadState.Loading -> LinearProgressIndicator()
         ReadState.ReadFailed -> Text(stringResource(R.string.reminder_read_failed))
@@ -70,12 +67,15 @@ internal fun ReminderRulesEditor(model: WorkspaceViewModel, subject: ReminderSub
             val policy = remember(draft) { draft?.let { Json.decodeFromString<ReminderPolicy>(it) } }
             Column {
                 if (policy == null) {
-                    PreferenceRow(heading(subject), stringResource(R.string.reminder_edit)) {
+                    val summary = buildList {
+                        if (view.policy.inherit) add(stringResource(R.string.reminder_inherit))
+                        if (view.effective.isEmpty()) add(stringResource(R.string.reminder_no_rules))
+                        else for (rule in view.effective) add(ReminderRuleLabel(rule.time))
+                    }.joinToString(" · ")
+                    PreferenceRow(heading(subject), summary, valueMaxLines = 2,
+                        leadingIcon = R.drawable.ic_calendar_view_week.takeIf { subject == ReminderSubject.CourseDefault }) {
                         revision = view.revision; draft = Json.encodeToString(view.policy); error = null
                     }
-                    if (view.policy.inherit) Text(stringResource(R.string.reminder_inherit), style = MaterialTheme.typography.labelMedium)
-                    if (view.effective.isEmpty()) Text(stringResource(R.string.reminder_no_rules))
-                    else for (rule in view.effective) Text(ReminderRuleLabel(rule.time), style = MaterialTheme.typography.bodyMedium)
                 } else if (!submission.busy) {
                     ReminderRuleFields(subject, policy) { draft = Json.encodeToString(it) }
                     val command = remember(subject, policy, revision) { PlannerCommand.SetReminders(subject, policy, revision) }

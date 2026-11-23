@@ -98,11 +98,11 @@ internal fun PageChrome(title: String, back: () -> Unit, backEnabled: Boolean = 
         val actionWidth = maxWidth * .62f
         RootPane(header = {
             if (short && footer != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { PageTitle(title, back, backEnabled, headerAction) }
+                Box(Modifier.weight(1f)) { PageTitle(title, back, backEnabled, action = headerAction) }
                 Box(Modifier.widthIn(max = actionWidth).padding(end = 8.dp).horizontalScroll(rememberScrollState())) {
                     ActionDock(footer)
                 }
-            } else PageTitle(title, back, backEnabled, headerAction)
+            } else PageTitle(title, back, backEnabled, action = headerAction)
         }, overlay = { _, bottom ->
             if (!short && footer != null) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = bottom)
                 .onSizeChanged { footerPixels = it.height }.padding(horizontal = 12.dp, vertical = 6.dp)) {
@@ -148,12 +148,17 @@ internal fun FormGroup(modifier: Modifier = Modifier, frosted: Boolean = false, 
 }
 
 @Composable
-internal fun PageTitle(title: String, back: () -> Unit, backEnabled: Boolean = true, action: (@Composable () -> Unit)? = null) {
+internal fun PageTitle(title: String, back: () -> Unit, backEnabled: Boolean = true, help: String? = null, action: (@Composable () -> Unit)? = null) {
     Row(LocalDetailChrome.current().fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         GlassIcon(R.drawable.ic_arrow_back, stringResource(R.string.ui_back), back, enabled = backEnabled)
-        Text(title, Modifier.weight(1f).semantics { heading() }, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, Modifier.weight(1f, fill = false).semantics { heading() }, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge)
+                if (help != null) SettingInfo(help, title = title)
+            }
+        }
         if (action == null) Spacer(Modifier.width(48.dp)) else action()
     }
 }
@@ -163,15 +168,24 @@ internal fun ToolbarIcon(icon: Int, description: String, enabled: Boolean = true
     GlassIcon(icon, description, onClick, enabled = enabled)
 }
 
+// Preference title/action and constrained value slots adapted from BiliPai AppPreferenceComponents
+// (5893c2c80739e3759ac64ae5f232cf03a94da7f8, GPL-3.0). StackLife retains its row geometry.
 @Composable
 internal fun PreferenceRow(label: String, value: String? = null, modifier: Modifier = Modifier, enabled: Boolean = true,
-    leadingIcon: Int? = null, onClick: () -> Unit) {
+    leadingIcon: Int? = null, help: String? = null, valueMaxLines: Int = 1, labelMaxLines: Int = 2, onClick: () -> Unit) {
     Row(modifier.fillMaxWidth().clickable(enabled = enabled, role = Role.Button, onClick = onClick).heightIn(min = 52.dp)
-        .padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+        .padding(vertical = if (help == null) 8.dp else 2.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (leadingIcon != null) Icon(painterResource(leadingIcon), null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
-        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-        if (value != null) Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (value == null) SettingLabel(label, help, Modifier.weight(1f), labelMaxLines)
+        else BoxWithConstraints(Modifier.weight(1f)) {
+            val valueLimit = minOf(200.dp, ((maxWidth - 8.dp) / 2).coerceAtLeast(0.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SettingLabel(label, help, Modifier.weight(1f), labelMaxLines)
+                Text(value, Modifier.widthIn(max = valueLimit), maxLines = valueMaxLines, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         Icon(painterResource(R.drawable.ic_chevron_right), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -212,7 +226,7 @@ internal fun ControlGroup(modifier: Modifier = Modifier, frosted: Boolean = fals
 
 @Composable
 internal fun ActionPill(label: String, onClick: () -> Unit, modifier: Modifier = Modifier,
-    enabled: Boolean = true, prominent: Boolean = false) {
+    enabled: Boolean = true, prominent: Boolean = false, maxLines: Int = Int.MAX_VALUE) {
     val colors = MaterialTheme.colorScheme
     val emphasized = prominent && enabled
     val fill = if (emphasized) colors.primaryContainer else colors.surfaceContainerHigh
@@ -223,7 +237,7 @@ internal fun ActionPill(label: String, onClick: () -> Unit, modifier: Modifier =
     val labelBox: @Composable (Modifier) -> Unit = {
         Box(it.clip(CircleShape).indication(interactions, LocalIndication.current)
             .heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
-            Text(label, color = ink, style = MaterialTheme.typography.labelLarge)
+            Text(label, color = ink, style = MaterialTheme.typography.labelLarge, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
         }
     }
     if (LocalActionGroup.current) labelBox(if (emphasized) target.background(fill, CircleShape) else target)

@@ -4,7 +4,6 @@ import android.database.sqlite.SQLiteException
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -19,6 +18,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -157,24 +157,26 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
             ManualStep.REVIEW -> form.submit(model)
         }
     }
-    val nextLabel = when (step) {
-        ManualStep.REVIEW -> if (draft.removing) R.string.courses_confirm_remove else R.string.ui_save
-        ManualStep.WEEKS -> R.string.courses_preview
-        else -> R.string.manual_next
-    }
     PlannerModalBottomSheet(close, nested = nested, onNestedBack = ::back, canDismiss = !form.busy) {
         val dialogFocus = LocalFocusManager.current
         val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
         LaunchedEffect(step) { dialogFocus.clearFocus(force = true); keyboard?.hide() }
         Box(Modifier.fillMaxSize().testTag("manual-course-sheet")) {
             PlannerPopupHost {
+                PaneMotion(step, origins, depth = { it.ordinal }, originKey = { it.tag }, modifier = Modifier.fillMaxSize(),
+                    parent = draft.previous().takeIf { nested && !form.busy }, onBack = ::back) { shown ->
+                val nextLabel = when (shown) {
+                    ManualStep.REVIEW -> if (draft.removing) R.string.courses_confirm_remove else R.string.ui_save
+                    ManualStep.WEEKS -> R.string.courses_preview
+                    else -> R.string.manual_next
+                }
                 val plane = rememberPlannerBackdrop()
                 Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), topBar = {
                     CompositionLocalProvider(LocalCapsuleBackdrop provides plane) {
                         StackLifeSurface(CapsuleScene.FROST, Modifier.fillMaxWidth().testTag("manual-toolbar"),
                             solid = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(0.dp)) {
                             CenterAlignedTopAppBar(title = {
-                                Text(stringResource(R.string.manual_progress, step.ordinal + 1), style = MaterialTheme.typography.labelLarge)
+                                Text(stringResource(R.string.manual_progress, shown.ordinal + 1), style = MaterialTheme.typography.labelLarge)
                             }, navigationIcon = {
                                 val backAction = LocalPanelBack.current ?: ::back
                                 IconButton(onClick = backAction, enabled = !form.busy, modifier = Modifier.testTag(if (nested) "manual-back" else "manual-cancel")) {
@@ -182,9 +184,9 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
                                         stringResource(if (nested) R.string.ui_back else R.string.ui_cancel))
                                 }
                             }, actions = {
-                                val launcher = Modifier.paneOrigin(origins, ManualStep.COURSE.tag).paneOrigin(origins, ManualStep.WEEKS.tag)
-                                Box(if (draft.removing) launcher else launcher.paneOrigin(origins, ManualStep.REVIEW.tag)) {
-                                    SheetAction(stringResource(nextLabel), when (step) {
+                                val next = ManualStep.entries.getOrNull(shown.ordinal + 1)
+                                Box(if (next == null) Modifier else Modifier.paneOrigin(origins, next.tag)) {
+                                    SheetAction(stringResource(nextLabel), when (shown) {
                                         ManualStep.REVIEW -> "manual-save"
                                         ManualStep.WEEKS -> "manual-preview"
                                         else -> "manual-next"
@@ -195,9 +197,7 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
                         }
                     }
                 }) { insets ->
-                    PaneMotion(step, origins, depth = { it.ordinal }, originKey = { it.tag },
-                        modifier = Modifier.fillMaxSize().padding(insets).plannerBackdrop(plane),
-                        parent = draft.previous().takeIf { nested && !form.busy }, onBack = ::back) { shown ->
+                    Box(Modifier.fillMaxSize().padding(insets).plannerBackdrop(plane)) {
                         val scroll = scrolls[shown.ordinal]
                         val ready = form.ready
                         // Do not clamp a restored review offset to a one-row loading placeholder.
@@ -225,7 +225,7 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
                                         CourseFields(form)
                                         if (draft.original != null) TextButton({ go(ManualStep.REVIEW, remove = true) },
                                             enabled = originalLoaded, modifier = Modifier.heightIn(min = 48.dp)
-                                                .then(if (draft.removing) Modifier.paneOrigin(origins, ManualStep.REVIEW.tag) else Modifier).testTag("manual-remove"),
+                                                .paneOrigin(origins, ManualStep.REVIEW.tag).testTag("manual-remove"),
                                             colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
                                             Text(stringResource(R.string.courses_remove_class))
                                         }
@@ -247,6 +247,7 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
                         }
                     }
                 }
+                }
             }
         }
     }
@@ -265,28 +266,22 @@ private fun CalendarFields(form: ManualCourseForm, terms: List<TermSpec>) {
     val d = form.draft
     if (d.original == null && terms.isNotEmpty()) {
         FormGroup(Modifier.selectableGroup(), frosted = true) {
-            for (term in terms) TermChoice(term.dateRangeLabel(), d.existing?.id == term.id, "manual-term:${term.id}") {
+            for (term in terms) TermChoice(term.displayLabel(), d.existing?.id == term.id, "manual-term:${term.id}",
+                dates = if (term.hasLegacyId()) null else term.dateRangeLabel()) {
                 if (d.existing?.id != term.id) form.update { it.copy(existing = term, weeks = setOf(1)) }
             }
             TermChoice(stringResource(R.string.courses_new_term), d.existing == null, "manual-term:new") {
                 if (d.existing != null) form.update { it.copy(existing = null, weeks = setOf(1)) }
             }
         }
-    } else d.existing?.let { Text(it.dateRangeLabel(), style = MaterialTheme.typography.bodyLarge) }
+    } else d.existing?.let {
+        Text(it.displayLabel(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
+        if (!it.hasLegacyId()) Hint(it.dateRangeLabel())
+    }
     if (d.existing == null) {
         TermFields(d.newTerm, true, frosted = true) { term -> form.update {
             it.copy(newTerm = term, weeks = if (term.weeks == it.newTerm.weeks) it.weeks else it.weeks.filterTo(mutableSetOf()) { w -> w <= (term.weeks ?: 0) })
         } }
-    }
-}
-
-@Composable
-private fun TermChoice(label: String, selected: Boolean, tag: String, choose: () -> Unit) {
-    Row(Modifier.fillMaxWidth().selectable(selected, role = Role.RadioButton, onClick = choose)
-        .heightIn(min = 48.dp).testTag(tag), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        RadioButton(selected, onClick = null)
-        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
@@ -314,7 +309,7 @@ private fun PickRow(label: String, value: String, tag: String, options: @Composa
     var menu by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
     Box {
-        PreferenceRow(label, value, Modifier.testTag(tag)) { focus.clearFocus(); menu = true }
+        PreferenceRow(label, value, Modifier.testTag(tag), labelMaxLines = 1) { focus.clearFocus(); menu = true }
         PlannerDropdownMenu(menu, { menu = false }) { options { menu = false } }
     }
 }

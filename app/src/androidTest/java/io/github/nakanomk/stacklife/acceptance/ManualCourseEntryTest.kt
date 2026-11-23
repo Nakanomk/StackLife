@@ -455,6 +455,9 @@ class ManualCourseEntryTest {
             scenario.moveToState(Lifecycle.State.RESUMED)
         }
         try {
+            await("termWeeks").assertTextContains("20").performScrollTo().performClick()
+            ui.onNodeWithTag("wheel-number").assert(hasStateDescription("20"))
+            ui.onNodeWithTag("wheel-cancel").performClick()
             ui.chooseDate("termMonday", LocalDate.of(2026, 9, 7))
             ui.chooseNumber("termWeeks", 53); next()
             field("manual-title", "实际草稿"); field("manual-room", "B")

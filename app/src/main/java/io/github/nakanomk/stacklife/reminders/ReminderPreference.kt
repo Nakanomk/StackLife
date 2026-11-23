@@ -59,13 +59,13 @@ internal fun ReminderPreference() {
         !exact -> R.string.reminder_inexact
         else -> R.string.reminder_on
     }
-    PreferenceRow(stringResource(R.string.reminder_channel), stringResource(status), leadingIcon = R.drawable.ic_schedule) {
+    PreferenceRow(stringResource(R.string.reminder_channel), stringResource(status), leadingIcon = R.drawable.ic_schedule,
+        help = stringResource(R.string.reminder_explanation)) {
         update(); open = true; unavailable = false
     }
     if (!open) return
     PlannerAlertDialog(onDismissRequest = { open = false }, title = { Text(stringResource(R.string.reminder_channel)) }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(stringResource(R.string.reminder_explanation))
             if (failed) TextButton(onClick = { reminders.refreshAsync() }) { Text(stringResource(R.string.reminder_retry)) }
             if (!allowed) Text(stringResource(R.string.reminder_blocked_hint))
             if (!exact) Text(stringResource(R.string.reminder_inexact_hint))

@@ -37,7 +37,7 @@ class OnboardingTest {
         attach(); tag("guide-feature:today").performClick(); tag("guide-next").performClick()
         tag("routine-wake").performClick(); tag("slot:time").assertExists(); back(); tag("guide:1")
         tag("guide-next").performClick(); tag("guide-add").performClick(); tag("title:0").assertIsDisplayed(); back(); tag("guide:2")
-        tag("guide-import").performClick(); tag("importCourseFile").assertExists(); back(); tag("guide:2")
+        tag("guide-import").performClick(); tag("importMethodFile").assertExists(); back(); tag("guide:2")
         assertEquals(0, prefs().onboardingVersion); assertEquals(Destination.entries.toSet(), prefs().appearance.visible)
         tag("guide-next").performClick(); tag("nav:workspace").assertIsSelected()
         ui.onNodeWithTag("nav:today").assertDoesNotExist()

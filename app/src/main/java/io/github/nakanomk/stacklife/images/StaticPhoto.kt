@@ -3,14 +3,21 @@ package io.github.nakanomk.stacklife.images
 import android.content.ContentResolver
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.ColorSpace
+import android.graphics.ImageDecoder
 import android.graphics.Matrix
+import android.graphics.Rect
 import android.media.ExifInterface
 import android.net.Uri
+import android.os.Build
+import androidx.annotation.RequiresApi
 import io.github.nakanomk.stacklife.i18n.uiText
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
 import java.util.zip.CRC32
+import kotlin.math.roundToInt
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import okio.buffer
@@ -21,17 +28,30 @@ internal const val PHOTO_EDGE = 2048
 internal const val MAX_PHOTO_BYTES = 50L * 1024 * 1024
 private const val DIRECT_IMAGE_BYTES = 8L * 1024 * 1024
 private val photoTypes = setOf("image/jpeg", "image/png", "image/webp")
+internal enum class PhotoSourcePolicy { STRICT_STATIC, PRIMARY_STILL }
 internal data class PhotoInfo(val mime: String, val width: Int, val height: Int, val bytes: Long)
 internal class PhotoProblem(message: String) : IOException(message)
 private fun invalidPhoto(): Nothing = throw PhotoProblem(uiText("The file is not a valid static JPEG, PNG or WebP image.", "文件不是有效的静态 JPEG、PNG 或 WebP 图片。"))
 private fun animatedPhoto(): Nothing = throw PhotoProblem(uiText("Animated or multi-frame images are not supported. Select a still image.", "不支持动画或多帧图片，请选择静态图片。"))
 private fun unavailable(): Nothing = throw PhotoProblem(uiText("Could not read or store this image. Check the selection and available storage.", "无法读取或存储这张图片，请检查选取权限和存储空间。"))
+private fun cannotDecode(): Nothing = throw PhotoProblem(uiText("This system cannot decode this image.", "当前系统无法解码这张图片。"))
 
-/** Copy only while the grant is live. Both staging files belong to the caller, never the provider. */
-internal suspend fun prepareStaticPhoto(resolver: ContentResolver, uri: Uri, source: File, pending: File): PhotoInfo {
-    if (uri.scheme != ContentResolver.SCHEME_CONTENT) invalidPhoto()
+private fun PhotoSourcePolicy.checkDeclaration(mime: String?) {
+    if (mime == null) return
+    when (this) {
+        PhotoSourcePolicy.STRICT_STATIC -> if (mime !in photoTypes) invalidPhoto()
+        PhotoSourcePolicy.PRIMARY_STILL -> if (mime != "application/octet-stream" &&
+            (!mime.startsWith("image/") || mime == "image/svg+xml")) cannotDecode()
+    }
+}
+
+// BiliPai WallpaperImageImport.kt, 5893c2c80739e3759ac64ae5f232cf03a94da7f8 (GPL-3.0):
+// copy during the grant. StackLife bounds the copy and publishes only private, re-encoded pixels.
+internal suspend fun prepareStaticPhoto(resolver: ContentResolver, uri: Uri, source: File, pending: File,
+    policy: PhotoSourcePolicy): PhotoInfo {
+    if (uri.scheme != ContentResolver.SCHEME_CONTENT) unavailable()
     val declared = resolver.getType(uri)?.lowercase()
-    if (declared != null && declared !in photoTypes) invalidPhoto()
+    policy.checkDeclaration(declared)
     resolver.openInputStream(uri)?.use { input ->
         source.outputStream().use { out ->
             val buf = ByteArray(32 * 1024)
@@ -48,27 +68,89 @@ internal suspend fun prepareStaticPhoto(resolver: ContentResolver, uri: Uri, sou
             }
         }
     } ?: unavailable()
-    return normalizeStaticPhoto(source, declared, pending)
+    return normalizeChecked(source, declared, pending, policy)
 }
 
-internal fun normalizeStaticPhoto(source: File, declared: String?, pending: File): PhotoInfo {
-    if (source.length() !in 1..MAX_PHOTO_BYTES) invalidPhoto()
-    val (mime, orientation) = inspectPhoto(source, declared)
-    val pixels = sampledBitmap(source, dimensions(source, mime), PHOTO_EDGE)
+internal fun normalizeStaticPhoto(source: File, declared: String?, pending: File, policy: PhotoSourcePolicy): PhotoInfo {
+    policy.checkDeclaration(declared)
+    return normalizeChecked(source, declared, pending, policy)
+}
+
+private fun normalizeChecked(source: File, declared: String?, pending: File, policy: PhotoSourcePolicy): PhotoInfo {
+    val size = source.length()
+    if (size !in 1..MAX_PHOTO_BYTES) {
+        if (policy == PhotoSourcePolicy.STRICT_STATIC) invalidPhoto() else cannotDecode()
+    }
+    val primary = policy == PhotoSourcePolicy.PRIMARY_STILL
+    if (Build.VERSION.SDK_INT >= 28 && primary) {
+        val bitmap = decodePrimary(source)
+        try { return encodePrimary(bitmap, size, pending) } finally { bitmap.recycle() }
+    }
+    val bounds = dimensions(source, if (primary) null else declared, policy)
+    val mime = bounds.outMimeType ?: cannotDecode()
+    val orientation = legacyOrientation(source, mime, allowContainerTail = primary)
+    val pixels = sampledBitmap(source, bounds, PHOTO_EDGE)
     try {
         val upright = orient(pixels, orientation)
         try {
-            val outputType = if (mime == "image/png" && source.length() > DIRECT_IMAGE_BYTES) "image/webp" else mime
-            @Suppress("DEPRECATION") // API 26–29 support lossy WebP with alpha.
-            val format = when (outputType) {
-                "image/png" -> Bitmap.CompressFormat.PNG
-                "image/webp" -> Bitmap.CompressFormat.WEBP
-                else -> Bitmap.CompressFormat.JPEG
-            }
-            pending.outputStream().use { if (!upright.compress(format, 95, it)) unavailable() }
-            return PhotoInfo(outputType, upright.width, upright.height, pending.length())
+            return if (primary) encodePrimary(upright, size, pending)
+            else encode(upright, if (mime == "image/png" && size > DIRECT_IMAGE_BYTES) "image/webp" else mime, pending)
         } finally { if (upright !== pixels) upright.recycle() }
     } finally { pixels.recycle() }
+}
+
+// Adapted from Coil StaticImageDecoder.kt, 14d99b18c4491fd6eccdc54454f3c079a90e3c10.
+// Copyright 2026 Coil Contributors, Apache-2.0 (assets/licenses/Coil-Apache-2.0.txt).
+// StackLife: bounded private file, no partial pixels, software/sRGB primary still only.
+@RequiresApi(28)
+private fun decodePrimary(file: File): Bitmap = try {
+    ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { decoder, info, _ ->
+        if (!info.mimeType.startsWith("image/") || info.mimeType == "image/svg+xml") cannotDecode()
+        val width = info.size.width
+        val height = info.size.height
+        checkDimensions(width, height)
+        // Some JPEG codecs synthesize an EOI at EOF. Require the complete primary codestream.
+        if (info.mimeType == "image/jpeg") checkJpegEnd(file, allowContainerTail = true)
+        if (!info.isAnimated && (info.mimeType == "image/png" || info.mimeType == "image/webp")) {
+            RandomAccessFile(file, "r").use { it.inspectChunks(info.mimeType == "image/png") }
+        }
+        val edge = maxOf(width, height)
+        if (edge > PHOTO_EDGE) {
+            val scale = PHOTO_EDGE.toDouble() / edge
+            decoder.setTargetSize((width * scale).roundToInt().coerceAtLeast(1), (height * scale).roundToInt().coerceAtLeast(1))
+        }
+        decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+        decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB))
+        decoder.setOnPartialImageListener { false }
+    }
+} catch (_: ImageDecoder.DecodeException) { cannotDecode() }
+  catch (_: java.io.EOFException) { cannotDecode() }
+
+private fun encodePrimary(bitmap: Bitmap, sourceBytes: Long, pending: File): PhotoInfo {
+    if (Build.VERSION.SDK_INT >= 34 && bitmap.hasGainmap()) bitmap.gainmap = null
+    val mime = when {
+        !bitmap.hasAlpha() -> "image/jpeg"
+        sourceBytes > DIRECT_IMAGE_BYTES -> "image/webp"
+        else -> "image/png"
+    }
+    val srgb = ColorSpace.get(ColorSpace.Named.SRGB)
+    if (bitmap.config == Bitmap.Config.ARGB_8888 && bitmap.colorSpace == srgb) return encode(bitmap, mime, pending)
+    val sdr = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888, bitmap.hasAlpha(), srgb)
+    try {
+        Canvas(sdr).drawBitmap(bitmap, null, Rect(0, 0, sdr.width, sdr.height), null)
+        return encode(sdr, mime, pending)
+    } finally { sdr.recycle() }
+}
+
+private fun encode(bitmap: Bitmap, mime: String, pending: File): PhotoInfo {
+    @Suppress("DEPRECATION") // API 26–29 support lossy WebP with alpha.
+    val format = when (mime) {
+        "image/png" -> Bitmap.CompressFormat.PNG
+        "image/webp" -> Bitmap.CompressFormat.WEBP
+        else -> Bitmap.CompressFormat.JPEG
+    }
+    pending.outputStream().use { if (!bitmap.compress(format, 95, it)) unavailable() }
+    return PhotoInfo(mime, bitmap.width, bitmap.height, pending.length())
 }
 
 internal fun PhotoInfo.matchesFile(file: File, verifyContents: Boolean): Boolean {
@@ -91,14 +173,21 @@ internal fun decodePrivatePhoto(file: File, edge: Int, expected: PhotoInfo? = nu
     return sampledBitmap(file, bounds, edge.coerceIn(1, PHOTO_EDGE))
 }
 
-private fun dimensions(file: File, mime: String?): BitmapFactory.Options {
+private fun dimensions(file: File, mime: String?, policy: PhotoSourcePolicy = PhotoSourcePolicy.STRICT_STATIC): BitmapFactory.Options {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(file.path, bounds)
-    if (bounds.outMimeType !in photoTypes || mime != null && bounds.outMimeType != mime || bounds.outWidth <= 0 || bounds.outHeight <= 0) invalidPhoto()
-    if (maxOf(bounds.outWidth, bounds.outHeight) > 65_535 || bounds.outWidth.toLong() * bounds.outHeight > 256_000_000) {
+    if (policy == PhotoSourcePolicy.PRIMARY_STILL) {
+        if (bounds.outMimeType?.startsWith("image/") != true || bounds.outMimeType == "image/svg+xml") cannotDecode()
+    } else if (bounds.outMimeType !in photoTypes || mime != null && bounds.outMimeType != mime) invalidPhoto()
+    checkDimensions(bounds.outWidth, bounds.outHeight)
+    return bounds
+}
+
+private fun checkDimensions(width: Int, height: Int) {
+    if (width <= 0 || height <= 0) cannotDecode()
+    if (maxOf(width, height) > 65_535 || width.toLong() * height > 256_000_000) {
         throw PhotoProblem(uiText("Image dimensions are too large to decode safely.", "图片尺寸过大，无法安全解码。"))
     }
-    return bounds
 }
 
 private fun sampledBitmap(file: File, bounds: BitmapFactory.Options, edge: Int): Bitmap {
@@ -107,9 +196,9 @@ private fun sampledBitmap(file: File, bounds: BitmapFactory.Options, edge: Int):
     while ((longest + sample - 1) / sample > edge) sample *= 2
     val options = BitmapFactory.Options().apply {
         inSampleSize = sample; inPreferredConfig = Bitmap.Config.ARGB_8888
-        inPreferredColorSpace = android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)
+        inPreferredColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
     }
-    val bitmap = BitmapFactory.decodeFile(file.path, options) ?: invalidPhoto()
+    val bitmap = BitmapFactory.decodeFile(file.path, options) ?: cannotDecode()
     if (maxOf(bitmap.width, bitmap.height) > edge) { bitmap.recycle(); invalidPhoto() }
     return bitmap
 }
@@ -136,20 +225,22 @@ private fun RandomAccessFile.photoType(): String? = when (readInt()) {
     else -> { seek(0); if (readUnsignedShort() == 0xffd8 && readUnsignedByte() == 0xff) "image/jpeg" else null }
 }
 
-private fun inspectPhoto(file: File, declared: String?): Pair<String, Int> = try {
-    RandomAccessFile(file, "r").use { input ->
-        val mime = input.photoType() ?: invalidPhoto()
-        if (declared != null && mime != declared) invalidPhoto()
-        val orientation = if (mime == "image/jpeg") {
-            checkJpegEnd(file)
+private fun legacyOrientation(file: File, mime: String, allowContainerTail: Boolean): Int = try {
+    if (mime !in photoTypes) {
+        // Vendor decoders on API 26/27 can support additional raster formats. Only reach here
+        // after BitmapFactory has positively identified image pixels and bounded dimensions.
+        ExifInterface(file.path).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)
+    } else RandomAccessFile(file, "r").use { input ->
+        if (input.photoType() != mime) invalidPhoto()
+        if (mime == "image/jpeg") {
+            checkJpegEnd(file, allowContainerTail = allowContainerTail)
             ExifInterface(file.path).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)
         } else input.inspectChunks(mime == "image/png")
-        mime to orientation
     }
 } catch (_: java.io.EOFException) { invalidPhoto() }
 
 // Walk actual JPEG marker boundaries (T.81 Annex B), not byte patterns in metadata/embedded thumbnails.
-private fun checkJpegEnd(file: File, expected: PhotoInfo? = null) = file.source().buffer().use { input ->
+private fun checkJpegEnd(file: File, expected: PhotoInfo? = null, allowContainerTail: Boolean = false) = file.source().buffer().use { input ->
     input.skip(2)
     var scanning = false
     var sawScan = false
@@ -167,7 +258,7 @@ private fun checkJpegEnd(file: File, expected: PhotoInfo? = null) = file.source(
         while (marker == 255) marker = input.readByte().toInt() and 255
         when {
             scanning && (marker == 0 || marker in 0xd0..0xd7) -> continue
-            marker == 0xd9 -> { if (!sawScan || !sawFrame || !input.exhausted()) invalidPhoto(); break }
+            marker == 0xd9 -> { if (!sawScan || !sawFrame || !allowContainerTail && !input.exhausted()) invalidPhoto(); break }
             marker < 0xc0 || marker in 0xd0..0xd8 -> invalidPhoto()
             else -> {
                 val length = input.readShort().toInt() and 65535

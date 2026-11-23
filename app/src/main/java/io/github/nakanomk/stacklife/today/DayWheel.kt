@@ -42,11 +42,13 @@ internal fun dayWheelEnabled(): Boolean {
 }
 
 // BiliPai 5893c2c, ThemeTimeWheelPicker.kt / ThemeTimeWheelColumn (GPL-3.0).
-// Normalize to the reference visible rows, not the variable duration of one calendar item.
-private fun GraphicsLayerScope.projectDayWheel(top: Float, viewport: Float) {
+// Normalize the visible center against the physical viewport edges, not the duration of the event.
+private fun GraphicsLayerScope.projectDayWheel(top: Float, viewport: Float, bottomEnabled: Boolean) {
     if (viewport <= 0f || size.height <= 0f) return
     val center = (top.coerceIn(0f, viewport) + (top + size.height).coerceIn(0f, viewport)) * .5f
-    val distance = (center / viewport - .5f) * (if (fontScale > 1.5f) 3f else 5f)
+    val band = maxOf(50f, 44.dp.toPx() * fontScale)
+    val distance = if (center <= viewport / 2) -3f * (1f - center / band).coerceAtLeast(0f)
+        else if (bottomEnabled) 3f * (1f - (viewport - center) / band).coerceAtLeast(0f) else 0f
     val weight = (1f - abs(distance) / 3f).coerceIn(0f, 1f)
     // A day-long rail can exceed the device's texture limit. Fade its primitives, not a bitmap of the row.
     compositingStrategy = CompositingStrategy.ModulateAlpha
@@ -59,7 +61,8 @@ private fun GraphicsLayerScope.projectDayWheel(top: Float, viewport: Float) {
 }
 
 internal fun Modifier.axisWheel(enabled: Boolean, drag: AxisDrag, y: Int, key: OccurrenceKey?): Modifier = if (!enabled) this else graphicsLayer {
-    if (key == null || !drag.isDragging(key)) projectDayWheel((y - drag.scroll.value).toFloat(), drag.viewport.height)
+    if (key == null || !drag.isDragging(key)) projectDayWheel((y - drag.scroll.value).toFloat(), drag.viewport.height,
+        drag.scroll.maxValue == Int.MAX_VALUE || drag.scroll.canScrollForward)
 }
 
 internal fun Modifier.listWheel(enabled: Boolean, list: LazyListState, index: Int): Modifier = if (!enabled) this else graphicsLayer {
@@ -69,7 +72,7 @@ internal fun Modifier.listWheel(enabled: Boolean, list: LazyListState, index: In
     if (visible.isEmpty()) return@graphicsLayer
     val item = visible.getOrNull(index - visible[0].index) ?: return@graphicsLayer
     projectDayWheel(item.offset - layout.viewportStartOffset + (item.size - size.height) / 2f,
-        (layout.viewportEndOffset - layout.viewportStartOffset).toFloat())
+        (layout.viewportEndOffset - layout.viewportStartOffset).toFloat(), list.canScrollForward)
 }
 
 /** Read-only clock rows share the event list projection. No selection, haptics or snapping. */

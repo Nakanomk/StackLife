@@ -123,24 +123,20 @@ internal fun SettingsScreen(settings: PolicyView, actions: WorkspaceViewModel, o
                 item { SettingsGroup(stringResource(R.string.ui_restore_policy)) { Column(Modifier.selectableGroup()) {
                     for (policy in RestorePolicy.entries) {
                         val selected = settings.policy == policy
-                        val muted = MaterialTheme.colorScheme.onSurfaceVariant
                         Row(Modifier.fillMaxWidth().selectable(selected, enabled = !action.busy, role = Role.RadioButton,
                             onClick = { if (!selected) action.send(PlannerCommand.SetRestorePolicy(policy)) })
                             .heightIn(min = 56.dp).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             RadioButton(selected = selected, onClick = null)
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(when (policy) {
-                                    RestorePolicy.PREPEND -> stringResource(R.string.ui_prepend)
-                                    RestorePolicy.APPEND -> stringResource(R.string.ui_append)
-                                    RestorePolicy.SWAP -> stringResource(R.string.ui_swap)
-                                }, style = MaterialTheme.typography.bodyLarge)
-                                Text(when (policy) {
-                                    RestorePolicy.PREPEND -> stringResource(R.string.ui_prepend_hint)
-                                    RestorePolicy.APPEND -> stringResource(R.string.ui_append_hint)
-                                    RestorePolicy.SWAP -> stringResource(R.string.ui_swap_hint)
-                                }, style = MaterialTheme.typography.bodyMedium, color = muted)
-                            }
+                            SettingLabel(stringResource(when (policy) {
+                                RestorePolicy.PREPEND -> R.string.ui_prepend
+                                RestorePolicy.APPEND -> R.string.ui_append
+                                RestorePolicy.SWAP -> R.string.ui_swap
+                            }), stringResource(when (policy) {
+                                RestorePolicy.PREPEND -> R.string.ui_prepend_hint
+                                RestorePolicy.APPEND -> R.string.ui_append_hint
+                                RestorePolicy.SWAP -> R.string.ui_swap_hint
+                            }))
                         }
                     }
                 } } }
@@ -153,16 +149,16 @@ internal fun RoutineScheduleRows(actions: WorkspaceViewModel, onSchedule: (SlotE
     for (kind in RoutineKind.entries) {
         val wake = kind == RoutineKind.WAKE
         val local = deviceDay()
-        val summary by remember(actions, kind) { actions.read<ScheduleView>(PlannerQuery.Schedule(kind.scheduleId)) }
-            .collectAsStateWithLifecycle(initialValue = ReadState.Loading)
+        val summary by actions.routineSchedules.getValue(kind).collectAsStateWithLifecycle()
         ReadPanel(summary) { view ->
             val title = stringResource(if (wake) R.string.agenda_wake else R.string.agenda_sleep)
             PreferenceRow(title, view.summary?.takeIf { it.enabled }?.let { scheduleText(it) } ?: stringResource(R.string.wheel_unset),
-                Modifier.testTag(if (wake) "routine-wake" else "routine-sleep").routeOrigin("slot:${kind.scheduleId}")) {
+                Modifier.testTag(if (wake) "routine-wake" else "routine-sleep").routeOrigin("slot:${kind.scheduleId}"),
+                leadingIcon = R.drawable.ic_schedule, valueMaxLines = 2) {
                 onSchedule(SlotEditorKey(kind.scheduleId, title, local.date.toEpochDay(), local.zone.id, 0, view.revision, role = kind))
             }
         }
-        HorizontalDivider()
+        HorizontalDivider(Modifier.padding(start = 32.dp))
     }
 }
 
@@ -190,6 +186,6 @@ private fun LanguagePreference() {
 private fun SettingsGroup(label: String, rows: @Composable ColumnScope.() -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         SectionTitle(label)
-        FormGroup(content = rows)
+        FormGroup(frosted = true, content = rows)
     }
 }

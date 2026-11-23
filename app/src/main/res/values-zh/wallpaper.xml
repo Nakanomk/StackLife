@@ -9,7 +9,7 @@
     <string name="wallpaper_replace">重新选择图片</string>
     <string name="wallpaper_preparing">正在准备图片…</string>
     <string name="wallpaper_unavailable">图片不可用</string>
-    <string name="wallpaper_import_failed">无法导入，请选择静态 JPEG、PNG 或 WebP，并检查存储空间。</string>
+    <string name="wallpaper_import_failed">无法导入这张图片，请检查当前系统是否支持解码，以及存储空间是否充足。</string>
     <string name="wallpaper_zoom">缩放</string>
     <string name="wallpaper_horizontal">水平焦点</string>
     <string name="wallpaper_vertical">垂直焦点</string>

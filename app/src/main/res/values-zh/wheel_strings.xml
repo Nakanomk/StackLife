@@ -8,6 +8,6 @@
     <string name="wheel_period">时段</string>
     <string name="wheel_unset">未设置</string>
     <string name="wheel_clear_date">清除日期</string>
-    <string name="hub_import_help">华科课程导入方法：</string>
-    <string name="hub_import_steps">1. 从当前页面正常登录hubs\n2. 进入hubs主页后，点击右上角“总课表”按钮，跳转到课表页面\n3. 点击页面内的“总课表”按钮\n4. 切换到总课表后，点击导入</string>
+    <string name="hub_import_help">华中科技大学 HUB 课表导入说明</string>
+    <string name="hub_import_steps">1. 在当前页面登录 HUB。\n2. 在 HUB 主页点击右上角的“总课表”，进入课表页面。\n3. 点击页面内的“总课表”按钮。\n4. 确认显示总课表后，点击“导入”。</string>
 </resources>

@@ -245,6 +245,80 @@ class AppearanceEditorInteractionTest {
         } finally { folder.deleteRecursively() }
     }
 
+    @SdkSuppress(minSdkVersion = 34)
+    @Test fun countdownGlobalAndPagePickersImportPrimaryStillsWithoutKeepingTheSourceGrant() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val folder = Files.createTempDirectory(context.cacheDir.toPath(), "primary-picker-").toFile()
+        val dir = File(folder, "background-images")
+        fun files() = dir.list().orEmpty().filterTo(mutableSetOf()) { !it.startsWith('.') }
+        val photos = BackgroundStore(object : ContextWrapper(context) { override fun getNoBackupFilesDir() = folder }) {
+            fixture.db.withTransaction { buildSet {
+                addAll(fixture.db.countdownDao().backgroundIds())
+                fixture.db.plannerDao().settings()?.let { addAll(decodeAppearance(it.appearance).backgroundIds()) }
+            } }
+        }
+        val api = RoomPlannerApi(fixture.db, imageExists = photos::exists, collectBackgrounds = photos::collect)
+        val picker = Selection()
+        @Suppress("DEPRECATION")
+        val sources = listOf("image/jpeg" to gainmapPhoto(), "image/jpeg" to motionPhoto(redPixels(Bitmap.CompressFormat.JPEG)),
+            "image/png" to redPixels(Bitmap.CompressFormat.PNG, 128), "image/webp" to redPixels(Bitmap.CompressFormat.WEBP, 128),
+            "image/heic" to photoFixture("red-blue-cw90.heic.b64"))
+        fun pickAll(activate: (Boolean) -> Unit): String {
+            var last = ""
+            for ((index, source) in sources.withIndex()) {
+                val before = files()
+                val (mime, bytes) = source
+                withSelectedPhoto(context, bytes, mime) { uri ->
+                    picker.uri = uri
+                    activate(index == 0)
+                    ui.waitUntil(12_000) { (files() - before).size == 1 }
+                    last = (files() - before).single()
+                }
+                val image = runBlocking { photos.bitmap(last, 64) }
+                try {
+                    val rotated = mime == "image/heic"
+                    assertEquals(if (rotated) 32 else 64, image.width)
+                    assertEquals(if (rotated) 64 else 32, image.height)
+                    val top = image.getPixel(image.width / 2, 4)
+                    assertTrue(android.graphics.Color.red(top) > 200)
+                    if (rotated) assertTrue(android.graphics.Color.blue(image.getPixel(16, 55)) > 200)
+                    assertFalse(image.hasGainmap())
+                } finally { image.recycle() }
+            }
+            return last
+        }
+        val before = revision()
+        try {
+            attach(api, photos, picker)
+            await(hasTestTag("nav:countdown")).performClick(); await(hasTestTag("countdown-add")).performClick()
+            await(hasTestTag("countdown-name")).performTextReplacement("合成图片")
+            val choose = row(context.getString(R.string.countdown_choose_photo))
+            val countdown = pickAll { await(choose and isEnabled()).performScrollTo().performClick() }
+            withSelectedPhoto(context, "<svg/>".toByteArray(), "image/jpeg") { uri ->
+                picker.uri = uri; await(choose and isEnabled()).performScrollTo().performClick()
+                await(hasText(io.github.nakanomk.stacklife.i18n.uiText("This system cannot decode this image.", "当前系统无法解码这张图片。")))
+                    .performScrollTo().assertIsDisplayed()
+            }
+            assertEquals(before, revision())
+            await(hasTestTag("countdown-save") and isEnabled()).performClick(); await(hasTestTag("countdown-list"))
+            fun savedCountdown() = runBlocking { (api.observe(PlannerQuery.Countdowns).first() as CountdownsView).items.single().backgroundId }
+            assertEquals(countdown, savedCountdown())
+            openSettings(); openGroup("材质与动态")
+            fun wallpaper() = pickAll { first ->
+                if (first) choice("背景", "私有图片") else field(row("重新选择图片") and isEnabled()).performClick()
+            }
+            val global = wallpaper()
+            choice("应用范围", WORKSPACE.label)
+            val page = wallpaper()
+            assertEquals(before + 1, revision())
+            await(row("保存外观") and isEnabled()).performClick(); await(row("材质与动态"))
+            ui.activityRule.scenario.recreate(); attach(api, photos, picker)
+            assertEquals(global, saved().background.imageId); assertEquals(page, saved().pageBackgrounds[WORKSPACE]?.imageId)
+            assertEquals(countdown, savedCountdown())
+            assertEquals(setOf(global, page, countdown), files()); assertEquals(before + 2, revision())
+        } finally { folder.deleteRecursively() }
+    }
+
     private fun shown(dest: Destination) = field(hasTestTag("visibility:${dest.key}"))
     private fun move(dest: Destination, up: Boolean) {
         field(hasTestTag("move:${dest.key}")).performClick()

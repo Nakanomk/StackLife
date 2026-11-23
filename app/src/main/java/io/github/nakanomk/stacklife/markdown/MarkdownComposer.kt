@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife.markdown
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.KeyboardActionHandler
@@ -21,7 +23,8 @@ private val compactLines = TextFieldLineLimits.MultiLine(maxHeightInLines = 5)
 private val sendKeyboard = KeyboardOptions(imeAction = ImeAction.Send, showKeyboardOnFocus = false)
 
 @Composable
-internal fun MarkdownComposer(state: TextFieldState, modifier: Modifier = Modifier, onSend: (() -> Unit)? = null) {
+internal fun MarkdownComposer(state: TextFieldState, modifier: Modifier = Modifier, onSend: (() -> Unit)? = null,
+    placeholder: (@Composable () -> Unit)? = null) {
     val colors = MaterialTheme.colorScheme
     val typography = MaterialTheme.typography
     val cache = remember(state) { MarkdownDocumentCache() }
@@ -60,6 +63,13 @@ internal fun MarkdownComposer(state: TextFieldState, modifier: Modifier = Modifi
             lineLimits = if (sending) compactLines else TextFieldLineLimits.Default,
             keyboardOptions = if (sending) sendKeyboard else KeyboardOptions.Default,
             onKeyboardAction = action,
+            decorator = { inner ->
+                if (placeholder == null) inner()
+                else Box(contentAlignment = Alignment.CenterStart) {
+                    if (state.text.isEmpty()) placeholder()
+                    inner()
+                }
+            },
         )
     }
 }

@@ -248,7 +248,7 @@ private fun QueueList(
                     Row(row, verticalAlignment = Alignment.CenterVertically) {
                         QueueTaskInfo(task, index, Modifier.weight(1f), shared.title("task:${task.id}"))
                         if (order.size > 1) MoveMenu(
-                            modifier = Modifier.longPressDraggableHandle(enabled = !action.busy, interactionSource = drags),
+                            modifier = Modifier.draggableHandle(enabled = !action.busy, interactionSource = drags),
                             title = task.title, index = index, lastIndex = order.lastIndex, enabled = !action.busy,
                             onMove = { to -> action.send(PlannerCommand.QueueOrder(order.moved(index, to).map { it.id })) },
                         )

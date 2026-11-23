@@ -4,7 +4,7 @@ StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Andr
 
 **项目许可：** StackLife 采用 [GNU 通用公共许可证第 3 版或任何后续版本](../LICENSE)（`GPL-3.0-or-later`）。第三方代码与资源保留[各自的许可和署名](../app/src/main/assets/licenses/)。
 
-**当前候选版本：v0.10.12（27），Room v12。** 今天可以安排重叠事件、单点和每日重复；流程图能引用已有任务，倒数日按日历日计数。手动功能不依赖模型或网络。下文 M0–M6 是历史契约；原本“冲突拒绝写入”“节点都是模板”等规则已由 [本次升级](#v01012-排程链接倒数日与外观) 替代。普通包不含联盟 SDK。
+**当前候选版本：v0.10.13（28），Room v12。** 本次[界面与导入修复](#v01013-界面与导入)不迁移日程或重建库。M1–M6 是历史契约；原本“冲突拒绝写入”“节点都是模板”等规则已由[排程与链接升级](#v01012-排程链接倒数日与外观)替代。普通包不含联盟 SDK。
 
 ## 起点与产品决定
 
@@ -99,11 +99,11 @@ interface PlannerApi {
 1. 「从 HUB 网页提取课表」在手机内打开[校方登录页](https://hubs.hust.edu.cn/login)。本人完成认证后点「总课表」，选学期，点「提取」进入学期确认，无需电脑或中间文件。`app/src/main/assets/importers/hust-hub.js` 的 Vue 父链查找依据 `../WadwaitaUp/browser.py:37–62`。
 2. Android 系统文件选择器选本人导出的原始周数组 JSON；格式依据 `../WadwaitaUp/tools/hust_converter.py:6–16,84–100`。不架中转服务，不承诺兼容未核实格式。
 
-**独立浏览。** 「用 Chrome 浏览 HUB」通过 [AndroidX Browser 1.10.0](https://developer.android.com/jetpack/androidx/releases/browser#1.10.0)（Apache-2.0）打开真正的 [Chrome Custom Tab](https://developer.chrome.com/docs/android/custom-tabs/guide-get-started)，使用 Chrome 自己的登录态、证书策略与导航。只打开固定的登录入口，不传正在使用的认证 URL。Chrome 不向宿主开放校方 DOM 或 Cookie；这个入口用于浏览，不是提取器。
+**独立浏览。** 先选导入方式；网页方式再选择实际支持的学校。「用浏览器浏览教务网站」通过系统 `ACTION_VIEW` 打开固定登录入口，不传认证重定向、DOM 或 Cookie，不指定 Chrome。这一入口只浏览，不提取。
 
 **浏览与提取分开。** 手机提取器用 [Android System WebView](https://developer.android.com/reference/android/webkit/WebView)。HTTP/HTTPS 页面及跨域验证交给 Chromium，不设校方域名白名单，不改写重定向。HTTP 是明文，App 不会把它变成安全连接。第三方登录 Cookie 仅限该会话；保留系统证书验证，不注册原生 JS bridge。只有当前显示的页面是 [HUB 总课表](https://hubs.hust.edu.cn/basicInformation/scheduleInformation/index) 且用户点提取，才运行 APK 内脚本；只取周次、日期、星期、课名、节次、教室。导航或换学期会使未完成的提取失效。
 
-退出提取器清理其 WebView 站点数据，不清 Chrome 数据，也不代替校方登出。给用户安装的包用 `./gradlew :app:assemblePreview` 构建，路径为 `app/build/outputs/apk/preview/app-preview.apk`，不可调试、与上一版同签名。`debug` 包只用于开发。
+退出提取器清理其 WebView 站点数据，不清外部浏览器数据，也不代替校方登出。给用户安装的包用 `./gradlew :app:assemblePreview` 构建，路径为 `app/build/outputs/apk/preview/app-preview.apk`，不可调试、与上一版同签名。`debug` 包只用于开发。
 
 **从原始行到实际上课日期。** `ZC` 为周序，周集合去重排序。按周保留课名 `KCMC`、星期、节次 `JC`、教室 `JSMC`；仅完全相同条目去重，同课换教室不能并掉。`JC` 完整匹配单节或数字区间，支持 `-`、`–`、`—`；倒序、越界、「实践」均保留原文待修正，不默认为第一节。`KS` 只是第一周日期候选。用户确认学期标识、首周周一、总周数和夏/冬作息，可指定中途切换作息的生效日，不猜当年校历。按 `Asia/Shanghai` 实际上课日期套用 `../WadwaitaUp/models.py:33–62` 的两套 12 节预设；来源没有的教师等字段留空。
 
@@ -193,9 +193,9 @@ interface PlannerApi {
 
 ## 动效与材质
 
-**应用内连续性。** 四个根页、队列／栈和相邻日／周保留分页器，根页的助理输入框不参与翻页。层级导航不推走前一页：设置齿轮、加号、列表项和操作按钮按实际屏幕位置展开为目的页，参照 [Material Container Transform](https://github.com/material-components/material-components-android/blob/master/docs/theming/Motion.md#container-transform)。工作台按实体 ID 和标题位置配对[共享容器](https://developer.android.com/develop/ui/compose/animation/shared-elements/customize)：标题和正文随卡片展开，详情工具栏和底部输入框留在最终屏幕位置，由同一张卡片逐步揭开。源卡不可见或已删除时不缩回替代项。[Nav3 预测返回](https://developer.android.com/guide/navigation/navigation-3/animate-destinations)可反向拖动和取消，不改草稿或业务数据。助理历史与消息、添加课程的选周与预览都在原弹层内切换，不重开窗口。系统选择器和 Chrome 保留平台动效；系统动画比例为零或勾选「减弱」时，应用内直接切换。
+**应用内连续性。** 四个根页、队列／栈和相邻日／周保留分页器，根页的助理输入框不参与翻页。层级导航不推走前一页：设置齿轮、加号、列表项和操作按钮按实际屏幕位置展开为目的页，参照 [Material Container Transform](https://github.com/material-components/material-components-android/blob/master/docs/theming/Motion.md#container-transform)。工作台按实体 ID 和标题位置配对[共享容器](https://developer.android.com/develop/ui/compose/animation/shared-elements/customize)：标题和正文随卡片展开，详情工具栏和底部输入框留在最终屏幕位置，由同一张卡片逐步揭开。源卡不可见或已删除时不缩回替代项。[Nav3 预测返回](https://developer.android.com/guide/navigation/navigation-3/animate-destinations)可反向拖动和取消，不改草稿或业务数据。助理历史与消息、添加课程的选周与预览都在原弹层内切换，不重开窗口。系统选择器和默认浏览器保留平台动效；系统动画比例为零或勾选「减弱」时，应用内直接切换。
 
-返回时，工作台真实列表行及相邻项一直留在原位；共享边界只使用等大的空锚点，不拿列表行本身重新测量。详情落到标题位置后才把像素交回真实行，参照 [BiliPai 返回时间线的内容交接](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/core/ui/transition/VideoCardReturnTimeline.kt#L112-L149)。**抽屉例外**：点课程、历史、添加课程或拓扑排序时用 [Android `ModalBottomSheet`](https://developer.android.com/develop/ui/compose/components/bottom-sheets) 从底部抽出，返回或下拉则滑回底部，不把源按钮放大；抽屉内选择条目不重开窗口。
+返回时，工作台真实列表行及相邻项留在原位；共享边界使用不绘制的等大锚点，避免重新测量列表项或把文字采样到半像素位置。目的页在来源范围之外保持不透明，在真实控件范围内按 [BiliPai 共享容器交接](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/navigation3/SettingsContainerMotionPolicy.kt) 揭开原有材质和文字。**抽屉例外**：点课程、历史、添加课程或拓扑排序时用 [Android `ModalBottomSheet`](https://developer.android.com/develop/ui/compose/components/bottom-sheets) 从底部抽出，返回或下拉则滑回底部，不把源按钮放大；抽屉内选择条目不重开窗口。
 
 **联盟系统能力（M6 单列验收）。** 依据 [ITGSA SharedViewDemo](https://gitee.com/itgsa_sharedviewkit/SharedViewDemo)。`gsai.sdk:sharedview-kit` 运行时调用 `ViewAnimationManager.isViewAnimationSupported()`，不按品牌猜。仅在协议支持、动效允许、源卡片完整可见时，对队列事件/栈帧卡片用非导出 `EntityDetailActivity`，复用同一详情 Composable，Intent 只传实体类型和 ID。用 `PixelCopy` 取被点卡片的 window 矩形，不把整屏 `LocalView` 当卡片。按 Kit 能力约定区分屏幕/窗口坐标、转换 bounds，圆角转 px，交给 `makeViewAnimationOptions(bitmap, bounds, radius, …)`；成功只让系统播一次。返回按实体 key 刷新落点，在详情 Activity 的 `finish()` **之前** `overrideViewAnimationTransition`；源丢失跟随系统。能力为 0、options 为空或取图失败，走同一应用内详情路径，不叠动画、不阻断导航。
 
@@ -357,6 +357,14 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 **画面复审。** 证据在本地 `app/build/outputs/`，只使用合成日程。API 37（1080×2340、440 dpi）与 API 26（1080×1920、420 dpi）覆盖玻璃／实色、深浅色与 200% 字号。字阶与层级对照 `u2-dark-200-detail.png`、`u7-countdown-list-200.png`：标题、日期和天数各自换行，不靠缩字。留白与对齐看 `u1-queue-before.png`／`u1-queue-after.png`；密度看 `u5-points-drawer-middle.png`：20 个同刻项改为整组可滚动而非细条。一致性看 `u8-week-grid-on.png`／`u8-week-grid-off.png`，同一课块和日期栏不移动；原生交互看 `u8-navigation-drag.png` 的实际换位及日期滚轮、系统选图、输入法记录。曾发现矮横屏的队列按钮压住设置、窄屏导航末行被圆形裁掉；两处均调整布局，不缩小 48 dp 触达区。
 
 **动效和性能分开验收。** `u8-integrated-motion.mp4` 与 `u8-recorded-gestures.txt` 对应卡片往返及返回取消、根页、抽屉、日／周切换和滚轮拖时。独立 `.bench` 包用 30 个任务和 5 门双节课完成滚动、卡片往返、助理开合的玻璃／实色六项模拟器 dry-run（`u8-benchmark-emulator-dryrun.txt`）。本轮没有 API 31+ 物理设备；没有新旧版本同机同刷新率的 p50、p95 或 overrun 结论。HUB 本人登录、真实外部 BYOK、联盟 SDK 分发许可和支持设备转场仍分别未验；候选包不等于发布。
+
+### v0.10.13 界面与导入
+
+- **输入与设置。** 根页、对话、历史续聊共用 12dp 圆角的原生 Markdown 编辑器。操作槽靠底对齐，五行后滚动文本；跨页草稿的范围在壳外。设置卡只磨砂背景，作息与课程默认提醒显示实际摘要。标题后的说明可单独点击、返回或滚动收起；错误、权限和当前值仍然可见。
+- **课表。** 文件入口只接本人导出的 HUB JSON；网页入口先选华中科技大学，再选内置提取或系统浏览器。新的内置会话先显示学校说明。新导入可命名，已有课表不改 ID，旧 UUID 显示日期范围。新校历默认 20 周，仍需确认首周周一。差异与取消/确认使用同一份本地提案；窄屏大字号同时缩短两个动作的文案，不缩小字体。
+- **主静态图。** 背景在授权期间复制，在解码成功后才替换。API 28+ 使用 [ImageDecoder](https://developer.android.com/reference/android/graphics/ImageDecoder) 的主画面，经方向归正、sRGB 转换和 SDR 重编码后保存；不保留视频、GPS、增益图或外部 URI。API 26–27 走有界采样与 EXIF 回退；平台不能解码则保留旧图。聊天附件的严格格式边界不变。[Coil 的代码与许可](../app/src/main/assets/licenses/Coil-Apache-2.0.txt)随包分发。状态栏使用独立的不透明明暗保护层，不采样照片。
+- **翻页与日末。** 周表时刻栏沿用网格背景。日／周标题与箭头共用 Pager 的选择；新请求取代旧动画，真实拖动落定才提交。回到本周沿当前课表来源时区计算并限制在学期内。队列扣手可直接拖动，松手提交，点按仍有菜单。滚轮只影响上下各至少 50 个物理像素的边缘带，触底下侧平直；只有时间模式的加号、托盘在日末向右让位，日末距助理仍为 16dp。
+- **转场。** 本地 Nav3 与弹层内页沿同一边界进度揭开。只配对紧邻父页的可见控件或同一实体，失去锚点时原位淡化。预测返回取消回放同一路径。分页、IME、系统浏览器及选择器不套用容器转场。BiliPai 固定提交、移植文件和 GPL 许可见[随包声明](../app/src/main/assets/licenses/BiliPai-GPL-3.0.txt)；本轮不测帧率，厂商 ProXDR/Live 实拍不由模拟器代证。
 
 ### 历史里程碑验收用例（M1–M6）
 

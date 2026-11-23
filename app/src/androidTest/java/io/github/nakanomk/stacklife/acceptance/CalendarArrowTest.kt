@@ -82,4 +82,36 @@ class CalendarArrowTest {
         slide("week-grid", hasTestTag("course-prev"), -1, "第 1 周")
         awaitOne(hasTestTag("course-week") and hasText("第 1 周")).assertIsDisplayed()
     }
+
+    @Test fun rapidRequestsAndListReturnStayOnTheSameTimetableWithoutWriting() {
+        val monday = LocalDate.now(campusZone).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(1)
+        val term = TermSpec("翻页验收", monday, 9, BellSchedule.SUMMER)
+        val revision = runBlocking {
+            val id = store.api.stageCourseImport(term, (1..9).map { term.meeting(it, 1, "课程-$it", "", 1, 2) })
+            try { store.apply(PlannerCommand.CourseImport(id)) } finally { store.api.discardCourseImport(id) }
+            store.state().revision
+        }
+        ui.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
+        awaitOne(hasTestTag("nav:courses")).performClick()
+        val header = awaitOne(hasTestTag("course-week") and hasText("第 2 周"))
+        ui.mainClock.autoAdvance = false
+        try {
+            var n = 2
+            for (delta in listOf(1, 1, 1, 1, 1, -1, 1, -1)) {
+                ui.onNodeWithTag(if (delta == 1) "course-next" else "course-prev").performClick()
+                n += delta
+                ui.mainClock.advanceTimeBy(80)
+                ui.onNodeWithTag("course-week").assertTextContains("第 $n 周")
+            }
+            ui.mainClock.advanceTimeBy(1000)
+        } finally { ui.mainClock.autoAdvance = true }
+        awaitOne(hasTestTag("course-options")).performClick()
+        awaitOne(hasTestTag("course-view-toggle")).performClick()
+        awaitOne(hasTestTag("week-course:0") and hasText("课程-6")).assertIsDisplayed()
+        ui.onNodeWithTag("course-options").performClick()
+        awaitOne(hasTestTag("course-current-week")).performClick()
+        header.assertTextContains(term.id)
+        awaitOne(hasTestTag("week-course:0") and hasText("课程-2")).assertIsDisplayed()
+        assertEquals(revision, runBlocking { store.state().revision })
+    }
 }

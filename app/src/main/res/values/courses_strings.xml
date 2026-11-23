@@ -5,15 +5,20 @@
     <string name="courses_assistant_hint">If you set up the assistant, you can describe your classes and times, then review its proposed changes.</string>
     <string name="courses_back">Back</string>
     <string name="courses_back_to_review">Back to review</string>
-    <string name="courses_browse_chrome">Browse HUB in Chrome</string>
+    <string name="courses_browse_website">Browse the school website in your browser</string>
+    <string name="courses_browser_missing">No browser is available.</string>
+    <string name="courses_browser_denied">The system did not allow the browser to open.</string>
     <string name="courses_cancel">Cancel</string>
     <string name="courses_cancel_import">Cancel import</string>
     <string name="courses_change_date">Bell schedule change date (optional)</string>
     <string name="courses_change_date_hint">The other bell schedule starts on this date. Clear the date to keep one schedule for the whole term.</string>
     <string name="courses_changeover">Bell schedule changes on %1$s. Open a class for its actual time.</string>
-    <string name="courses_choose_json">Choose raw JSON file</string>
+    <string name="courses_choose_json">Choose JSON file</string>
     <string name="courses_choose_new_source">Choose another source</string>
-    <string name="courses_choose_source">Choose timetable source</string>
+    <string name="courses_choose_source">Choose import method</string>
+    <string name="courses_choose_school">Choose school</string>
+    <string name="courses_import_web">Import from the school website</string>
+    <string name="courses_import_file">Import from a file (HUB JSON)</string>
     <string name="courses_choose_weeks">Select class weeks</string>
     <string name="courses_class_info">Class details</string>
     <string name="courses_class_name">Class name</string>
@@ -43,8 +48,8 @@
     <string name="courses_extracting">Extracting</string>
     <string name="courses_first_monday">First Monday</string>
     <string name="courses_first_period">First period</string>
-    <string name="courses_hub_extract">Extract timetable from HUB</string>
-    <string name="courses_hub_source">HUST HUB</string>
+    <string name="courses_hub_extract">Extract timetable from the school website</string>
+    <string name="courses_hub_source">Huazhong University of Science and Technology (HUB)</string>
     <string name="courses_hub_help">HUST HUB: sign in on the school page, open the full timetable, select your term and tap Import. If sign-in is unavailable, choose an exported HUB week-array JSON file instead.</string>
     <string name="courses_hub_timetable">Timetable</string>
     <string name="courses_import">Import timetable</string>
@@ -110,4 +115,5 @@
     <string name="courses_weeks_count">Selected weeks: %1$d</string>
     <string name="courses_weeks_list">Weeks: %1$s</string>
     <string name="courses_winter">Winter</string>
+    <string name="courses_go_current_week">Go to this week</string>
 </resources>
