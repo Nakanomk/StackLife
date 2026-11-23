@@ -1,0 +1,295 @@
+name: Android prerelease
+run-name: Preview ${{ inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Annotated version tag reachable from main (vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+concurrency:
+  group: preview-release-${{ inputs.tag }}
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  APP_ID: io.github.nakanomk.stacklife
+  TAG: ${{ inputs.tag }}
+
+jobs:
+  build:
+    if: github.repository == 'Nakanomk/StackLife' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      source: ${{ steps.resolve.outputs.source }}
+      object: ${{ steps.resolve.outputs.object }}
+      version: ${{ steps.resolve.outputs.version }}
+      code: ${{ steps.resolve.outputs.code }}
+      candidate: ${{ steps.candidate.outputs.artifact-id }}
+    env:
+      APK: source/app/build/outputs/apk/preview/app-preview.apk
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve annotated tag and check version
+        id: resolve
+        run: |
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo 'Expected vX.Y.Z'; exit 1; }
+          ref="refs/tags/$TAG"
+          git show-ref --verify "$ref" || { echo "Missing tag: $TAG"; exit 1; }
+          [[ $(git cat-file -t "$ref") == tag ]] || { echo 'Expected an annotated tag'; exit 1; }
+          object=$(git rev-parse "$ref")
+          source=$(git rev-parse "$ref^{commit}")
+          git merge-base --is-ancestor "$source" "$GITHUB_SHA" || { echo 'Source is not on main'; exit 1; }
+          code=$(git show "$source:app/build.gradle.kts" | python3 -c '
+          import os, re, sys
+          text = sys.stdin.read()
+          def unique(field, pattern):
+              values = re.findall(r"(?m)^\s*" + field + r"\s*=\s*(.*?)\s*$", text)
+              if len(values) != 1 or not (match := re.fullmatch(pattern, values[0])):
+                  sys.exit(f"Expected one literal {field}: {values!r}")
+              return match[1]
+          if unique("versionName", r"\"([^\"]+)\"") != os.environ["TAG"][1:]:
+              sys.exit("Tag differs from versionName")
+          print(unique("versionCode", r"([1-9][0-9]*)"))')
+          printf 'source=%s\nobject=%s\nversion=%s\ncode=%s\n' "$source" "$object" "${TAG#v}" "$code" >> "$GITHUB_OUTPUT"
+          printf 'VERSION=%s\nCODE=%s\n' "${TAG#v}" "$code" >> "$GITHUB_ENV"
+          git for-each-ref --format='%(contents)' "$ref" > "$RUNNER_TEMP/tag-notes.md"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.resolve.outputs.source }}
+          path: source
+          persist-credentials: false
+      - &java
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - &sdk
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: platform-tools platforms;android-37.2 build-tools;37.0.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          validate-wrappers: true
+          cache-provider: basic
+          cache-read-only: true
+      - name: Test and assemble tagged source
+        id: gradle
+        working-directory: source
+        run: ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest :app:assemblePreview
+      - name: Upload unit test results
+        if: always() && steps.gradle.outcome != 'skipped'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unit-tests-${{ steps.resolve.outputs.source }}
+          path: |
+            source/app/build/reports/tests/testDebugUnitTest/
+            source/app/build/test-results/testDebugUnitTest/TEST-*.xml
+          retention-days: 14
+      - &check-apk
+        name: Check APK manifest and alignment
+        run: |
+          tools="$ANDROID_HOME/build-tools/37.0.0"
+          "$tools/zipalign" -c -P 16 4 "$APK"
+          "$tools/aapt" dump badging "$APK" > "$RUNNER_TEMP/badging"
+          grep '^package:' "$RUNNER_TEMP/badging" | grep -F "package: name='$APP_ID' versionCode='$CODE' versionName='$VERSION' "
+          grep -Fx "sdkVersion:'26'" "$RUNNER_TEMP/badging"
+          grep -Fx "targetSdkVersion:'37'" "$RUNNER_TEMP/badging"
+          if grep -q '^application-debuggable' "$RUNNER_TEMP/badging"; then echo 'APK is debuggable'; exit 1; fi
+      - name: Check Gradle output metadata and collect candidate
+        run: |
+          mkdir candidate
+          jq -e --arg id "$APP_ID" --arg version "$VERSION" --argjson code "$CODE" '
+            select(.applicationId == $id and .variantName == "preview" and (.elements | length) == 1)
+            | .elements[0] | select(.outputFile == "app-preview.apk" and .filters == [] and .versionName == $version and .versionCode == $code)
+            | {applicationId: $id, versionName, versionCode, variant: "preview", minSdk: 26, targetSdk: 37}
+          ' "$(dirname "$APK")/output-metadata.json" > candidate/package.json
+          cp "$APK" candidate/app-preview.apk
+          cp "$RUNNER_TEMP/tag-notes.md" candidate/tag-notes.md
+      - name: Upload candidate from this run
+        id: candidate
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: candidate-${{ steps.resolve.outputs.source }}
+          path: |
+            candidate/app-preview.apk
+            candidate/package.json
+            candidate/tag-notes.md
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  sign-and-publish:
+    needs: build
+    if: github.repository == 'Nakanomk/StackLife' && github.ref == 'refs/heads/main'
+    environment: preview-release
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SOURCE: ${{ needs.build.outputs.source }}
+      TAG_OBJECT: ${{ needs.build.outputs.object }}
+      VERSION: ${{ needs.build.outputs.version }}
+      CODE: ${{ needs.build.outputs.code }}
+      APK: release/StackLife-${{ needs.build.outputs.version }}-preview.apk
+      CERT: 6a51915f4e57205dfd4e5f1bee5bac6c14434e7bdaa2050c165975a512b758d9
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.candidate }}
+          path: candidate
+          merge-multiple: true
+          digest-mismatch: error
+      - *java
+      - *sdk
+      - name: Sign with the preview certificate
+        env:
+          KEYSTORE_B64: ${{ secrets.STACKLIFE_PREVIEW_KEYSTORE_BASE64 }}
+        run: |
+          set -u
+          umask 077
+          : "${KEYSTORE_B64:?Missing preview-release secret}"
+          key=$(mktemp "$RUNNER_TEMP/preview-key.XXXXXXXX")
+          trap 'rm -f "$key"' EXIT
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$key"
+          unset KEYSTORE_B64
+          alias=androiddebugkey
+          fingerprint=$(keytool -exportcert -keystore "$key" -storepass android -alias "$alias" | sha256sum)
+          [[ ${fingerprint%% *} == "$CERT" ]] || { echo 'Unexpected keystore certificate'; exit 1; }
+          tools="$ANDROID_HOME/build-tools/37.0.0"
+          mkdir release
+          "$tools/zipalign" -c -P 16 4 candidate/app-preview.apk
+          "$tools/apksigner" sign --ks "$key" --ks-key-alias "$alias" --ks-pass pass:android --key-pass pass:android --out "$APK" candidate/app-preview.apk
+          "$tools/apksigner" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/signers"
+          grep -Fx 'Number of signers: 1' "$RUNNER_TEMP/signers"
+          grep -Fx "Signer #1 certificate SHA-256 digest: $CERT" "$RUNNER_TEMP/signers"
+      - *check-apk
+      - name: Install API 37 emulator image
+        run: sdkmanager 'emulator' 'system-images;android-37.0;default;x86_64'
+      - name: Install signed APK, finish onboarding and cold-start offline
+        env:
+          ANDROID_SERIAL: emulator-5554
+        run: |
+          set -u
+          image='system-images;android-37.0;default;x86_64'
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/preview-avds"
+          mkdir -p "$ANDROID_AVD_HOME" smoke
+          sudo setfacl -m "u:$(id -un):rw" /dev/kvm
+          avdmanager create avd --name smoke --package "$image" --device pixel_5 <<< no
+          "$ANDROID_HOME/emulator/emulator" -avd smoke -port 5554 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on > smoke/emulator.log 2>&1 &
+          emu=$!
+          phone() { timeout 30 adb -s "$ANDROID_SERIAL" "$@"; }
+          cleanup() {
+            if [[ $1 != 0 ]]; then
+              phone logcat -b all -d -t 4000 > smoke/failure-logcat.txt || :
+              phone exec-out screencap -p > smoke/failure.png || :
+            fi
+            phone emu kill || kill "$emu" 2>/dev/null || :
+          }
+          trap 'cleanup $?' EXIT
+          timeout 240 adb -s "$ANDROID_SERIAL" wait-for-device
+          end=$((SECONDS + 240))
+          until [[ $(phone shell getprop sys.boot_completed | tr -d '\r') == 1 ]]; do
+            kill -0 "$emu" && (( SECONDS < end )) || { echo 'Emulator did not boot'; exit 1; }
+            sleep 2
+          done
+          phone shell wm dismiss-keyguard
+          phone shell cmd connectivity airplane-mode enable
+          phone shell svc wifi disable
+          phone shell svc data disable
+          [[ $(phone shell settings get global airplane_mode_on | tr -d '\r') == 1 ]]
+          phone logcat -b all -c
+          phone install "$APK"
+          python3 - <<'PY'
+          import os, re, subprocess, time, xml.etree.ElementTree as ET
+          from pathlib import Path
+          out = Path('smoke')
+          pkg = os.environ['APP_ID']
+          def adb(*args, timeout=25):
+              return subprocess.check_output(['adb', '-s', os.environ['ANDROID_SERIAL'], *args], timeout=timeout)
+          def launch():
+              status = adb('shell', 'am', 'start', '-W', '-n', f'{pkg}/.MainActivity').decode()
+              if 'Status: ok' not in status: raise RuntimeError(status)
+          def screen(name, guide=False):
+              deadline = time.monotonic() + 75
+              path = '/sdcard/preview-window.xml'
+              while time.monotonic() < deadline:
+                  adb('shell', 'rm', '-f', path)
+                  try:
+                      adb('shell', 'uiautomator', 'dump', path, timeout=15)
+                      xml = adb('exec-out', 'cat', path)
+                      nodes = [n for n in ET.fromstring(xml).iter('node') if n.get('package') == pkg]
+                  except (ET.ParseError, subprocess.SubprocessError):
+                      time.sleep(1); continue
+                  (out / f'{name}.xml').write_bytes(xml)
+                  def labels(n): return {n.get('text'), n.get('content-desc')}
+                  later = next((n for n in nodes if labels(n) & {'Later', '稍后'}), None)
+                  nav = any(labels(n) & {'Today','今天','Workspace','工作台'} for n in nodes)
+                  ids = {n.get('resource-id', '') for n in nodes}
+                  if guide and later is not None:
+                      (out / f'{name}.png').write_bytes(adb('exec-out', 'screencap', '-p'))
+                      x1,y1,x2,y2 = map(int, re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', later.get('bounds')).groups())
+                      if x2 <= x1 or y2 <= y1: raise ValueError('Empty Later button')
+                      adb('shell','input','tap', str((x1+x2)//2), str((y1+y2)//2)); return
+                  if not guide and later is None and nav and 'day-axis' in ids and 'nav:today' in ids:
+                      (out / f'{name}.png').write_bytes(adb('exec-out', 'screencap', '-p')); return
+                  time.sleep(1)
+              raise RuntimeError(f'{name}: expected StackLife screen not visible')
+          launch(); screen('guide', guide=True); screen('home')
+          adb('shell','am','force-stop',pkg); launch(); screen('restarted')
+          PY
+          phone logcat -b events -d -s am_crash:I am_anr:I > smoke/process-events.txt
+          phone logcat -b crash -d > smoke/crashes.txt
+          if grep -F "$APP_ID" smoke/process-events.txt smoke/crashes.txt; then echo 'StackLife crashed or stopped responding'; exit 1; fi
+      - name: Upload emulator evidence
+        if: always() && hashFiles('smoke/**') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: offline-smoke-${{ needs.build.outputs.source }}
+          path: |
+            smoke/guide.png
+            smoke/guide.xml
+            smoke/home.png
+            smoke/home.xml
+            smoke/restarted.png
+            smoke/restarted.xml
+            smoke/failure.png
+            smoke/failure-logcat.txt
+            smoke/emulator.log
+            smoke/process-events.txt
+            smoke/crashes.txt
+          retention-days: 7
+      - name: Record source, build and file digests
+        run: |
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          jq -e --arg id "$APP_ID" --arg v "$VERSION" --argjson c "$CODE" --arg tag "$TAG" --arg src "$SOURCE" --arg obj "$TAG_OBJECT" --arg wf "$GITHUB_SHA" --arg url "$url" --arg cert "$CERT" '
+            select(. == {applicationId:$id, versionName:$v, versionCode:$c, variant:"preview", minSdk:26, targetSdk:37})
+            | . + {sourceTag:$tag, sourceCommit:$src, tagObjectSha:$obj, workflowCommit:$wf, workflowRunUrl:$url, signingCertificateSha256:$cert}
+          ' candidate/package.json > release/BUILD-INFO.json
+          (cd release && sha256sum "${APK##*/}" BUILD-INFO.json > SHA256SUMS)
+      - name: Verify remote tag and publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          ref="refs/tags/$TAG"
+          git ls-remote --exit-code "$repo.git" "$ref" "$ref^{}" > "$RUNNER_TEMP/remote-tag"
+          grep -Fqx "$(printf '%s\t%s' "$TAG_OBJECT" "$ref")" "$RUNNER_TEMP/remote-tag"
+          grep -Fqx "$(printf '%s\t%s' "$SOURCE" "$ref^{}")" "$RUNNER_TEMP/remote-tag"
+          existing=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" | jq -r --arg t "$TAG" '.[] | select(.tag_name == $t) | .html_url')
+          [[ -z "$existing" ]] || { echo "Release already exists: $existing"; exit 1; }
+          cp candidate/tag-notes.md "$RUNNER_TEMP/notes.md"
+          printf '\n[对应源码](%s/tree/%s) · [构建与离线安装验证](%s/actions/runs/%s)\n\n下载三个资产后运行 `sha256sum -c SHA256SUMS`；`BUILD-INFO.json` 记录源码提交与签名证书指纹。\n' "$repo" "$SOURCE" "$repo" "$GITHUB_RUN_ID" >> "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" "$APK" release/BUILD-INFO.json release/SHA256SUMS --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --target "$SOURCE" --title "StackLife $VERSION 预发布" --prerelease --latest=false --notes-file "$RUNNER_TEMP/notes.md"
