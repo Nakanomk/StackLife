@@ -18,3 +18,5 @@ transitions/{ContainerMotion,RouteMotion,SceneMotion,PaneMotion}.kt ← navigati
 today/DayWheel.kt uses the same ThemeTimeWheelPicker projection listed above; viewport edge bands and the end-of-day condition are StackLife behavior.
 
 AboutIdentity.kt (StackLife 0.10.19, same revision) uses the 72/88 dp mark sizing, 12 dp inset and Material container roles of feature/settings/ui/MaterialAboutContent.kt. The Fumo vector, blink, and responsive mark/text arrangement are original to StackLife; no BiliPai artwork is distributed.
+
+StackLife 0.10.20 uses the behavior of feature/settings/AppUpdateAutoCheckGate.kt and feature/settings/update/{AppUpdateChecker,AppUpdateAssetSelectionPolicy,AppUpdateDialogHost,AppUpdateDownloader,AppUpdateInstaller}.kt (same BiliPai revision) as a reference for foreground checks, release notes, download progress and Android source authorization. The fixed StackLife release workflow, APK verification, persisted cooldown and PackageInstaller self-update sessions are implemented for StackLife.

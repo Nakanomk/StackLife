@@ -159,6 +159,39 @@ class AppearanceEditorInteractionTest {
         ui.waitUntil(12_000) { matches(sample(node, .22f)) }
     }
 
+    @SdkSuppress(minSdkVersion = 29)
+    @Test fun eachAppearanceHeaderShowsTheGlobalPhotoBeforeAndAfterScrolling() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val folder = Files.createTempDirectory(context.cacheDir.toPath(), "header-photo-").toFile()
+        val photos = BackgroundStore(object : ContextWrapper(context) { override fun getNoBackupFilesDir() = folder }) { emptySet() }
+        val api = RoomPlannerApi(fixture.db, imageExists = photos::exists)
+        try {
+            val id = withSelectedPhoto(context, redPixels(Bitmap.CompressFormat.PNG), "image/png") { uri ->
+                runBlocking { photos.importImage(uri) }
+            }
+            runBlocking {
+                val a = Appearance(theme = ThemeMode.LIGHT, background = WallpaperSpec(id, tint = 0f))
+                val proposal = api.preview(listOf(PlannerCommand.EditAppearance(AppearancePatch.Replace(a)))) as PreviewResult.Ready
+                assertTrue(api.commit(proposal.proposalId) is CommitResult.Applied)
+            }
+            attach(api, photos)
+            openSettings()
+            val header = hasTestTag("appearance-header")
+            fun showsPhoto(): Boolean {
+                val color = sample(ui.onNode(header), .08f) // Above the title, below the status bar.
+                return color.red > color.green + .25f && color.red > color.blue + .25f
+            }
+            for (title in listOf(R.string.ui_colors, R.string.ui_layout, R.string.ui_material_motion)) {
+                openGroup(context.getString(title))
+                ui.waitUntil(10_000) { showsPhoto() }
+                field(row(context.getString(R.string.ui_restore_defaults)))
+                assertTrue("Header lost the page photo after scrolling ${context.getString(title)}", showsPhoto())
+                ui.onNode(row(context.getString(R.string.ui_cancel)) and hasAnyAncestor(header)).performClick()
+                ui.waitUntil(5_000) { ui.onAllNodes(header).fetchSemanticsNodes().isEmpty() }
+            }
+        } finally { folder.deleteRecursively() }
+    }
+
     @OptIn(ExperimentalTestApi::class)
     @Test fun largeTextPreviewKeepsTheFullNoteAboveBothDockStyles() {
         ui.setContent {

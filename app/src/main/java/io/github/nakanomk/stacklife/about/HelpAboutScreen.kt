@@ -23,11 +23,12 @@ import io.github.nakanomk.stacklife.courses.SchoolImports
 import io.github.nakanomk.stacklife.transitions.PaneMotion
 import io.github.nakanomk.stacklife.transitions.PaneOrigins
 import io.github.nakanomk.stacklife.transitions.paneOrigin
+import io.github.nakanomk.stacklife.updates.STACKLIFE_REPOSITORY
+import io.github.nakanomk.stacklife.updates.UpdateSettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private const val REPOSITORY = "https://github.com/Nakanomk/StackLife"
 private const val PROJECT_LICENSE = "StackLife-GPL-3.0-or-later.txt"
 private enum class AboutPage(val title: Int) {
     HOME(R.string.about_title), HELP(R.string.about_help), BUILD(R.string.about_build),
@@ -147,12 +148,13 @@ internal fun HelpAboutScreen(back: () -> Unit, onGuide: () -> Unit) {
                     val apk = localRead(app) { baseApkDigest(app) }
                     val signers = localRead(app) { signingDigests(app) }
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = padding, verticalArrangement = listSpacing) {
+                        item { UpdateSettings() }
                         item { FormGroup {
                             SectionTitle(stringResource(R.string.about_project))
                             Text(stringResource(R.string.about_developer))
-                            SelectionContainer { Text(REPOSITORY) }
+                            SelectionContainer { Text(STACKLIFE_REPOSITORY) }
                             PreferenceRow(stringResource(R.string.about_open_repo), modifier = Modifier.testTag("about-repository")) {
-                                noBrowser = try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(REPOSITORY))); false }
+                                noBrowser = try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(STACKLIFE_REPOSITORY))); false }
                                 catch (_: android.content.ActivityNotFoundException) { true }
                                 catch (_: SecurityException) { true }
                             }

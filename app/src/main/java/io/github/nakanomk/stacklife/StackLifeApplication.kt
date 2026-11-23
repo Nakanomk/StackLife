@@ -13,6 +13,7 @@ import io.github.nakanomk.stacklife.planner.PlannerApi
 import io.github.nakanomk.stacklife.storage.PlannerDatabase
 import io.github.nakanomk.stacklife.storage.RoomPlannerApi
 import io.github.nakanomk.stacklife.reminders.AgendaReminders
+import io.github.nakanomk.stacklife.updates.AppUpdates
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -35,6 +36,7 @@ open class StackLifeApplication : Application() {
         AppLocales.sync(this)
     }
 
+    internal val updates by lazy { AppUpdates(this) }
     internal val connections by lazy { ConnectionStore(this) }
     internal val chat by lazy { OpenAiTransport() }
     private val database by lazy { PlannerDatabase.open(this, "stacklife.db") }

@@ -404,6 +404,13 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 - **矢量动效。** 在 Blender 中给原眼形制作开合形态键；应用按同一组贝塞尔曲线绘制，嘴形与线宽不缩放。进入关于页只眨一次，约 0.8 秒后停在原脸；减少动态效果或系统关闭动画时直接显示原脸。[可编辑 Blender 原件](images/about-fumo.blend) · [独立可播放 SVG](images/about-fumo.svg)。
 - **壁纸。** 「设置 → 外观 → 背景图片」直达「材质与动态」内的同一张背景图片卡。应用范围、图片来源、预览与调节在一张卡内，入口本身不启动照片选择器。两条路径共用草稿；取消不改已保存的壁纸，只有保存才生效。
 
+### v0.10.20 设置展开与应用更新
+
+- **课程默认提醒**用标准 Material 尺寸动效从行首向下展开，取消、保存后沿同一方向收回；减少动态效果时直接排到最终高度。提交期间编辑区留在原位，不出现可再次提交的副本。
+- **应用头栏**与 [Now in Android 给顶栏传入透明底色的实现](https://github.com/android/nowinandroid/blob/2982e63cb691ad49cd009aab43dc206fee6699c2/app/src/main/kotlin/com/google/samples/apps/nowinandroid/ui/NiaApp.kt#L230-L245) 一样不另画底色。色彩、布局、材质与动态及模型服务显示本页的真实壁纸或主题底色；模型字段在头栏下方滚动，仍禁止截屏和采样密钥。系统时间、电量区域的纯色保护保持不变。
+- **应用更新**借用 [BiliPai 入口检查](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/AppUpdateAutoCheckGate.kt) 和[发布说明、进度及安装入口](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/update/AppUpdateDialogHost.kt)的行为，不启用第三方镜像。普通包在回到首页时默认每 24 小时最多查一次[本仓库 Releases](https://github.com/Nakanomk/StackLife/releases)，手动检查不受间隔限制。只接收发布工作流的普通预览 APK；同时核对版本和构建号、BUILD-INFO、SHA-256、包名及实装签名。无网络、GitHub 限流或校验失败不报「已是最新」。
+- **自动安装单独授权。**「帮助与关于 → 版本与项目」可关闭自动检查，或另外开启自动更新。通过 [Android PackageInstaller](https://developer.android.com/reference/android/content/pm/PackageInstaller.SessionParams#setRequireUserAction(int)) 仅更新自身；Android 12 及以上符合条件时申请免二次确认，不符合时交由系统授权和确认。不卸载、不降级、不在浏览器寻找替代 APK，不上传用户数据。
+
 ### 历史里程碑验收用例（M1–M6）
 
 |阶段 / 用例|输入 → 可观察结果（校方登录、真实模型、联盟真机和性能有各自的验收条件）|

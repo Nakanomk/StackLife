@@ -1,12 +1,17 @@
 package io.github.nakanomk.stacklife.assistant
 
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.github.nakanomk.stacklife.R
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.runBlocking
@@ -24,9 +29,9 @@ class ConnectionScreenTest {
     private fun field(tag: String) = ui.onNodeWithTag("provider-$tag")
     private fun option(name: String) = ui.onNode(hasText(name) and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
 
-    private fun show() {
+    private fun show(frame: Modifier = Modifier) {
         val connectionStore = store
-        ui.setContent { ConnectionScreen(connectionStore) { closed.set(true) } }
+        ui.setContent { Box(frame, propagateMinConstraints = true) { ConnectionScreen(connectionStore) { closed.set(true) } } }
         ui.waitUntil(timeoutMillis = 5_000) {
             ui.onAllNodes(hasText("自定义") and isEnabled() and hasClickAction()).fetchSemanticsNodes().isNotEmpty()
         }
@@ -44,6 +49,25 @@ class ConnectionScreenTest {
     }
 
     @After fun clear() = runBlocking { store.clear() }
+
+    @Test fun privateFieldsScrollInASeparateViewportBelowTheSecureHeader() {
+        runBlocking { store.save("https://sample.invalid/v1", "sample-model", UUID.randomUUID().toString()) }
+        show(Modifier.height(320.dp))
+        val title = ui.onNodeWithText(ui.activity.getString(R.string.assistant_service_title))
+        val viewport = ui.onNode(hasScrollAction() and hasAnyDescendant(hasTestTag("provider-save")))
+        val heading = title.fetchSemanticsNode().boundsInRoot
+        assertTrue(viewport.fetchSemanticsNode().boundsInRoot.top >= heading.bottom)
+        for (name in listOf("url", "model", "key", "save")) {
+            val input = field(name).performScrollTo().assertIsDisplayed()
+            assertTrue(input.fetchSemanticsNode().boundsInRoot.top >= heading.bottom)
+            assertEquals(heading, title.fetchSemanticsNode().boundsInRoot)
+        }
+        val offset = viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+        ui.runOnIdle {
+            assertTrue("Fixture must exercise actual scrolling", offset.value() > 0f)
+            assertNotEquals(0, ui.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
 
     @Test fun radioSelectionSetsOfficialDefaultsAndNeverCarriesAnUnsavedKey() {
         show()

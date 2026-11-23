@@ -1,12 +1,14 @@
 package io.github.nakanomk.stacklife.reminders
 
 import android.database.sqlite.SQLiteException
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -65,7 +67,12 @@ internal fun ReminderRulesEditor(model: WorkspaceViewModel, subject: ReminderSub
                 if (it == SaveOutcome.APPLIED) { draft = null; error = null }
             }
             val policy = remember(draft) { draft?.let { Json.decodeFromString<ReminderPolicy>(it) } }
-            Column {
+            // One live branch: measure its real content and move the following settings with it.
+            val courseDefault = subject == ReminderSubject.CourseDefault
+            val layout = if (courseDefault && LocalMotionEnabled.current) Modifier.fillMaxWidth()
+                .animateContentSize(MaterialTheme.motionScheme.defaultSpatialSpec(), alignment = Alignment.TopStart)
+            else if (courseDefault) Modifier.fillMaxWidth() else Modifier
+            Column(layout) {
                 if (policy == null) {
                     val summary = buildList {
                         if (view.policy.inherit) add(stringResource(R.string.reminder_inherit))
@@ -73,11 +80,13 @@ internal fun ReminderRulesEditor(model: WorkspaceViewModel, subject: ReminderSub
                         else for (rule in view.effective) add(ReminderRuleLabel(rule.time))
                     }.joinToString(" · ")
                     PreferenceRow(heading(subject), summary, valueMaxLines = 2,
-                        leadingIcon = R.drawable.ic_calendar_view_week.takeIf { subject == ReminderSubject.CourseDefault }) {
+                        leadingIcon = R.drawable.ic_calendar_view_week.takeIf { courseDefault }) {
                         revision = view.revision; draft = Json.encodeToString(view.policy); error = null
                     }
-                } else if (!submission.busy) {
-                    ReminderRuleFields(subject, policy) { draft = Json.encodeToString(it) }
+                } else if (!courseDefault && submission.busy) {
+                    LinearProgressIndicator()
+                } else {
+                    ReminderRuleFields(subject, policy, enabled = !submission.busy) { draft = Json.encodeToString(it) }
                     val command = remember(subject, policy, revision) { PlannerCommand.SetReminders(subject, policy, revision) }
                     var valid by remember(command, view.revision) { mutableStateOf(false) }
                     var issue by remember(command, view.revision) { mutableStateOf<String?>(null) }
@@ -101,13 +110,16 @@ internal fun ReminderRulesEditor(model: WorkspaceViewModel, subject: ReminderSub
                         Text(stringResource(R.string.reminder_expired), style = MaterialTheme.typography.bodySmall)
                     }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    Row {
-                        TextButton(onClick = { draft = null; error = null }) { Text(stringResource(R.string.ui_cancel)) }
-                        TextButton(onClick = { submission.send(command) }, enabled = valid) {
-                            Text(stringResource(R.string.ui_save_changes))
+                    Box {
+                        Row {
+                            TextButton(onClick = { draft = null; error = null }, enabled = !submission.busy) { Text(stringResource(R.string.ui_cancel)) }
+                            TextButton(onClick = { submission.send(command) }, enabled = valid && !submission.busy) {
+                                Text(stringResource(R.string.ui_save_changes))
+                            }
                         }
+                        if (submission.busy) LinearProgressIndicator(Modifier.align(Alignment.BottomStart))
                     }
-                } else LinearProgressIndicator()
+                }
             }
         }
     }
@@ -115,17 +127,17 @@ internal fun ReminderRulesEditor(model: WorkspaceViewModel, subject: ReminderSub
 
 /** Local-only fields: canceling the enclosing schedule editor never writes a rule. */
 @Composable
-internal fun ReminderRuleFields(subject: ReminderSubject, policy: ReminderPolicy, onChange: (ReminderPolicy) -> Unit) = key(subject) {
+internal fun ReminderRuleFields(subject: ReminderSubject, policy: ReminderPolicy, enabled: Boolean = true, onChange: (ReminderPolicy) -> Unit) = key(subject) {
     var editing by rememberSaveable { mutableStateOf<String?>(null) }
     Column {
         Text(heading(subject), style = MaterialTheme.typography.titleMedium)
-        if (subject is ReminderSubject.Occurrence) CheckRow(stringResource(R.string.reminder_inherit), policy.inherit) {
+        if (subject is ReminderSubject.Occurrence) CheckRow(stringResource(R.string.reminder_inherit), policy.inherit, enabled = enabled) {
             editing = null; onChange(ReminderPolicy(!policy.inherit, emptyList()))
         }
         if (!policy.inherit) {
             if (policy.rules.isEmpty()) Text(stringResource(R.string.reminder_no_rules), style = MaterialTheme.typography.bodyMedium)
-            for (rule in policy.rules) key(rule.id) { PreferenceRow(ReminderRuleLabel(rule.time)) { editing = rule.id } }
-            TextButton(onClick = { editing = UUID.randomUUID().toString() }) { Text(stringResource(R.string.reminder_add)) }
+            for (rule in policy.rules) key(rule.id) { PreferenceRow(ReminderRuleLabel(rule.time), enabled = enabled) { editing = rule.id } }
+            TextButton(onClick = { editing = UUID.randomUUID().toString() }, enabled = enabled) { Text(stringResource(R.string.reminder_add)) }
             editing?.let { id -> key(id) {
                 val old = policy.rules.firstOrNull { it.id == id }
                 RuleDialog(old, subject is ReminderSubject.Occurrence, policy.rules, { editing = null }, remove = {

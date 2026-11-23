@@ -24,9 +24,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.workspace.*
-import io.github.nakanomk.stacklife.appearance.*
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
+import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -79,11 +77,13 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
         }
     }
     BackHandler(enabled = busy) {}
-    ConnectionPane(back, !busy, stringResource(R.string.assistant_service_privacy,
-        profile?.origin ?: stringResource(R.string.assistant_selected_service))) { top, safeChoiceGroup ->
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, 8.dp)),
+    Page {
+        // The header sees only Page's paper. Do not record or scroll any fields behind it, even masked.
+        PageTitle(stringResource(R.string.assistant_service_title), back = back, backEnabled = !busy,
+            help = stringResource(R.string.assistant_service_privacy, profile?.origin ?: stringResource(R.string.assistant_selected_service)))
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(dockListPadding(0.dp, 8.dp)),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            FormGroup(safeChoiceGroup.selectableGroup()) {
+            FormGroup(Modifier.selectableGroup()) {
                 ServicePreset.entries.forEach { option ->
                     val selected = preset == option
                     Row(Modifier.fillMaxWidth().selectable(selected = selected, enabled = !busy, role = Role.RadioButton) {
@@ -154,22 +154,4 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
     if (clear) PlannerAlertDialog(onDismissRequest = { clear = false }, title = { Text(stringResource(R.string.assistant_remove_service_title)) }, text = { Text(stringResource(R.string.assistant_remove_service_body)) },
         confirmButton = { TextButton(onClick = { clear = false; run { store.clear(); key = ""; back() } }) { Text(stringResource(R.string.assistant_remove)) } },
         dismissButton = { TextButton(onClick = { clear = false }) { Text(stringResource(R.string.assistant_cancel)) } })
-}
-
-@Composable
-private fun ConnectionPane(back: () -> Unit, backEnabled: Boolean, help: String, content: @Composable (androidx.compose.ui.unit.Dp, Modifier) -> Unit) {
-    Page {
-        // Never record the key, URL or model fields, even masked; FLAG_SECURE is a separate protection.
-        val safeChoices = rememberPlannerBackdrop()
-        val density = LocalDensity.current
-        var headerHeight by remember { mutableIntStateOf(0) }
-        Box(Modifier.fillMaxSize()) {
-            content(with(density) { headerHeight.toDp() }, Modifier.plannerBackdrop(safeChoices))
-            Surface(Modifier.fillMaxWidth().onSizeChanged { headerHeight = it.height }, color = MaterialTheme.colorScheme.surface) {
-                CompositionLocalProvider(LocalCapsuleBackdrop provides safeChoices) {
-                    PageTitle(stringResource(R.string.assistant_service_title), back = back, backEnabled = backEnabled, help = help)
-                }
-            }
-        }
-    }
 }

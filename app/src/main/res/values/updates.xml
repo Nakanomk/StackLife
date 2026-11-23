@@ -1,0 +1,34 @@
+<resources>
+    <string name="update_title">App updates</string>
+    <string name="update_auto_check">Automatically check for updates</string>
+    <string name="update_check_help">Checks StackLife’s public GitHub releases, including previews, when you open the app, at most once a day. No planner or account data is sent.</string>
+    <string name="update_auto_install">Automatically update</string>
+    <string name="update_install_help">Downloads and verifies new APKs, including on mobile data. Android may restart StackLife or ask you to approve installation. Off by default.</string>
+    <string name="update_check_now">Check now</string>
+    <string name="update_details">View update</string>
+    <string name="update_source">GitHub Releases</string>
+    <string name="update_checking">Checking GitHub Releases…</string>
+    <string name="update_current">No newer public version</string>
+    <string name="update_available">StackLife %1$s is available</string>
+    <string name="update_size">GitHub release · %1$s</string>
+    <string name="update_progress">Downloading and verifying · %1$d%%</string>
+    <string name="update_verified">APK verified; ready to install.</string>
+    <string name="update_permission">Allow StackLife to install its own updates in Android settings, then return here.</string>
+    <string name="update_installing">Waiting for the Android installation result…</string>
+    <string name="update_confirm">Android needs your confirmation to install this update.</string>
+    <string name="update_recover">The previous installation has no final result. You can verify the APK and resume.</string>
+    <string name="update_installed">Update installed</string>
+    <string name="update_network">Could not reach or download from GitHub. Check the connection and try again.</string>
+    <string name="update_rate_limit">GitHub has limited requests. Try again later.</string>
+    <string name="update_invalid">The release or its APK failed verification. Nothing was installed.</string>
+    <string name="update_incompatible">This APK cannot update the installed app. Check its version, Android requirements and signing certificate.</string>
+    <string name="update_system_failed">Android could not complete the installation. The current app and its data are unchanged.</string>
+    <string name="update_cancelled">Installation canceled. The current version is unchanged.</string>
+    <string name="update_storage">Not enough space to install the update.</string>
+    <string name="update_blocked">Android or the device administrator blocked installation.</string>
+    <string name="update_get">Download and install</string>
+    <string name="update_authorize">Allow this source</string>
+    <string name="update_retry">Try again</string>
+    <string name="update_later">Later</string>
+    <string name="update_close">Close</string>
+</resources>

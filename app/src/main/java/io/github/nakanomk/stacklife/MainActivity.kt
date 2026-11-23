@@ -31,6 +31,7 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import io.github.nakanomk.stacklife.about.AppDiagnostics
 import io.github.nakanomk.stacklife.about.HelpAboutScreen
+import io.github.nakanomk.stacklife.updates.UpdateHost
 import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.countdown.*
 import io.github.nakanomk.stacklife.assistant.*
@@ -377,6 +378,8 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
         }
     }
     val source = historySource
+    if (firstRunGuide) UpdateHost(atHome = stack.last() == Home && !offerGuide && reminder == null,
+        inAbout = stack.last() == HelpAbout, allowPresentation = source == null && privateScreens.intValue == 0)
     AssistantPanels(assistant, source?.let { remember(it) { historyPage(it) } }, configuring = stack.last() == ModelConnection,
         onCloseHistory = { historySource = null }, onSettings = { navigate(ModelConnection) }, onImport = { navigate(ImportCourses) })
     }

@@ -14,6 +14,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -94,6 +95,8 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
     StackLifeTheme(preview) {
         Page {
             CenterAlignedTopAppBar(title = { Text(group.title, style = MaterialTheme.typography.titleLarge) },
+                modifier = Modifier.testTag("appearance-header"),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent, scrolledContainerColor = Color.Transparent),
                 navigationIcon = { TextButton(onClick = leave, enabled = !receipt.busy && !closing) { Text(stringResource(R.string.ui_cancel)) } },
                 actions = {
                     TextButton(enabled = !busy && !applied && seedOK && !stale && selected != persisted,
@@ -253,7 +256,7 @@ private fun AccessibilityFields(d: Appearance, update: (Appearance) -> Unit) {
 
 
 @Composable
-private fun SwitchRow(label: String, checked: Boolean, enabled: Boolean = true, help: String? = null, change: () -> Unit) {
+internal fun SwitchRow(label: String, checked: Boolean, enabled: Boolean = true, help: String? = null, change: () -> Unit) {
     Row(Modifier.fillMaxWidth().toggleable(checked, enabled = enabled, role = Role.Switch) { change() }
         .heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         CompositionLocalProvider(LocalContentColor provides if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant) {

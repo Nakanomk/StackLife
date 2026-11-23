@@ -6,9 +6,11 @@ StackLife 是为 Android 手机设计的离线日程工具。用队列决定先�
 
 ## 下载与安装
 
-**[0.10.17 公开预发布 · 下载页面](https://github.com/Nakanomk/StackLife/releases/tag/v0.10.17)**（`versionCode 32`）。在 Assets 中选 `StackLife-0.10.17-preview.apk`，打开后按 Android 提示允许从当前来源安装。后续版本也需手动更新。
+**[公开下载 · GitHub Releases](https://github.com/Nakanomk/StackLife/releases)**。在 Assets 中选 `StackLife-版本号-preview.apk`，打开后按 Android 提示允许从当前来源安装。[0.10.17 公开预发布](https://github.com/Nakanomk/StackLife/releases/tag/v0.10.17) 本身没有内置更新器。
 
-已安装 **0.10.18 或其他更高 versionCode** 的用户请保留现有版本。Android 会拒绝降级覆盖；卸载再装可能丢失本地日程。
+如果手机上的 `versionCode` 高于下载页面的 APK，请保留手机上的版本。Android 会拒绝降级覆盖；不要为了安装旧版而卸载，卸载可能丢失本地日程。
+
+从 **0.10.20** 起，打开应用默认每天最多向本仓库检查一次更新，预发布也会检查。在「设置 → 帮助与关于 → 版本与项目」可以立即检查、关闭联网检查或开启「自动更新」。自动更新默认关闭；开启后会下载并校验新版，在 Android 允许时自动覆盖安装，否则提示你授权或确认。不会卸载旧版。
 
 ## 界面
 
@@ -41,7 +43,7 @@ v0.10.17 源码运行截图，示例数据。2026-11-24 在 Pixel 5 配置的 AP
 
 日程、备注、图片和对话历史保存在设备上。系统云备份与设备迁移已在 [Manifest](app/src/main/AndroidManifest.xml) 和[数据提取规则](app/src/main/res/xml/data_extraction_rules.xml) 中关闭，目前没有完整的日程备份导出。
 
-HUB 在线登录和外部模型请求需要网络。发送消息前可查看接收服务并选择共享范围；跨页数据、备注和课程详情需另行选取。模型只能查询或提出更改，逐项差异经你确认后才在本机提交。API Key 由 Android Keystore 中的密钥加密保存。
+HUB 在线登录、外部模型请求和 GitHub 更新检查需要网络。更新器不发送日程、对话或 API Key。发送模型消息前可查看接收服务并选择共享范围；跨页数据、备注和课程详情需另行选取。模型只能查询或提出更改，逐项差异经你确认后才在本机提交。API Key 由 Android Keystore 中的密钥加密保存。
 
 通知权限用于显示日程提醒；精确闹钟用于按时触发，未获授权时提醒可能延迟。开机广播让应用在重启后重新安排提醒，唤醒锁只在处理提醒时短暂保持 CPU 运行。
 
