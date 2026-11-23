@@ -18,21 +18,33 @@ import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.today.SlotEditorKey
 import io.github.nakanomk.stacklife.workspace.*
+import java.time.LocalDate
 
-/** NiA ForYouScreen: real selection before explicit completion; no sample rows or startup permissions. */
+/** NiA ForYouScreen: choices take effect on explicit completion, not when the guide opens. */
 @Composable
 internal fun OnboardingScreen(settings: PolicyView, model: WorkspaceViewModel, onBack: () -> Unit,
-    onSchedule: (SlotEditorKey) -> Unit, onAdd: () -> Unit, onImport: () -> Unit) {
+    onSchedule: (SlotEditorKey) -> Unit, onAdd: () -> Unit, onImport: () -> Unit, onStarterQueue: (Boolean) -> Unit) {
     val baselineJson = rememberSaveable { encodeAppearance(settings.appearance) }
     val baseline = remember(baselineJson) { decodeAppearance(baselineJson) }
     var selected by rememberSaveable { mutableStateOf(ArrayList(baseline.visible.map { it.name })) }
     var step by rememberSaveable { mutableIntStateOf(0) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
-    val receipt = rememberSubmission(model, { error = it }) { if (it == SaveOutcome.APPLIED) onBack() }
+    val offerStarter = settings.onboardingVersion == 0
+    var includeStarter by rememberSaveable { mutableStateOf(true) }
+    var starterQueueInNavigation by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    val receipt = rememberSubmission(model, { error = it }) {
+        if (it == SaveOutcome.APPLIED) {
+            starterQueueInNavigation?.let(onStarterQueue) ?: onBack()
+        }
+    }
     fun leave(saveChoice: Boolean) {
         val choice = if (saveChoice) selected.mapTo(linkedSetOf(), Destination::valueOf) else null
         if (settings.onboardingVersion >= 1 && (choice == null || choice == settings.appearance.visible)) onBack()
-        else receipt.send(PlannerCommand.CompleteOnboarding(choice, if (saveChoice) baseline else null))
+        else {
+            val day = if (saveChoice && offerStarter && includeStarter) LocalDate.now() else null
+            starterQueueInNavigation = if (day != null) Destination.WORKSPACE in choice.orEmpty() else null
+            receipt.send(PlannerCommand.CompleteOnboarding(choice, if (saveChoice) baseline else null, starterDay = day))
+        }
     }
     val back = { if (!receipt.busy) { if (step > 0) step-- else onBack() }; Unit }
     BackHandler(onBack = back)
@@ -40,12 +52,20 @@ internal fun OnboardingScreen(settings: PolicyView, model: WorkspaceViewModel, o
     EditorPage(stringResource(title), back, backEnabled = !receipt.busy, footer = {
         Actions {
             ActionPill(stringResource(R.string.guide_later), { leave(false) }, Modifier.testTag("guide-later"), !receipt.busy)
-            ActionPill(stringResource(if (step < 2) R.string.guide_next else R.string.ui_done),
+            ActionPill(stringResource(when {
+                step < 2 -> R.string.guide_next
+                offerStarter && includeStarter -> R.string.guide_finish_with_examples
+                else -> R.string.ui_done
+            }),
                 { if (step < 2) step++ else leave(true) }, Modifier.testTag("guide-next"), !receipt.busy && selected.isNotEmpty(), prominent = true)
         }
     }) { top, bottom ->
         LazyColumn(Modifier.fillMaxSize().testTag("guide:$step"), contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
             error?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
+            if (step == 2 && offerStarter) item { FormGroup {
+                CheckRow(stringResource(R.string.guide_examples), includeStarter, !receipt.busy) { includeStarter = !includeStarter }
+                Hint(stringResource(R.string.guide_examples_hint))
+            } }
             item { Hint(stringResource(when (step) { 0 -> R.string.guide_features_hint; 1 -> R.string.guide_routines_hint; else -> R.string.guide_first_hint })) }
             when (step) {
                 0 -> item { FormGroup {

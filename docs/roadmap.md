@@ -4,7 +4,7 @@ StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Andr
 
 **项目许可：** StackLife 采用 [GNU 通用公共许可证第 3 版或任何后续版本](../LICENSE)（`GPL-3.0-or-later`）。第三方代码与资源保留[各自的许可和署名](../app/src/main/assets/licenses/)。
 
-**当前候选版本：v0.10.18（33），Room v12。** 本次[真机帧预算优化](#v01018-真机帧预算)不迁移或重建日程库。M1–M6 是历史契约；原本“冲突拒绝写入”“节点都是模板”等规则已由[排程与链接升级](#v01012-排程链接倒数日与外观)替代。普通包不含联盟 SDK。
+**当前候选版本：v0.11.0（36），Room v13。** [首次使用示例](#v0110-首次使用示例)只由新用户在引导中确认创建；旧库升级不填充日程。M1–M6 是历史契约；原本“冲突拒绝写入”“节点都是模板”等规则已由[排程与链接升级](#v01012-排程链接倒数日与外观)替代。普通包不含联盟 SDK。
 
 ## 起点与产品决定
 
@@ -348,7 +348,7 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 |流程图可混排模板、原任务与特定日期的任务发生项；先预览每项去向，再加入队列或存栈。|仅模板创建新任务。链接不移动已有任务；存栈得到不可恢复的引用快照。解除链接不删源事件，来源已移除则阻止生成。课程和倒数日不在选择器内。|`graphs/GraphForms.kt` 借 [Vikunja `RelatedTasks.vue`](https://github.com/go-vikunja/vikunja/blob/2ba8cef799cf12f7d0cf1196a180d75a2890c873/frontend/src/components/tasks/partials/RelatedTasks.vue) / `Multiselect.vue` 的搜索、多选与解除关联交互；不移植 AGPL 代码。`GraphDraft` 与 `BatchDraft` 只读写本批的权威事务状态。|
 |在第五个功能保存、置顶、排序倒数日，或在编辑页预览日期和私有背景。|使用本地公历日期，不以毫秒除以 24 小时。当天显示 0，过期标「已过」。不会创建待办、占时或发提醒；取消编辑不产生记录。|`countdown/{CountdownRoute,CountdownCards,CountdownEditor}.kt`、`planner/CountdownModels.kt`：[TimeTrace 固定版本、逐文件映射与 MIT 全文](../app/src/main/assets/licenses/TimeTrace-MIT.txt)。未引入上游数据库、图标或摄影图。|
 |在外观设置中选择全局或逐页背景、开关课表辅助线、切换平面／滚轮、拖排和隐藏五个功能。|只录制背景，文字和导航不录进壁纸；本地图片按持久引用回收。关线保留课块与触达，滚轮不吸附。完整排列、可见集合与启动页一次保存，至少保留一项。设置仍可打开隐藏页。|`appearance/{WallpaperHost,WallpaperPolicy,BackgroundStore,NavigationFields}.kt`、`today/DayWheel.kt`：[BiliPai 固定版本和逐文件映射](../app/src/main/assets/licenses/BiliPai-GPL-3.0.txt)（GPL-3.0）。真实拖排沿用 [Reorderable 3.1.0](../app/src/main/assets/licenses/reorderable-3.1.0-LICENSE.txt)。|
-|首次启动可选功能、进入真实作息编辑器、新增任务或导入；也可直接选「稍后」。|空队列不等于新安装。升级不弹引导，稍后不提交未保存的功能选择，帮助中可重看。不预填任务、不索要密钥或通知权限。|`onboarding/OnboardingScreen.kt`：[Now in Android `ForYouScreen`](../app/src/main/assets/licenses/Android-Calendar-and-Onboarding-Apache-2.0.txt)（Apache-2.0）；完成状态独立于外观重置。|
+|首次启动可选功能、进入真实作息编辑器、新增任务或导入；也可直接选「稍后」。|空队列不等于新安装。升级不弹引导，稍后不提交未保存的功能选择，帮助中可重看。不索要密钥或通知权限；v0.11.0 起可[明确添加入门示例](#v0110-首次使用示例)。|`onboarding/OnboardingScreen.kt`：[Now in Android `ForYouScreen`](../app/src/main/assets/licenses/Android-Calendar-and-Onboarding-Apache-2.0.txt)（Apache-2.0）；完成状态独立于外观重置。|
 
 **迁移和授权。** API 26 `PlannerMigrationTest` 从导出的 v8 schema 实际开库，经 v9（对话与引导）、v10（排程与收据）、v11（图链接）、v12（倒数日），关闭再打开。比对同起点两项的 ID/时刻、帧历史与当前值、模板图、课程和停用作息的勾选、聊天原文、四项外观升级及旧通知收据只导入一次。API 37 `AssistantProposalTest` 和 `WorkspaceTest` 走查询、预览、手动确认、事务和重开；模型没有提交工具，读取过某任务也不等于获准读取其笔记或背景文件。
 
@@ -410,6 +410,12 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 - **应用头栏**与 [Now in Android 给顶栏传入透明底色的实现](https://github.com/android/nowinandroid/blob/2982e63cb691ad49cd009aab43dc206fee6699c2/app/src/main/kotlin/com/google/samples/apps/nowinandroid/ui/NiaApp.kt#L230-L245) 一样不另画底色。色彩、布局、材质与动态及模型服务显示本页的真实壁纸或主题底色；模型字段在头栏下方滚动，仍禁止截屏和采样密钥。系统时间、电量区域的纯色保护保持不变。
 - **应用更新**借用 [BiliPai 入口检查](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/AppUpdateAutoCheckGate.kt) 和[发布说明、进度及安装入口](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/update/AppUpdateDialogHost.kt)的行为，不启用第三方镜像。普通包在回到首页时默认每 24 小时最多查一次[本仓库 Releases](https://github.com/Nakanomk/StackLife/releases)，手动检查不受间隔限制。只接收发布工作流的普通预览 APK；同时核对版本和构建号、BUILD-INFO、SHA-256、包名及实装签名。无网络、GitHub 限流或校验失败不报「已是最新」。
 - **自动安装单独授权。**「帮助与关于 → 版本与项目」可关闭自动检查，或另外开启自动更新。通过 [Android PackageInstaller](https://developer.android.com/reference/android/content/pm/PackageInstaller.SessionParams#setRequireUserAction(int)) 仅更新自身；Android 12 及以上符合条件时申请免二次确认，不符合时交由系统授权和确认。不卸载、不降级、不在浏览器寻找替代 APK，不上传用户数据。
+
+### v0.11.0 首次使用示例
+
+- 引导末页沿用已有选择行和确认按钮。「加入入门示例」默认勾选，点「添加示例并完成」才按当前应用语言创建真实记录，并打开工作台队列。若工作台未选入底栏，以独立入口打开，不改启动页或所选导航。「稍后」、取消勾选或仅返回均不创建示例。
+- 「摄影散步」的四张队列卡各有一篇可编辑的操作笔记。手动栈帧内另有两项可分别恢复的装备任务；图中「选路线」和「看光线」均指向「拍张照片」，可生成队列或栈帧。未置顶的「摄影散步日」以确认时本机日期加七个日历日为目标。不创建时段、课程或提醒。
+- `CompleteOnboarding` 将功能选择、四类示例及首次完成标记放在同一个 `PlannerApi` 事务里；沿用普通创建命令，队列追加不覆盖。编辑、删除、重启和重看引导不会恢复原示例。Room v12 → v13 不改表结构，只标记旧库跳过首次创建；即使没有设置行、尚未完成旧引导或队列已清空，也不会把升级当新安装。
 
 ### 历史里程碑验收用例（M1–M6）
 

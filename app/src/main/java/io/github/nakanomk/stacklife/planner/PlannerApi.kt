@@ -133,7 +133,9 @@ sealed interface PlannerCommand {
     data class FrameRestore(val frameId: String, val mode: RestoreMode, val taskIds: List<String> = emptyList()) : PlannerCommand
     data class DeleteFrameHistory(val frameIds: List<String>) : PlannerCommand
     data class SetRestorePolicy(val policy: RestorePolicy) : PlannerCommand
-    data class CompleteOnboarding(val visible: Set<Destination>? = null, val baseline: Appearance? = null) : PlannerCommand
+    /** A non-null local day requests the practice plan on first completion only. */
+    data class CompleteOnboarding(val visible: Set<Destination>? = null, val baseline: Appearance? = null,
+        val starterDay: LocalDate? = null) : PlannerCommand
     data class EditAppearance(val patch: AppearancePatch, val expected: Appearance? = null) : PlannerCommand
     data class CourseImport(val draftId: String) : PlannerCommand
     data class TermRemove(val termId: String, val source: String? = null) : PlannerCommand

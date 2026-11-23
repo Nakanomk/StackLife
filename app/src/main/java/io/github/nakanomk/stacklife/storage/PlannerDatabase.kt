@@ -38,10 +38,11 @@ import io.github.nakanomk.stacklife.planner.RestorePolicy
         ConversationRow::class, ConversationMessageRow::class, ConversationImageRow::class, ScheduleRow::class,
         SegmentRow::class, ExceptionRow::class, CompletionRow::class, ReminderSettingRow::class, ReminderRuleRow::class,
         ReminderReceiptRow::class, CountdownRow::class],
-    version = 12,
+    version = 13,
     autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7),
-        AutoMigration(from = 7, to = 8), AutoMigration(from = 8, to = 9, spec = ExistingInstall::class), AutoMigration(from = 11, to = 12)],
+        AutoMigration(from = 7, to = 8), AutoMigration(from = 8, to = 9, spec = ExistingInstall::class), AutoMigration(from = 11, to = 12),
+        AutoMigration(from = 12, to = 13, spec = ExistingInstall::class)],
     exportSchema = true,
 )
 abstract class PlannerDatabase : RoomDatabase() {
@@ -63,7 +64,7 @@ abstract class PlannerDatabase : RoomDatabase() {
 internal class ExistingInstall : AutoMigrationSpec {
     override fun onPostMigrate(connection: SQLiteConnection) {
         connection.execSQL("INSERT OR IGNORE INTO planner_settings(id,revision,restorePolicy,appearance,onboardingVersion) VALUES (1,0,'PREPEND','{}',1)")
-        connection.execSQL("UPDATE planner_settings SET onboardingVersion=1 WHERE id=1")
+        connection.execSQL("UPDATE planner_settings SET onboardingVersion=1 WHERE id=1 AND onboardingVersion=0")
     }
 }
 

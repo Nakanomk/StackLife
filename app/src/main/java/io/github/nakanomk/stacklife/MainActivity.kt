@@ -280,7 +280,12 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     }
                 }
                 entry<Guidance> { io.github.nakanomk.stacklife.onboarding.OnboardingScreen(preferences, model, back,
-                    onSchedule = navigate, onAdd = { navigate(AddTask) }, onImport = { navigate(ImportCourses) }) }
+                    onSchedule = navigate, onAdd = { navigate(AddTask) }, onImport = { navigate(ImportCourses) },
+                    onStarterQueue = { inNavigation ->
+                        frames = false
+                        while (stack.size > 1) back()
+                        if (inNavigation) destination = Destination.WORKSPACE else navigate(Feature(Destination.WORKSPACE))
+                    }) }
                 entry<CountDetail> { key -> CountdownDetail(model, key.id, { navigate(CountEdit(it)) }, back) }
                 entry<CountEdit> { key -> CountdownEditor(model, key.id, back) }
                 entry<SlotEditorKey> { key ->

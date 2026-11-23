@@ -19,8 +19,8 @@ class PlannerMigrationTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val context get() = instrumentation.targetContext
 
-    private fun oldDatabase(name: String, fill: (SQLiteDatabase) -> Unit) {
-        val schema = instrumentation.context.assets.open("${PlannerDatabase::class.java.name}/8.json")
+    private fun oldDatabase(name: String, version: Int = 8, fill: (SQLiteDatabase) -> Unit) {
+        val schema = instrumentation.context.assets.open("${PlannerDatabase::class.java.name}/$version.json")
             .bufferedReader().use { Json.parseToJsonElement(it.readText()).jsonObject.getValue("database").jsonObject }
         context.openOrCreateDatabase(name, 0, null).use { db ->
             db.beginTransaction()
@@ -32,7 +32,7 @@ class PlannerMigrationTest {
                     for (index in e["indices"]?.jsonArray.orEmpty()) execute(index.jsonObject.getValue("createSql"))
                 }
                 for (q in schema.getValue("setupQueries").jsonArray) db.execSQL(q.jsonPrimitive.content)
-                fill(db); db.version = 8; db.setTransactionSuccessful()
+                fill(db); db.version = version; db.setTransactionSuccessful()
             } finally { db.endTransaction() }
         }
     }
@@ -124,5 +124,36 @@ class PlannerMigrationTest {
             database(old) { assertEquals(1, it.plannerDao().settings()?.onboardingVersion) }
             database(fresh) { assertEquals(0, (it.plannerDao().settings() ?: SettingsRow()).onboardingVersion) }
         } finally { context.deleteDatabase(old); context.deleteDatabase(fresh) }
+    }
+
+    @Test fun version12WithNoSettingsOrAnUnfinishedGuideNeverReceivesPracticeData() = runBlocking {
+        for (unfinished in listOf(false, true)) {
+            val name = "starter-upgrade-${UUID.randomUUID()}.db"
+            val original = if (unfinished) listOf(QueueTask("mine", "Keep my task", "My note", 9)) else emptyList()
+            try {
+                oldDatabase(name, version = 12) { old ->
+                    if (unfinished) {
+                        old.execSQL("INSERT INTO planner_settings(id,revision,restorePolicy,onboardingVersion) VALUES (1,4,'APPEND',0)")
+                        old.execSQL("INSERT INTO tasks(id,title,notes,minutes,owner,queuePosition) VALUES ('mine','Keep my task','My note',9,'QUEUE',0)")
+                    }
+                }
+                database(name) { db ->
+                    val api = RoomPlannerApi(db)
+                    val settings = api.observe(PlannerQuery.Settings).first() as PolicyView
+                    assertEquals(1, settings.onboardingVersion)
+                    assertEquals(if (unfinished) RestorePolicy.APPEND else RestorePolicy.PREPEND, settings.policy)
+                    val offer = PlannerCommand.CompleteOnboarding(starterDay = java.time.LocalDate.of(2028, 2, 28))
+                    val replay = api.preview(listOf(offer)) as PreviewResult.Ready
+                    assertTrue(api.commit(replay.proposalId) is CommitResult.Applied)
+                }
+                database(name) { db ->
+                    val api = RoomPlannerApi(db)
+                    val state = api.observe(PlannerQuery.Workspace).first() as Workspace
+                    assertEquals(original, state.queue); assertTrue(state.frames.isEmpty())
+                    assertTrue((api.observe(PlannerQuery.Graphs).first() as GraphList).graphs.isEmpty())
+                    assertTrue((api.observe(PlannerQuery.Countdowns).first() as CountdownsView).items.isEmpty())
+                }
+            } finally { context.deleteDatabase(name) }
+        }
     }
 }

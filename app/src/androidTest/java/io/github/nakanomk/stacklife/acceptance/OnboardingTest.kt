@@ -33,12 +33,13 @@ class OnboardingTest {
     }
     private fun back() = ui.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
 
-    @Test fun finishingPersistsRealSelectionsWithoutCreatingAStarterTaskOrRequestingAService() {
+    @Test fun decliningExamplesKeepsThePlannerEmptyAndPersistsFeatureChoices() {
         attach(); tag("guide-feature:today").performClick(); tag("guide-next").performClick()
         tag("routine-wake").performClick(); tag("slot:time").assertExists(); back(); tag("guide:1")
         tag("guide-next").performClick(); tag("guide-add").performClick(); tag("title:0").assertIsDisplayed(); back(); tag("guide:2")
         tag("guide-import").performClick(); tag("importMethodFile").assertExists(); back(); tag("guide:2")
         assertEquals(0, prefs().onboardingVersion); assertEquals(Destination.entries.toSet(), prefs().appearance.visible)
+        ui.onNodeWithText("加入入门示例").assertIsOn().performClick()
         tag("guide-next").performClick(); tag("nav:workspace").assertIsSelected()
         ui.onNodeWithTag("nav:today").assertDoesNotExist()
         val saved = prefs(); assertEquals(1, saved.onboardingVersion); assertEquals(Destination.WORKSPACE, saved.appearance.start)
@@ -49,6 +50,29 @@ class OnboardingTest {
         store.reopen(); assertEquals(1,prefs().onboardingVersion)
     }
 
+    @Test fun confirmingOpensTheRealQueueAndItsEditableTutorialNote() {
+        attach(); tag("guide-next").performClick(); tag("guide-next").performClick()
+        ui.onNodeWithText("加入入门示例").assertIsOn()
+        tag("guide-next").performClick(); tag("nav:workspace").assertIsSelected()
+        val lessons = runBlocking { store.state().queue }
+        assertEquals(4, lessons.size)
+        val first = lessons.first()
+        tag("task:${first.id}").performClick()
+        tag("task-note:${first.id}").performClick()
+        tag("note-source").assertTextContains(first.notes).performTextReplacement("我的摄影主题：倒影")
+        tag("note-save").performClick(); tag("task-note:${first.id}")
+        assertEquals("我的摄影主题：倒影", runBlocking { store.state() }.queue.first().notes)
+        assertEquals(Destination.TODAY, prefs().appearance.start)
+    }
+
+    @Test fun hiddenWorkspaceOpensAsAShortcutWithoutChangingNavigation() {
+        attach(); tag("guide-feature:workspace").performClick()
+        tag("guide-next").performClick(); tag("guide-next").performClick(); tag("guide-next").performClick()
+        tag("queue").assertIsDisplayed()
+        assertFalse(Destination.WORKSPACE in prefs().appearance.visible)
+        back(); tag("nav:today").assertIsSelected(); ui.onNodeWithTag("nav:workspace").assertDoesNotExist()
+    }
+
     @Test fun laterDoesNotSaveUnsubmittedSelectionAndHelpCanOpenTheGuideAgain() {
         attach(); tag("guide-feature:today").performClick(); tag("guide-later").performClick()
         tag("nav:today").assertIsSelected(); assertEquals(Destination.entries.toSet(), prefs().appearance.visible)
@@ -57,6 +81,8 @@ class OnboardingTest {
         ui.tapAboveDock(ui.onNode(hasScrollToIndexAction()), hasTestTag("settings-about"))
         tag("about-help").performClick()
         tag("open-guidance").performClick(); tag("guide:0").assertExists()
+        tag("guide-next").performClick(); tag("guide-next").performClick(); tag("guide:2")
+        ui.onNodeWithText("加入入门示例").assertDoesNotExist()
         tag("guide-later").performClick(); tag("open-guidance").assertIsDisplayed()
         assertEquals(1, prefs().onboardingVersion); assertTrue(runBlocking { store.state().queue.isEmpty() })
     }

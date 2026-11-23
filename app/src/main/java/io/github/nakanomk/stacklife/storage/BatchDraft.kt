@@ -36,6 +36,11 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
 
     fun plan(commands: List<PlannerCommand>): Proposal {
         if (commands.isEmpty()) invalid(uiText("Select at least one change.", "请至少选择一项更改。"))
+        applyCommands(commands)
+        return finish()
+    }
+
+    private fun applyCommands(commands: List<PlannerCommand>) {
         for (cmd in commands) when (cmd) {
             is PlannerCommand.TaskAdd -> {
                 val row = newTask(cmd.task.title, cmd.task.notes, cmd.task.minutes, cmd.task.ref, frameId = null)
@@ -102,6 +107,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
                         invalid(uiText("Navigation changed. Open the guide again to review it.", "导航设置已变更，请重新打开引导核对。"))
                     if (old.visible != chosen) appearance = old.withVisible(chosen)
                 }
+                if (onboardingVersion == 0 && cmd.starterDay != null) applyCommands(starterPlan(cmd.starterDay))
                 onboardingVersion = maxOf(onboardingVersion, 1)
             }
             is PlannerCommand.SetRestorePolicy -> policy = cmd.policy
@@ -136,7 +142,6 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             is PlannerCommand.GraphFrame -> generateFrame(cmd)
             is PlannerCommand.GraphQueue -> generateQueue(cmd)
         }
-        return finish()
     }
 
     private fun invalid(message: String): Nothing = throw InvalidCommand(message)
