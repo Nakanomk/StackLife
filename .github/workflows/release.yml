@@ -173,7 +173,8 @@ jobs:
           "$tools/apksigner" sign --ks "$key" --ks-key-alias "$alias" --ks-pass pass:android --key-pass pass:android --out "$APK" candidate/app-preview.apk
           "$tools/apksigner" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/signers"
           grep -Fx 'Number of signers: 1' "$RUNNER_TEMP/signers"
-          grep -Fx "Signer #1 certificate SHA-256 digest: $CERT" "$RUNNER_TEMP/signers"
+          signed_cert=$(awk -F' certificate SHA-256 digest: ' 'NF == 2 {print $2}' "$RUNNER_TEMP/signers")
+          [[ "$signed_cert" == "$CERT" ]] || { echo 'Unexpected APK signing certificate'; exit 1; }
       - *check-apk
       - name: Install API 37 emulator image
         run: sdkmanager 'emulator' 'system-images;android-37.0;default;x86_64'
