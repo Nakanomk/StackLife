@@ -11,8 +11,8 @@ today/DayWheel.kt (projectDayWheel) ← app/src/main/java/com/android/purebilibi
 
 Earlier BiliPai references used for sheet layout, grouped preferences and card handoff are documented in docs/roadmap.md. LiquidLens.kt has a separate Apache-2.0 notice in Backdrop-Miuix-Apache-2.0.txt. No BiliPai logos, photographs or fonts are included.
 
-Adaptations in StackLife 0.10.13, same BiliPai revision and GPL-3.0:
-assistant/AssistantSheet.kt, markdown/MarkdownComposer.kt ← design-system/.../ui/components/AppCompactInputField.kt: fixed 12dp corner branch, decorated placeholder, independent button and text slots. The five-line Markdown state and input connection are StackLife's.
+Adaptations in StackLife 0.10.13–0.10.14, same BiliPai revision and GPL-3.0:
+assistant/AssistantSheet.kt, markdown/MarkdownComposer.kt ← design-system/.../ui/components/AppCompactInputField.kt: ordinary single-line capsule, decorated placeholder, independent leading and trailing slots. StackLife keeps the single-line corner radius as its five-line native Markdown editor grows.
 workspace/WorkspaceUi.kt, SettingInfo.kt ← design-system/.../ui/components/{AdaptivePreferenceComponents,AppPreferenceComponents}.kt and ui/AdaptiveTooltip.kt: title action and bounded value slots, Material 3 plain tooltip; scroll, Back and local setting behavior integrated here.
 transitions/{ContainerMotion,RouteMotion,SceneMotion,PaneMotion}.kt ← navigation3/{SettingsSharedContainerTransition,SettingsContainerMotionPolicy}.kt, feature/settings/SettingsContainerSource.kt and core/ui/transition/SharedCardContainerHost.kt: placed/live source gating, shared corners and bounds, source/destination handoff and reversible seeking. Adapted to AndroidX Navigation 3, stable planner IDs and same-window editor panes.
 today/DayWheel.kt uses the same ThemeTimeWheelPicker projection listed above; viewport edge bands and the end-of-day condition are StackLife behavior.

@@ -149,7 +149,7 @@ private fun prepareBody(profile: ServiceProfile, messages: JsonArray, tools: Jso
             val ids = mutableSetOf<String>()
             for ((ordinal, entry) in images.entries.withIndex()) {
                 val (image, file) = entry
-                if (!ids.add(image.id) || !image.matchesPreparedFile(file, forUpload = true)) imageNotReady()
+                if (!ids.add(image.id) || !image.matchesPreparedFile(file)) imageNotReady()
                 val length = preset.inlineImageLength(image.bytes)
                 if (includeText || ordinal > 0) header.writeByte(','.code)
                 header.writeUtf8("{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:").writeUtf8(image.mime).writeUtf8(";base64,")

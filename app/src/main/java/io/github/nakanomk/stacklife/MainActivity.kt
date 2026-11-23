@@ -2,7 +2,6 @@ package io.github.nakanomk.stacklife
 
 import androidx.compose.ui.res.stringResource
 
-import androidx.compose.animation.core.tween
 import android.os.Bundle
 import android.content.Intent
 import io.github.nakanomk.stacklife.i18n.LocalizedActivity
@@ -10,8 +9,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -267,38 +264,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 entry<Home> {
                     val order = preferences.appearance.visibleOrder
                     val active = preferences.appearance.nearestVisible(destination)
-                    val pager = rememberPagerState(initialPage = order.indexOf(active)) { order.size }
-                    var request by remember { mutableStateOf<Destination?>(null) }
-                    // One scroll owner for restored selection, layout changes, notification reveals and dock taps.
-                    LaunchedEffect(pager, order, visitToday, request) {
-                        val requested = request
-                        val target = preferences.appearance.nearestVisible(requested ?: destination)
-                        val index = order.indexOf(target)
-                        if (requested != null) {
-                            try { if (animate) pager.animateScrollToPage(index, animationSpec = tween(320)) else pager.scrollToPage(index) }
-                            finally { if (request == requested) request = null }
-                        } else if (pager.currentPage != index || pager.currentPageOffsetFraction != 0f) pager.scrollToPage(index)
-                        destination = target
-                        snapshotFlow { pager.settledPage.takeUnless { pager.isScrollInProgress } }.collect { settled ->
-                            settled?.let(order::getOrNull)?.let { destination = it }
-                        }
-                    }
-                    val position = remember(pager) { derivedStateOf { pager.currentPage + pager.currentPageOffsetFraction } }
-                    val bar = rememberDestinationCapsule(active.key, position) { key ->
-                        order.firstOrNull { it.key == key }?.let { destination = it; request = it }
-                    }
-                    CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
-                        Page { DockOverlay(bar, featureScope(active)) { bottom ->
-                            CompositionLocalProvider(LocalRootBottom provides bottom) {
-                                HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = order.lastIndex, key = { order[it].key }) { index ->
-                                    val page = order[index]
-                                    val front = page == active
-                                    val inViewport by remember(pager, index) { derivedStateOf { kotlin.math.abs(position.value - index) < 1f } }
-                                    PagerPane(front, front || inViewport) { showFeature(page, front) }
-                                }
-                            }
-                        } }
-                    }
+                    RootPages(order, active, visitToday, { destination = it }, featureScope(active), showFeature)
                 }
                 entry<Feature> { key ->
                     CompositionLocalProvider(LocalFeatureBack provides back, LocalPlannerGlassAllowed provides true) {

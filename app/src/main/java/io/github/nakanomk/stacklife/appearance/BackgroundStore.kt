@@ -72,7 +72,7 @@ internal class BackgroundStore(context: Context, private val retained: suspend (
                     if (!recovered) sweepLocked()
                     drafts.add(id)
                 }
-                prepareStaticPhoto(resolver, uri, source, pending, PhotoSourcePolicy.PRIMARY_STILL)
+                prepareStaticPhoto(resolver, uri, source, pending, PhotoDestination.BACKGROUND)
                 currentCoroutineContext().ensureActive()
                 Files.delete(source.toPath())
                 Files.move(pending.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)

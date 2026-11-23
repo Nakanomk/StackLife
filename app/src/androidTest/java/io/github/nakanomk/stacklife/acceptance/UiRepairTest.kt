@@ -2,6 +2,14 @@ package io.github.nakanomk.stacklife.acceptance
 
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -12,6 +20,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.StackLifeApp
+import io.github.nakanomk.stacklife.StackLifeTheme
+import io.github.nakanomk.stacklife.RootPages
+import io.github.nakanomk.stacklife.assistant.AssistantPage
+import io.github.nakanomk.stacklife.planner.Appearance
+import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import org.junit.Assert.*
 import org.junit.Rule
@@ -58,17 +71,67 @@ class UiRepairTest {
         field.performTextReplacement(twenty)
         assertEquals(five.size, shell().size)
         assertEquals(twenty, field.fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
-        val actions = listOf("assistant-attach", "assistant-history", "assistant-send").map { name ->
+        val actions = listOf("assistant-history", "assistant-attach", "assistant-send").map { name ->
             tag(name).assertWidthIsEqualTo(48.dp).assertHeightIsEqualTo(48.dp); box(name)
         }
         assertTrue(actions.all { kotlin.math.abs(it.bottom - five.bottom) <= 1f })
-        assertTrue(actions.zipWithNext().all { (a, b) -> a.right <= b.left })
+        val (history, attach, send) = actions
+        val text = field.fetchSemanticsNode().boundsInRoot
+        assertEquals(five.left, history.left, 1f)
+        assertTrue(history.right <= text.left + 1f && text.right <= attach.left + 1f)
+        assertEquals(attach.right, send.left, 1f)
+        assertEquals(five.right, send.right, 1f)
         tag("assistant-history").performTouchInput { click() }
         tag("assistant-history-list").assertIsDisplayed()
     }
 
     @Test fun composerGrowsOnlyThroughFiveLinesAndKeepsTheHistoryHitTarget() = checkComposer(false)
     @Test fun narrowLargeFontComposerKeepsItsDraftAndIndependentActions() = checkComposer(true)
+
+    @Test fun distantTabTapPaintsOnlyItsTwoPagesThenRestoresTheRealSwipeOrder() {
+        val fills = mapOf(Destination.TODAY to Color.Red, Destination.WORKSPACE to Color.Green,
+            Destination.GRAPHS to Color.Blue, Destination.COURSES to Color.Magenta, Destination.COUNTDOWN to Color.Yellow)
+        val appearance = Appearance(glass = false)
+        ui.setContent {
+            var active by remember { mutableStateOf(Destination.TODAY) }
+            StackLifeTheme(appearance) {
+                RootPages(appearance.visibleOrder, active, 0L, { active = it }, AssistantPage.Terms) { page, _ ->
+                    Spacer(Modifier.fillMaxSize().background(fills.getValue(page)))
+                }
+            }
+        }
+        tag("nav:today").assertIsSelected()
+        val root = ui.onRoot()
+        val scan = IntArray(root.captureToImage().width)
+        fun trip(from: Destination, to: Destination) {
+            val action = tag("nav:${to.key}").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+            ui.runOnUiThread { action() }
+            val src = fills.getValue(from).toArgb()
+            val dst = fills.getValue(to).toArgb()
+            var sharedFrame = false
+            var finalTarget = 0
+            repeat(25) { frame ->
+                ui.mainClock.advanceTimeByFrame()
+                val image = root.captureToImage()
+                image.readPixels(scan, startY = image.height / 2, width = scan.size, height = 1)
+                val old = scan.count { it == src }
+                finalTarget = scan.count { it == dst }
+                assertTrue("$from → $to frame $frame painted ${scan.size - old - finalTarget} foreign pixels",
+                    old + finalTarget >= scan.size - 2)
+                if (old > 5 && finalTarget > 5) sharedFrame = true
+            }
+            assertTrue("A direct tap should still slide from its real source, not cut", sharedFrame)
+            assertTrue(finalTarget >= scan.size - 2)
+            tag("nav:${to.key}").assertIsSelected()
+        }
+        ui.mainClock.autoAdvance = false
+        try {
+            trip(Destination.TODAY, Destination.COURSES)
+            trip(Destination.COURSES, Destination.TODAY)
+        } finally { ui.mainClock.autoAdvance = true }
+        root.performTouchInput { swipeLeft() }
+        tag("nav:workspace").assertIsSelected()
+    }
 
     @Test fun helpDoesNotOpenThePreferenceAndBackAndScrollDismissIt() {
         show()

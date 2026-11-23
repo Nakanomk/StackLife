@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -88,8 +89,8 @@ private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: As
         active = active, openHistory = { openHistory(page ?: AssistantPage.Terms) })
 }
 
-// Fixed-corner field and decorated text slot adapted from BiliPai AppCompactInputField.kt
-// (5893c2c80739e3759ac64ae5f232cf03a94da7f8, GPL-3.0); keep the native Markdown editor and IME.
+// BiliPai AppCompactInputField.kt (5893c2c, GPL-3.0): separate text and action slots.
+// Keep the original single-line capsule's radius as the native multiline field grows.
 @Composable
 internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: String, onSend: () -> Unit, originHint: String? = null,
     active: Boolean = true, openHistory: (() -> Unit)? = null, tagPrefix: String = "assistant", historyOrigin: Modifier = Modifier) {
@@ -116,23 +117,21 @@ internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: Strin
             onSend()
         }
     }
+    val lineHeight = with(LocalDensity.current) { MaterialTheme.typography.bodyLarge.lineHeight.toDp() }
+    val singleLine = maxOf(48.dp, lineHeight + 16.dp)
     Column(if (active) Modifier.testTag("$tagPrefix-composer") else Modifier.clearAndSetSemantics {}) {
         if (active) DraftImageStrip(model.attachments, draft)
         if (originHint != null) Text(originHint, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
         StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth(), colors.surfaceContainerHigh,
-            shape = RoundedCornerShape(12.dp), solidBorder = solidBorder) {
-            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+            shape = RoundedCornerShape(singleLine / 2), solidBorder = solidBorder) {
+            Row(Modifier.fillMaxWidth().heightIn(min = singleLine), verticalAlignment = Alignment.CenterVertically) {
                 val button = Modifier.align(Alignment.Bottom).size(48.dp)
-                IconButton(onClick = { picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) }, enabled = active,
-                    modifier = button.testTag("$tagPrefix-attach")) {
-                    Icon(painterResource(R.drawable.ic_add), stringResource(R.string.chat_attach), Modifier.size(24.dp))
-                }
                 if (openHistory != null) IconButton(onClick = { keyboard?.hide(); openHistory() }, enabled = active,
                     modifier = historyOrigin.then(button).testTag("assistant-history")) {
                     Icon(painterResource(R.drawable.ic_history), stringResource(R.string.assistant_history), Modifier.size(24.dp), tint = colors.onSurfaceVariant)
                 }
-                val field = Modifier.weight(1f).padding(vertical = 8.dp)
+                val field = Modifier.weight(1f).padding(start = if (openHistory == null) 16.dp else 0.dp, top = 8.dp, bottom = 8.dp)
                 val placeholder: @Composable () -> Unit = {
                     Text(stringResource(R.string.assistant_message_placeholder), maxLines = 1, overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
@@ -140,6 +139,10 @@ internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: Strin
                 if (active) MarkdownComposer(draft.field, field.testTag("$tagPrefix-input")
                     .semantics { contentDescription = fieldDescription }.onFocusChanged { editing = it.isFocused }, submit, placeholder)
                 else Box(field) { placeholder() }
+                IconButton(onClick = { picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) }, enabled = active,
+                    modifier = button.testTag("$tagPrefix-attach")) {
+                    Icon(painterResource(R.drawable.ic_add), stringResource(R.string.chat_attach), Modifier.size(24.dp))
+                }
                 IconButton(onClick = submit, enabled = enabled, modifier = button.testTag("$tagPrefix-send"),
                     colors = IconButtonDefaults.iconButtonColors(contentColor = colors.primary)) {
                     Icon(painterResource(R.drawable.ic_assistant_send), stringResource(R.string.assistant_send), Modifier.size(24.dp))

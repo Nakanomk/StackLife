@@ -15,7 +15,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.images.MAX_PHOTO_BYTES
 import io.github.nakanomk.stacklife.images.PhotoInfo
 import io.github.nakanomk.stacklife.images.PhotoProblem
-import io.github.nakanomk.stacklife.images.PhotoSourcePolicy.PRIMARY_STILL
+import io.github.nakanomk.stacklife.images.PhotoDestination.BACKGROUND
 import io.github.nakanomk.stacklife.images.matchesFile
 import io.github.nakanomk.stacklife.images.normalizeStaticPhoto
 import java.io.File
@@ -55,19 +55,19 @@ class BackgroundStoreTest {
         val jpeg = redPixels(Bitmap.CompressFormat.JPEG)
         source.writeBytes(motionPhoto(jpeg))
         for (declared in listOf(null, "application/octet-stream")) {
-            val photo = normalizeStaticPhoto(source, declared, output, PRIMARY_STILL)
+            val photo = normalizeStaticPhoto(source, declared, output, BACKGROUND)
             assertEquals(PhotoInfo("image/jpeg", 64, 32, output.length()), photo)
-            assertTrue(photo.matchesFile(output, verifyContents = true)) // exact EOI, no APP1 or MP4
+            assertTrue(photo.matchesFile(output)) // exact EOI, no APP1 or MP4
             val image = BitmapFactory.decodeFile(output.path)
             try { assertTrue(Color.red(image.getPixel(32, 16)) > 235) } finally { image.recycle() }
         }
         for (mime in listOf("video/mp4", "text/xml", "image/svg+xml")) {
-            assertTrue(runCatching { normalizeStaticPhoto(source, mime, output, PRIMARY_STILL) }.exceptionOrNull() is PhotoProblem)
+            assertTrue(runCatching { normalizeStaticPhoto(source, mime, output, BACKGROUND) }.exceptionOrNull() is PhotoProblem)
         }
         source.writeBytes(jpeg.copyOf(jpeg.size - 2))
-        assertTrue(runCatching { normalizeStaticPhoto(source, "image/jpeg", output, PRIMARY_STILL) }.exceptionOrNull() is PhotoProblem)
+        assertTrue(runCatching { normalizeStaticPhoto(source, "image/jpeg", output, BACKGROUND) }.exceptionOrNull() is PhotoProblem)
         source.writeBytes(photoFixture("green-avc.mp4.b64"))
-        assertTrue(runCatching { normalizeStaticPhoto(source, null, output, PRIMARY_STILL) }.exceptionOrNull() is PhotoProblem)
+        assertTrue(runCatching { normalizeStaticPhoto(source, null, output, BACKGROUND) }.exceptionOrNull() is PhotoProblem)
     } }
 
     @Test fun largeTransparentSourceUsesBoundedWebpAndOversizedHeaderCannotReplaceIt() = runBlocking { fixture { app, _ ->
@@ -84,15 +84,15 @@ class BackgroundStoreTest {
             source.outputStream().use { check(noise.compress(Bitmap.CompressFormat.PNG, 100, it)) }
         } finally { noise.recycle() }
         assertTrue(source.length() > 8L * 1024 * 1024)
-        val result = normalizeStaticPhoto(source, "image/png", output, PRIMARY_STILL)
+        val result = normalizeStaticPhoto(source, "image/png", output, BACKGROUND)
         assertEquals("image/webp", result.mime)
         assertTrue(result.width in 1..2048); assertTrue(result.height in 1..2048)
-        assertTrue(result.matchesFile(output, verifyContents = true))
+        assertTrue(result.matchesFile(output))
         val tooWide = Bitmap.createBitmap(65_536, 1, Bitmap.Config.ARGB_8888)
         try { source.outputStream().use { check(tooWide.compress(Bitmap.CompressFormat.PNG, 100, it)) } }
         finally { tooWide.recycle() }
-        assertTrue(runCatching { normalizeStaticPhoto(source, "image/png", output, PRIMARY_STILL) }.exceptionOrNull() is PhotoProblem)
-        assertTrue(result.matchesFile(output, verifyContents = true))
+        assertTrue(runCatching { normalizeStaticPhoto(source, "image/png", output, BACKGROUND) }.exceptionOrNull() is PhotoProblem)
+        assertTrue(result.matchesFile(output))
     } }
 
     @SdkSuppress(minSdkVersion = 29)
@@ -110,7 +110,7 @@ class BackgroundStoreTest {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(source.path, bounds)
         assertFalse("fixture must carry wide-gamut color", requireNotNull(bounds.outColorSpace).isSrgb)
-        normalizeStaticPhoto(source, "image/png", output, PRIMARY_STILL)
+        normalizeStaticPhoto(source, "image/png", output, BACKGROUND)
         val bitmap = BitmapFactory.decodeFile(output.path)
         try {
             assertEquals(srgb, bitmap.colorSpace)
@@ -131,7 +131,7 @@ class BackgroundStoreTest {
         selected(source) { uri ->
             val id = store.importImage(uri)
             val file = File(dir, id)
-            assertTrue(PhotoInfo("image/jpeg", 64, 32, file.length()).matchesFile(file, verifyContents = true))
+            assertTrue(PhotoInfo("image/jpeg", 64, 32, file.length()).matchesFile(file))
             val bitmap = BitmapFactory.decodeFile(file.path)
             try {
                 assertFalse(bitmap.hasGainmap()); assertEquals(ColorSpace.get(ColorSpace.Named.SRGB), bitmap.colorSpace)
@@ -150,7 +150,7 @@ class BackgroundStoreTest {
         }
         val id = retained.single()
         val file = File(dir, id)
-        assertTrue(PhotoInfo("image/jpeg", 32, 64, file.length()).matchesFile(file, verifyContents = true))
+        assertTrue(PhotoInfo("image/jpeg", 32, 64, file.length()).matchesFile(file))
         val reopened = BackgroundStore(app) { retained }.bitmap(id, 64)
         try {
             assertEquals(32, reopened.width); assertEquals(64, reopened.height)
@@ -165,18 +165,18 @@ class BackgroundStoreTest {
         val source = File(dir, "source")
         val output = File(dir, "photo")
         source.writeBytes(redPixels(Bitmap.CompressFormat.JPEG))
-        normalizeStaticPhoto(source, "image/jpeg", output, PRIMARY_STILL)
+        normalizeStaticPhoto(source, "image/jpeg", output, BACKGROUND)
         val previous = output.readBytes()
         source.writeBytes(photoFixture("red-blue-cw90.heic.b64"))
         val native = BitmapFactory.decodeFile(source.path)
         if (native == null) {
-            val error = runCatching { normalizeStaticPhoto(source, "image/heic", output, PRIMARY_STILL) }.exceptionOrNull()
+            val error = runCatching { normalizeStaticPhoto(source, "image/heic", output, BACKGROUND) }.exceptionOrNull()
             assertTrue(error is PhotoProblem)
             assertEquals(io.github.nakanomk.stacklife.i18n.uiText("This system cannot decode this image.", "当前系统无法解码这张图片。"), error?.message)
             assertArrayEquals(previous, output.readBytes())
         } else {
             native.recycle()
-            val normalized = normalizeStaticPhoto(source, "image/heic", output, PRIMARY_STILL)
+            val normalized = normalizeStaticPhoto(source, "image/heic", output, BACKGROUND)
             assertEquals(32, normalized.width); assertEquals(64, normalized.height)
         }
     } }
@@ -189,7 +189,7 @@ class BackgroundStoreTest {
             selected(redPixels(format, 128), mime) { uri ->
                 val id = store.importImage(uri)
                 val file = File(dir, id)
-                assertTrue(PhotoInfo("image/png", 64, 32, file.length()).matchesFile(file, verifyContents = true))
+                assertTrue(PhotoInfo("image/png", 64, 32, file.length()).matchesFile(file))
                 val bitmap = store.bitmap(id, 64)
                 try { assertEquals(128, Color.alpha(bitmap.getPixel(32, 16))) } finally { bitmap.recycle() }
                 store.release(id)

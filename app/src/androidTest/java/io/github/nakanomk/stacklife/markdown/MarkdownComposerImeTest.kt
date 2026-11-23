@@ -53,7 +53,8 @@ class MarkdownComposerImeTest {
         val state = TextFieldState(original)
         var sends = 0
         open(state) { sends++ }
-        assertEquals(EditorInfo.IME_ACTION_SEND, attributes.imeOptions and EditorInfo.IME_MASK_ACTION)
+        assertEquals(EditorInfo.IME_ACTION_NONE, attributes.imeOptions and EditorInfo.IME_MASK_ACTION)
+        assertTrue(attributes.inputType and android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0)
         var expected = original
         for ((reading, candidate) in listOf("pinyin" to "拼音", "にほん" to "日本", "ㅎ" to "한글")) {
             ime {
@@ -71,15 +72,16 @@ class MarkdownComposerImeTest {
                 assertEquals(expected, state.text.toString())
             }
         }
+        ime { commitText("\n", 1) }
         field.performKeyInput { pressKey(Key.Enter) }
-        ui.runOnIdle { assertEquals(expected + "\n", state.text.toString()); assertEquals(0, sends) }
+        ui.runOnIdle { assertEquals(expected + "\n\n", state.text.toString()); assertEquals(0, sends) }
         field.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.Enter) } }
         ime {
             assertEquals(1, sends)
             performEditorAction(EditorInfo.IME_ACTION_NEXT)
             assertEquals(1, sends)
             performEditorAction(EditorInfo.IME_ACTION_SEND)
-            assertEquals(2, sends)
+            assertEquals(1, sends)
         }
     }
 

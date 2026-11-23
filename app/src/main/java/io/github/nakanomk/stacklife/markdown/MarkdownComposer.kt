@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.input.KeyboardActionHandler
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material3.MaterialTheme
@@ -20,7 +19,7 @@ import io.github.nakanomk.stacklife.markdown.kern.*
 
 private val compactLines = TextFieldLineLimits.MultiLine(maxHeightInLines = 5)
 // Window focus restoration must not start a conversation or expand a read-only detail sheet.
-private val sendKeyboard = KeyboardOptions(imeAction = ImeAction.Send, showKeyboardOnFocus = false)
+private val chatKeyboard = KeyboardOptions(imeAction = ImeAction.None, showKeyboardOnFocus = false)
 
 @Composable
 internal fun MarkdownComposer(state: TextFieldState, modifier: Modifier = Modifier, onSend: (() -> Unit)? = null,
@@ -33,13 +32,10 @@ internal fun MarkdownComposer(state: TextFieldState, modifier: Modifier = Modifi
     val output = remember(state, colors, typography) {
         MarkdownDocumentOutputTransformation(state, cache, MarkdownSpanStyleProvider(typography, colors)) { focused.value }
     }
-    val sending = onSend != null
+    val chat = onSend != null
     val currentSend by rememberUpdatedState(onSend)
-    val action = remember(state, sending) {
-        if (!sending) null else KeyboardActionHandler { if (state.composition == null) currentSend?.invoke() }
-    }
-    val interceptor = remember(input, sending) { PlatformTextInputInterceptor { request, next ->
-        next.startInputMethod { attributes -> input.connection(request.createInputConnection(attributes), sending) }
+    val interceptor = remember(input) { PlatformTextInputInterceptor { request, next ->
+        next.startInputMethod { attributes -> input.connection(request.createInputConnection(attributes)) }
     } }
     InterceptPlatformTextInput(interceptor) {
         BasicTextField(
@@ -51,7 +47,7 @@ internal fun MarkdownComposer(state: TextFieldState, modifier: Modifier = Modifi
                 val enter = event.key == Key.Enter || event.key == Key.NumPadEnter
                 val down = event.type == KeyEventType.KeyDown
                 input.hardwareEnter = enter && down && !event.isCtrlPressed && state.composition == null
-                if (sending && enter && event.isCtrlPressed) {
+                if (chat && enter && event.isCtrlPressed) {
                     if (down && event.nativeKeyEvent.repeatCount == 0 && state.composition == null) currentSend?.invoke()
                     true
                 } else false // Multiline BasicTextField handles ordinary Enter, including undo grouping.
@@ -60,9 +56,8 @@ internal fun MarkdownComposer(state: TextFieldState, modifier: Modifier = Modifi
             outputTransformation = output,
             textStyle = typography.bodyLarge.copy(color = colors.onSurface),
             cursorBrush = SolidColor(colors.primary),
-            lineLimits = if (sending) compactLines else TextFieldLineLimits.Default,
-            keyboardOptions = if (sending) sendKeyboard else KeyboardOptions.Default,
-            onKeyboardAction = action,
+            lineLimits = if (chat) compactLines else TextFieldLineLimits.Default,
+            keyboardOptions = if (chat) chatKeyboard else KeyboardOptions.Default,
             decorator = { inner ->
                 if (placeholder == null) inner()
                 else Box(contentAlignment = Alignment.CenterStart) {

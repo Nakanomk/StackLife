@@ -1,8 +1,12 @@
 package io.github.nakanomk.stacklife.transitions
 
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Box
@@ -32,6 +36,19 @@ internal val LocalRouteOrigins = staticCompositionLocalOf<RouteOrigins?> { null 
 internal val LocalRouteOriginsEnabled = compositionLocalOf { true }
 internal val LocalRouteOwner = compositionLocalOf<String?> { null }
 
+@Composable
+internal fun AnimatedVisibilityScope.routeOpen(enabled: Boolean): State<Float> {
+    val owner = LocalRouteOwner.current
+    val origins = LocalRouteOrigins.current
+    val exiting = enabled && transition.currentState == EnterExitState.Visible && transition.targetState != EnterExitState.Visible
+    // NavDisplay 1.2.2 advances normal animateTo linearly, but seeks gesture progress
+    // directly and eases its own cancellation. A toolbar pop removes the entry first;
+    // a predictive pop starts while it is still on the stack. Latch that distinction
+    // for the whole exit, including release, so committing cannot warp a held frame.
+    val scrubbing = remember(transition, owner, exiting) { exiting && owner != null && origins?.isPopped(owner) == false }
+    return containerOpen(enabled, if (scrubbing) LinearEasing else FastOutSlowInEasing)
+}
+
 internal class RouteLaunch(val modifier: Modifier, private val host: RouteOrigins?, private val site: OriginSite) {
     fun open(action: () -> Unit) { host?.chosen = site; action() }
 }
@@ -47,6 +64,7 @@ internal class RouteOrigins : ContainerOrigins() {
         chosen = null
     }
     fun pop(key: String) { removed.add(key) }
+    fun isPopped(key: String) = key in removed
 
     @Composable
     internal fun Entry(key: String, depth: Int, stackTop: Int, from: String?, animate: Boolean,
@@ -61,9 +79,11 @@ internal class RouteOrigins : ContainerOrigins() {
                 if (ordinary) {
                     val visibility = LocalNavAnimatedContentScope.current
                     val moving = animate && front && visibility.transition.currentState != visibility.transition.targetState
-                    val open = visibility.containerOpen(animate && front)
-                    ContainerPage(this, links[key]?.takeIf { it.site.owner == from }, visibility, LocalContainerScope.current,
-                        open, visibility.transition.currentState == androidx.compose.animation.EnterExitState.Visible, depth, moving,
+                    val open = visibility.routeOpen(animate && front)
+                    val link = links[key]?.takeIf { it.site.owner == from }
+                    val returning = visibility.transition.currentState == EnterExitState.Visible
+                    val driver = pairVisibility(this, link, open, moving, returning)
+                    ContainerPage(this, link, visibility, LocalContainerScope.current, open, driver, returning, depth, moving,
                         Modifier.fillMaxSize().testTag("route:$key"), content)
                 } else content()
             }
@@ -94,7 +114,7 @@ internal fun rememberRouteLaunch(key: String, shape: Shape = RectangleShape): Ro
     val host = LocalRouteOrigins.current.takeIf { LocalRouteOriginsEnabled.current }
     val owner = LocalRouteOwner.current
     val density = LocalDensity.current
-    val site = OriginSite(owner, key, currentCompositeKeyHashCode.toLong())
+    val site = OriginSite(owner, key, currentCompositeKeyHashCode)
     val anchor = remember(site, density, shape) { ContainerAnchor(site, shape, density) }
     val modifier = if (host == null) Modifier else Modifier.containerSource(host, anchor)
     return remember(modifier, host, site) { RouteLaunch(modifier, host, site) }

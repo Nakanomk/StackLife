@@ -161,7 +161,7 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
     // Enlist the landing on Nav3's timeline immediately. Otherwise a lazy origin can
     // be disposed on the first push frame, before the shared match has been established.
     val front = LocalFrontEntry.current
-    val openness = visibility.containerOpen(front)
+    val openness = visibility.routeOpen(front)
     val returning = visibility.transition.currentState == EnterExitState.Visible
     val moving = front && visibility.transition.currentState != visibility.transition.targetState
     val driver = if (origins == null) null else pairVisibility(origins, link, openness, moving, returning)

@@ -2,7 +2,6 @@
 // Copyright 2026 Gary Keeler (Apache-2.0). Only a confirmed newline can continue a list.
 package io.github.nakanomk.stacklife.markdown.kern
 
-import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
 import android.view.inputmethod.TextAttribute
@@ -46,7 +45,7 @@ internal class MarkdownDocumentInputTransformation(
     /** InputTransformation sees only a text delta, not whether it originated in commitText,
      * setComposingText or a paste. Tag a committed newline without replacing the native IME
      * session, forwarding selection, annotations and Android's batch boundaries intact. */
-    fun connection(target: InputConnection, sending: Boolean): InputConnection = object : InputConnectionWrapper(target, false) {
+    fun connection(target: InputConnection): InputConnection = object : InputConnectionWrapper(target, false) {
         private var depth = 0
         private var pendingBreak = false
 
@@ -76,11 +75,6 @@ internal class MarkdownDocumentInputTransformation(
         @RequiresApi(33)
         override fun setComposingText(text: CharSequence, newCursorPosition: Int, textAttribute: TextAttribute?): Boolean =
             edit(false) { super.setComposingText(text, newCursorPosition, textAttribute) }
-
-        // Compose's action handler does not carry the action ID. Do not interpret a Done/Next
-        // candidate action from a physical IME as authorisation to send a message.
-        override fun performEditorAction(editorAction: Int): Boolean =
-            if (sending && editorAction != EditorInfo.IME_ACTION_SEND) false else super.performEditorAction(editorAction)
     }
 
     private fun CharSequence?.isNewline() = this != null &&

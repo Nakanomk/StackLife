@@ -1,11 +1,10 @@
 package io.github.nakanomk.stacklife.assistant
 
-import android.content.ContentValues
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.media.ExifInterface
 import android.net.Uri
-import android.provider.MediaStore
 import androidx.annotation.RequiresApi
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
@@ -13,18 +12,30 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.appearance.gainmapPhoto
 import io.github.nakanomk.stacklife.appearance.motionPhoto
 import io.github.nakanomk.stacklife.appearance.photoFixture
-import io.github.nakanomk.stacklife.images.PhotoSourcePolicy
+import io.github.nakanomk.stacklife.appearance.redPixels
+import io.github.nakanomk.stacklife.appearance.withSelectedPhoto
+import io.github.nakanomk.stacklife.images.PhotoDestination.CHAT
+import io.github.nakanomk.stacklife.images.PhotoProblem
+import io.github.nakanomk.stacklife.images.matchesFile
 import io.github.nakanomk.stacklife.images.normalizeStaticPhoto
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.File
+import java.net.InetAddress
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import java.util.zip.CRC32
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.*
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import okhttp3.OkHttpClient
+import okhttp3.tls.HandshakeCertificates
+import okhttp3.tls.HeldCertificate
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -43,20 +54,9 @@ class AttachmentStoreTest {
         } finally { bitmap.recycle() }
     }
 
-    /** A real, pending media item owned by this fixture; no gallery access or durable URI grants. */
     @RequiresApi(29)
-    private suspend fun withMedia(type: String, body: ByteArray, block: suspend (Uri) -> Unit) {
-        val resolver = context.contentResolver
-        val suffix = if (type == "image/jpeg") "jpg" else type.substringAfter('/')
-        val uri = requireNotNull(resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, "StackLife-test-${UUID.randomUUID()}.$suffix")
-            put(MediaStore.MediaColumns.MIME_TYPE, type); put(MediaStore.MediaColumns.IS_PENDING, 1)
-        }))
-        try {
-            requireNotNull(resolver.openOutputStream(uri)).use { it.write(body) }
-            block(uri)
-        } finally { resolver.delete(uri, null, null) }
-    }
+    private suspend fun <T> withMedia(type: String, body: ByteArray, block: suspend (Uri) -> T): T =
+        withSelectedPhoto(context, body, type) { block(it) }
 
     @SdkSuppress(minSdkVersion = 29)
     @Test fun preparesExifUprightPixelsStripsGpsAndSamplesTheActualSentFile() = runBlocking {
@@ -90,28 +90,78 @@ class AttachmentStoreTest {
     }
 
     @SdkSuppress(minSdkVersion = 34)
-    @Test fun backgroundOnlyContainersRemainForbiddenForPreparationAndUpload() = runBlocking {
-        val folder = "photo-policy-${UUID.randomUUID()}"
+    @Test fun pickedMotionGainmapAndRotatedHeicSendOnlyTheirPreparedSdrPixels() = runBlocking {
+        val folder = "photo-wire-${UUID.randomUUID()}"
         val store = AttachmentStore(context, { emptySet() }, folder)
         val root = File(context.noBackupFilesDir, folder)
-        try {
-            val motion = motionPhoto(pixels(64, 32, Bitmap.CompressFormat.JPEG))
-            for ((declared, bytes) in listOf("image/jpeg" to motion, "image/jpeg" to gainmapPhoto(),
-                "image/heic" to photoFixture("red-blue-cw90.heic.b64"))) {
-                withMedia(declared, bytes) { uri ->
-                    assertTrue(runCatching { store.prepare(uri) }.exceptionOrNull() is ChatProblem)
-                }
-                assertTrue(root.list()!!.isEmpty())
-                val replaced = File(root, UUID.randomUUID().toString()).apply { writeBytes(bytes) }
-                val image = ChatImage(replaced.name, declared, 64, 32, replaced.length())
-                assertFalse(image.matchesPreparedFile(replaced, forUpload = true))
-                assertTrue(replaced.delete())
+        val cert = HeldCertificate.Builder().addSubjectAlternativeName("127.0.0.1").build()
+        val trust = HandshakeCertificates.Builder().addTrustedCertificate(cert.certificate).build()
+        val client = OkHttpClient.Builder().sslSocketFactory(trust.sslSocketFactory(), trust.trustManager).build()
+        try { MockWebServer().use { server ->
+            server.useHttps(HandshakeCertificates.Builder().heldCertificate(cert).build().sslSocketFactory())
+            server.start(InetAddress.getByName("127.0.0.1"), 0)
+            val profile = serviceProfile("https://127.0.0.1:${server.port}/v1", "test-model", true)
+            val transport = OpenAiTransport(client)
+            val messages = Json.parseToJsonElement("""[{"role":"user","content":""}]""").jsonArray
+            val tools = JsonArray(emptyList())
+            val hdr = gainmapPhoto()
+            val hdrBitmap = BitmapFactory.decodeByteArray(hdr, 0, hdr.size)
+            try { assertTrue(hdrBitmap.hasGainmap()) } finally { hdrBitmap.recycle() }
+            val sources = listOf("image/jpeg" to motionPhoto(pixels(64, 32, Bitmap.CompressFormat.JPEG)),
+                "image/jpeg" to hdr, "image/heic" to photoFixture("red-blue-cw90.heic.b64"))
+            val entries = sources.map { (mime, bytes) ->
+                val image = withMedia(mime, bytes) { store.prepare(it) } // grant gone before local use or send
+                val file = store.file(image.id)
+                assertEquals("image/jpeg", image.mime)
+                assertTrue(image.matchesPreparedFile(file))
+                image to file
             }
-        } finally { root.deleteRecursively() }
+            val turn = TurnImages(0, entries)
+            validateImageTurn(profile, messages, tools, turn)
+            val disabled = ServiceConnection(profile.copy(supportsImages = false), "fixture")
+            assertTrue(runCatching { transport.complete(disabled, messages, tools, turn) }.exceptionOrNull() is ChatProblem)
+            assertEquals(0, server.requestCount)
+            server.enqueue(MockResponse(body = """{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]}"""))
+            transport.complete(ServiceConnection(profile, "fixture"), messages, tools, turn)
+            val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            val sent = Json.parseToJsonElement(requireNotNull(request.body).utf8()).jsonObject
+                .getValue("messages").jsonArray.single().jsonObject.getValue("content").jsonArray
+            assertEquals(sources.size, sent.size)
+            for ((i, part) in sent.withIndex()) {
+                val url = part.jsonObject.getValue("image_url").jsonObject.getValue("url").jsonPrimitive.content
+                assertEquals("data:image/jpeg;base64", url.substringBefore(','))
+                val bytes = java.util.Base64.getDecoder().decode(url.substringAfter(','))
+                assertArrayEquals(entries[i].second.readBytes(), bytes)
+                assertFalse(sources[i].second.contentEquals(bytes))
+                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                try {
+                    assertFalse(bitmap.hasGainmap()); assertTrue(bitmap.colorSpace!!.isSrgb)
+                    val rotated = i == 2
+                    assertEquals(if (rotated) 32 else 64, bitmap.width)
+                    assertEquals(if (rotated) 64 else 32, bitmap.height)
+                    assertTrue(Color.red(bitmap.getPixel(8, 8)) > 210)
+                    if (i != 1) assertTrue(Color.blue(bitmap.getPixel(bitmap.width - 8, bitmap.height - 8)) > 210)
+                } finally { bitmap.recycle() }
+            }
+            assertEquals(1, server.requestCount)
+
+            // Replacing a private image with the original container is never an alternate import path,
+            // even if the recorded length matches. Reading history, duplicating and sending all fail.
+            for ((i, entry) in entries.withIndex()) {
+                val file = entry.second.apply { writeBytes(sources[i].second) }
+                val corrupt = entry.first.copy(bytes = file.length())
+                assertTrue(runCatching { store.bitmap(corrupt, 64) }.exceptionOrNull() is ChatProblem)
+                assertTrue(runCatching { store.duplicate(corrupt) }.exceptionOrNull() is ChatProblem)
+                assertTrue(runCatching { transport.complete(ServiceConnection(profile, "fixture"), messages, tools,
+                    TurnImages(0, listOf(corrupt to file))) }.exceptionOrNull() is ChatProblem)
+            }
+            assertEquals(entries.map { it.first.id }.toSet(), root.list()!!.toSet())
+            assertEquals(1, server.requestCount)
+        } } finally { root.deleteRecursively(); client.connectionPool.evictAll() }
     }
 
     @SdkSuppress(minSdkVersion = 29)
-    @Test fun rejectsMislabeledTruncatedAnimatedActiveAndOversizedInputsWithoutLeakingDrafts() = runBlocking {
+    @Test fun invalidPartialAnimatedAndOversizedSelectionsLeavePreparedDraftUntouched() = runBlocking {
         val folder = "image-bounds-${UUID.randomUUID()}"
         val store = AttachmentStore(context, { emptySet() }, folder)
         val root = File(context.noBackupFilesDir, folder)
@@ -124,12 +174,18 @@ class AttachmentStoreTest {
             @Suppress("DEPRECATION") val webp = pixels(16, 12, Bitmap.CompressFormat.WEBP)
             val animatedWebp = animatedWebp(webp, 16, 12)
             val jpeg = pixels(16, 12, Bitmap.CompressFormat.JPEG)
-            for ((mime, bytes) in listOf("image/jpeg" to png, "image/png" to animatedPng, "image/webp" to animatedWebp,
+            val previous = withMedia("image/jpeg", jpeg) { store.prepare(it) }
+            // A valid CRC and IEND alone do not prove that the compressed scanlines are complete.
+            val partialPng = png.copyOfRange(0, 33) + pngChunk("IDAT", byteArrayOf(0x78, 0x01, 0x01)) +
+                pngChunk("IEND", byteArrayOf())
+            val kept = store.file(previous.id).readBytes()
+            for ((mime, bytes) in listOf("image/jpeg" to photoFixture("green-avc.mp4.b64"),
+                "image/png" to partialPng, "image/png" to animatedPng, "image/webp" to animatedWebp,
                 "image/png" to huge,
                 "image/png" to "<svg xmlns='http://www.w3.org/2000/svg'/>".toByteArray(),
-                "image/png" to png.copyOf(png.size - 1), "image/jpeg" to jpeg.copyOf(jpeg.size - 2), "image/jpeg" to jpeg + jpeg)) {
+                "image/png" to png.copyOf(png.size - 1), "image/jpeg" to jpeg.copyOf(jpeg.size - 2))) {
                 withMedia(mime, bytes) { uri -> assertTrue(runCatching { store.prepare(uri) }.exceptionOrNull() is ChatProblem) }
-                assertTrue(root.listFiles()!!.isEmpty())
+                assertEquals(listOf(previous.id), root.list()!!.toList())
             }
             withMedia("image/png", png) { uri ->
                 val pfd = requireNotNull(context.contentResolver.openFileDescriptor(uri, "rw"))
@@ -138,7 +194,8 @@ class AttachmentStoreTest {
                 }
                 assertTrue(runCatching { store.prepare(uri) }.exceptionOrNull()?.message.orEmpty().contains("50 MiB"))
             }
-            assertTrue(root.listFiles()!!.isEmpty())
+            assertEquals(listOf(previous.id), root.list()!!.toList())
+            assertArrayEquals(kept, store.file(previous.id).readBytes())
             assertTrue(runCatching { store.prepare(Uri.parse("https://private.invalid/photo")) }.exceptionOrNull() is ChatProblem)
             withMedia("image/png", pixels(4150, 64, Bitmap.CompressFormat.PNG)) { uri ->
                 val image = store.prepare(uri)
@@ -150,6 +207,60 @@ class AttachmentStoreTest {
                 assertEquals("image/webp", image.mime); assertEquals(16, image.width); store.remove(image.id)
             }
         } finally { root.deleteRecursively() }
+    }
+
+    @SdkSuppress(minSdkVersion = 29)
+    @Test fun rasterAttachmentsKeepTransparencyAndRejectMetadataSplicedIntoSavedPixels() = runBlocking {
+        val folder = "raster-draft-${UUID.randomUUID()}"
+        val root = File(context.noBackupFilesDir, folder)
+        val store = AttachmentStore(context, { emptySet() }, folder)
+        try {
+            @Suppress("DEPRECATION")
+            for ((mime, format) in listOf("image/png" to Bitmap.CompressFormat.PNG, "image/webp" to Bitmap.CompressFormat.WEBP)) {
+                // An image declaration is not proof of the codec. Select normalized output using
+                // the encoded pixels and keep an alpha-capable format, including for opaque PNG text.
+                val image = withMedia("image/jpeg", redPixels(format, 96)) { store.prepare(it) }
+                assertEquals(mime, image.mime)
+                val preview = store.bitmap(image, 64)
+                try { assertEquals(96, Color.alpha(preview.getPixel(32, 16))) } finally { preview.recycle() }
+                if (mime == "image/png") {
+                    val file = store.file(image.id)
+                    val clean = file.readBytes()
+                    val metadata = pngChunk("tEXt", "GPS\u0000fixture coordinates".toByteArray())
+                    file.writeBytes(clean.copyOfRange(0, 33) + metadata + clean.copyOfRange(33, clean.size))
+                    val changed = image.copy(bytes = file.length())
+                    assertFalse(changed.matchesPreparedFile(file))
+                    assertTrue(runCatching { store.duplicate(changed) }.exceptionOrNull() is ChatProblem)
+                }
+                store.remove(image.id)
+            }
+            assertTrue(root.list()!!.isEmpty())
+        } finally { root.deleteRecursively() }
+    }
+
+    @SdkSuppress(maxSdkVersion = 27)
+    @Test fun legacyChatImportKeepsOnlyThePrimaryJpegAndExplainsAnUnsupportedHeic() {
+        val dir = File(context.cacheDir, "legacy-chat-${UUID.randomUUID()}").apply { mkdir() }
+        try {
+            val source = File(dir, "input")
+            val output = File(dir, "prepared")
+            source.writeBytes(motionPhoto(pixels(64, 32, Bitmap.CompressFormat.JPEG)))
+            val still = normalizeStaticPhoto(source, "application/octet-stream", output, CHAT)
+            assertEquals("image/jpeg", still.mime); assertTrue(still.matchesFile(output))
+            val previous = output.readBytes()
+            source.writeBytes(photoFixture("red-blue-cw90.heic.b64"))
+            val native = BitmapFactory.decodeFile(source.path)
+            if (native == null) {
+                val error = runCatching { normalizeStaticPhoto(source, "image/heic", output, CHAT) }.exceptionOrNull()
+                assertTrue(error is PhotoProblem)
+                assertEquals(io.github.nakanomk.stacklife.i18n.uiText("This system cannot decode this image.", "当前系统无法解码这张图片。"), error?.message)
+                assertArrayEquals(previous, output.readBytes())
+            } else {
+                native.recycle()
+                val heic = normalizeStaticPhoto(source, "image/heic", output, CHAT)
+                assertTrue(heic.matchesFile(output)); assertEquals(32, heic.width); assertEquals(64, heic.height)
+            }
+        } finally { dir.deleteRecursively() }
     }
 
     @Test fun platformCodecAlsoAppliesEmbeddedPngOrientationWithoutPlatformPngExifSupport() {
@@ -165,7 +276,7 @@ class AttachmentStoreTest {
             }
             val id = UUID.randomUUID().toString()
             val output = File(dir, id)
-            val image = normalizeStaticPhoto(source, "image/png", output, PhotoSourcePolicy.STRICT_STATIC)
+            val image = normalizeStaticPhoto(source, "image/png", output, CHAT)
             assertEquals(32, image.width); assertEquals(64, image.height)
             val bitmap = android.graphics.BitmapFactory.decodeFile(output.path)
             try {

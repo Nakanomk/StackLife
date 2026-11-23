@@ -9,6 +9,7 @@ import androidx.compose.animation.core.SeekableTransitionState
 import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.createChildTransition
 import androidx.compose.animation.core.rememberTransition
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.snap
@@ -36,8 +37,8 @@ internal val containerBounds = BoundsTransform { _, _ -> tween(ContainerDuration
 internal fun containerInk(open: Float, returning: Boolean) = ((open - if (returning) .6f else .2f) / .2f).coerceIn(0f, 1f)
 
 @Composable
-internal fun AnimatedVisibilityScope.containerOpen(enabled: Boolean): State<Float> = transition.animateFloat(
-    { if (enabled) tween(ContainerDuration, easing = LinearEasing) else snap() }, label = "container openness",
+internal fun AnimatedVisibilityScope.containerOpen(enabled: Boolean, easing: Easing): State<Float> = transition.animateFloat(
+    { if (enabled) tween(ContainerDuration, easing = easing) else snap() }, label = "container openness",
 ) { if (it == EnterExitState.Visible) 1f else 0f }
 
 /** A Popup/Dialog has a different coordinate root. Clipped or detached nodes have no landing. */
@@ -85,6 +86,20 @@ private fun Transition<Boolean>.side(label: String, page: Boolean): AnimatedVisi
     return remember(child) { object : AnimatedVisibilityScope { override val transition = child } }
 }
 
+/** Both endpoints, corners and ink sample one already-positioned fraction. */
+@Composable
+internal fun Transition<Boolean>.placedPair(link: ContainerLink): PairVisibility {
+    val row = side("source", false)
+    val page = side("destination", true)
+    val sample = animateFloat({ tween(ContainerDuration, easing = LinearEasing) }, label = "sampled frame") { if (it) 1f else 0f }
+    val driver = remember(row, page, sample) { PairVisibility(row, page, sample) }
+    DisposableEffect(link, driver) {
+        link.driver = driver
+        onDispose { if (link.driver === driver) link.driver = null }
+    }
+    return driver
+}
+
 /** Back recomposes the removed parent with a *new* Nav3 entry transition. Keep the two
  * shared endpoints on the destination's seek instead; a newly placed row must not start
  * its own clock or replace the fully open start rectangle with its own bounds. */
@@ -94,16 +109,9 @@ internal fun pairVisibility(origins: ContainerOrigins, link: ContainerLink?, ope
     if (link == null) return null
     val state = remember(link) { SeekableTransitionState(returning || open.value == 1f) }
     val pair = rememberTransition(state, label = "placed container")
-    val row = pair.side("source", false)
-    val page = pair.side("destination", true)
-    val sample = pair.animateFloat({ tween(ContainerDuration, easing = LinearEasing) }, label = "sampled frame") { if (it) 1f else 0f }
-    val driver = remember(row, page, sample) { PairVisibility(row, page, sample) }
+    val driver = pair.placedPair(link)
     val active by rememberUpdatedState(moving)
     val progress by rememberUpdatedState(open)
-    DisposableEffect(link, driver) {
-        link.driver = driver
-        onDispose { if (link.driver === driver) link.driver = null }
-    }
     LaunchedEffect(link, state) {
         snapshotFlow { Triple(active, progress.value, origins.live(link) && link.destination?.isAttached == true) }
             .collect { (movingNow, fraction, placed) ->
@@ -183,10 +191,9 @@ internal fun Modifier.containerSource(origins: ContainerOrigins, anchor: Contain
 
 @Composable
 internal fun ContainerPage(origins: ContainerOrigins, link: ContainerLink?, visibility: AnimatedVisibilityScope,
-    scope: SharedTransitionScope?, open: State<Float>, returning: Boolean, depth: Int, moving: Boolean,
+    scope: SharedTransitionScope?, open: State<Float>, driver: PairVisibility?, returning: Boolean, depth: Int, moving: Boolean,
     modifier: Modifier, content: @Composable () -> Unit) {
     val density = LocalDensity.current
-    val driver = pairVisibility(origins, link, open, moving, returning)
     val side = driver?.page ?: visibility
     val shared = if (link == null || scope == null) null else with(scope) {
         // Keep the resting destination registered while its parent is off-stack. Its

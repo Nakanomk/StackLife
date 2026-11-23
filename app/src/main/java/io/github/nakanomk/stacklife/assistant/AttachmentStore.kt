@@ -27,9 +27,9 @@ internal const val MAX_IMAGE_INPUT_BYTES = MAX_PHOTO_BYTES
 internal data class ChatImage(val id: String, val mime: String, val width: Int, val height: Int, val bytes: Long)
 
 /** Only immutable, normalized UUID files can be passed to the offline viewer or streaming sender. */
-internal fun ChatImage.matchesPreparedFile(file: File, forUpload: Boolean = false): Boolean =
+internal fun ChatImage.matchesPreparedFile(file: File): Boolean =
     privatePhotoId.matches(id) && file.name == id && bytes in 1..MAX_IMAGE_INPUT_BYTES &&
-        PhotoInfo(mime, width, height, bytes).matchesFile(file, forUpload)
+        PhotoInfo(mime, width, height, bytes).matchesFile(file)
 
 private fun unavailable(): Nothing = throw ChatProblem(uiText("Could not read or store this image. Check the selection and available storage.", "无法读取或存储这张图片，请检查选取权限和存储空间。"))
 
@@ -76,7 +76,7 @@ internal class AttachmentStore(context: Context, private val retainedIds: suspen
     suspend fun prepare(uri: Uri): ChatImage = publish { pending, id ->
         val source = File(root, ".input-$id")
         try {
-            val image = prepareStaticPhoto(app.contentResolver, uri, source, pending, PhotoSourcePolicy.STRICT_STATIC)
+            val image = prepareStaticPhoto(app.contentResolver, uri, source, pending, PhotoDestination.CHAT)
             ChatImage(id, image.mime, image.width, image.height, image.bytes)
         } finally { source.unlink() }
     }

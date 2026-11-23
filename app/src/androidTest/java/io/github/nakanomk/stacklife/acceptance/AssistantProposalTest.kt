@@ -160,7 +160,7 @@ class AssistantProposalTest {
         ui.onNodeWithTag("assistant-sheet").assertDoesNotExist()
         assertEquals(0, server.requestCount)
         toolCall("planner_query", """{"kind":"current"}"""); toolCall("planner_propose", composite)
-        input.performImeAction()
+        tag("assistant-send").performClick()
         ui.runOnUiThread { assistant.send() }
         val apply = tag("assistant-apply"); val pending = requireNotNull(assistant.state.value.pending)
         val eventId = requireNotNull(assistant.state.value.eventId)
@@ -311,7 +311,7 @@ class AssistantProposalTest {
         assertEquals(0, server.requestCount)
         capture("assistant-bound-draft.png")
         reply("收到")
-        input.performImeAction()
+        tag("assistant-send").performClick()
         val origin = assistant.state.value.page as AssistantPage.Day
         assertTrue(origin.date.toString() in originLabel && origin.zone.id in originLabel)
         val answer = await(hasText("收到"))
@@ -359,7 +359,7 @@ class AssistantProposalTest {
         input.performKeyInput { pressKey(Key.Enter) }
         input.assertTextContains("$prompt\n")
         assertEquals(0, server.requestCount)
-        input.performImeAction()
+        tag("assistant-send").performClick()
         await(hasText("配置模型服务")).assertIsDisplayed().performClick()
         val custom = await(hasText("自定义"))
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("assistant-input").fetchSemanticsNodes().isEmpty() }
@@ -378,7 +378,7 @@ class AssistantProposalTest {
         val request = Json.parseToJsonElement(requireNotNull(server.takeRequest(3, TimeUnit.SECONDS)).body!!.utf8()).jsonObject
         assertEquals("$prompt\n", request.getValue("messages").jsonArray.last().jsonObject.getValue("content").jsonPrimitive.content)
         inst.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-        tag("assistant-input").assertTextEquals("")
+        assertEquals("", tag("assistant-input").fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
         assertEquals(1, server.requestCount)
         assertEquals(listOf("眼前的工作"), store.state().queue.map { it.title })
     }

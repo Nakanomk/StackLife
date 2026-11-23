@@ -1,6 +1,7 @@
 package io.github.nakanomk.stacklife.acceptance
 
 import androidx.activity.ComponentActivity
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -16,6 +17,8 @@ import androidx.navigationevent.DirectNavigationEventInput
 import androidx.navigationevent.NavigationEvent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.nakanomk.stacklife.StackLifeApp
+import io.github.nakanomk.stacklife.StackLifeTheme
+import io.github.nakanomk.stacklife.about.HelpAboutScreen
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.planner.*
 import kotlinx.coroutines.runBlocking
@@ -223,6 +226,8 @@ class SceneMotionTest {
         start(input); seek(input, .35f)
         val nearDetail = bounds(detail)
         between(row, nearDetail, open.box)
+        assertEquals("Holding Back at 35% must track the finger, not the automatic playback curve",
+            open.box.height + (row.height - open.box.height) * .35f, nearDetail.height, 3f)
         seek(input, .70f)
         val nearCard = frame(key)
         between(row, nearCard.box, open.box)
@@ -233,6 +238,8 @@ class SceneMotionTest {
         assertTrue("More back progress must contract the same surface", nearCard.box.height < nearDetail.height - 2f)
         seek(input, .30f)
         assertTrue("Dragging the finger back must expand the surface again", bounds(detail).height > nearCard.box.height + 2f)
+        assertEquals("Reversing Back must seek the same geometry immediately",
+            open.box.height + (row.height - open.box.height) * .30f, bounds(detail).height, 3f)
         ui.runOnUiThread { input.backCancelled() }
         ui.mainClock.advanceTimeBy(600)
         assertEquals("Cancel must keep the original detail fully open", open.box, bounds(detail))
@@ -469,6 +476,91 @@ class SceneMotionTest {
             assertEquals(dock, bounds("navigation-capsule")); assertEquals(composer, bounds("assistant-input"))
             ui.mainClock.advanceTimeBy(600)
             checkCardTrip("frame:$id", input)
+        }
+    }
+
+    private fun tracePlacement(value: () -> Float?): List<Pair<Long, Float>> = buildList {
+        repeat(28) {
+            ui.mainClock.advanceTimeByFrame()
+            value()?.let { add(ui.mainClock.currentTime to it) }
+        }
+    }
+
+    private fun checkTweenTravel(samples: List<Pair<Long, Float>>, start: Float, end: Float, remaining: Float = 1f) {
+        val native = tween<Float>()
+        fun nativeTime(distance: Float) = (0..native.durationMillis).first {
+            native.easing.transform(it.toFloat() / native.durationMillis) >= distance
+        }
+        val travel = samples.map { (time, position) -> time to (position - start) / (end - start) }
+        // Compare elapsed time between actual placements, not time since click:
+        // the source and destination have to be placed before they can be paired.
+        fun crossed(distance: Float): Double = travel.zipWithNext().firstNotNullOfOrNull { (a, b) ->
+            if (a.second > 0f && a.second <= distance && b.second >= distance && b.second < 1f && b.second > a.second)
+                a.first + (b.first - a.first) * ((distance - a.second) / (b.second - a.second)).toDouble()
+            else null
+        } ?: error("No moving frame crossing $distance in $travel")
+        val startTime = crossed(.30f)
+        for (distance in listOf(.65f, .95f)) {
+            assertEquals("Measured container travel from 30% to ${distance * 100}%: $travel",
+                (nativeTime(distance) - nativeTime(.30f)) * remaining.toDouble(), crossed(distance) - startTime, 24.0)
+        }
+    }
+
+    @Test fun helpPaneOpensAndRecoversFromBackAlongTheSamePlacedPath() {
+        ui.setContent {
+            StackLifeTheme(Appearance()) { HelpAboutScreen(back = { error("Unexpected exit") }, onGuide = { error("Unexpected guide") }) }
+        }
+        val launcher = ui.onNodeWithTag("about-help").performScrollTo()
+        val location = launcher.fetchSemanticsNode().boundsInRoot
+        val tag = "pane:HELP"
+        fun window() = ui.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().singleOrNull()?.boundsInRoot
+        withClockAndBack { input ->
+            click(launcher)
+            // The guide is a LazyColumn item under Scaffold insets, not the
+            // container. Compare the actual clipped surface with its real row.
+            val opening = tracePlacement { window()?.height }
+            val full = checkNotNull(window())
+            checkTweenTravel(opening, location.height, full.height)
+            fun checkSeek(progress: Float): Rect {
+                val landing = ui.onNodeWithTag("about-help", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                assertEquals("The same row is available throughout the gesture", location, landing)
+                val box = checkNotNull(window())
+                fun edge(parent: Float, source: Float, actual: Float) = assertEquals(
+                    "Pane at $progress: $full → $landing, actual $box", parent + (source - parent) * progress, actual, 3f)
+                edge(full.top, landing.top, box.top); edge(full.bottom, landing.bottom, box.bottom)
+                edge(full.left, landing.left, box.left); edge(full.right, landing.right, box.right)
+                return box
+            }
+            start(input); checkSeek(0f)
+            seek(input, .75f)
+            val held = checkSeek(.75f)
+            seek(input, .25f); checkSeek(.25f)
+            seek(input, .75f); assertEquals(held, checkSeek(.75f))
+            ui.runOnUiThread { input.backCancelled() }
+            checkTweenTravel(tracePlacement { window()?.height }, held.height, full.height, remaining = .75f)
+            assertEquals(full, window())
+            start(input); seek(input, .5f); complete(input)
+            assertEquals(location, launcher.fetchSemanticsNode().boundsInRoot)
+        }
+    }
+
+    @Test fun launcherOpenAndToolbarBackFollowTheDefaultComposeTween() {
+        show()
+        val fab = ui.onNodeWithTag("add-task")
+        val compact = fab.fetchSemanticsNode().boundsInRoot.height
+        val route = "route:add-task"
+        fun record(button: SemanticsNodeInteraction): List<Pair<Long, Float>> {
+            click(button)
+            return tracePlacement { ui.onAllNodesWithTag(route).fetchSemanticsNodes().singleOrNull()?.boundsInRoot?.height }
+        }
+        withClockAndBack {
+            val opening = record(fab)
+            val full = bounds(route).height
+            checkTweenTravel(opening, compact, full)
+            val back = ui.onNode(hasAnyAncestor(hasTestTag(route)) and hasContentDescription("返回") and hasClickAction())
+            checkTweenTravel(record(back), full, compact)
+            ui.onNodeWithTag(route).assertDoesNotExist()
+            assertEquals(compact, bounds("add-task").height, 0f)
         }
     }
 

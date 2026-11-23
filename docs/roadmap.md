@@ -4,7 +4,7 @@ StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Andr
 
 **项目许可：** StackLife 采用 [GNU 通用公共许可证第 3 版或任何后续版本](../LICENSE)（`GPL-3.0-or-later`）。第三方代码与资源保留[各自的许可和署名](../app/src/main/assets/licenses/)。
 
-**当前候选版本：v0.10.13（28），Room v12。** 本次[界面与导入修复](#v01013-界面与导入)不迁移日程或重建库。M1–M6 是历史契约；原本“冲突拒绝写入”“节点都是模板”等规则已由[排程与链接升级](#v01012-排程链接倒数日与外观)替代。普通包不含联盟 SDK。
+**当前候选版本：v0.10.14（29），Room v12。** 本次[输入与导航修正](#v01014-输入与导航)不迁移日程或重建库。M1–M6 是历史契约；原本“冲突拒绝写入”“节点都是模板”等规则已由[排程与链接升级](#v01012-排程链接倒数日与外观)替代。普通包不含联盟 SDK。
 
 ## 起点与产品决定
 
@@ -132,7 +132,7 @@ interface PlannerApi {
 
 ## M5 对话
 
-四个业务根页共用底部输入框：切页、切日或切周不会丢草稿；换页时非空草稿仍标记并使用最初的范围。已配置服务时，点纸飞机或键盘发送键直接发消息，不再弹出「发送前核对」。未配置时保留草稿，保存服务不会代发。参考 [Telegram Android 输入栏](https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java)与[消息气泡](https://github.com/TelegramMessenger/Telegram-Android/blob/21f7d109da6ab3506c9e9577f98c6a38771ab335/TMessagesProj/src/main/java/org/telegram/ui/Cells/ChatMessageCell.java#L19055-L19067)；圆形 `!` 收起提示、警告、错误及可选的数据范围。原始课表、HUB 登录与密钥页无助理。
+业务根页共用底部输入框：切页、切日或切周不会丢草稿；换页时非空草稿仍使用最初的范围。软键盘回车只换行，确认输入法候选也不发送。已配置服务时，点纸飞机或在实体键盘按 Ctrl+Enter 才发送；未配置时保留草稿，保存服务不会代发。参考 [Telegram Android 输入栏](https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java)与[消息气泡](https://github.com/TelegramMessenger/Telegram-Android/blob/21f7d109da6ab3506c9e9577f98c6a38771ab335/TMessagesProj/src/main/java/org/telegram/ui/Cells/ChatMessageCell.java#L19055-L19067)；圆形 `!` 收起提示、警告、错误及可选的数据范围。原始课表、HUB 登录与密钥页无助理。
 
 **连接。** 用 OkHttp `5.5.1` + `kotlinx.serialization`。用户提供含 API 前缀的 HTTPS base URL、模型、Key；在 base URL 后追加 `chat/completions`。使用 [OpenAI 兼容 function tools](https://platform.openai.com/docs/guides/function-calling) 和 `tool_calls`，不从散文猜命令；模型必须支持这套协议，只支持 Responses 的不冒充兼容。用 [Android Keystore](https://developer.android.com/privacy-and-security/keystore) 中不可导出的 AES-GCM 密钥加密 BYOK，每次写用新 IV，密文放私有 `noBackupFilesDir`。换服务域需重新授权/填 key，不跨域转发鉴权。无账号、无托管中转、无后台自动操作。
 
@@ -365,6 +365,12 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 - **主静态图。** 背景在授权期间复制，在解码成功后才替换。API 28+ 使用 [ImageDecoder](https://developer.android.com/reference/android/graphics/ImageDecoder) 的主画面，经方向归正、sRGB 转换和 SDR 重编码后保存；不保留视频、GPS、增益图或外部 URI。API 26–27 走有界采样与 EXIF 回退；平台不能解码则保留旧图。聊天附件的严格格式边界不变。[Coil 的代码与许可](../app/src/main/assets/licenses/Coil-Apache-2.0.txt)随包分发。状态栏使用独立的不透明明暗保护层，不采样照片。
 - **翻页与日末。** 周表时刻栏沿用网格背景。日／周标题与箭头共用 Pager 的选择；新请求取代旧动画，真实拖动落定才提交。回到本周沿当前课表来源时区计算并限制在学期内。队列扣手可直接拖动，松手提交，点按仍有菜单。滚轮只影响上下各至少 50 个物理像素的边缘带，触底下侧平直；只有时间模式的加号、托盘在日末向右让位，日末距助理仍为 16dp。
 - **转场。** 本地 Nav3 与弹层内页沿同一边界进度揭开。只配对紧邻父页的可见控件或同一实体，失去锚点时原位淡化。预测返回取消回放同一路径。分页、IME、系统浏览器及选择器不套用容器转场。BiliPai 固定提交、移植文件和 GPL 许可见[随包声明](../app/src/main/assets/licenses/BiliPai-GPL-3.0.txt)；本轮不测帧率，厂商 ProXDR/Live 实拍不由模拟器代证。
+
+### v0.10.14 输入与导航
+
+- **输入框。** 复用 [BiliPai `AppCompactInputField`](../app/src/main/assets/licenses/BiliPai-GPL-3.0.txt) 普通样式的单行胶囊；输入多行时沿用单行半径，五行后滚动正文。历史在文字前，附件和发送在文字后相邻，各保留独立 48dp 点击区。根页、对话和历史续聊的软键盘都用回车换行。
+- **聊天图片。** 从系统选择器读取平台能解码的主静态画面，包括旋转 HEIC、带增益图或 Motion 辅助数据的照片。附件只保留归正、重编码后的 SDR 像素；不发送原容器、EXIF/GPS、辅助图或视频，也不因为选图而联网。无法解码时不替换已有草稿图片。
+- **切页。** 点远处的导航标签时，同一个 AndroidX Pager 仅让当前页与目标页相邻滑动；落定后按已保存的导航顺序继续手势翻页，不经过中间功能。容器自动展开和返回采用非线性运动，预测返回仍可随手指反向或取消；关闭动效时直接落位。
 
 ### 历史里程碑验收用例（M1–M6）
 
