@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -40,54 +41,69 @@ import io.github.nakanomk.stacklife.transitions.LocalDetailChrome
 
 private val LocalShortDock = compositionLocalOf { false }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun DockOverlay(
     navigationBar: (@Composable () -> Unit)? = null,
     assistantPage: AssistantPage? = null,
-    content: @Composable (bottomClearance: Dp) -> Unit,
+    content: @Composable (bottomClearance: PaddingValues) -> Unit,
 ) {
-    val density = LocalDensity.current
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        // IME animation changes the safe height every frame, but only crossing a
+        // layout breakpoint changes the composition of the dock.
+        val landscape = maxWidth > maxHeight
+        DockScaffold(
+            short = maxWidth >= 480.dp && landscape && maxHeight < 220.dp,
+            wideRow = maxWidth >= 600.dp && landscape,
+            navigationBar, assistantPage, content,
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DockScaffold(short: Boolean, wideRow: Boolean, navigationBar: (@Composable () -> Unit)?,
+    assistantPage: AssistantPage?, content: @Composable (PaddingValues) -> Unit) {
     val appearance = LocalAppearance.current
     val docked = appearance.navStyle == NavStyle.DOCKED
     val composer = assistantPage?.takeIf { LocalAssistant.current != null }
     var composerFocused by remember { mutableStateOf(false) }
-    val showNav = navigationBar != null && (!composerFocused || WindowInsets.imeAnimationTarget.getBottom(density) == 0)
+    val density = LocalDensity.current
+    val target = WindowInsets.imeAnimationTarget
+    val hasNav = navigationBar != null
+    val showNav by remember(hasNav, target, density) { derivedStateOf {
+        hasNav && (!composerFocused || target.getBottom(density) == 0)
+    } }
     val source = rememberPlannerBackdrop((navigationBar != null && appearance.navGlass) || (composer != null && appearance.assistantGlass))
     val ms = if (LocalMotionEnabled.current) 150 else 0
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        // Use the actual safe height: a landscape window with three-button navigation can
-        // leave only enough room for one action row between the toolbar and this dock.
-        val short = maxWidth >= 480.dp && maxWidth > maxHeight && maxHeight < 220.dp
-        val shareRow = (short || maxWidth >= 600.dp && maxWidth > maxHeight) && composer != null && showNav
-        val navSlot: @Composable () -> Unit = {
-            if (navigationBar != null) AnimatedVisibility(showNav,
-                enter = expandVertically(tween(ms), expandFrom = Alignment.Bottom),
-                exit = shrinkVertically(tween(ms), shrinkTowards = Alignment.Bottom)) {
-                Box(if (docked) Modifier.fillMaxWidth() else chromeRail()) {
-                    CompositionLocalProvider(LocalShortDock provides short) { navigationBar() }
-                }
+    val shareRow = (short || wideRow) && composer != null && showNav
+    val navSlot: @Composable () -> Unit = {
+        if (navigationBar != null) AnimatedVisibility(showNav,
+            enter = expandVertically(tween(ms), expandFrom = Alignment.Bottom),
+            exit = shrinkVertically(tween(ms), shrinkTowards = Alignment.Bottom)) {
+            Box(if (docked) Modifier.fillMaxWidth() else chromeRail()) {
+                CompositionLocalProvider(LocalShortDock provides short) { navigationBar() }
             }
         }
-        Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), bottomBar = {
-            CompositionLocalProvider(LocalCapsuleBackdrop provides source) {
-                Column(LocalDetailChrome.current().fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (composer != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                        Box(Modifier.weight(if (short && shareRow) 2f else 1f), contentAlignment = Alignment.Center) {
-                            Box(chromeRail(top = 0.dp).onFocusChanged { composerFocused = it.hasFocus }.focusGroup()) {
-                                AssistantComposer(composer, persistentRoot = navigationBar != null || LocalFeatureBack.current != null)
-                            }
+    }
+    Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), bottomBar = {
+        CompositionLocalProvider(LocalCapsuleBackdrop provides source) {
+            Column(LocalDetailChrome.current().fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                if (composer != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                    Box(Modifier.weight(if (short && shareRow) 2f else 1f), contentAlignment = Alignment.Center) {
+                        Box(chromeRail(top = 0.dp).onFocusChanged { composerFocused = it.hasFocus }.focusGroup()) {
+                            AssistantComposer(composer, persistentRoot = navigationBar != null || LocalFeatureBack.current != null)
                         }
-                        if (shareRow) Box(Modifier.weight(if (short) 3f else 1f), contentAlignment = Alignment.Center) { navSlot() }
                     }
-                    if (!shareRow) navSlot()
+                    if (shareRow) Box(Modifier.weight(if (short) 3f else 1f), contentAlignment = Alignment.Center) { navSlot() }
                 }
-            }
-        }) { insets ->
-            Box(Modifier.fillMaxSize().plannerBackdrop(source)) {
-                content(insets.calculateBottomPadding())
+                if (!shareRow) navSlot()
             }
         }
+    }) { insets ->
+        // Cursor and button redraws must not re-record the page donor. This is a
+        // display-list boundary, not a bitmap: live page descendants still update it.
+        val donor = if (source == null) Modifier else Modifier.graphicsLayer().plannerBackdrop(source)
+        Box(Modifier.fillMaxSize().then(donor)) { content(insets) }
     }
 }
 

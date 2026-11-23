@@ -33,6 +33,7 @@ internal fun MarkdownComposer(state: TextFieldState, modifier: Modifier = Modifi
         MarkdownDocumentOutputTransformation(state, cache, MarkdownSpanStyleProvider(typography, colors)) { focused.value }
     }
     val chat = onSend != null
+    val empty = if (placeholder == null) null else remember(state) { derivedStateOf { state.text.isEmpty() } }
     val currentSend by rememberUpdatedState(onSend)
     val interceptor = remember(input) { PlatformTextInputInterceptor { request, next ->
         next.startInputMethod { attributes -> input.connection(request.createInputConnection(attributes)) }
@@ -61,7 +62,7 @@ internal fun MarkdownComposer(state: TextFieldState, modifier: Modifier = Modifi
             decorator = { inner ->
                 if (placeholder == null) inner()
                 else Box(contentAlignment = Alignment.CenterStart) {
-                    if (state.text.isEmpty()) placeholder()
+                    if (empty?.value == true) placeholder()
                     inner()
                 }
             },

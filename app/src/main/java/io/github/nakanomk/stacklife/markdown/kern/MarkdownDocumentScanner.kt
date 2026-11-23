@@ -42,6 +42,24 @@ internal class MarkdownDocumentCache {
             if (version === text) return it
             if (it.source == text) { version = text; return it }
         }
-        return MarkdownDocumentScanner.scan(text).also { last = it; version = text }
+        val parsed = if (text.isPlainEditorProse()) ParsedMarkdown(text, emptyList(), emptyList(), emptyList())
+            else MarkdownDocumentScanner.scan(text)
+        last = parsed
+        version = text
+        return parsed
     }
+}
+
+// Letters, digits, single inter-word spaces and ordinary newlines cannot open
+// a GFM construct. Be conservative: indentation, double spaces (hard breaks),
+// punctuation, CR, tabs and even emoji still go through the original scanner.
+private fun String.isPlainEditorProse(): Boolean {
+    var previous = '\n'
+    for (c in this) {
+        if (c == ' ') {
+            if (previous == '\n' || previous == ' ') return false
+        } else if (c != '\n' && !c.isLetterOrDigit()) return false
+        previous = c
+    }
+    return true
 }

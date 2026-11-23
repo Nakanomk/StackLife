@@ -27,8 +27,13 @@ internal class ChatDraft(private val store: AttachmentStore, private val scope: 
     var issue by mutableStateOf<String?>(null)
         private set
     private val preparing = mutableMapOf<String, Job>()
-    val sendable: Boolean get() = this.field.text.length <= 8000 && images.all { it.status is ImagePreparation.Ready } &&
-        (this.field.text.isNotBlank() || images.isNotEmpty())
+    // Keystrokes, composing ranges and caret moves belong to the native field.
+    // Its enclosing dock only needs to observe an actual change of send eligibility.
+    val sendable by derivedStateOf(structuralEqualityPolicy()) {
+        val text = field.text
+        text.length <= 8000 && images.all { it.status is ImagePreparation.Ready } &&
+            (text.isNotBlank() || images.isNotEmpty())
+    }
 
     fun add(sources: List<ImageSource>) {
         if (sources.isEmpty()) return

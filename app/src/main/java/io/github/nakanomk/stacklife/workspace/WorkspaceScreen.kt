@@ -118,7 +118,7 @@ internal fun WorkspaceScreen(
                 }
             }
         }) { top, bottom ->
-        HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = false, beyondViewportPageCount = 1) { index ->
+        HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = false) { index ->
             val selected = index == mode
             val inViewport by remember(pager, index) { derivedStateOf { kotlin.math.abs(position.value - index) < 1f } }
             PagerPane(selected, selected || inViewport) {

@@ -21,11 +21,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
+import io.github.nakanomk.stacklife.appearance.LocalAppearance
+import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
 
 internal fun AnimatedContentTransitionScope<*>.sceneMotion(enabled: Boolean) = EnterTransition.None togetherWith
     if (enabled) ExitTransition.KeepUntilTransitionsFinished else ExitTransition.None
@@ -75,7 +79,7 @@ internal class RouteOrigins : ContainerOrigins() {
         }
         val front = depth >= stackTop && levels.values.none { it > depth }
         CompositionLocalProvider(LocalRouteOwner provides key, LocalEntryDepth provides depth, LocalFrontEntry provides front) {
-            EntryWindow(front) {
+            EntryWindow(front, animate) {
                 if (ordinary) {
                     val visibility = LocalNavAnimatedContentScope.current
                     val moving = animate && front && visibility.transition.currentState != visibility.transition.targetState
@@ -96,7 +100,7 @@ internal class RouteOrigins : ContainerOrigins() {
  * it during Back. Keep real bars/cutouts; consume only the extra IME clearance. At commit
  * the IME can outlive the departing scene, so wait for this page to own focus again. */
 @Composable
-private fun EntryWindow(front: Boolean, content: @Composable () -> Unit) {
+private fun EntryWindow(front: Boolean, animate: Boolean, content: @Composable () -> Unit) {
     var hasFocus by remember { mutableStateOf(false) }
     var covered by remember { mutableStateOf(false) }
     SideEffect {
@@ -106,7 +110,13 @@ private fun EntryWindow(front: Boolean, content: @Composable () -> Unit) {
         val bars = WindowInsets.systemBars.union(WindowInsets.displayCutout)
         Modifier.consumeWindowInsets(WindowInsets.ime.exclude(bars))
     }
-    Box(Modifier.fillMaxSize().onFocusChanged { hasFocus = it.hasFocus }.focusGroup().then(keyboard),
+    // The covered entry stays at rest. Reuse its composited glass until its contents
+    // invalidate, rather than sampling the same toolbar, list and dock for every frame
+    // of the reveal above. The layer belongs to this window and dies with the overlap.
+    val appearance = LocalAppearance.current
+    val underlay = if (!front && animate && appearance.glass && glassUnavailableReason(appearance) == null)
+        Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen } else Modifier
+    Box(Modifier.fillMaxSize().onFocusChanged { hasFocus = it.hasFocus }.focusGroup().then(keyboard).then(underlay),
         propagateMinConstraints = true) { content() }
 }
 

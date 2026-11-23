@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.platform.LocalContext
 import io.github.nakanomk.stacklife.StackLifeApplication
 import io.github.nakanomk.stacklife.planner.WallpaperSpec
+import top.yukonga.miuix.kmp.blur.Backdrop
 
 internal val LocalBackgroundStore = compositionLocalWithComputedDefaultOf {
     (LocalContext.currentValue.applicationContext as StackLifeApplication).backgrounds
@@ -52,18 +53,18 @@ internal fun WallpaperHost(spec: WallpaperSpec, drawBehindContent: Boolean = tru
 }
 
 @Composable
-internal fun Modifier.wallpaperBackground(fallback: Color): Modifier {
-    val source = LocalWallpaperRecording.current ?: return background(fallback)
+internal fun Modifier.wallpaperBackground(fallback: Color, source: Backdrop? = LocalWallpaperRecording.current): Modifier {
+    if (source == null) return background(fallback)
     return then(WallpaperReplay(source))
 }
 
-private data class WallpaperReplay(val source: PlannerBackdrop) : ModifierNodeElement<ReplayNode>() {
+private data class WallpaperReplay(val source: Backdrop) : ModifierNodeElement<ReplayNode>() {
     override fun create() = ReplayNode(source)
     override fun update(node: ReplayNode) { node.source = source }
     override fun InspectorInfo.inspectableProperties() { name = "wallpaperBackground" }
 }
 
-private class ReplayNode(var source: PlannerBackdrop) : Modifier.Node(), DrawModifierNode, GlobalPositionAwareModifierNode {
+private class ReplayNode(var source: Backdrop) : Modifier.Node(), DrawModifierNode, GlobalPositionAwareModifierNode {
     private var receiver: LayoutCoordinates? = null
     private var screen = Offset.Unspecified
     override fun onGloballyPositioned(coordinates: LayoutCoordinates) {

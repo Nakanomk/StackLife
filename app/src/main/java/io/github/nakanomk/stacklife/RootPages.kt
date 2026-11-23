@@ -77,7 +77,9 @@ internal fun RootPages(order: List<Destination>, active: Destination, reveal: Lo
                 // Reset the lazy key map when the order changes, but retain the same source-site
                 // identity when Home is recomposed on Back (a new PagerState instance is not a site).
                 key(order, reveal) {
-                    HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = order.lastIndex, key = { slots[it].key }) { index ->
+                    // Let Pager compose the visible pair. SaveableStateProvider owns tab state;
+                    // Back to one tab must not lay out the other four on its first frame.
+                    HorizontalPager(pager, Modifier.fillMaxSize(), key = { slots[it].key }) { index ->
                         val page = slots[index]
                         val selected = page == active
                         val inViewport by remember(index) { derivedStateOf { abs(pager.getOffsetDistanceInPages(index)) < 1f } }

@@ -94,7 +94,7 @@ internal fun PageChrome(title: String, back: () -> Unit, backEnabled: Boolean = 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // A landscape IME can leave less than two rows of controls plus one editable field.
         // Put the same action dock next to Back instead of covering the remaining form.
-        val short = footer != null && maxWidth >= 480.dp && maxHeight - LocalRootBottom.current < 220.dp
+        val short = footer != null && maxWidth >= 480.dp && maxHeight - LocalRootBottom.current.calculateBottomPadding() < 220.dp
         val actionWidth = maxWidth * .62f
         RootPane(header = {
             if (short && footer != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

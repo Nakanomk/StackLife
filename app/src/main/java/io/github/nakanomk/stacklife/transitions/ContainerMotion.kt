@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.*
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.clipPath
@@ -35,6 +36,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.round
 import kotlin.math.roundToInt
+import kotlin.math.ceil
+import kotlin.math.floor
 
 internal const val ContainerDuration = 300
 internal val containerBounds = BoundsTransform { _, _ -> tween(ContainerDuration, easing = LinearEasing) }
@@ -133,6 +136,11 @@ internal open class ContainerOrigins {
     var size by mutableStateOf(IntSize.Zero)
     fun attach(anchor: ContainerAnchor) { anchors[anchor.site] = anchor }
     fun detach(anchor: ContainerAnchor) { anchors.remove(anchor.site, anchor) }
+    fun place(anchor: ContainerAnchor, node: LayoutCoordinates) {
+        // Only the captured launcher needs live clipped geometry. Keep the other
+        // buttons' coordinates so a later click can resolve them at that instant.
+        anchor.place(node, if (links[anchor.site.target]?.site == anchor.site) host else null)
+    }
     fun capture(target: String, owner: String?, chosen: OriginSite? = null) {
         val a = if (chosen != null) anchors[chosen]?.takeIf { chosen.owner == owner && chosen.target == target }
             else anchors.values.singleOrNull { it.site.owner == owner && it.site.target == target && it.coordinates?.fullBoundsIn(host) != null }
@@ -191,7 +199,7 @@ internal fun SharedTransitionScope.gatedContent(key: Any, enabled: () -> Boolean
 @Composable
 internal fun Modifier.containerSource(origins: ContainerOrigins, anchor: ContainerAnchor): Modifier {
     DisposableEffect(origins, anchor) { origins.attach(anchor); onDispose { origins.detach(anchor) } }
-    return onGloballyPositioned { anchor.place(it, origins.host) }
+    return onGloballyPositioned { origins.place(anchor, it) }
 }
 
 @Composable
@@ -218,19 +226,20 @@ internal fun ContainerPage(origins: ContainerOrigins, link: ContainerLink?, visi
             // its parent and its donor; sharedBounds still places it at the animated rect.
             renderInOverlayDuringTransition = false).placedPage(link)
     }
+    val finalSize = if (scope == null || shared == null) Modifier else with(scope) {
+        Modifier.skipToLookaheadSize { shared.isMatchFound }
+    }
     androidx.compose.foundation.layout.Box(frame.then(modifier).graphicsLayer {
+        val matched = paired()
         alpha = when {
             !moving -> 1f
-            paired() -> if (sample.value > 0f) 1f else 0f
+            matched -> if (sample.value > 0f) 1f else 0f
             link != null && origins.live(link) && !returning -> sample.value
             else -> open.value
         }
         if (link != null) shape = link.shape
-        clip = paired()
-    }.containerPaper(origins, link, moving, paired, ink), propagateMinConstraints = true) {
-        val finalSize = if (scope == null || shared == null) Modifier else with(scope) { Modifier.skipToLookaheadSize { shared.isMatchFound } }
-        androidx.compose.foundation.layout.Box(finalSize, propagateMinConstraints = true) { content() }
-    }
+        clip = matched
+    }.containerPaper(origins, link, moving, paired, ink).then(finalSize), propagateMinConstraints = true) { content() }
 }
 
 /** Immediately inside sharedBounds: its lookahead placeholder and the painted child's
@@ -267,44 +276,48 @@ internal fun Modifier.containerPaper(origins: ContainerOrigins?, link: Container
     val paper = if (sheet) colors.surfaceContainerHigh else colors.surface
     if (!moving) return if (pane) this else wallpaperBackground(paper)
     val donor = if (sheet) LocalCapsuleBackdrop.current else LocalWallpaperRecording.current
-    var receiver by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    if (link == null) return wallpaperBackground(paper, donor)
     var position by remember { mutableStateOf(Offset.Unspecified) }
-    val placement = onGloballyPositioned {
-        receiver = it
+    return onGloballyPositioned {
         position = origins?.host?.takeIf { host -> host.isAttached }?.localPositionOf(it, Offset.Zero) ?: Offset.Unspecified
-    }
-    val masked = if (link == null) placement else placement.sourceHandoff({ if (paired()) ink() else 1f }) {
+    }.sourceHandoff({ if (paired()) ink() else 1f }) {
         if (position.isSpecified) origins?.sourceBounds(link)?.translate(-position) else null
-    }
-    return masked.drawWithCache {
-        onDrawBehind {
-            if (donor == null) drawRect(paper) else with(donor) { drawBackdrop(this@onDrawBehind, receiver, null, 1f) }
-        }
-    }
+    }.wallpaperBackground(paper, donor)
 }
 
-/** One real page draw. Only its intersection with the real launcher changes opacity;
- * everywhere else inside the reveal, paper and foreground must already belong to the page. */
-internal fun Modifier.sourceHandoff(coverage: () -> Float, slot: () -> Rect?): Modifier = graphicsLayer {
+/** The last layer holds live drawing commands, not a bitmap of the page. Keep group
+ * opacity (including overlapping ink and glass) but isolate only the launcher's tile. */
+internal fun Modifier.sourceHandoff(coverage: () -> Float, slot: () -> Rect?): Modifier = drawWithContent {
     val a = coverage()
-    compositingStrategy = if (a > 0f && a < 1f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
-}.drawWithCache {
-    onDrawWithContent {
-        val a = coverage()
-        val overlap = if (a < 1f) slot()?.intersect(Rect(Offset.Zero, size)) else null
-        when {
-            overlap == null || overlap.isEmpty -> drawContent()
-            a <= 0f -> clipRect(overlap.left, overlap.top, overlap.right, overlap.bottom, clipOp = ClipOp.Difference) {
-                this@onDrawWithContent.drawContent()
-            }
-            else -> {
-                drawContent()
-                // DstOut changes only the clipped page layer's alpha, not the parent or its colour.
-                drawRect(Color.White.copy(alpha = 1f - a), overlap.topLeft, overlap.size, blendMode = BlendMode.DstOut)
+    val overlap = if (a < 1f) slot()?.intersect(Rect(Offset.Zero, size)) else null
+    when {
+        a >= 1f -> drawContent()
+        a <= 0f -> if (overlap == null || overlap.isEmpty) drawContent() else
+            clipRect(overlap.left, overlap.top, overlap.right, overlap.bottom, ClipOp.Difference) { this@drawWithContent.drawContent() }
+        // A fractional group previously had an implicit clip at the layer's own edges.
+        overlap == null || overlap.isEmpty -> clipRect { this@drawWithContent.drawContent() }
+        else -> clipRect {
+            // Split on pixel edges; the original DstOut still supplies the fractional
+            // edge inside this tile. Both clips replay the same live child display list.
+            val l = floor(overlap.left)
+            val t = floor(overlap.top)
+            val r = ceil(overlap.right)
+            val b = ceil(overlap.bottom)
+            if (l > 0f || t > 0f || r < size.width || b < size.height)
+                clipRect(l, t, r, b, ClipOp.Difference) { this@drawWithContent.drawContent() }
+            clipRect(l, t, r, b) {
+                val canvas = drawContext.canvas.nativeCanvas
+                val save = canvas.saveLayer(l, t, r, b, null)
+                try {
+                    this@drawWithContent.drawContent()
+                    drawRect(Color.White.copy(alpha = 1f - a), overlap.topLeft, overlap.size, blendMode = BlendMode.DstOut)
+                } finally {
+                    canvas.restoreToCount(save)
+                }
             }
         }
     }
-}
+}.graphicsLayer()
 
 internal fun Modifier.containerClip(bounds: () -> Rect, radius: () -> Float, enabled: () -> Boolean): Modifier = drawWithCache {
     val path = Path()

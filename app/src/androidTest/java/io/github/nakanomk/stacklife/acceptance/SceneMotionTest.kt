@@ -743,8 +743,30 @@ class SceneMotionTest {
                 repeat(22) { i -> ui.mainClock.advanceTimeByFrame(); checkFrame("cancel $i") }
                 ui.mainClock.advanceTimeBy(600)
                 assertLivePatch(settled, pixels(), label)
-                start(input); seek(input, .98f); complete(input)
+                start(input); seek(input, .98f)
                 assertLivePatch(parent, pixels(), row)
+                if (glass) {
+                    // A retained hardware layer must still repaint real mutations in the
+                    // exposed page even while the gesture and the destination are stationary.
+                    val renamed = "WWWWWWWW"
+                    runBlocking { store.apply(PlannerCommand.TaskEdit(taskId, title = renamed)) }
+                    ui.waitUntil(5_000) {
+                        ui.mainClock.advanceTimeByFrame()
+                        ui.onAllNodesWithText(renamed).fetchSemanticsNodes().isNotEmpty()
+                    }
+                    val live = pixels()
+                    val patch = windowRect(queueTitle)
+                    var changed = 0
+                    for (y in patch.top.toInt() until patch.bottom.toInt() step 2)
+                        for (x in patch.left.toInt() until patch.right.toInt() step 2)
+                            if (delta(parent[x, y], live[x, y]) > .25f) changed++
+                    assertTrue("Held Back still shows the old task title", changed > 12)
+                    complete(input)
+                    assertLivePatch(pixels(), live, patch)
+                } else {
+                    complete(input)
+                    assertLivePatch(parent, pixels(), row)
+                }
             }
         } finally { folder.deleteRecursively() }
     }

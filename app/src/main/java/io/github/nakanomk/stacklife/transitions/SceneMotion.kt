@@ -96,7 +96,7 @@ internal fun cardBoundsModifier(key: String): Modifier {
         registry?.attach(source)
         onDispose { rows?.remove(key, anchor); registry?.detach(source) }
     }
-    return Modifier.onGloballyPositioned { source.place(it, registry?.host) }.layout { measurable, constraints ->
+    return Modifier.onGloballyPositioned { registry?.place(source, it) }.layout { measurable, constraints ->
         val row = measurable.measure(constraints)
         if (isLookingAhead) {
             anchor.x = row[TitleX]
@@ -162,7 +162,7 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
     val depth = LocalEntryDepth.current
     val radius = { (rows?.get(key)?.radius ?: 0f) * (1f - sampled.value) }
     val paired = { moving && link != null && link.drawingMatch(origins, state) }
-    val ink = { if (paired()) containerInk(sampled.value, returning) else 1f }
+    val ink = { containerInk(sampled.value, returning) }
     if (link != null) {
         SideEffect { link.open = sampled }
         DisposableEffect(link) { onDispose { link.destination = null; link.open = null } }
@@ -194,7 +194,7 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
             }
         }.renderInSharedTransitionScopeOverlay(zIndexInOverlay = depth + .5f, renderInOverlay = paired)
             .containerClip({ windowInOverlay.value.translate(-origin) }, radius, paired)
-            .then(if (!moving || link == null) Modifier else Modifier.sourceHandoff(ink) {
+            .then(if (!moving || link == null) Modifier else Modifier.sourceHandoff({ if (paired()) ink() else 1f }) {
                 origins.sourceBounds(link)?.translate(-origin)
             })
     }
@@ -205,13 +205,14 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
         renderInOverlayDuringTransition = false).placedPage(link)
     Box(sharedFrame.fillMaxSize().then(tag).graphicsLayer {
             // With no live partner, fade in place; never aim at a newly recycled row.
+            val matched = paired()
             alpha = when {
                 !moving -> 1f
-                paired() -> if (sampled.value > 0f) 1f else 0f
+                matched -> if (sampled.value > 0f) 1f else 0f
                 link != null && origins.live(link) && !returning -> sampled.value
                 else -> openness.value
             }
-            if (link != null && paired()) shape = link.shape
+            if (link != null && matched) shape = link.shape
             clip = true
         }.containerPaper(origins, link, moving, paired, ink)
         .approachLayout(isMeasurementApproachInProgress = { paired() },
@@ -222,11 +223,12 @@ internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, co
             val w = window.constrainWidth(page.width)
             val h = window.constrainHeight(page.height)
             layout(w, h) {
-                if (paired()) coordinates?.let {
+                val matched = paired()
+                if (matched) coordinates?.let {
                     val position = lookaheadScopeCoordinates.localPositionOf(it, Offset.Zero)
                     windowInOverlay.value = Rect(position.x, position.y, position.x + w, position.y + h)
                 }
-                val row = if (paired() && h != page.height) rows?.get(key) else null
+                val row = if (matched && h != page.height) rows?.get(key) else null
                 val tx = if (row != null) page[TitleX] else AlignmentLine.Unspecified
                 val ty = if (row != null) page[TitleY] else AlignmentLine.Unspecified
                 if (row == null || row.height !in 1 until page.height ||

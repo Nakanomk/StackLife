@@ -75,8 +75,8 @@ private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: As
         model.composerReturned(id)
         onDispose { if (retainedId == null && activity?.isChangingConfigurations != true) model.composerLeft(id) }
     }
-    val ui by model.state.collectAsStateWithLifecycle()
-    val active = ui.page == null && !model.browsingHistory
+    val ui = model.state.collectAsStateWithLifecycle()
+    val active by remember(model, ui) { derivedStateOf { ui.value.page == null && !model.browsingHistory } }
     val currentPage by rememberUpdatedState(page)
     LaunchedEffect(draft, active) {
         if (active) snapshotFlow { draft.field.text.isNotEmpty() || draft.images.isNotEmpty() }.collect { hasContent ->
@@ -105,7 +105,6 @@ internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: Strin
         else -> null
     }
     val fieldDescription = stringResource(R.string.assistant_message_field, scope)
-    val enabled = active && draft.sendable
     val picker = rememberLauncherForActivityResult(PickMultipleVisualMedia(MAX_CHAT_IMAGES)) { uris ->
         if (active) draft.add(uris.map { ImageSource.Picker(it) })
     }
@@ -143,7 +142,7 @@ internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: Strin
                     modifier = button.testTag("$tagPrefix-attach")) {
                     Icon(painterResource(R.drawable.ic_add), stringResource(R.string.chat_attach), Modifier.size(24.dp))
                 }
-                IconButton(onClick = submit, enabled = enabled, modifier = button.testTag("$tagPrefix-send"),
+                IconButton(onClick = submit, enabled = active && draft.sendable, modifier = button.testTag("$tagPrefix-send"),
                     colors = IconButtonDefaults.iconButtonColors(contentColor = colors.primary)) {
                     Icon(painterResource(R.drawable.ic_assistant_send), stringResource(R.string.assistant_send), Modifier.size(24.dp))
                 }

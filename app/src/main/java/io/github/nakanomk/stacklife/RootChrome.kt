@@ -20,6 +20,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.blur.drawBackdrop
@@ -30,17 +31,39 @@ import io.github.nakanomk.stacklife.transitions.LocalRouteOriginsEnabled
 import io.github.nakanomk.stacklife.transitions.routeOrigin
 
 internal val LocalFeatureBack = compositionLocalOf<(() -> Unit)?> { null }
-internal val LocalRootBottom = compositionLocalOf { 0.dp }
+internal val LocalRootBottom = compositionLocalOf { PaddingValues(0.dp) }
 internal val chromeGutter = 16.dp
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun PagerPane(selected: Boolean, visible: Boolean, content: @Composable () -> Unit) {
     val semantics = if (selected) Modifier else Modifier.clearAndSetSemantics {}
-    Box(semantics.fillMaxSize().layout { child, constraints ->
-        val measured = child.measure(constraints)
-        layout(measured.width, measured.height) { if (visible) measured.place(0, 0) }
-    }.focusProperties { onEnter = { if (!selected) cancelFocusChange() } }.focusGroup()) {
-        CompositionLocalProvider(LocalPlannerGlassAllowed provides (visible && LocalPlannerGlassAllowed.current),
+    val insets = LocalRootBottom.current
+    // Retained off-screen pages have no pixels or touch targets to move. Keep
+    // their last measured inset; restore live geometry before the first visible placement.
+    val pageInsets = if (visible) insets else remember(insets) { PaddingValues(bottom = insets.calculateBottomPadding()) }
+    val showing = rememberUpdatedState(visible)
+    val ime = WindowInsets.ime
+    val target = WindowInsets.imeAnimationTarget
+    val viewport = remember(ime, target) {
+        var last = Constraints()
+        Modifier.layout { child, constraints ->
+            // A retained neighbor still measures its real contents. It needn't
+            // reflow them through every intermediate keyboard height while it isn't
+            // placed. Catch up at the target, on width changes, or before revealing it.
+            val hold = !showing.value && constraints.hasFixedHeight && last.hasFixedHeight &&
+                last.minWidth == constraints.minWidth && last.maxWidth == constraints.maxWidth &&
+                ime.getBottom(this) != target.getBottom(this)
+            val childConstraints = if (hold) last else constraints
+            last = childConstraints
+            val measured = child.measure(childConstraints)
+            layout(measured.width, if (hold) constraints.maxHeight else measured.height) {
+                if (showing.value) measured.place(0, 0)
+            }
+        }
+    }
+    Box(semantics.fillMaxSize().then(viewport).focusProperties { onEnter = { if (!selected) cancelFocusChange() } }.focusGroup()) {
+        CompositionLocalProvider(LocalRootBottom provides pageInsets, LocalPlannerGlassAllowed provides (visible && LocalPlannerGlassAllowed.current),
             LocalRouteOriginsEnabled provides (selected && LocalRouteOriginsEnabled.current), content = content)
     }
 }
@@ -51,7 +74,7 @@ internal fun RootPane(header: @Composable () -> Unit,
     contentDrawsTopEdge: Boolean = false,
     content: @Composable (top: Dp, bottom: Dp) -> Unit) {
     val source = rememberPlannerBackdrop()
-    val bottom = LocalRootBottom.current
+    val dockInsets = LocalRootBottom.current
     Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), topBar = {
         Box(Modifier.fillMaxWidth().then(if (source == null) Modifier.wallpaperBackground(MaterialTheme.colorScheme.surface) else Modifier)) {
             if (source != null && !contentDrawsTopEdge) ScrollEdge(source, Modifier.matchParentSize())
@@ -61,8 +84,10 @@ internal fun RootPane(header: @Composable () -> Unit,
         val top = insets.calculateTopPadding()
         Box(Modifier.fillMaxSize()) {
             val plane = Modifier.fillMaxSize()
-            Box(plane.plannerBackdrop(source).wallpaperBackground(MaterialTheme.colorScheme.surface)) { content(top, bottom) }
-            CompositionLocalProvider(LocalCapsuleBackdrop provides source) { overlay(top, bottom) }
+            Box(plane.plannerBackdrop(source).wallpaperBackground(MaterialTheme.colorScheme.surface)) {
+                content(top, dockInsets.calculateBottomPadding())
+            }
+            CompositionLocalProvider(LocalCapsuleBackdrop provides source) { overlay(top, dockInsets.calculateBottomPadding()) }
         }
     }
 }

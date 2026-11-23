@@ -60,7 +60,8 @@ internal fun PlannerPopupHost(enabled: Boolean = true, content: @Composable () -
 }
 
 @Composable
-private fun PopupPanel(shape: RoundedCornerShape, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+private fun PopupPanel(shape: RoundedCornerShape, modifier: Modifier = Modifier, materialBounds: Modifier = Modifier,
+    content: @Composable () -> Unit) {
     val a = LocalAppearance.current
     val readers = LocalPanelReaders.current.takeIf { LocalPlannerGlassAllowed.current && a.glass && glassUnavailableReason(a) == null }
     DisposableEffect(readers) {
@@ -80,7 +81,8 @@ private fun PopupPanel(shape: RoundedCornerShape, modifier: Modifier = Modifier,
         onDispose { if (observer.isAlive) observer.removeOnDrawListener(listener) }
     }
     CompositionLocalProvider(LocalCapsuleBackdrop provides plane) {
-        StackLifeSurface(CapsuleScene.PANEL, modifier, MaterialTheme.colorScheme.surfaceContainerHigh, 4.dp, shape, content = content)
+        StackLifeSurface(CapsuleScene.PANEL, modifier, MaterialTheme.colorScheme.surfaceContainerHigh, 4.dp, shape,
+            materialBounds = materialBounds, content = content)
     }
 }
 
@@ -160,7 +162,20 @@ internal fun PlannerModalBottomSheet(onDismissRequest: () -> Unit, nested: Boole
             if (sheetState.currentValue != SheetValue.Expanded) sheetState.expand()
             next.startInputMethod(request)
         } }
-        PopupPanel(sheetShape, Modifier.fillMaxSize().testTag("planner-sheet-shell")) {
+        // Material keeps full-height drag anchors. Only the glass backing needs a smaller
+        // render target during hidden ↔ half travel. Keep its bottom edge off screen and
+        // its size fixed until crossing the half anchor, not a new GPU buffer each frame.
+        val glassViewport = remember(sheetState) {
+            Modifier.layout { measurable, constraints ->
+                val full = constraints.maxHeight
+                val half = full / 2
+                val height = if (sheetState.hasPartiallyExpandedState && sheetState.requireOffset() >= half)
+                    (half + 96.dp.roundToPx()).coerceAtMost(full) else full
+                val glass = measurable.measure(constraints.copy(minHeight = height, maxHeight = height))
+                layout(glass.width, full) { glass.place(0, 0) }
+            }
+        }
+        PopupPanel(sheetShape, Modifier.fillMaxSize().testTag("planner-sheet-shell"), materialBounds = glassViewport) {
             // Material positions the full-height shell at its drag offset. Only the
             // visible part may measure the list/footer; otherwise the IME or the
             // partial anchor puts bottom actions below the physical screen.

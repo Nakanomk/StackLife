@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -126,7 +127,8 @@ internal fun GlassBacking(modifier: Modifier = Modifier, background: @Composable
 @Composable
 internal fun StackLifeSurface(scene: CapsuleScene, modifier: Modifier, solid: Color, elevation: Dp = 0.dp,
     shape: RoundedCornerShape = CircleShape, tint: Color = Color.Unspecified,
-    interactionSource: InteractionSource? = null, solidBorder: BorderStroke? = null, content: @Composable () -> Unit) {
+    interactionSource: InteractionSource? = null, solidBorder: BorderStroke? = null, materialBounds: Modifier = Modifier,
+    content: @Composable () -> Unit) {
     val a = LocalAppearance.current
     val source = LocalCapsuleBackdrop.current?.takeIf { LocalPlannerGlassAllowed.current && a.glass && glassUnavailableReason(a) == null && when (scene) {
         CapsuleScene.NAVIGATION -> a.navGlass
@@ -157,14 +159,15 @@ internal fun StackLifeSurface(scene: CapsuleScene, modifier: Modifier, solid: Co
             scaleY = scale
         }
     } else Modifier
-    OpticalSurface(scene, modifier.then(semantics).then(courseContact), source, nestedShell, shape, tint, floating, elastic, content)
+    OpticalSurface(scene, modifier.then(semantics).then(courseContact), source, nestedShell, shape, tint, floating, elastic, materialBounds, content)
 }
 
 @RequiresApi(33)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Backdrop, nestedShell: Boolean,
-    shape: RoundedCornerShape, tint: Color, floating: Boolean, elastic: Boolean, content: @Composable () -> Unit) {
+    shape: RoundedCornerShape, tint: Color, floating: Boolean, elastic: Boolean, materialBounds: Modifier,
+    content: @Composable () -> Unit) {
     val touch = if (elastic) remember { GlassTouch() } else null
     val transform = touch?.let { rememberGlassTouchLayer(it) }
     val panel = scene == CapsuleScene.PANEL || scene == CapsuleScene.TRAY
@@ -220,13 +223,21 @@ private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Back
             drawRect(tint.copy(alpha = .75f))
         }
         drawRect(wash, blendMode = blend)
-    }, onDrawFront = if (specular == null) null else {
+    }, onDrawFront = if (specular == null || input) null else {
         { drawEdgeStroke(shape, specular.value, .75f * dockGeometryScale(size.minDimension)) }
     })
+    // The editor's rim is over the wash and under the text (this spacer has no
+    // other content). Give just the moving light its own display list: a light
+    // change no longer records the backdrop, and Miuix needn't force a full-size
+    // offscreen buffer for onDrawFront. The receiver still clips both together.
+    val inputRim = if (!input || specular == null) Modifier else Modifier.graphicsLayer().drawBehind {
+        drawEdgeStroke(shape, specular.value, .75f * dockGeometryScale(size.minDimension))
+    }
     val receiver = if (touch == null) modifier else modifier.observeGlassTouch(touch, ownsScrub = floating)
     Box(receiver, propagateMinConstraints = true) {
-        Spacer(Modifier.matchParentSize().then(if (export == null) Modifier.plannerBackdrop(panelPlane) else Modifier.layerBackdrop(export))
-            .then(shadow).then(material))
+        Spacer(Modifier.matchParentSize().then(materialBounds)
+            .then(if (export == null) Modifier.plannerBackdrop(panelPlane) else Modifier.layerBackdrop(export))
+            .then(shadow).then(material).then(inputRim))
         val body = if (transform == null) Modifier else Modifier.graphicsLayer(block = transform)
         Box(if (floating) body else body.clip(shape), propagateMinConstraints = true) {
             if (export == null && panelPlane == null && touch == null) content()

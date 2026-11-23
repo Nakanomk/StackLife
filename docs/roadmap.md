@@ -4,7 +4,7 @@ StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Andr
 
 **项目许可：** StackLife 采用 [GNU 通用公共许可证第 3 版或任何后续版本](../LICENSE)（`GPL-3.0-or-later`）。第三方代码与资源保留[各自的许可和署名](../app/src/main/assets/licenses/)。
 
-**当前候选版本：v0.10.15（30），Room v12。** 本次[转场修正与助理帧测量](#v01015-转场与助理帧测量)不迁移日程或重建库。M1–M6 是历史契约；原本“冲突拒绝写入”“节点都是模板”等规则已由[排程与链接升级](#v01012-排程链接倒数日与外观)替代。普通包不含联盟 SDK。
+**当前候选版本：v0.10.16（31），Room v12。** 本次[无缝转场与助理性能优化](#v01016-无缝转场与助理性能)不迁移日程或重建库。M1–M6 是历史契约；原本“冲突拒绝写入”“节点都是模板”等规则已由[排程与链接升级](#v01012-排程链接倒数日与外观)替代。普通包不含联盟 SDK。
 
 ## 起点与产品决定
 
@@ -376,6 +376,12 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 
 - **连续画面。** 普通单窗格导航只提升实际配对的控件或工具层，不同时提升整页。移动边界外保留来源页的内容和壁纸，边界内绘制真实目的页，只在与来源控件重叠的区域交接文字。打开、返回、反拖和取消沿同一条路径；失锚时在父页上淡化。模型密钥页仍受系统防录屏保护。
 - **助理帧耗时。** `.bench` 在后台准备 30 项任务和 5 条课程，直接进入工作台，不显示准备页。键盘进出、连续四行编辑和离线面板开合分开测，玻璃与实色各五轮。用 [`FrameTimingMetric`](https://developer.android.com/topic/performance/benchmarking/macrobenchmark-metrics)；设备仪器驱动阻塞时，用系统 [Perfetto FrameTimeline](https://perfetto.dev/docs/data-sources/frametimeline) 按应用进程、同一帧的实际和期望完成时间计算超期。等待夹具、网络耗时和模拟器数据不计入真机结果。
+
+### v0.10.16 无缝转场与助理性能
+
+- **转场。** 沿用 [BiliPai 的共享容器](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/navigation3/SettingsSharedContainerTransition.kt)的来源／目的分工，只为两者重叠的控件范围做透明度合成。被覆盖的静止玻璃页在交叠期间复用[硬件图层](https://developer.android.com/develop/ui/compose/graphics/draw/modifiers#graphicslayer)，页内数据变化仍立即重绘。根页、队列和栈采用 [AndroidX Pager 按需创建](https://developer.android.com/develop/ui/compose/layouts/pager#lazy-creation)；返回工作台不强制构造其他根页，各页按自己的 key 恢复状态。非线性曲线、预测返回、取消和失锚行为不变。
+- **助理。** 按 [Compose 阶段](https://developer.android.com/develop/ui/compose/performance/phases)把键盘净空留给实际可见的页面，保留草稿和今天页末的 16dp。输入框边光单独绘制，文字和光标不参与背景滤镜；半高抽屉不处理屏下大段不可见的玻璃，Material 的全高锚点和手势区不变。普通文字不用逐键建 Markdown 语法树，含有潜在标记的输入仍走原解析器。
+- **对照方法。** 同一台手机、同一档系统刷新率与合成数据，分别预热玻璃／实色，每档五轮：首张任务卡往返、键盘弹起收回、聚焦后连续输入四行、离线消息面板打开关闭。只比较应用 [FrameTimeline](https://perfetto.dev/docs/data-sources/frametimeline) 的帧，不计模型速度。`P95` 超期大于零的场景仍未达到 M6 目标。
 
 ### 历史里程碑验收用例（M1–M6）
 

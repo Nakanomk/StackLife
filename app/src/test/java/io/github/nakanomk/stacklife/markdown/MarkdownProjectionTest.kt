@@ -57,6 +57,23 @@ class MarkdownProjectionTest {
         assertNull(MarkdownEditorEngine.continueDocumentList("- [ ] task", 1, cache))
     }
 
+    @Test fun nativeEditorMatchesReaderTextStylesAndOffsetsAsPlainProseBecomesMarkdown() {
+        val cache = MarkdownDocumentCache()
+        for (source in listOf("", "今天 123", "今天 123\n\nNext line", "中  \n文", "中\\\n文",
+            "    code", "text\n\n\tcode", "contact <a@example.org>", "one\r\n**two**", "1. item", "😀 __中文__")) {
+            val reader = MarkdownDocumentScanner.scan(source)
+            val editor = cache.get(source)
+            assertEquals(source, reader.elements, editor.elements)
+            assertEquals(source, reader.listMarkerEnds, editor.listMarkerEnds)
+            for (caret in listOf(null, TextRange(source.length / 2))) {
+                assertEquals(source, projected(reader, caret), projected(editor, caret))
+                val expected = MarkdownRenderProjection(reader, caret, null)
+                val actual = MarkdownRenderProjection(editor, caret, null)
+                for (i in 0..source.length) assertEquals("$source @ $i", expected.mapped(i), actual.mapped(i))
+            }
+        }
+    }
+
     @Test fun hundredKilobyteDocumentReusesOneParseAcrossCursorAndSelectionChanges() {
         val body = "plain中😀 ".repeat(13_000)
         val source = "__start__\n\n$body\n\n**end**"
