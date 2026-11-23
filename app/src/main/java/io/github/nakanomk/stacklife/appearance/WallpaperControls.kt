@@ -85,7 +85,7 @@ internal fun WallpaperControls(value: Appearance, change: (Appearance) -> Unit, 
     val own = if (target == null) value.background else value.pageBackgrounds[target]
     val spec = own ?: value.background
     val mode = if (own == null) WallpaperSource.INHERIT else if (own.imageId == null) WallpaperSource.SOLID else WallpaperSource.IMAGE
-    Column {
+    FormGroup(Modifier.testTag("wallpaper-card"), frosted = true) {
         SectionTitle(stringResource(R.string.wallpaper_title))
         Choice(stringResource(R.string.wallpaper_target), listOf(null) + Destination.entries, target,
             { it?.label ?: stringResource(R.string.wallpaper_global) }, change = chooseTarget)

@@ -59,11 +59,14 @@ class AppearanceEditorInteractionTest {
     private class Selection : ActivityResultRegistry(), ActivityResultRegistryOwner {
         @Volatile var uri: Uri? = null
         @Volatile var hold = false
+        var launches = 0
+            private set
         private var pending: Int? = null
         override val activityResultRegistry: ActivityResultRegistry get() = this
         override fun <I, O> onLaunch(requestCode: Int, contract: ActivityResultContract<I, O>, input: I, options: ActivityOptionsCompat?) {
             check(contract is PickVisualMedia && (input as PickVisualMediaRequest).mediaType == PickVisualMedia.ImageOnly)
             check(pending == null)
+            launches++
             pending = requestCode
             if (!hold) finishSelection()
         }
@@ -166,6 +169,37 @@ class AppearanceEditorInteractionTest {
         openSettings(); openGroup("布局"); page(TODAY)
         choice(ui.activity.getString(R.string.ui_nav_style), ui.activity.getString(R.string.ui_bottom_nav))
         page(TODAY)
+    }
+
+    @Test fun wallpaperShortcutStartsAtTheCardAndRestoresTheUsersScroll() {
+        val picker = Selection()
+        val original = saved()
+        val before = revision()
+        attach(selection = picker); openSettings(); openGroup(ui.activity.getString(R.string.wallpaper_title))
+
+        // Read the entire default card in the initial viewport, without scrolling to its controls.
+        val window = await(hasTestTag("appearance-scroll")).getUnclippedBoundsInRoot()
+        val card = await(hasTestTag("wallpaper-card")).getUnclippedBoundsInRoot()
+        assertTrue("Wallpaper card $card outside editor $window", card.top >= window.top && card.bottom <= window.bottom)
+        await(row("应用范围")).assertIsDisplayed().assertTextContains("全局")
+        await(row("背景")).assertIsDisplayed().assertTextContains("主题纯色")
+        choice("应用范围", COURSES.label); choice("背景", "主题纯色")
+
+        // A deliberate scroll away and a preview change must win over the shortcut, even after recreation.
+        field(pagePreview)
+        val dockTab = hasTestTag("nav:${WORKSPACE.key}") and hasAnyAncestor(pagePreview)
+        await(dockTab).assertIsDisplayed().performClick()
+        await(dockTab and isSelected()).assertIsDisplayed()
+        ui.activityRule.scenario.recreate(); attach(selection = picker)
+        await(dockTab and isSelected()).assertIsDisplayed()
+        assertEquals(original, saved()); assertEquals(before, revision())
+
+        await(row("保存外观") and isEnabled()).performClick(); await(row("材质与动态"))
+        assertEquals(original.copy(pageBackgrounds = original.pageBackgrounds + (COURSES to WallpaperSpec())), saved())
+        assertEquals(before + 1, revision())
+        openGroup("材质与动态"); await(pagePreview).assertIsDisplayed()
+        choice("应用范围", COURSES.label); field(row("背景")).assertTextContains("主题纯色")
+        ui.runOnIdle { assertEquals(0, picker.launches) }
     }
 
     @SdkSuppress(minSdkVersion = 29)

@@ -95,7 +95,7 @@ class MainActivity : LocalizedActivity() {
 @Serializable private data object Guidance : NavKey
 @Serializable private data object Preferences : NavKey
 @Serializable private data object HelpAbout : NavKey
-@Serializable private data class EditAppearance(val group: String) : NavKey
+@Serializable private data class EditAppearance(val group: String, val startAtWallpaper: Boolean = false) : NavKey
 @Serializable private data object ModelConnection : NavKey
 @Serializable private data object AddTask : NavKey
 @Serializable private data object CreateFrame : NavKey
@@ -114,7 +114,7 @@ private fun NavKey.motionKey(): String = when (this) {
     is NoteEditorKey -> "note:$draftId"
     is SlotEditorKey -> origin
     is GraphEditor -> "graph:$id"
-    is EditAppearance -> "appearance:$group"
+    is EditAppearance -> if (startAtWallpaper) WallpaperSettingsOrigin else "appearance:$group"
     is RemoveTerm -> "remove-term:$id:$source"
     is Feature -> "feature:${destination.key}"
     Guidance -> "guidance"
@@ -334,11 +334,12 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 }
                 entry<Preferences>(metadata = { key -> origins.sourceSceneMetadata(key.motionKey()) }) {
                     SettingsHelpHost { SettingsScreen(preferences, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) },
-                        { navigate(HelpAbout) }, { navigate(Feature(it)) }, navigate) }
+                        onWallpaper = { navigate(EditAppearance(AppearanceGroup.MATERIAL.key, startAtWallpaper = true)) },
+                        onAbout = { navigate(HelpAbout) }, onFeature = { navigate(Feature(it)) }, onSchedule = navigate) }
                 }
                 entry<HelpAbout> { HelpAboutScreen(back) { navigate(Guidance) } }
                 entry<EditAppearance> { key -> SettingsHelpHost { AppearanceEditor(preferences.appearance,
-                    AppearanceGroup.entries.first { it.key == key.group }, model, back) } }
+                    AppearanceGroup.entries.first { it.key == key.group }, model, startAtWallpaper = key.startAtWallpaper, onBack = back) } }
                 entry<ModelConnection> { PrivateScreen(privateScreens) { SettingsHelpHost { ConnectionScreen(assistant.connections, back) } } }
         }
         homePlane.Layout(Modifier.onGloballyPositioned { origins.host = it; origins.size = it.size }) {

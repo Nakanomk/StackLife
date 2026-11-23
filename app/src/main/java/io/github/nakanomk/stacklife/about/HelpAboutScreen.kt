@@ -3,17 +3,11 @@ package io.github.nakanomk.stacklife.about
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -21,7 +15,6 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
@@ -186,16 +179,10 @@ internal fun HelpAboutScreen(back: () -> Unit, onGuide: () -> Unit) {
                         } }
                     }
                 }
-                AboutPage.HOME -> LazyColumn(Modifier.fillMaxSize(), contentPadding = padding, verticalArrangement = listSpacing) {
-                    item { Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large,
-                        color = MaterialTheme.colorScheme.primaryContainer) {
-                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(painterResource(R.drawable.fumo_face), null, Modifier.size(52.dp))
-                            Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineLarge)
-                            Text(stringResource(R.string.about_developer), style = MaterialTheme.typography.bodyMedium)
-                            version.display { Text(stringResource(R.string.about_version, it.name ?: "—", it.code),
-                                modifier = Modifier.testTag("about-version"), style = MaterialTheme.typography.labelLarge) }
-                        }
+                AboutPage.HOME -> LazyColumn(Modifier.fillMaxSize(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    item { AboutIdentity {
+                        version.display { Text(stringResource(R.string.about_version, it.name ?: "—", it.code),
+                            modifier = Modifier.testTag("about-version"), style = MaterialTheme.typography.labelLarge) }
                     } }
                     item { FormGroup {
                         listOf(AboutPage.HELP, AboutPage.DIAGNOSTICS, AboutPage.BUILD, AboutPage.LICENSES).forEach { entry ->

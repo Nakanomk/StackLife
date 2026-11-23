@@ -5,6 +5,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.*
@@ -29,13 +30,15 @@ import sh.calvin.reorderable.ReorderableColumn
 
 private val appearanceSaver = Saver<Appearance, String>(save = { encodeAppearance(it) }, restore = ::decodeAppearance)
 private val validSeed = Regex("#[0-9A-F]{6}")
+private enum class EditorLeadSection { MESSAGE, PREVIEW, MATERIAL, WALLPAPER }
 private val AppearanceGroup.title: String @Composable get() = when (this) {
     AppearanceGroup.COLOR -> stringResource(R.string.ui_colors); AppearanceGroup.LAYOUT -> stringResource(R.string.ui_layout); AppearanceGroup.MATERIAL -> stringResource(R.string.ui_material_motion)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions: WorkspaceActions, onBack: () -> Unit) {
+internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions: WorkspaceActions,
+    startAtWallpaper: Boolean = false, onBack: () -> Unit) {
     var baseline by rememberSaveable(stateSaver = appearanceSaver) { mutableStateOf(saved) }
     var draft by rememberSaveable(stateSaver = appearanceSaver) { mutableStateOf(saved) }
     var seedInput by rememberSaveable { mutableStateOf(saved.seed) }
@@ -74,7 +77,20 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
     var previewPage by rememberSaveable(preview.start, wallpaperTarget) { mutableStateOf(wallpaperTarget ?: preview.start) }
     val reload = { baseline = saved; draft = saved; seedInput = saved.seed; message = "" }
     BackHandler(enabled = busy || leases.isNotEmpty()) { leave() }
-    val scroll = rememberLazyListState()
+    val hasMessage = message.isNotEmpty()
+    val leadSections = remember(group, hasMessage) {
+        buildList {
+            if (hasMessage) add(EditorLeadSection.MESSAGE)
+            add(EditorLeadSection.PREVIEW)
+            if (group == AppearanceGroup.MATERIAL) {
+                add(EditorLeadSection.MATERIAL)
+                add(EditorLeadSection.WALLPAPER)
+            }
+        }
+    }
+    // The entry point only chooses the initial viewport. LazyListState restores subsequent user scrolls.
+    val scroll = rememberLazyListState(initialFirstVisibleItemIndex =
+        if (startAtWallpaper && group == AppearanceGroup.MATERIAL) leadSections.indexOf(EditorLeadSection.WALLPAPER) else 0)
     StackLifeTheme(preview) {
         Page {
             CenterAlignedTopAppBar(title = { Text(group.title, style = MaterialTheme.typography.titleLarge) },
@@ -87,10 +103,18 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                 }, windowInsets = WindowInsets(0))
             LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("appearance-scroll"), state = scroll, contentPadding = dockListPadding(0.dp, 0.dp),
                 verticalArrangement = listSpacing) {
-                if (message.isNotEmpty()) item { Text(message, color = MaterialTheme.colorScheme.error) }
-                item {
-                    val page = previewPage.takeIf { it in preview.visible || it == wallpaperTarget } ?: preview.start
-                    AppearancePreview(preview, page) { previewPage = it }
+                items(leadSections, key = { it }) { section ->
+                    when (section) {
+                        EditorLeadSection.MESSAGE -> Text(message, color = MaterialTheme.colorScheme.error)
+                        EditorLeadSection.PREVIEW -> {
+                            val page = previewPage.takeIf { it in preview.visible || it == wallpaperTarget } ?: preview.start
+                            AppearancePreview(preview, page) { previewPage = it }
+                        }
+                        EditorLeadSection.MATERIAL -> MaterialFields(draft) { draft = it }
+                        EditorLeadSection.WALLPAPER -> if (picker != null) {
+                            WallpaperControls(draft, { draft = it }, wallpaperTarget, { wallpaperTarget = it }, picker)
+                        }
+                    }
                 }
                 when (group) {
                     AppearanceGroup.COLOR -> item { ColorFields(draft, seedInput, { seedInput = it }, { draft = it }) }
@@ -112,10 +136,6 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                         }
                     }
                     AppearanceGroup.MATERIAL -> {
-                        item { MaterialFields(draft) { draft = it } }
-                        item {
-                            if (picker != null) WallpaperControls(draft, { draft = it }, wallpaperTarget, { wallpaperTarget = it }, picker)
-                        }
                         item {
                             FormGroup(frosted = true) {
                                 SectionTitle(stringResource(R.string.ui_course_preview))

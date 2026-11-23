@@ -87,9 +87,12 @@ internal fun MissingDetail(title: String, message: String, onBack: () -> Unit) {
     }
 }
 
+internal const val WallpaperSettingsOrigin = "appearance:wallpaper"
+
 @Composable
 internal fun SettingsScreen(settings: PolicyView, actions: WorkspaceViewModel, onBack: () -> Unit,
-    onConnection: () -> Unit, onAppearance: (AppearanceGroup) -> Unit, onAbout: () -> Unit, onFeature: (Destination) -> Unit, onSchedule: (SlotEditorKey) -> Unit) {
+    onConnection: () -> Unit, onAppearance: (AppearanceGroup) -> Unit, onWallpaper: () -> Unit,
+    onAbout: () -> Unit, onFeature: (Destination) -> Unit, onSchedule: (SlotEditorKey) -> Unit) {
     val action = rememberSubmission(actions)
     EditorPage(stringResource(R.string.ui_settings), onBack, AssistantPage.Settings) { top, bottom ->
             LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -107,6 +110,9 @@ internal fun SettingsScreen(settings: PolicyView, actions: WorkspaceViewModel, o
                     HorizontalDivider(Modifier.padding(start = 32.dp))
                     PreferenceRow(stringResource(R.string.ui_material_motion), modifier = Modifier.routeOrigin("appearance:${AppearanceGroup.MATERIAL.key}"),
                         leadingIcon = R.drawable.ic_blur_on) { onAppearance(AppearanceGroup.MATERIAL) }
+                    HorizontalDivider(Modifier.padding(start = 32.dp))
+                    PreferenceRow(stringResource(R.string.wallpaper_title), modifier = Modifier.routeOrigin(WallpaperSettingsOrigin)
+                        .testTag("settings-wallpaper"), leadingIcon = R.drawable.ic_wallpaper, onClick = onWallpaper)
                 } }
                 item { SettingsGroup(stringResource(R.string.pref_general)) {
                     LanguagePreference()
