@@ -40,7 +40,6 @@ import io.github.nakanomk.stacklife.transitions.PaneOrigins
 import io.github.nakanomk.stacklife.transitions.paneOrigin
 import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch
 import io.github.nakanomk.stacklife.workspace.CheckRow
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -50,6 +49,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import io.github.nakanomk.stacklife.markdown.MarkdownComposer
 import java.util.UUID
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 internal val LocalAssistant = staticCompositionLocalOf<AssistantModel?> { null }
 internal val LocalRootDraftId = staticCompositionLocalOf<String?> { null }
@@ -75,8 +76,9 @@ private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: As
         model.composerReturned(id)
         onDispose { if (retainedId == null && activity?.isChangingConfigurations != true) model.composerLeft(id) }
     }
-    val ui = model.state.collectAsStateWithLifecycle()
-    val active by remember(model, ui) { derivedStateOf { ui.value.page == null && !model.browsingHistory } }
+    val chatOpen by remember(model) { model.state.map { it.page != null }.distinctUntilChanged() }
+        .collectAsStateWithLifecycle(initialValue = model.state.value.page != null)
+    val active = !chatOpen && !model.browsingHistory
     val currentPage by rememberUpdatedState(page)
     LaunchedEffect(draft, active) {
         if (active) snapshotFlow { draft.field.text.isNotEmpty() || draft.images.isNotEmpty() }.collect { hasContent ->
@@ -86,26 +88,27 @@ private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: As
     val openHistory = LocalOpenChatHistory.current
     MessageEditor(model, draft, draft.origin?.scopeName() ?: scope, { model.submitLocal(id, target) },
         draft.origin?.takeIf { page != null && it != page && privateScope == null }?.let { stringResource(R.string.assistant_draft_scope, it.scopeName()) },
-        active = active, openHistory = { openHistory(page ?: AssistantPage.Terms) })
+        active = active, keepField = true, openHistory = { openHistory(page ?: AssistantPage.Terms) })
 }
 
 // BiliPai AppCompactInputField.kt (5893c2c, GPL-3.0): separate text and action slots.
 // Keep the original single-line capsule's radius as the native multiline field grows.
 @Composable
 internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: String, onSend: () -> Unit, originHint: String? = null,
-    active: Boolean = true, openHistory: (() -> Unit)? = null, tagPrefix: String = "assistant", historyOrigin: Modifier = Modifier) {
+    active: Boolean = true, openHistory: (() -> Unit)? = null, tagPrefix: String = "assistant", historyOrigin: Modifier = Modifier,
+    keepField: Boolean = false) {
     val colors = MaterialTheme.colorScheme
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val haptics = LocalHapticFeedback.current
     var editing by remember { mutableStateOf(false) }
     val solidBorder = when {
-        editing -> BorderStroke(1.5.dp, colors.primary)
+        active && editing -> BorderStroke(1.5.dp, colors.primary)
         colors.surface.luminance() < .5f -> BorderStroke(1.dp, colors.outline)
         else -> null
     }
     val fieldDescription = stringResource(R.string.assistant_message_field, scope)
-    val picker = rememberLauncherForActivityResult(PickMultipleVisualMedia(MAX_CHAT_IMAGES)) { uris ->
+    val picker = rememberLauncherForActivityResult(remember { PickMultipleVisualMedia(MAX_CHAT_IMAGES) }) { uris ->
         if (active) draft.add(uris.map { ImageSource.Picker(it) })
     }
     val submit: () -> Unit = {
@@ -135,9 +138,10 @@ internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: Strin
                     Text(stringResource(R.string.assistant_message_placeholder), maxLines = 1, overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
                 }
-                if (active) MarkdownComposer(draft.field, field.testTag("$tagPrefix-input")
-                    .semantics { contentDescription = fieldDescription }.onFocusChanged { editing = it.isFocused }, submit, placeholder)
-                else Box(field) { placeholder() }
+                if (active || keepField) {
+                    val label = if (active) Modifier.testTag("$tagPrefix-input").semantics { contentDescription = fieldDescription } else Modifier
+                    MarkdownComposer(draft.field, field.then(label).onFocusChanged { editing = it.isFocused }, submit, placeholder, enabled = active)
+                } else Box(field) { placeholder() }
                 IconButton(onClick = { picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) }, enabled = active,
                     modifier = button.testTag("$tagPrefix-attach")) {
                     Icon(painterResource(R.drawable.ic_add), stringResource(R.string.chat_attach), Modifier.size(24.dp))
@@ -162,16 +166,17 @@ private sealed interface AssistantPanel {
 @Composable
 internal fun AssistantPanels(model: AssistantModel, history: AssistantPage?, configuring: Boolean,
     onCloseHistory: () -> Unit, onSettings: () -> Unit, onImport: () -> Unit) {
-    val ui by model.state.collectAsStateWithLifecycle()
+    val state = model.state.collectAsStateWithLifecycle()
+    // The activity hosts the window, not the transcript. Only a change of
+    // visibility or commit protection needs to recompose the sheet's caller.
+    val chatOpen by remember(state) { derivedStateOf { state.value.page != null } }
+    val canDismiss by remember(state) { derivedStateOf { state.value.work != AssistantWork.COMMIT } }
     SideEffect { model.browsingHistory = history != null }
     var selected by rememberSaveable(history) { mutableStateOf<Long?>(null) }
-    if (history == null && ui.page == null) return
+    if (history == null && !chatOpen) return
     val origins = remember { PaneOrigins() }
-    val listState = rememberLazyListState()
-    val chatState = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+    val paneState = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     if (configuring) return
-    val threads = if (history != null) remember(model) { model.history.observeConversations() }
-        .collectAsStateWithLifecycle(initialValue = null).value else null
     val thread = selected
     val panel = when {
         history == null -> AssistantPanel.Chat
@@ -180,7 +185,7 @@ internal fun AssistantPanels(model: AssistantModel, history: AssistantPage?, con
     }
     val previous = when (panel) {
         is AssistantPanel.Thread -> AssistantPanel.History(panel.fallback)
-        is AssistantPanel.History -> AssistantPanel.Chat.takeIf { ui.page != null }
+        is AssistantPanel.History -> AssistantPanel.Chat.takeIf { chatOpen }
         AssistantPanel.Chat -> null
     }
     val back: () -> Unit = {
@@ -191,18 +196,20 @@ internal fun AssistantPanels(model: AssistantModel, history: AssistantPage?, con
         }
     }
     PlannerModalBottomSheet(back, nested = previous != null, onNestedBack = back,
-        canDismiss = ui.work != AssistantWork.COMMIT) {
+        canDismiss = canDismiss) {
+        val threads = if (history != null) remember(model) { model.history.observeConversations() }
+            .collectAsStateWithLifecycle(initialValue = null).value else null
         PaneMotion(panel, origins, depth = { when (it) {
             AssistantPanel.Chat -> 0; is AssistantPanel.History -> 1; is AssistantPanel.Thread -> 2
         } }, originKey = { when (it) {
             AssistantPanel.Chat -> "chat"; is AssistantPanel.History -> "history"; is AssistantPanel.Thread -> "thread:${it.id}"
-        } }, parent = previous.takeUnless { ui.work == AssistantWork.COMMIT }, onBack = back, modifier = Modifier.fillMaxSize()) { shown ->
+        } }, parent = previous.takeIf { canDismiss }, onBack = back, modifier = Modifier.fillMaxSize()) { shown ->
             when (shown) {
-                AssistantPanel.Chat -> chatState.SaveableStateProvider("chat") { ChatPanel(model, ui, shown == panel, origins, onSettings, onImport) }
+                AssistantPanel.Chat -> paneState.SaveableStateProvider("chat") { ChatPanel(model, state.value, shown == panel, origins, onSettings, onImport) }
                 else -> {
                     val id = (shown as? AssistantPanel.Thread)?.id
                     val fallback = if (shown is AssistantPanel.Thread) shown.fallback else (shown as AssistantPanel.History).fallback
-                    ConversationHistoryPane(model, fallback, id, origins, threads, listState, shown == panel, onThread = {
+                    ConversationHistoryPane(model, fallback, id, origins, threads, paneState, shown == panel, onThread = {
                         if (it == null && id != null) model.leaveDraft("history:$id")
                         selected = it
                     },
@@ -248,8 +255,6 @@ private fun ChatPanel(model: AssistantModel, ui: AssistantState, active: Boolean
         NoticeLevel.ERROR -> if (dark) Color(0xFFFFC1BA) else Color(0xFFA40E26)
     }
     val draft = ui.composerId?.let(model::draft) ?: return
-    val settingsLaunch = rememberRouteLaunch("model")
-    val importLaunch = rememberRouteLaunch("course-import")
         Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 4.dp).testTag("assistant-sheet")) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -324,8 +329,11 @@ private fun ChatPanel(model: AssistantModel, ui: AssistantState, active: Boolean
             }
             when {
                 ui.work == AssistantWork.LOADING -> Unit
-                service == null -> ActionPill(stringResource(R.string.assistant_configure_service),
-                    { settingsLaunch.open { model.leaveForConfiguration(); onSettings() } }, settingsLaunch.modifier, prominent = true)
+                service == null -> {
+                    val launch = rememberRouteLaunch("model")
+                    ActionPill(stringResource(R.string.assistant_configure_service),
+                        { launch.open { model.leaveForConfiguration(); onSettings() } }, launch.modifier, prominent = true)
+                }
                 ui.work == AssistantWork.COMMIT -> Text(stringResource(R.string.assistant_saving))
                 ui.work == AssistantWork.REQUEST -> Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -335,9 +343,10 @@ private fun ChatPanel(model: AssistantModel, ui: AssistantState, active: Boolean
                 }
                 ready != null || ui.reviewAgain -> Unit
                 ui.importRequested -> Row {
+                    val launch = rememberRouteLaunch("course-import")
                     ActionPill(stringResource(R.string.assistant_cancel), model::cancel)
                     ActionPill(stringResource(R.string.assistant_open_importer),
-                        { importLaunch.open { model.close(); onImport() } }, importLaunch.modifier, prominent = true)
+                        { launch.open { model.close(); onImport() } }, launch.modifier, prominent = true)
                 }
                 else -> MessageEditor(model, draft, page.scopeName(), model::send, active = active, openHistory = { openHistory(page) },
                     historyOrigin = Modifier.paneOrigin(origins, "history"))

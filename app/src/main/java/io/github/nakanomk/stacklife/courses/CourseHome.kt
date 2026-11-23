@@ -39,6 +39,7 @@ import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.assistant.AssistantComposer
 import io.github.nakanomk.stacklife.assistant.AssistantPage
+import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.planner.Terms
 import io.github.nakanomk.stacklife.workspace.ActionPill
 import io.github.nakanomk.stacklife.workspace.SectionTitle
@@ -122,7 +123,7 @@ internal fun CourseHome(
     val terms = catalog.terms
     CourseEditorHost(model, editor, terms, onWeek)
     RootPane(contentDrawsTopEdge = term != null && week != null && !listMode, header = {
-        RootToolbar(onSettings, leading = {
+        RootToolbar(Destination.COURSES, onSettings, leading = {
             if (term != null) {
                 var menu by remember { mutableStateOf(false) }
                 Box {

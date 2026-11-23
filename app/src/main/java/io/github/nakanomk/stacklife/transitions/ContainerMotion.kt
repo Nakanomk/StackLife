@@ -5,10 +5,8 @@ package io.github.nakanomk.stacklife.transitions
 // (5893c2c80739e3759ac64ae5f232cf03a94da7f8, GPL-3.0). The host is the actual Nav3 or sheet layout.
 import androidx.compose.animation.*
 import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.animation.core.SeekableTransitionState
 import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.createChildTransition
-import androidx.compose.animation.core.rememberTransition
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
@@ -18,17 +16,16 @@ import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.*
 import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.drawscope.clipPath
 import io.github.nakanomk.stacklife.appearance.LocalCapsuleBackdrop
 import io.github.nakanomk.stacklife.appearance.LocalPanelBack
 import io.github.nakanomk.stacklife.appearance.LocalWallpaperRecording
 import io.github.nakanomk.stacklife.appearance.wallpaperBackground
 import androidx.compose.ui.layout.*
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
@@ -42,6 +39,52 @@ import kotlin.math.floor
 internal const val ContainerDuration = 300
 internal val containerBounds = BoundsTransform { _, _ -> tween(ContainerDuration, easing = LinearEasing) }
 internal fun containerInk(open: Float, returning: Boolean) = ((open - if (returning) .6f else .2f) / .2f).coerceIn(0f, 1f)
+
+/** Only the last *painted window* belongs to this transition. If its launcher disappears,
+ * carry that window to the logical end edge; never extrapolate toward the former launcher.
+ * Seeking back above the handoff reopens the window to the page using the same Nav fraction. */
+internal class EdgeDeparture {
+    private var held: Rect? = null
+    private var corner = 0f
+    private var heldOpen = 1f
+    var detached = false
+        private set
+
+    fun placed(rect: Rect, radius: Float, open: Float) {
+        held = rect
+        corner = radius
+        heldOpen = open
+    }
+
+    fun loseMatch() {
+        if (held != null && heldOpen < 1f) detached = true
+    }
+
+    fun depart(page: Rect, hostWidth: Float, direction: LayoutDirection, open: Float): EdgeFrame {
+        val last = held
+        // A newly laid out parent can acquire its source at the untouched endpoint.
+        // After painting an intermediate edge frame, even the same source returning
+        // must not pull this gesture sideways onto a different trajectory.
+        if (open > 0f && open < 1f) detached = true else loseMatch()
+        val reopen = if (last == null || heldOpen >= 1f) 1f
+            else ((open - heldOpen) / (1f - heldOpen)).coerceIn(0f, 1f)
+        val frame = when {
+            last == null || reopen >= 1f -> page
+            reopen <= 0f -> last
+            else -> lerp(last, page, reopen)
+        }
+        val travel = if (heldOpen <= 0f) 0f else (1f - open / heldOpen).coerceIn(0f, 1f)
+        val distance = if (direction == LayoutDirection.Ltr) hostWidth - frame.left else -frame.right
+        return EdgeFrame(frame, (distance * travel).roundToInt().toFloat(), corner * (1f - reopen), 1f - reopen)
+    }
+}
+
+internal class EdgeFrame(val rect: Rect, val dx: Float, val radius: Float, val retained: Float)
+
+private class PaneEdgeOutline(private val edge: EdgeFrame) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
+        Outline.Rounded(RoundRect(Rect(Offset.Zero, edge.rect.size), CornerRadius(edge.radius)))
+}
 
 @Composable
 internal fun AnimatedVisibilityScope.containerOpen(enabled: Boolean, easing: Easing): State<Float> = transition.animateFloat(
@@ -59,21 +102,19 @@ internal fun LayoutCoordinates.fullBoundsIn(host: LayoutCoordinates?): Rect? {
     return whole.takeIf { visible.width + 1f >= uncut.width && visible.height + 1f >= uncut.height }
 }
 
-internal val LocalContainerScope = staticCompositionLocalOf<SharedTransitionScope?> { null }
-internal val LocalEntryDepth = compositionLocalOf { 0 }
-
 internal data class OriginSite(val owner: String?, val target: String, val site: Long)
-internal class ContainerAnchor(val site: OriginSite, val shape: Shape, val density: Density, val rowVisible: (() -> Boolean)? = null) {
-    var coordinates: LayoutCoordinates? = null
+internal open class ContainerAnchor(val site: OriginSite, val shape: Shape, val density: Density, val rowVisible: (() -> Boolean)? = null) {
+    var coordinates by mutableStateOf<LayoutCoordinates?>(null, referentialEqualityPolicy())
     var bounds by mutableStateOf<Rect?>(null)
         private set
-    fun place(node: LayoutCoordinates, host: LayoutCoordinates?) { coordinates = node; bounds = node.fullBoundsIn(host) }
+    fun place(node: LayoutCoordinates, host: LayoutCoordinates?) { coordinates = node; locate(host) }
+    fun locate(host: LayoutCoordinates?): Rect? = coordinates?.fullBoundsIn(host).also { bounds = it }
     fun radius(box: Rect) = (shape as? CornerBasedShape)?.topStart?.toPx(box.size, density)?.coerceIn(0f, box.minDimension / 2) ?: 0f
 }
 
 /** Remembers identity and host metrics, never a rectangle to animate back to. */
 internal class ContainerLink(val site: OriginSite, val hostSize: IntSize, val density: Density, val radius: Float,
-    val keepCardList: Boolean) {
+    val keepSource: Boolean) {
     var destination by mutableStateOf<LayoutCoordinates?>(null)
     var pageSize by mutableStateOf(IntSize.Zero)
     var frameSize by mutableStateOf(IntSize.Zero)
@@ -108,28 +149,6 @@ internal fun Transition<Boolean>.placedPair(link: ContainerLink): PairVisibility
     return driver
 }
 
-/** Back recomposes the removed parent with a *new* Nav3 entry transition. Keep the two
- * shared endpoints on the destination's seek instead; a newly placed row must not start
- * its own clock or replace the fully open start rectangle with its own bounds. */
-@Composable
-internal fun pairVisibility(origins: ContainerOrigins, link: ContainerLink?, open: State<Float>, moving: Boolean,
-    returning: Boolean): PairVisibility? {
-    if (link == null) return null
-    val state = remember(link) { SeekableTransitionState(returning || open.value == 1f) }
-    val pair = rememberTransition(state, label = "placed container")
-    val driver = pair.placedPair(link)
-    val active by rememberUpdatedState(moving)
-    val progress by rememberUpdatedState(open)
-    LaunchedEffect(link, state) {
-        snapshotFlow { Triple(active, progress.value, origins.live(link) && link.destination?.isAttached == true) }
-            .collect { (movingNow, fraction, placed) ->
-                if (!movingNow && fraction == 1f) state.snapTo(true)
-                else if (movingNow && placed) state.seekTo(if (state.currentState) 1f - fraction else fraction, !state.currentState)
-            }
-    }
-    return driver
-}
-
 internal open class ContainerOrigins {
     private val anchors = mutableStateMapOf<OriginSite, ContainerAnchor>()
     val links = mutableStateMapOf<String, ContainerLink>()
@@ -142,23 +161,23 @@ internal open class ContainerOrigins {
         // buttons' coordinates so a later click can resolve them at that instant.
         anchor.place(node, if (links[anchor.site.target]?.site == anchor.site) host else null)
     }
-    fun capture(target: String, owner: String?, chosen: OriginSite? = null, keepCardList: Boolean = false) {
-        val a = if (chosen != null) anchors[chosen]?.takeIf { chosen.owner == owner && chosen.target == target }
-            else anchors.values.singleOrNull { it.site.owner == owner && it.site.target == target && it.coordinates?.fullBoundsIn(host) != null }
-        a?.coordinates?.let { a.place(it, host) }
+    protected open fun keepSource(anchor: ContainerAnchor) = false
+    fun capture(target: String, owner: String?, chosen: OriginSite? = null) {
+        val a = if (chosen != null) anchors[chosen]?.takeIf { chosen.owner == owner && chosen.target == target && it.locate(host) != null }
+            else anchors.values.singleOrNull { it.site.owner == owner && it.site.target == target && it.locate(host) != null }
         val bounds = a?.bounds
         if (bounds == null || a.rowVisible?.invoke() == false) links.remove(target)
-        else links[target] = ContainerLink(a.site, size, a.density, a.radius(bounds), keepCardList = keepCardList && a.rowVisible != null)
+        else links[target] = ContainerLink(a.site, size, a.density, a.radius(bounds), keepSource(a))
     }
     /** The endpoint is geometry only. Moving the painted control through an overlay
      * and counter-translating it still filters its text at fractional display pixels. */
     @Composable
     fun SharedTransitionScope.PlacedSources() {
         for ((_, link) in links) key(link) {
+            val side = link.driver?.row // Entity cards have no shared-bounds spacer.
             val anchor = anchors[link.site]
             val bounds = anchor?.bounds
-            val side = link.driver?.row
-            if (anchor != null && anchor.rowVisible == null && bounds != null && side != null) {
+            if (side != null && anchor != null && anchor.rowVisible == null && bounds != null) {
                 val state = gatedContent(link) { live(link) }
                 Spacer(Modifier.layout { measurable, constraints ->
                     val source = measurable.measure(Constraints.fixed(bounds.width.roundToInt(), bounds.height.roundToInt()))
@@ -179,7 +198,8 @@ internal open class ContainerOrigins {
         }
     }
 
-    fun sourceCoordinates(link: ContainerLink) = anchors[link.site]?.coordinates
+    fun source(link: ContainerLink) = anchors[link.site]
+    fun sourceCoordinates(link: ContainerLink) = source(link)?.coordinates
     fun sourceBounds(link: ContainerLink) = anchors[link.site]?.bounds
     fun live(link: ContainerLink): Boolean {
         val a = anchors[link.site] ?: return false
@@ -205,7 +225,7 @@ internal fun Modifier.containerSource(origins: ContainerOrigins, anchor: Contain
 
 @Composable
 internal fun ContainerPage(origins: ContainerOrigins, link: ContainerLink?, visibility: AnimatedVisibilityScope,
-    scope: SharedTransitionScope?, open: State<Float>, sample: State<Float>, returning: Boolean, front: Boolean, moving: Boolean,
+    scope: SharedTransitionScope?, open: State<Float>, returning: Boolean, front: Boolean, moving: Boolean,
     modifier: Modifier, content: @Composable () -> Unit) {
     val density = LocalDensity.current
     val shared = if (link == null || scope == null) null else with(scope) {
@@ -214,12 +234,16 @@ internal fun ContainerPage(origins: ContainerOrigins, link: ContainerLink?, visi
         gatedContent(link) { front && origins.size == link.hostSize && link.density == density }
     }
     if (link != null) {
-        SideEffect { link.open = sample }
+        SideEffect { link.open = open }
         DisposableEffect(link) { onDispose { link.destination = null; link.open = null } }
     }
-    val ink = { containerInk(sample.value, returning) }
-    val paired = { moving && link != null && link.drawingMatch(origins, shared) }
-    val frame = if (shared == null || scope == null || link?.sourcePlaced != true) Modifier else with(scope) {
+    val ink = { containerInk(open.value, returning) }
+    val direction = LocalLayoutDirection.current
+    val departure = remember(origins, link, returning, moving) { EdgeDeparture() }
+    val orphan = moving && (link == null || departure.detached || !origins.live(link) || density != link.density)
+    if (orphan) departure.loseMatch()
+    val paired = { moving && !orphan && link != null && link.drawingMatch(origins, shared) }
+    val frame = if (departure.detached || shared == null || scope == null || link?.sourcePlaced != true) Modifier else with(scope) {
         Modifier.sharedBounds(shared, visibility,
             enter = EnterTransition.None, exit = ExitTransition.None, boundsTransform = containerBounds,
             resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds,
@@ -227,20 +251,61 @@ internal fun ContainerPage(origins: ContainerOrigins, link: ContainerLink?, visi
             // its parent and its donor; sharedBounds still places it at the animated rect.
             renderInOverlayDuringTransition = false).placedPage(link)
     }
-    val finalSize = if (scope == null || shared == null) Modifier else with(scope) {
+    val finalSize = if (orphan || scope == null || shared == null) Modifier else with(scope) {
         Modifier.skipToLookaheadSize { shared.isMatchFound }
     }
-    androidx.compose.foundation.layout.Box(frame.then(modifier).graphicsLayer {
-        val matched = paired()
-        alpha = when {
-            !moving -> 1f
-            matched -> if (sample.value > 0f) 1f else 0f
-            link != null && origins.live(link) && !returning -> sample.value
-            else -> open.value
+    var page by remember(departure, orphan) { mutableStateOf<Rect?>(null) }
+    val placement = if (!moving) Modifier else Modifier.onGloballyPositioned { c ->
+        val host = origins.host
+        if (host?.isAttached == true && c.isAttached) {
+            if (orphan) page = host.localBoundingBoxOf(c, clipBounds = false)
+            else if (link != null && paired()) {
+                val t = open.value
+                departure.placed(host.localBoundingBoxOf(c, clipBounds = false), link.radius * (1f - t), t)
+            }
         }
-        if (link != null) shape = link.shape
-        clip = matched
-    }.containerPaper(origins, link, moving, paired, ink).then(finalSize), propagateMinConstraints = true) { content() }
+    }
+    val edge by remember(departure, orphan, open, direction) { derivedStateOf {
+        if (!orphan) null else page?.let { full ->
+            departure.depart(full, origins.host?.size?.width?.toFloat() ?: full.right, direction, open.value)
+        }
+    } }
+    val carry = if (!orphan) Modifier else Modifier.graphicsLayer {
+        val e = edge
+        val full = page
+        if (e != null && full != null && !full.isEmpty) {
+            transformOrigin = TransformOrigin(0f, 0f)
+            translationX = e.rect.left + e.dx - full.left
+            translationY = e.rect.top - full.top
+            scaleX = e.rect.width / full.width
+            scaleY = e.rect.height / full.height
+            clip = true
+        }
+    }
+    // A narrow sheet isn't necessarily clipped by its window. Never paint the strip
+    // of the carried page that has already crossed the sheet's physical edge.
+    val viewport = if (!orphan) Modifier else Modifier.drawWithContent {
+        val e = edge ?: return@drawWithContent
+        val x = e.rect.left + e.dx
+        val width = origins.host?.size?.width?.toFloat() ?: return@drawWithContent
+        val left = maxOf(0f, -x)
+        val right = minOf(e.rect.width, width - x)
+        if (right > left) clipRect(left = left, right = right) { this@drawWithContent.drawContent() }
+    }
+    androidx.compose.foundation.layout.Box(frame.then(placement).then(carry).then(modifier).graphicsLayer {
+        val e = edge
+        if (e != null && !e.rect.isEmpty) {
+            transformOrigin = TransformOrigin(0f, 0f)
+            scaleX = size.width / e.rect.width
+            scaleY = size.height / e.rect.height
+            shape = PaneEdgeOutline(e)
+            clip = true
+        } else {
+            if (link != null) shape = link.shape
+            clip = paired()
+        }
+        alpha = if (moving && (open.value <= 0f || orphan && e == null)) 0f else 1f
+    }.then(viewport).containerPaper(origins, link, moving, paired, ink).then(finalSize), propagateMinConstraints = true) { content() }
 }
 
 /** Immediately inside sharedBounds: its lookahead placeholder and the painted child's
@@ -319,14 +384,3 @@ internal fun Modifier.sourceHandoff(coverage: () -> Float, slot: () -> Rect?): M
         }
     }
 }.graphicsLayer()
-
-internal fun Modifier.containerClip(bounds: () -> Rect, radius: () -> Float, enabled: () -> Boolean): Modifier = drawWithCache {
-    val path = Path()
-    onDrawWithContent {
-        if (!enabled()) drawContent() else {
-            val rect = bounds()
-            path.reset(); path.addRoundRect(RoundRect(rect, CornerRadius(radius().coerceIn(0f, rect.minDimension / 2f))))
-            clipPath(path) { this@onDrawWithContent.drawContent() }
-        }
-    }
-}

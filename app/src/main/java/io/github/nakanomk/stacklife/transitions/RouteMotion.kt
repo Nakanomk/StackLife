@@ -26,6 +26,8 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
@@ -59,19 +61,22 @@ internal class RouteLaunch(val modifier: Modifier, private val host: RouteOrigin
 
 internal class RouteOrigins : ContainerOrigins() {
     var chosen: OriginSite? = null
-    var canKeepCardList = false
+    var canKeepSource = false
     private val removed = mutableSetOf<String>()
     private val levels = mutableStateMapOf<String, Int>()
 
+    override fun keepSource(anchor: ContainerAnchor) = canKeepSource &&
+        (anchor.rowVisible != null || (anchor.site.owner == "home" && anchor.site.target == "settings"))
+
     fun push(key: String, from: String) {
         removed.remove(key)
-        capture(key, from, chosen, canKeepCardList)
+        capture(key, from, chosen)
         chosen = null
     }
     fun pop(key: String) { removed.add(key) }
     fun isPopped(key: String) = key in removed
-    fun cardSceneMetadata(key: String): Map<String, Any> =
-        if (links[key]?.keepCardList == true) liveCardMetadata else emptyMap()
+    fun sourceSceneMetadata(key: String): Map<String, Any> =
+        if (links[key]?.keepSource == true) liveSourceMetadata else emptyMap()
 
     // When a deeper editor returns to a disposed detail there is no live list to keep.
     // Don't build an invisible Home on the way back from editing.
@@ -85,7 +90,7 @@ internal class RouteOrigins : ContainerOrigins() {
             onDispose { levels.remove(key); if (removed.remove(key)) links.remove(key) }
         }
         val front = depth >= stackTop && levels.values.none { it > depth }
-        CompositionLocalProvider(LocalRouteOwner provides key, LocalEntryDepth provides depth, LocalFrontEntry provides front) {
+        CompositionLocalProvider(LocalRouteOwner provides key, LocalFrontEntry provides front) {
             EntryWindow(front, animate) {
                 if (ordinary) {
                     val visibility = LocalNavAnimatedContentScope.current
@@ -93,10 +98,7 @@ internal class RouteOrigins : ContainerOrigins() {
                     val open = visibility.routeOpen(animate && front)
                     val link = links[key]?.takeIf { it.site.owner == from }
                     val returning = visibility.transition.currentState == EnterExitState.Visible
-                    val driver = pairVisibility(this, link, open, moving, returning)
-                    ContainerPage(this, link, driver?.page ?: visibility, LocalContainerScope.current,
-                        open, driver?.open ?: open, returning, front, moving,
-                        Modifier.fillMaxSize().testTag("route:$key"), content)
+                    RoutePage(this, link, open, returning, moving, Modifier.testTag("route:$key"), content)
                 } else content()
             }
         }
@@ -110,33 +112,52 @@ internal class RouteOrigins : ContainerOrigins() {
 private fun EntryWindow(front: Boolean, animate: Boolean, content: @Composable () -> Unit) {
     var hasFocus by remember { mutableStateOf(false) }
     var covered by remember { mutableStateOf(false) }
+    val sourceCovered = LocalCoveredSource.current
+    val focus = LocalFocusManager.current
     SideEffect {
+        if (sourceCovered && hasFocus) focus.clearFocus(force = true)
         if (!front) covered = true else if (hasFocus) covered = false
     }
-    val keyboard = if (front && (!covered || hasFocus)) Modifier else {
-        val bars = WindowInsets.systemBars.union(WindowInsets.displayCutout)
-        Modifier.consumeWindowInsets(WindowInsets.ime.exclude(bars))
+    val bars = WindowInsets.systemBars
+    val cutout = WindowInsets.displayCutout
+    val ime = WindowInsets.ime
+    val extra = remember(ime, bars, cutout) { ime.exclude(bars.union(cutout)) }
+    val density = LocalDensity.current
+    val direction = LocalLayoutDirection.current
+    val hasKeyboardInset by remember(extra, density, direction) {
+        derivedStateOf {
+            extra.getBottom(density) > 0 || extra.getLeft(density, direction) > 0 ||
+                extra.getRight(density, direction) > 0 || extra.getTop(density) > 0
+        }
     }
-    // The covered entry stays at rest. Reuse its composited glass until its contents
-    // invalidate, rather than sampling the same toolbar, list and dock for every frame
-    // of the reveal above. The card scene skips drawing this layer altogether at rest.
+    // An absent keyboard must not replace the consumed-insets provider for every
+    // Scaffold and list when a page is covered. While present, consume live insets.
+    val keyboard = if (hasKeyboardInset && (!front || covered && !hasFocus))
+        Modifier.consumeWindowInsets(extra) else Modifier
+    // Keep the same display-list boundary before the tap, through overlap and after
+    // Back. Only a covered, glass-capable page needs a raster cache; solid pages
+    // and the front entry retain live draw commands without a full-window texture.
     val appearance = LocalAppearance.current
-    val underlay = if (!front && animate && appearance.glass && glassUnavailableReason(appearance) == null)
-        Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen } else Modifier
-    Box(Modifier.fillMaxSize().onFocusChanged { hasFocus = it.hasFocus }.focusGroup().then(keyboard).then(underlay),
+    val cacheGlass = !front && animate && appearance.glass && glassUnavailableReason(appearance) == null
+    val underlay = if (animate) Modifier.graphicsLayer {
+        compositingStrategy = if (cacheGlass) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+    } else Modifier
+    Box(Modifier.fillMaxSize().coveredSourceWindow(sourceCovered)
+        .onFocusChanged { hasFocus = it.hasFocus }.focusGroup().then(keyboard).then(underlay),
         propagateMinConstraints = true) { content() }
 }
 
 @Composable
-internal fun rememberRouteLaunch(key: String, shape: Shape = RectangleShape): RouteLaunch {
+internal fun rememberRouteLaunch(key: String, shape: Shape = RectangleShape, siteId: Long? = null): RouteLaunch {
     val host = LocalRouteOrigins.current.takeIf { LocalRouteOriginsEnabled.current }
     val owner = LocalRouteOwner.current
     val density = LocalDensity.current
-    val site = OriginSite(owner, key, currentCompositeKeyHashCode)
+    val site = OriginSite(owner, key, siteId ?: currentCompositeKeyHashCode)
     val anchor = remember(site, density, shape) { ContainerAnchor(site, shape, density) }
     val modifier = if (host == null) Modifier else Modifier.containerSource(host, anchor)
     return remember(modifier, host, site) { RouteLaunch(modifier, host, site) }
 }
 
 @Composable
-internal fun Modifier.routeOrigin(key: String, shape: Shape = RectangleShape): Modifier = then(rememberRouteLaunch(key, shape).modifier)
+internal fun Modifier.routeOrigin(key: String, shape: Shape = RectangleShape, siteId: Long? = null): Modifier =
+    then(rememberRouteLaunch(key, shape, siteId).modifier)

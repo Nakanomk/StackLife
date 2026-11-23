@@ -44,7 +44,6 @@ import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.SchedulePattern
 import io.github.nakanomk.stacklife.planner.ScheduleSummary
 import io.github.nakanomk.stacklife.i18n.uiText
-import io.github.nakanomk.stacklife.transitions.LocalDetailChrome
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -72,12 +71,16 @@ internal fun Page(assistantPage: AssistantPage? = null, content: @Composable Col
     Surface(modifier = Modifier.fillMaxSize().wallpaperBackground(if (docked) colors.surfaceContainer else colors.surface), color = Color.Transparent) {
         Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding(), contentAlignment = Alignment.TopCenter) {
             val page = (if (docked) Modifier else Modifier.widthIn(max = 760.dp)).fillMaxSize()
-            // Record the actual page surface, not its descendant buttons. Overlays that float
-            // over scrolling data receive the nearer RootPane/DockOverlay content source.
-            GlassBacking(page, background = { Spacer(Modifier.matchParentSize().wallpaperBackground(colors.surface)) }) {
-                if (assistantPage == null || LocalAssistant.current == null) Column(Modifier.fillMaxSize(), content = content)
-                else DockOverlay(assistantPage = assistantPage) { clearance ->
-                    CompositionLocalProvider(LocalRootBottom provides clearance) { Column(Modifier.fillMaxSize(), content = content) }
+            val paper = rememberPagePaper(colors.surface)
+            // Surface already painted the same window-aligned photo or flat
+            // paper. Only a photo-free docked page has a different inner color.
+            val insetFill = if (docked && LocalWallpaperRecording.current == null) Modifier.background(colors.surface) else Modifier
+            Box(page.then(insetFill)) {
+                CompositionLocalProvider(LocalCapsuleBackdrop provides paper) {
+                    if (assistantPage == null || LocalAssistant.current == null) Column(Modifier.fillMaxSize(), content = content)
+                    else DockOverlay(assistantPage = assistantPage) { clearance ->
+                        CompositionLocalProvider(LocalRootBottom provides clearance) { Column(Modifier.fillMaxSize(), content = content) }
+                    }
                 }
             }
         }
@@ -117,7 +120,7 @@ internal fun PageChrome(title: String, back: () -> Unit, backEnabled: Boolean = 
 
 @Composable
 private fun ActionDock(actions: @Composable () -> Unit) {
-    StackLifeSurface(CapsuleScene.PANEL, LocalDetailChrome.current(), MaterialTheme.colorScheme.surfaceContainerHigh,
+    StackLifeSurface(CapsuleScene.PANEL, Modifier, MaterialTheme.colorScheme.surfaceContainerHigh,
         elevation = 2.dp, shape = RoundedCornerShape(24.dp)) {
         Box(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
             CompositionLocalProvider(LocalActionGroup provides true, content = actions)
@@ -149,7 +152,7 @@ internal fun FormGroup(modifier: Modifier = Modifier, frosted: Boolean = false, 
 
 @Composable
 internal fun PageTitle(title: String, back: () -> Unit, backEnabled: Boolean = true, help: String? = null, action: (@Composable () -> Unit)? = null) {
-    Row(LocalDetailChrome.current().fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         GlassIcon(R.drawable.ic_arrow_back, stringResource(R.string.ui_back), back, enabled = backEnabled)
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {

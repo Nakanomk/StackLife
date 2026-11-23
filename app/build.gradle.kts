@@ -25,11 +25,12 @@ android {
         applicationId = "io.github.nakanomk.stacklife"
         minSdk = 26
         targetSdk = 37
-        versionCode = 32
-        versionName = "0.10.17"
+        versionCode = 33
+        versionName = "0.10.18"
         testInstrumentationRunner = "io.github.nakanomk.stacklife.acceptance.StackLifeTestRunner"
     }
     buildTypes {
+        getByName("release") { optimization { enable = true } }
         create("preview") {
             initWith(getByName("release"))
             signingConfig = signingConfigs.getByName("debug")

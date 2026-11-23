@@ -131,9 +131,8 @@ internal fun <T : Any> PaneMotion(
         val pair = if (link == null) null else hostTransition.createChildTransition("pane pair") {
             originKey(it) == owner || depth(it) > depth(shown)
         }.placedPair(link)
-        val reveal = if (pair != null) open else containerOpen(child, LinearEasing)
         CompositionLocalProvider(LocalPane provides owner) {
-            ContainerPage(origins, link, pair?.page ?: this, shared, reveal, reveal, returning, child, moving && child,
+            ContainerPage(origins, link, pair?.page ?: this, shared, open, returning, child, moving && child,
                 Modifier.testTag("pane:$owner").then(input)) { content(shown) }
         }
     }

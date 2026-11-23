@@ -15,8 +15,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -28,6 +30,7 @@ import top.yukonga.miuix.kmp.blur.ProgressiveBlur
 import top.yukonga.miuix.kmp.blur.progressiveBlur
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.transitions.LocalRouteOriginsEnabled
+import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.transitions.routeOrigin
 
 internal val LocalFeatureBack = compositionLocalOf<(() -> Unit)?> { null }
@@ -36,34 +39,42 @@ internal val chromeGutter = 16.dp
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun PagerPane(selected: Boolean, visible: Boolean, content: @Composable () -> Unit) {
+internal fun PagerPane(selected: Boolean, visible: Boolean, modifier: Modifier = Modifier,
+    retainedViewport: State<Boolean>? = null, content: @Composable () -> Unit) {
     val semantics = if (selected) Modifier else Modifier.clearAndSetSemantics {}
     val insets = LocalRootBottom.current
     // Retained off-screen pages have no pixels or touch targets to move. Keep
     // their last measured inset; restore live geometry before the first visible placement.
-    val pageInsets = if (visible) insets else remember(insets) { PaddingValues(bottom = insets.calculateBottomPadding()) }
-    val showing = rememberUpdatedState(visible)
-    val ime = WindowInsets.ime
-    val target = WindowInsets.imeAnimationTarget
-    val viewport = remember(ime, target) {
-        var last = Constraints()
+    val pageInsets = if (retainedViewport == null && visible) insets else {
+        val bottom = if (visible) insets.calculateBottomPadding() else remember(insets) { insets.calculateBottomPadding() }
+        remember(bottom) { PaddingValues(bottom = bottom) }
+    }
+    // Retained roots keep their real material tree. Gate placement at layout time so the
+    // first exposed pixel is not waiting on a recomposition of the visibility flag.
+    val showing = retainedViewport ?: rememberUpdatedState(visible)
+    val chosen = rememberUpdatedState(selected)
+    val viewport = remember(showing, chosen) {
         Modifier.layout { child, constraints ->
-            // A retained neighbor still measures its real contents. It needn't
-            // reflow them through every intermediate keyboard height while it isn't
-            // placed. Catch up at the target, on width changes, or before revealing it.
-            val hold = !showing.value && constraints.hasFixedHeight && last.hasFixedHeight &&
-                last.minWidth == constraints.minWidth && last.maxWidth == constraints.maxWidth &&
-                ime.getBottom(this) != target.getBottom(this)
-            val childConstraints = if (hold) last else constraints
-            last = childConstraints
-            val measured = child.measure(childConstraints)
-            layout(measured.width, if (hold) constraints.maxHeight else measured.height) {
-                if (showing.value) measured.place(0, 0)
+            // The pager owns the size of this slot. Moving Home between Nav3 scenes
+            // or opening the IME must not measure two invisible business pages.
+            // Measure the chosen destination ahead of its first exposed pixel.
+            if (!showing.value && !chosen.value && constraints.hasFixedWidth && constraints.hasFixedHeight) {
+                layout(constraints.maxWidth, constraints.maxHeight) {}
+            } else {
+                val measured = child.measure(constraints)
+                layout(measured.width, measured.height) {
+                    if (showing.value) measured.place(0, 0)
+                }
             }
         }
     }
-    Box(semantics.fillMaxSize().then(viewport).focusProperties { onEnter = { if (!selected) cancelFocusChange() } }.focusGroup()) {
-        CompositionLocalProvider(LocalRootBottom provides pageInsets, LocalPlannerGlassAllowed provides (visible && LocalPlannerGlassAllowed.current),
+    val focus = LocalFocusManager.current
+    var focused by remember { mutableStateOf(false) }
+    if (!selected) SideEffect { if (focused) focus.clearFocus(force = true) }
+    Box(semantics.fillMaxSize().then(viewport).then(modifier).onFocusChanged { focused = it.hasFocus }
+        .focusProperties { onEnter = { if (!selected) cancelFocusChange() } }.focusGroup()) {
+        CompositionLocalProvider(LocalRootBottom provides pageInsets,
+            LocalPlannerGlassAllowed provides ((retainedViewport != null || visible) && LocalPlannerGlassAllowed.current),
             LocalRouteOriginsEnabled provides (selected && LocalRouteOriginsEnabled.current), content = content)
     }
 }
@@ -95,6 +106,7 @@ internal fun RootPane(header: @Composable () -> Unit,
 @Composable
 internal fun ScrollEdge(source: PlannerBackdrop, modifier: Modifier, fadeAbove: Dp = 0.dp) {
     val tint = MaterialTheme.colorScheme.surface.copy(alpha = .40f)
+    val reader = rememberGlassReader(source)
     BoxWithConstraints(modifier) {
         val gradient = remember(maxHeight, fadeAbove) {
             if (fadeAbove == 0.dp || maxHeight == 0.dp) ProgressiveBlur.Top else
@@ -105,13 +117,13 @@ internal fun ScrollEdge(source: PlannerBackdrop, modifier: Modifier, fadeAbove: 
                 val wash = Brush.verticalGradient(listOf(tint, Color.Transparent),
                     startY = size.height * gradient.startFraction, endY = size.height)
                 onDrawWithContent { drawContent(); drawRect(wash) }
-            }.drawBackdrop(source, shape = { RectangleShape }, progressiveGradient = gradient,
-                effects = { progressiveBlur(16.dp.toPx(), gradient = gradient) }))
+            }.drawBackdrop(reader.backdrop, shape = { RectangleShape }, progressiveGradient = gradient,
+                effects = { progressiveBlur(16.dp.toPx(), gradient = gradient) }).then(reader.placement))
     }
 }
 
 @Composable
-internal fun RootToolbar(onSettings: () -> Unit, leading: (@Composable () -> Unit)? = null,
+internal fun RootToolbar(page: Destination, onSettings: () -> Unit, leading: (@Composable () -> Unit)? = null,
     controls: @Composable RowScope.() -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = chromeGutter, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -124,7 +136,10 @@ internal fun RootToolbar(onSettings: () -> Unit, leading: (@Composable () -> Uni
                     horizontalArrangement = Arrangement.Center, content = controls)
             }
         }
-        GlassIcon(R.drawable.ic_settings, stringResource(R.string.ui_settings), onSettings, Modifier.routeOrigin("settings", CircleShape))
+        // The same gear may move between Nav3 scene slots. Its tab, not its
+        // transient composition position, identifies the real return target.
+        GlassIcon(R.drawable.ic_settings, stringResource(R.string.ui_settings), onSettings,
+            Modifier.routeOrigin("settings", CircleShape, page.ordinal.toLong()))
     }
 }
 

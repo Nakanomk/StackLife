@@ -98,8 +98,9 @@ internal fun rememberCalendarSelection(page: Int, count: Int, onSelect: (Int) ->
 @Composable
 internal fun CalendarPager(selection: CalendarSelection, modifier: Modifier, content: @Composable (Int) -> Unit) {
     val pager = selection.pager
-    HorizontalPager(state = pager, modifier = modifier, key = { it },
-        beyondViewportPageCount = 1) { index ->
+    // Let AndroidX prefetch in the direction of a calendar scroll. Landing a root tab
+    // isn't a date/week change and must not synchronously measure two unrelated calendars.
+    HorizontalPager(state = pager, modifier = modifier, key = { it }) { index ->
         val selected = index == selection.committed
         val inViewport by remember(pager, index) {
             derivedStateOf { kotlin.math.abs(pager.getOffsetDistanceInPages(index)) < 1f }

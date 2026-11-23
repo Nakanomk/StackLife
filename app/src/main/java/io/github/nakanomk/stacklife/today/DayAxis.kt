@@ -54,15 +54,19 @@ internal fun DayAxis(
     var selectedEnd by remember(drag, revision) { mutableStateOf<String?>(null) }
     Box(modifier.fillMaxWidth().clipToBounds()) {
         Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll).padding(top = topInset, bottom = 16.dp)) {
-            BoxWithConstraints(Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() })) {
+            val plane = Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() })
+            Box(plane) {
                 for (band in scale.bands) for (tick in band.ticks) {
-                    Box(Modifier.offset { IntOffset(0, band.top + band.yAt(tick.millis)) }.width(spine - 10.dp)
-                        .testTag(tick.tag)) {
-                        if (tick.major) Text(tick.label, Modifier.padding(start = 4.dp), style = hourStyle, softWrap = false,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        else Spacer(Modifier.align(Alignment.TopEnd).size(4.dp, 1.dp).background(MaterialTheme.colorScheme.outlineVariant))
-                    }
+                    // The tick's page-local position is fixed for this scale. The lambda
+                    // offset would place each quarter hour in its own hardware layer.
+                    val y = with(density) { (band.top + band.yAt(tick.millis)).toDp() }
+                    val mark = Modifier.offset(y = y).width(spine - 10.dp).testTag(tick.tag)
+                    if (tick.major) Text(tick.label, mark.padding(start = 4.dp), style = hourStyle,
+                        softWrap = false, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else Spacer(mark.wrapContentWidth(Alignment.End).size(4.dp, 1.dp).background(MaterialTheme.colorScheme.outlineVariant))
                 }
+            }
+            if (scale.placement.visible.isNotEmpty() || scale.placement.more.isNotEmpty()) BoxWithConstraints(plane) {
                 val moreWidth = if (scale.placement.more.isEmpty()) 0.dp else 52.dp
                 for (rect in scale.placement.visible) key(rect.item.key) {
                     val item = rect.item

@@ -38,7 +38,7 @@ internal fun CountdownRoute(model: WorkspaceViewModel, onOpen: (String) -> Unit,
     val receipt = rememberSubmission(model, onError = { error = it })
     ReadPanel(state) { view ->
         val pinnedCount = remember(view.items) { view.items.indexOfFirst { !it.pinned }.let { if (it < 0) view.items.size else it } }
-        RootPane(header = { RootToolbar(onSettings, leading = {
+        RootPane(header = { RootToolbar(Destination.COUNTDOWN, onSettings, leading = {
             if (pinnedCount > 1 || view.items.size - pinnedCount > 1 || arranging) ToolbarIcon(
                 if (arranging) R.drawable.ic_close else R.drawable.ic_drag_handle,
                 stringResource(if (arranging) R.string.ui_done else R.string.countdown_reorder), enabled = !receipt.busy) {

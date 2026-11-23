@@ -193,7 +193,7 @@ private fun DayHeader(
     val fullDate = remember(fullPattern, locale) { DateTimeFormatter.ofPattern(fullPattern, locale) }
     val pickDate = stringResource(R.string.today_choose_date, date.format(fullDate))
     var options by remember { mutableStateOf(false) }
-    RootToolbar(onSettings, leading = {
+    RootToolbar(Destination.TODAY, onSettings, leading = {
         Box {
             val label = if (events) stringResource(R.string.today_events) else stringResource(R.string.today_time)
             val switchView = stringResource(R.string.today_switch_view)

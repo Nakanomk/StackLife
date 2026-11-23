@@ -1,0 +1,3 @@
+# Android Nav3 persists value.javaClass.name and restores it with Class.forName.
+# An existing task must still restore after upgrading the optimized APK.
+-keep,allowoptimization class io.github.nakanomk.stacklife.** implements androidx.navigation3.runtime.NavKey

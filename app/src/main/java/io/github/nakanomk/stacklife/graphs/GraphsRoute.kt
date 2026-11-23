@@ -34,7 +34,7 @@ internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Uni
     var rename by rememberSaveable { mutableStateOf<String?>(null) }
     var remove by rememberSaveable { mutableStateOf<String?>(null) }
     ReadPanel(state) { list ->
-        RootPane(header = { RootToolbar(onSettings) {
+        RootPane(header = { RootToolbar(Destination.GRAPHS, onSettings) {
             TextButton(onClick = { creating = true }) { Text(stringResource(R.string.ui_new_graph)) }
         } }) { top, bottom ->
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = listSpacing,

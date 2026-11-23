@@ -28,7 +28,7 @@ private fun currentDay(): DeviceDay {
 internal fun deviceDay(): DeviceDay {
     val context = LocalContext.current.applicationContext
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    return produceState(currentDay(), context, lifecycle) {
+    return produceState(remember { currentDay() }, context, lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             val changes = Channel<Unit>(Channel.CONFLATED)
             val clock = object : BroadcastReceiver() {

@@ -38,6 +38,9 @@ internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
     // the snap and edge-scroll regions on placement changes during a drag.
     var viewport by mutableStateOf(Rect.Zero)
         private set
+    // The wheel uses the clipped height, not the root-space origin that changes
+    // on every frame of a horizontal page transition.
+    val viewportHeight by derivedStateOf(structuralEqualityPolicy()) { viewport.height }
     private var viewportLayout: LayoutCoordinates? = null
     private var rootLayout: LayoutCoordinates? = null
     fun placeViewport(layout: LayoutCoordinates) {

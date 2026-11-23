@@ -167,6 +167,14 @@ private fun SelectionLens(backdrop: Backdrop, slot: State<Float>, count: Int, co
     val verticalScale = remember(pressure, speed, pressedScale) { derivedStateOf {
         (1f + (pressedScale - 1f) * pressure.value) * (1f - (.25f * speed.value).coerceIn(-.2f, .2f))
     } }
+    // At rest the lens is exactly over its own shell with no refraction, stretch
+    // or shadow. Tint those actual pixels instead of replaying the entire page
+    // and toolbar into a second lens during every scroll and keyboard frame.
+    val resting by remember(pressure, speed) { derivedStateOf { pressure.value == 0f && speed.value == 0f } }
+    if (resting) {
+        Spacer(modifier.background(idle.copy(alpha = .10f), CircleShape))
+        return
+    }
     Spacer(modifier.drawBackdrop(backdrop, shape = { CircleShape }, effects = {
         val reach = opticalScale * pressure.value
         if (reach > 0f) {

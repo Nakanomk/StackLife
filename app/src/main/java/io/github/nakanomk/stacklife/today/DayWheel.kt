@@ -61,7 +61,7 @@ private fun GraphicsLayerScope.projectDayWheel(top: Float, viewport: Float, bott
 }
 
 internal fun Modifier.axisWheel(enabled: Boolean, drag: AxisDrag, y: Int, key: OccurrenceKey?): Modifier = if (!enabled) this else graphicsLayer {
-    if (key == null || !drag.isDragging(key)) projectDayWheel((y - drag.scroll.value).toFloat(), drag.viewport.height,
+    if (key == null || !drag.isDragging(key)) projectDayWheel((y - drag.scroll.value).toFloat(), drag.viewportHeight,
         drag.scroll.maxValue == Int.MAX_VALUE || drag.scroll.canScrollForward)
 }
 

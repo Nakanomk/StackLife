@@ -23,7 +23,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntOffset
@@ -159,9 +161,16 @@ internal fun DayWithTray(
 @Composable
 private fun EndOverlay(modifier: Modifier, fraction: Float, margin: Dp, content: @Composable () -> Unit) {
     val right = LocalWindowInfo.current.containerSize.width
-    var left by remember { mutableFloatStateOf(0f) }
-    Box(modifier.onGloballyPositioned { left = it.positionInWindow().x }) {
-        Box(Modifier.fillMaxSize().absoluteOffset { IntOffset(((right - left + margin.toPx()) * fraction).roundToInt(), 0) }) { content() }
+    var slot by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    Box(modifier.onPlaced { slot = it }) {
+        // Normal paging moves the entire day. A resting control doesn't need a window
+        // coordinate, a per-frame state write, or its own translation layer for that.
+        val shift = if (fraction == 0f) Modifier else Modifier.absoluteOffset {
+            val coords = slot
+            if (coords == null || !coords.isAttached) IntOffset.Zero
+            else IntOffset(((right - coords.positionInWindow().x + margin.toPx()) * fraction).roundToInt(), 0)
+        }
+        Box(Modifier.fillMaxSize().then(shift)) { content() }
     }
 }
 

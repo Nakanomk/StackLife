@@ -25,13 +25,15 @@ import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.today.SlotEditorKey
-import io.github.nakanomk.stacklife.today.deviceDay
 import io.github.nakanomk.stacklife.reminders.ReminderRulesEditor
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.reminders.ReminderPreference
 import io.github.nakanomk.stacklife.transitions.title
+import io.github.nakanomk.stacklife.transitions.detailBodyMotion
 import io.github.nakanomk.stacklife.transitions.routeOrigin
 import io.github.nakanomk.stacklife.notes.CurrentTaskNote
+import java.time.LocalDate
+import java.time.ZoneId
 
 @Composable
 internal fun TaskScreen(id: String, view: SourceView, actions: WorkspaceActions, onBack: () -> Unit,
@@ -54,7 +56,7 @@ internal fun TaskScreen(id: String, view: SourceView, actions: WorkspaceActions,
             if (source.owner == Owner.QUEUE) Secondary(stringResource(R.string.ui_remove_from_queue), enabled = !action.busy) { action.send(PlannerCommand.TaskRemove(id)) }
         }
     }) { top, bottom ->
-        LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
+        LazyColumn(Modifier.detailBodyMotion(), contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (index == 0) Text(stringResource(R.string.ui_current_priority), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -148,14 +150,16 @@ internal fun SettingsScreen(settings: PolicyView, actions: WorkspaceViewModel, o
 internal fun RoutineScheduleRows(actions: WorkspaceViewModel, onSchedule: (SlotEditorKey) -> Unit) {
     for (kind in RoutineKind.entries) {
         val wake = kind == RoutineKind.WAKE
-        val local = deviceDay()
         val summary by actions.routineSchedules.getValue(kind).collectAsStateWithLifecycle()
         ReadPanel(summary) { view ->
             val title = stringResource(if (wake) R.string.agenda_wake else R.string.agenda_sleep)
             PreferenceRow(title, view.summary?.takeIf { it.enabled }?.let { scheduleText(it) } ?: stringResource(R.string.wheel_unset),
                 Modifier.testTag(if (wake) "routine-wake" else "routine-sleep").routeOrigin("slot:${kind.scheduleId}"),
                 leadingIcon = R.drawable.ic_schedule, valueMaxLines = 2) {
-                onSchedule(SlotEditorKey(kind.scheduleId, title, local.date.toEpochDay(), local.zone.id, 0, view.revision, role = kind))
+                // The date is an editor argument, not row content. Resolve it at
+                // the tap instead of registering a receiver and midnight timer per row.
+                val zone = ZoneId.systemDefault()
+                onSchedule(SlotEditorKey(kind.scheduleId, title, LocalDate.now(zone).toEpochDay(), zone.id, 0, view.revision, role = kind))
             }
         }
         HorizontalDivider(Modifier.padding(start = 32.dp))

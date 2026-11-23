@@ -150,6 +150,41 @@ class AppearanceBenchmark(private val glass: Boolean) {
     }
     @Test fun cardOpen() = measure(reset = { returnCard() }) { openCard() }
     @Test fun cardReturn() = measure(prepare = { openCard() }) { returnCard() }
+
+    private fun UiDevice.openSettings() {
+        val name = appString("ui_settings")
+        val icon = await(name) { contentDescription?.toString() == name }
+        tap(generateSequence(icon) { it.parent }.first { it.isClickable && it.isEnabled })
+        tag("route:settings"); tag("routine-wake")
+        automation.waitForIdle(500, 5_000)
+    }
+    private fun UiDevice.leaveSettings() {
+        pressBack()
+        tag("queue"); await("first task", firstTask)
+        awaitGone("settings", 5_000) { viewIdResourceName == "route:settings" }
+        automation.waitForIdle(500, 5_000)
+    }
+    @Test fun settingsOpen() = measure(reset = { leaveSettings() }) { openSettings() }
+    @Test fun settingsBack() = measure(prepare = { openSettings() }) { leaveSettings() }
+
+    private fun UiDevice.selectPage(key: String, contentTag: String) {
+        tap(tag("nav:$key") { isClickable && isEnabled && !isSelected })
+        tag(contentTag)
+        automation.waitForIdle(500, 5_000)
+        tag("nav:$key") { isSelected }
+    }
+
+    @Test fun workspaceToToday() = measure(reset = { selectPage("workspace", "queue") }) {
+        selectPage("today", "day-date")
+    }
+    @Test fun todayToCourses() = measure(reset = { selectPage("workspace", "queue") },
+        prepare = { selectPage("today", "day-date") }) {
+        selectPage("courses", "course-week")
+    }
+    @Test fun coursesToWorkspace() = measure(prepare = { selectPage("courses", "course-week") }) {
+        selectPage("workspace", "queue")
+    }
+
     @Test fun assistantKeyboard() = measure(assistant = true) {
         openKeyboard()
         closeKeyboard()

@@ -7,7 +7,6 @@ import android.content.Intent
 import io.github.nakanomk.stacklife.i18n.LocalizedActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +22,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
@@ -175,6 +175,8 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
     var selectedTerm by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedWeek by rememberSaveable { mutableStateOf<Int?>(null) }
     val origins = remember { RouteOrigins() }
+    val hostOwner = LocalLifecycleOwner.current
+    val homePlane = remember(hostOwner) { HomePlane(hostOwner) }
     val back = {
         if (stack.size > 1) origins.pop(stack.removeAt(stack.lastIndex).motionKey())
         else if (initialDetail != null) onDetailBack()
@@ -224,10 +226,10 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
             uiText("Could not read the event.", "无法读取事件。") else uiText("This event no longer exists.", "该事件已不存在。")) }
     }
     val animate = LocalMotionEnabled.current
-    val canKeepCardList = animate && glassUnavailableReason(preferences.appearance) == null
+    val canKeepSource = animate && glassUnavailableReason(preferences.appearance) == null
     // The source chooses retention at click time. A platform preference changing
     // must not replace an existing navigation entry or its scroll state.
-    SideEffect { origins.canKeepCardList = canKeepCardList }
+    SideEffect { origins.canKeepSource = canKeepSource }
     val privateScreens = remember { mutableIntStateOf(0) }
     var historySource by rememberSaveable { mutableStateOf<String?>(null) }
     val rootDraft = rememberSaveable { java.util.UUID.randomUUID().toString() }
@@ -239,7 +241,6 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
     // Keep Home's decoded photo available for the first frame of Back, without painting it
     // over another entry or using a private wallpaper as the cross-window popup donor.
     WallpaperHost(preferences.appearance.wallpaper(home), drawBehindContent = false) {
-    SharedTransitionLayout {
         val shared: SharedModifier = { key ->
             if (animate && initialDetail == null) cardBoundsModifier(key) else Modifier
         }
@@ -312,7 +313,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                         SlotEditor(editor, model, onBack = back, onSaved = { _, _ -> back() })
                     }
                 } }
-                entry<TaskDetail>(metadata = { key -> origins.cardSceneMetadata(key.motionKey()) }) { key ->
+                entry<TaskDetail>(metadata = { key -> origins.sourceSceneMetadata(key.motionKey()) }) { key ->
                     DetailRoute("task:${key.id}", animate && initialDetail == null) {
                         SourcePanel(model, GraphLink.Task(key.id)) { view ->
                             TaskScreen(key.id, view, model, back, shared) { navigate(EditTask(key.id, view.source?.frameId, view.revision)) }
@@ -326,12 +327,12 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     else TaskEditor(model, back, original = QueueTask(key.id, task.title, task.notes, task.minutes, task.schedule),
                         frameId = key.frameId, expectedRevision = key.revision ?: rememberSaveable { view.revision })
                 } }
-                entry<FrameDetail>(metadata = { key -> origins.cardSceneMetadata(key.motionKey()) }) { key ->
+                entry<FrameDetail>(metadata = { key -> origins.sourceSceneMetadata(key.motionKey()) }) { key ->
                     DetailRoute("frame:${key.id}", animate && initialDetail == null && !key.generated) {
                         WorkspacePanel(model) { FrameScreen(key.id, it, model, back, shared, openSource) { task -> navigate(EditTask(task, key.id, it.revision)) } }
                     }
                 }
-                entry<Preferences> {
+                entry<Preferences>(metadata = { key -> origins.sourceSceneMetadata(key.motionKey()) }) {
                     SettingsHelpHost { SettingsScreen(preferences, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) },
                         { navigate(HelpAbout) }, { navigate(Feature(it)) }, navigate) }
                 }
@@ -340,12 +341,9 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     AppearanceGroup.entries.first { it.key == key.group }, model, back) } }
                 entry<ModelConnection> { PrivateScreen(privateScreens) { SettingsHelpHost { ConnectionScreen(assistant.connections, back) } } }
         }
-        EntityMotionScope(animate && initialDetail == null) {
-            // Nav3 moves the one live list between its own scene and a matched card scene.
-            // Only the card/control pair uses the shared overlay, not the entire entry.
+        homePlane.Layout(Modifier.onGloballyPositioned { origins.host = it; origins.size = it.size }) {
             NavDisplay(backStack = stack, onBack = back,
-                sceneStrategies = remember { listOf(LiveCardSceneStrategy<NavKey>()) },
-                modifier = Modifier.onGloballyPositioned { origins.host = it; origins.size = it.size },
+                sceneStrategies = remember { listOf(LiveSourceSceneStrategy<NavKey>()) },
                 transitionSpec = { sceneMotion(animate) }, popTransitionSpec = { sceneMotion(animate) },
                 predictivePopTransitionSpec = { sceneMotion(animate) },
                 entryProvider = { key ->
@@ -366,15 +364,16 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                                     ?: appearance.nearestVisible(destination)
                             }
                         }
-                        WallpaperHost(appearance.wallpaper(owner), drawBehindContent = false) {
-                            origins.Entry(key.motionKey(), depth, stack.lastIndex, parent, animate,
-                                ordinary = key != Home && key !is TaskDetail && (key !is FrameDetail || key.generated)) { entry.Content() }
+                        val page: @Composable () -> Unit = {
+                            WallpaperHost(appearance.wallpaper(owner), drawBehindContent = false) {
+                                origins.Entry(key.motionKey(), depth, stack.lastIndex, parent, animate && initialDetail == null,
+                                    ordinary = key != Home && key !is TaskDetail && (key !is FrameDetail || key.generated)) { entry.Content() }
+                            }
                         }
+                        if (key == Home && depth == 0) homePlane.Entry(page) else page()
                     }
                 })
         }
-        if (animate) with(origins) { PlacedSources() }
-    }
     }
     val source = historySource
     AssistantPanels(assistant, source?.let { remember(it) { historyPage(it) } }, configuring = stack.last() == ModelConnection,

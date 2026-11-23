@@ -44,6 +44,7 @@ import io.github.nakanomk.stacklife.AddTaskFab
 import io.github.nakanomk.stacklife.taskFabClearance
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.markdown.markdownSummary
+import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.planner.Workspace
@@ -98,7 +99,7 @@ internal fun WorkspaceScreen(
     var feedbackHeight by remember { mutableIntStateOf(0) }
     val hasFeedback = editingId != null || pushedId != null
     val feedbackInset = if (hasFeedback) with(LocalDensity.current) { feedbackHeight.toDp() } else 0.dp
-    RootPane(header = { RootToolbar(onSettings) { WorkspaceSegments(stack, setStack, position) } },
+    RootPane(header = { RootToolbar(Destination.WORKSPACE, onSettings) { WorkspaceSegments(stack, setStack, position) } },
         overlay = { _, bottom ->
             if (!stack) AddTaskFab(onAdd, bottomInset = bottom + feedbackInset)
             if (hasFeedback) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = bottom)

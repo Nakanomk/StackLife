@@ -22,6 +22,13 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.layer.CompositingStrategy
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
@@ -37,7 +44,6 @@ import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.assistant.LocalAssistant
 import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.planner.NavStyle
-import io.github.nakanomk.stacklife.transitions.LocalDetailChrome
 
 private val LocalShortDock = compositionLocalOf { false }
 
@@ -87,7 +93,7 @@ private fun DockScaffold(short: Boolean, wideRow: Boolean, navigationBar: (@Comp
     }
     Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), bottomBar = {
         CompositionLocalProvider(LocalCapsuleBackdrop provides source) {
-            Column(LocalDetailChrome.current().fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 if (composer != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                     Box(Modifier.weight(if (short && shareRow) 2f else 1f), contentAlignment = Alignment.Center) {
                         Box(chromeRail(top = 0.dp).onFocusChanged { composerFocused = it.hasFocus }.focusGroup()) {
@@ -100,10 +106,28 @@ private fun DockScaffold(short: Boolean, wideRow: Boolean, navigationBar: (@Comp
             }
         }
     }) { insets ->
-        // Cursor and button redraws must not re-record the page donor. This is a
-        // display-list boundary, not a bitmap: live page descendants still update it.
-        val donor = if (source == null) Modifier else Modifier.graphicsLayer().plannerBackdrop(source)
-        Box(Modifier.fillMaxSize().then(donor)) { content(insets) }
+        // Both controls share a live GPU tile of the page. Their own labels,
+        // input and icons are never in the recording. Keep the content call site
+        // stable across an appearance change or a power-saving fallback.
+        val page = if (source != null) rememberGraphicsLayer() else null
+        Box(Modifier.fillMaxSize()) {
+            val capture = if (page == null) Modifier else Modifier.graphicsLayer().drawWithContent {
+                page.record { this@drawWithContent.drawContent() }
+                drawLayer(page)
+            }
+            Box(Modifier.fillMaxSize().then(capture)) { content(insets) }
+            if (source != null && page != null) {
+                SideEffect { source.layer.compositingStrategy = CompositingStrategy.Offscreen }
+                Spacer(Modifier.align(Alignment.BottomCenter).fillMaxWidth().layout { child, constraints ->
+                    // Include the lens reach, Gaussian blur apron and elastic travel.
+                    val height = (insets.calculateBottomPadding() + 64.dp).roundToPx().coerceIn(0, constraints.maxHeight)
+                    val band = child.measure(constraints.copy(minHeight = height, maxHeight = height))
+                    layout(band.width, height) { band.place(0, 0) }
+                }.plannerBackdrop(source, drawInPlace = false).drawBehind {
+                    translate(top = size.height - page.size.height) { drawLayer(page) }
+                })
+            }
+        }
     }
 }
 

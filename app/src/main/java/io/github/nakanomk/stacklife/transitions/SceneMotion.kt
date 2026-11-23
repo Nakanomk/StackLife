@@ -1,7 +1,6 @@
 package io.github.nakanomk.stacklife.transitions
 
 import androidx.compose.animation.EnterExitState
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyListState
@@ -10,28 +9,38 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.AlignmentLine
 import androidx.compose.ui.layout.HorizontalAlignmentLine
 import androidx.compose.ui.layout.VerticalAlignmentLine
-import androidx.compose.ui.layout.approachLayout
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.util.lerp
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
+import io.github.nakanomk.stacklife.appearance.wallpaperBackground
 import io.github.nakanomk.stacklife.workspace.SharedModifier
-import kotlin.math.roundToInt
 
 // Entity bounds and title layout use the same Nav3 timeline as ordinary containers.
 // BiliPai SettingsSharedContainerTransition, 5893c2c80739e3759ac64ae5f232cf03a94da7f8 (GPL-3.0).
 internal val noCardBounds: SharedModifier = { Modifier }
 internal val LocalCardList = compositionLocalOf<LazyListState?> { null }
-internal val LocalDetailChrome = staticCompositionLocalOf<@Composable () -> Modifier> { { Modifier } }
+private val LocalDetailBody = compositionLocalOf<Modifier> { Modifier }
+
+@Composable
+internal fun Modifier.detailBodyMotion(): Modifier = then(LocalDetailBody.current)
 
 // These are layout anchors, not separate animated or painted copies of the title.
 private val TitleX = VerticalAlignmentLine(::minOf)
@@ -42,19 +51,23 @@ private const val TitlePart = "title/"
 @Composable
 internal fun SharedModifier.title(entityKey: String) = this("$TitlePart$entityKey")
 
-private class RowAnchor(private val inViewport: () -> Boolean) {
-    fun visible() = inViewport()
-    var x by mutableIntStateOf(AlignmentLine.Unspecified)
-    var y by mutableIntStateOf(AlignmentLine.Unspecified)
-    var height by mutableIntStateOf(0)
+private class CardWindow(val rect: Rect, radius: Float, val edge: EdgeFrame? = null) : Shape {
+    private val outline = Outline.Rounded(RoundRect(rect, CornerRadius(radius.coerceIn(0f, rect.minDimension / 2))))
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline = outline
 }
 
-private val LocalAnchors = staticCompositionLocalOf<MutableMap<String, RowAnchor>?> { null }
+/** Chrome stays fixed inside a matched card. Its body alone scales around the title;
+ * when the row disappears keep the last drawn body transform, not its old row bounds. */
+private class BodyPose {
+    var scale = 1f
+    var x = 0f
+    var y = 0f
+}
 
-@Composable
-internal fun SharedTransitionScope.EntityMotionScope(enabled: Boolean, content: @Composable () -> Unit) {
-    val rows = remember { mutableStateMapOf<String, RowAnchor>() }
-    CompositionLocalProvider(LocalAnchors provides rows, LocalContainerScope provides this.takeIf { enabled }, content = content)
+private class RowAnchor(site: OriginSite, shape: Shape, density: Density, val visible: () -> Boolean) :
+    ContainerAnchor(site, shape, density, visible) {
+    var x by mutableIntStateOf(AlignmentLine.Unspecified)
+    var y by mutableIntStateOf(AlignmentLine.Unspecified)
 }
 
 @Composable
@@ -68,178 +81,165 @@ internal fun cardBoundsModifier(key: String): Modifier {
         }
     }
     if (list == null) return Modifier
-    val anchor = remember(list, key) {
+    val registry = LocalRouteOrigins.current ?: return Modifier
+    val owner = LocalRouteOwner.current
+    val density = LocalDensity.current
+    val shape = MaterialTheme.shapes.large
+    val anchor = remember(list, key, owner, density, shape) {
         val id = key.substringAfter(':')
-        RowAnchor {
+        RowAnchor(OriginSite(owner, key, 0L), shape, density) {
             val viewport = list.layoutInfo
             val item = viewport.visibleItemsInfo.firstOrNull { it.key == id }
             item != null && item.offset >= viewport.viewportStartOffset + viewport.beforeContentPadding &&
                 item.offset + item.size <= viewport.viewportEndOffset - viewport.afterContentPadding
         }
     }
-    val rows = LocalAnchors.current
-    val registry = LocalRouteOrigins.current
-    val owner = LocalRouteOwner.current
-    val density = LocalDensity.current
-    val shape = MaterialTheme.shapes.large
-    val source = remember(key, owner, density, shape, anchor) { ContainerAnchor(OriginSite(owner, key, 0L), shape, density, anchor::visible) }
-    DisposableEffect(anchor, rows, registry, source) {
-        rows?.put(key, anchor)
-        registry?.attach(source)
-        onDispose { rows?.remove(key, anchor); registry?.detach(source) }
-    }
-    return Modifier.onGloballyPositioned { registry?.place(source, it) }.layout { measurable, constraints ->
+    return Modifier.containerSource(registry, anchor).layout { measurable, constraints ->
         val row = measurable.measure(constraints)
-        if (isLookingAhead) {
+        if (!isLookingAhead) {
             anchor.x = row[TitleX]
             anchor.y = row[TitleY]
-            anchor.height = row.height
         }
         layout(row.width, row.height) { row.place(0, 0) }
     }
 }
 
 @Composable
-internal fun SharedTransitionScope.DetailRoute(key: String, enabled: Boolean, content: @Composable () -> Unit) {
+internal fun DetailRoute(key: String, enabled: Boolean, content: @Composable () -> Unit) {
     val tag = Modifier.testTag("detail:$key")
     if (!enabled) {
         Box(Modifier.fillMaxSize().then(tag)) { content() }
         return
     }
-    val rows = LocalAnchors.current
     val origins = LocalRouteOrigins.current
     val link = origins?.links?.get(key)
     val density = LocalDensity.current
     val front = LocalFrontEntry.current
-    val source = remember(key, origins, rows, link, density) {
-        derivedStateOf {
-            val row = rows?.get(key)
-            if (row == null || link == null || link.density != density || !row.visible()) null
-            else origins.sourceBounds(link)
-        }
-    }
-    val typography = MaterialTheme.typography
-    val compactScale = with(LocalDensity.current) {
-        typography.bodyLarge.fontSize.toPx() / typography.titleLarge.fontSize.toPx()
-    }
     val visibility = LocalNavAnimatedContentScope.current
     val sampled = visibility.routeOpen(front)
     val returning = visibility.transition.currentState == EnterExitState.Visible
     val moving = front && visibility.transition.currentState != visibility.transition.targetState
-    val depth = LocalEntryDepth.current
-    val radius = { (link?.radius ?: 0f) * (1f - sampled.value) }
-    // LayoutCoordinates.isAttached is not snapshot state. In particular the existing
-    // list can detach and reattach at the *same* rect when Nav3 moves its entry.
-    // The source rectangle is placed before the asynchronous detail title. Only its
-    // typography needs both title alignment lines; the moving window never has to wait.
-    val placedSource = { if (moving && link != null && origins.live(link)) source.value else null }
-    val paired = { placedSource() != null }
-    val ink = { containerInk(sampled.value, returning) }
-    if (link != null) {
-        SideEffect { link.open = sampled }
-        DisposableEffect(link) { onDispose { link.open = null } }
-    }
-    val appliedScale = remember(key) { mutableFloatStateOf(1f) }
-    val windowInOverlay = remember(key) { mutableStateOf(Rect.Zero) }
-    val fixedChrome: @Composable () -> Modifier = {
-        var origin by remember { mutableStateOf(Offset.Zero) }
-        Modifier.layout { measurable, constraints ->
-            val chrome = measurable.measure(constraints)
-            val lookahead = isLookingAhead
-            layout(chrome.width, chrome.height) {
-                val c = coordinates
-                if (lookahead || c == null || !paired()) chrome.place(0, 0)
-                else {
-                    val root = lookaheadScopeCoordinates
-                    val target = root.localLookaheadPositionOf(c)
-                    origin = target
-                    val offset = c.localPositionOf(root, target)
-                    val inverse = 1f / appliedScale.floatValue
-                    chrome.placeWithLayer(0, 0) {
-                        transformOrigin = TransformOrigin(0f, 0f)
-                        scaleX = inverse
-                        scaleY = inverse
-                        translationX = offset.x
-                        translationY = offset.y
-                    }
-                }
+    val fill = MaterialTheme.colorScheme.surface
+    val direction = LocalLayoutDirection.current
+    if (link == null) {
+        Box(Modifier.fillMaxSize().graphicsLayer {
+            if (moving) {
+                translationX = ((1f - sampled.value) * size.width) * if (direction == LayoutDirection.Ltr) 1f else -1f
+                clip = true
             }
-        }.renderInSharedTransitionScopeOverlay(zIndexInOverlay = depth + .5f, renderInOverlay = paired)
-            .containerClip({ windowInOverlay.value.translate(-origin) }, radius, paired)
-            .then(if (!moving || link == null) Modifier else Modifier.sourceHandoff({ if (paired()) ink() else 1f }) {
-                origins.sourceBounds(link)?.translate(-origin)
-            })
+        }.then(tag).wallpaperBackground(fill)) { content() }
+        return
     }
-    // Source and detail are now in the same Nav3 scene on push, but in different
-    // scenes during pop. Sample the placed row in the host plane rather than waiting
-    // for a second SharedBounds transition to acquire the moving source composition.
-    val frame = Modifier.fillMaxSize().approachLayout(isMeasurementApproachInProgress = { moving },
-        isPlacementApproachInProgress = { moving }) { measurable, window ->
-        val w = window.maxWidth
-        val h = window.maxHeight
-        // Subscribe for the whole trip, even when the row is moving between scene
-        // slots or the detail is still loading. A temporarily missing partner is not
-        // completion of the navigation transition.
-        val t = if (moving) sampled.value else 1f
-        val start = placedSource()
-        val width = if (start == null) w else lerp(start.width, w.toFloat(), t).roundToInt()
-        val height = if (start == null) h else lerp(start.height, h.toFloat(), t).roundToInt()
-        val page = measurable.measure(Constraints.fixed(width, height))
-        layout(w, h) {
-            val x = if (start == null) 0 else (start.left * (1f - t)).roundToInt()
-            val y = if (start == null) 0 else (start.top * (1f - t)).roundToInt()
-            page.place(x, y)
+    val row by remember(link, origins, density) {
+        derivedStateOf {
+            if (link.density != density) null
+            else (origins.source(link) as? RowAnchor)?.takeIf { it.visible() }
         }
     }
-    Box(frame.then(tag).graphicsLayer {
-            // With no live partner, fade in place; never aim at a newly recycled row.
-            val matched = paired()
-            alpha = when {
-                !front -> 1f
-                matched -> if (sampled.value > 0f) 1f else 0f
-                else -> sampled.value
-            }
-            shape = if (link != null && matched) link.shape else RectangleShape
-            clip = matched
-        }.containerPaper(origins, link, moving, paired, ink)
-        .layout { measurable, window ->
-            val w = window.maxWidth
-            val h = window.maxHeight
-            val full = link?.hostSize
-            val page = measurable.measure(if (moving && full != null && full == origins.size)
-                Constraints.fixed(full.width, full.height) else window)
-            val tx = page[TitleX]
-            val ty = page[TitleY]
-            val lookahead = isLookingAhead
-            layout(w, h) {
-                val matched = !lookahead && paired()
-                if (matched) coordinates?.let {
-                    val position = lookaheadScopeCoordinates.localPositionOf(it, Offset.Zero)
-                    windowInOverlay.value = Rect(position.x, position.y, position.x + w, position.y + h)
-                }
-                val row = if (matched && h != page.height) rows?.get(key) else null
-                // Both titles are measured at their resting constraints.
-                if (row == null || row.height !in 1 until page.height ||
-                    tx == AlignmentLine.Unspecified || ty == AlignmentLine.Unspecified ||
-                    row.x == AlignmentLine.Unspecified || row.y == AlignmentLine.Unspecified) {
-                    appliedScale.floatValue = 1f
-                    page.place(0, 0)
+    val typography = MaterialTheme.typography
+    val compactScale = with(density) { typography.bodyLarge.fontSize.toPx() / typography.titleLarge.fontSize.toPx() }
+
+    // Both Nav3 scenes use the NavDisplay plane. The backing, header and footer stay
+    // at their final coordinates; only the aperture and the list's display list move.
+    // A detached/recycled or partly covered row is not a landing, even on a held seek.
+    val departure = remember(link, moving, returning) { EdgeDeparture() }
+    val lastBody = remember(departure) { BodyPose() }
+    val hostSize = origins.size
+    val end = remember(hostSize) { Rect(0f, 0f, hostSize.width.toFloat(), hostSize.height.toFloat()) }
+    val window by remember(link, origins, moving, sampled, density, departure, direction, end) {
+        derivedStateOf {
+            if (!moving) null else {
+                val t = sampled.value
+                if (end.isEmpty) return@derivedStateOf null
+                val start = if (!departure.detached && origins.live(link)) row?.bounds else null
+                if (start != null) {
+                    val rect = androidx.compose.ui.geometry.lerp(start, end, t)
+                    val corner = link.radius * (1f - t)
+                    departure.placed(rect, corner, t)
+                    CardWindow(rect, corner)
                 } else {
-                    val t = sampled.value
-                    val scale = lerp(compactScale, 1f, t)
-                    appliedScale.floatValue = scale
-                    // Pan the fully laid-out page. No nested Scaffold, LazyColumn or
-                    // backdrop can cut across the title on its way out of the row.
-                    page.placeWithLayer(0, 0) {
-                        transformOrigin = TransformOrigin(0f, 0f)
-                        scaleX = scale
-                        scaleY = scale
-                        translationX = lerp(row.x.toFloat(), tx.toFloat(), t) - tx * scale
-                        translationY = lerp(row.y.toFloat(), ty.toFloat(), t) - ty * scale
-                    }
+                    val edge = departure.depart(end, end.width, direction, t)
+                    CardWindow(edge.rect, edge.radius, edge)
                 }
             }
-        }) {
-        CompositionLocalProvider(LocalDetailChrome provides fixedChrome, content = content)
+        }
     }
+    var plane by remember(key) { mutableStateOf<LayoutCoordinates?>(null, referentialEqualityPolicy()) }
+    var bodyOrigin by remember(key) { mutableStateOf(Offset.Unspecified) }
+    var titleOffset by remember(key) { mutableStateOf(Offset.Unspecified) }
+    val body = Modifier.layout { measurable, constraints ->
+        val child = measurable.measure(constraints)
+        val actual = !isLookingAhead
+        if (actual) {
+            val x = child[TitleX]
+            val y = child[TitleY]
+            titleOffset = if (x != AlignmentLine.Unspecified && y != AlignmentLine.Unspecified)
+                Offset(x.toFloat(), y.toFloat()) else Offset.Unspecified
+        }
+        layout(child.width, child.height) {
+            if (actual) {
+                val c = coordinates
+                val root = plane
+                if (c != null && root?.isAttached == true) bodyOrigin = root.localPositionOf(c, Offset.Zero)
+            }
+            child.place(0, 0)
+        }
+    }.graphicsLayer {
+        val aperture = window
+        val edge = aperture?.edge
+        val anchor = if (aperture != null && edge == null) row else null
+        val start = anchor?.bounds
+        val title = titleOffset
+        val origin = bodyOrigin
+        if (anchor != null && start != null && title.isSpecified && origin.isSpecified &&
+            anchor.x != AlignmentLine.Unspecified && anchor.y != AlignmentLine.Unspecified) {
+            val t = sampled.value
+            val scale = lerp(compactScale, 1f, t)
+            transformOrigin = TransformOrigin(0f, 0f)
+            scaleX = scale
+            scaleY = scale
+            translationX = lerp(start.left + anchor.x - origin.x, title.x, t) - title.x * scale
+            translationY = lerp(start.top + anchor.y - origin.y, title.y, t) - title.y * scale
+            lastBody.scale = scale
+            lastBody.x = translationX
+            lastBody.y = translationY
+        } else if (edge != null && edge.retained > 0f) {
+            transformOrigin = TransformOrigin(0f, 0f)
+            scaleX = lerp(1f, lastBody.scale, edge.retained)
+            scaleY = scaleX
+            translationX = lastBody.x * edge.retained
+            translationY = lastBody.y * edge.retained
+        }
+    }
+    // The outer layer is the actual hit/semantics window. Its child undoes ONLY
+    // this transform, so wallpaper/glass still sample the stationary host plane.
+    // Neither layer reads a frame in measure or placement, in either direction.
+    val aperture = Modifier.fillMaxSize().graphicsLayer {
+        val frame = window?.rect
+        if (frame != null) {
+            transformOrigin = TransformOrigin(0f, 0f)
+            scaleX = frame.width / size.width
+            scaleY = frame.height / size.height
+            translationX = frame.left + (window?.edge?.dx ?: 0f)
+            translationY = frame.top
+            clip = true
+        }
+        alpha = if (moving && (frame == null || sampled.value <= 0f)) 0f else 1f
+    }.then(tag).graphicsLayer {
+        val aperture = window
+        if (aperture != null) {
+            val frame = aperture.rect
+            transformOrigin = TransformOrigin(0f, 0f)
+            scaleX = size.width / frame.width
+            scaleY = size.height / frame.height
+            translationX = -frame.left * scaleX
+            translationY = -frame.top * scaleY
+            shape = aperture
+            clip = true
+        }
+    }
+        .onPlaced { plane = it }
+        .sourceHandoff({ if (window?.let { it.edge == null } == true) containerInk(sampled.value, returning) else 1f }) { row?.bounds }
+        .wallpaperBackground(fill)
+    Box(aperture) { CompositionLocalProvider(LocalDetailBody provides body, content = content) }
 }

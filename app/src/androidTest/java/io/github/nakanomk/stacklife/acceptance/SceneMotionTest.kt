@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigationevent.DirectNavigationEventInput
 import androidx.navigationevent.NavigationEvent
@@ -138,6 +139,38 @@ class SceneMotionTest {
             different <= maxOf(8, edges / 10))
     }
 
+    private data class EdgeShot(val frame: Rect, val pixels: PixelMap)
+
+    private fun edgeShot(tag: String, full: Rect, progress: Float): EdgeShot {
+        val actual = windowRect(ui.onNodeWithTag(tag, useUnmergedTree = true))
+        val dx = full.width * progress
+        assertEquals("Back must follow the end edge, not a replacement", full.left + dx, actual.left, 2f)
+        assertEquals("Do not shrink the clipped-away part", full.right + dx, actual.right, 2f)
+        assertEquals(full.top, actual.top, 1f)
+        assertEquals(full.bottom, actual.bottom, 1f)
+        return EdgeShot(actual, pixels())
+    }
+
+    /** Check ink that differs from the *actual* newly uncovered parent. Comparing only
+     * backgrounds (or testing bounds alone) would also pass a two-page crossfade. */
+    private fun assertOpaqueEdge(full: Rect, front: PixelMap, parent: PixelMap, shot: EdgeShot) {
+        assertUncoveredPixels(parent, shot.pixels, shot.frame)
+        val dx = (shot.frame.left - full.left).roundToInt()
+        val trim = (32 * ui.density.density).roundToInt()
+        var distinct = 0
+        var unchanged = 0
+        for (y in maxOf(trim, full.top.toInt() + 2) until minOf(front.height - trim, full.bottom.toInt() - 2) step 2) {
+            for (x in full.left.toInt() + 2 until minOf(full.right.toInt(), front.width - dx) - 3 step 2) {
+                val a = front[x, y]
+                val b = front[x + 2, y]
+                if (delta(a, b) < .30f || delta(a, parent[x + dx, y]) < .30f) continue
+                distinct++
+                if (delta(a, shot.pixels[x + dx, y]) < .09f && delta(b, shot.pixels[x + dx + 2, y]) < .09f) unchanged++
+            }
+        }
+        assertTrue("Moving front-page ink must remain opaque ($unchanged/$distinct)", distinct > 30 && unchanged >= distinct * .85f)
+    }
+
     private fun title(key: String) =
         ui.onNodeWithTag("detail-title/$key", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
     private fun backHit() = ui.onNode(hasContentDescription("返回") and hasClickAction()).fetchSemanticsNode().boundsInRoot
@@ -224,13 +257,28 @@ class SceneMotionTest {
 
     private fun checkCardTrip(key: String, input: DirectNavigationEventInput) {
         val row = bounds(key)
+        val startTitle = windowRect(ui.onNodeWithTag("row-title/$key", useUnmergedTree = true)).topLeft
+        fun placedTitle() = windowRect(ui.onNodeWithTag("detail-title/$key", useUnmergedTree = true)).topLeft
         val before = pixels()
         val detail = "detail:$key"
+        fun measuredPage() = ui.onNodeWithTag(detail).fetchSemanticsNode().size
         click(ui.onNodeWithTag(key))
         ui.mainClock.advanceTimeBy(128)
         val middle = frame(key)
+        val pushTitle = placedTitle()
+        val pushSize = measuredPage()
         ui.mainClock.advanceTimeBy(600)
         val open = frame(key)
+        val restingTitle = placedTitle()
+        val restingSize = measuredPage()
+        fun checkTitlePath(box: Rect, placed: Offset) {
+            val fraction = (box.height - row.height) / (open.box.height - row.height)
+            val expected = androidx.compose.ui.geometry.lerp(startTitle, restingTitle, fraction)
+            assertEquals("The title and aperture must share one x path", expected.x, placed.x, 3f)
+            assertEquals("The title and aperture must share one y path", expected.y, placed.y, 3f)
+        }
+        assertEquals("Opening changes the painted aperture, not the measured page", restingSize, pushSize)
+        checkTitlePath(middle.box, pushTitle)
         ui.onNodeWithTag(key).assertDoesNotExist() // The covered row is not an accessible action.
         between(row, middle.box, open.box)
         assertUncoveredPixels(before, middle.pixels, middle.box)
@@ -239,6 +287,8 @@ class SceneMotionTest {
         start(input); seek(input, .35f)
         val nearDetail = bounds(detail)
         between(row, nearDetail, open.box)
+        assertEquals("Seeking must retain the resting page constraints", restingSize, measuredPage())
+        checkTitlePath(nearDetail, placedTitle())
         assertEquals("Holding Back at 35% must track the finger, not the automatic playback curve",
             open.box.height + (row.height - open.box.height) * .35f, nearDetail.height, 3f)
         seek(input, .70f)
@@ -250,6 +300,7 @@ class SceneMotionTest {
         assertLivePatch(before, nearCard.pixels, row)
         assertTrue("More back progress must contract the same surface", nearCard.box.height < nearDetail.height - 2f)
         seek(input, .30f)
+        checkTitlePath(bounds(detail), placedTitle())
         assertTrue("Dragging the finger back must expand the surface again", bounds(detail).height > nearCard.box.height + 2f)
         assertEquals("Reversing Back must seek the same geometry immediately",
             open.box.height + (row.height - open.box.height) * .30f, bounds(detail).height, 3f)
@@ -442,12 +493,21 @@ class SceneMotionTest {
         assertTrue("The row must now straddle the top clearance", bounds(key).top < aligned.top - 2f)
         withClockAndBack { input ->
             click(ui.onNodeWithTag(key)); ui.mainClock.advanceTimeBy(128)
-            val first = bounds("detail:$key")
+            val first = windowRect(ui.onNodeWithTag("detail:$key"))
             ui.mainClock.advanceTimeBy(600)
-            assertEquals("Do not expand from the hidden part of a row", bounds("detail:$key"), first)
+            val full = windowRect(ui.onNodeWithTag("detail:$key"))
+            assertEquals("A half-obscured row must not supply vertical geometry", full.top, first.top, 1f)
+            assertEquals(full.bottom, first.bottom, 1f)
+            assertEquals("Do not expand from the hidden part of a row", full.width, first.width, 1f)
+            val front = pixels()
             start(input); seek(input, .55f)
-            assertEquals("The still-obscured source must not attract Back", first, bounds("detail:$key"))
+            val half = edgeShot("detail:$key", full, .55f)
+            seek(input, .25f)
+            val reversed = edgeShot("detail:$key", full, .25f)
             complete(input)
+            val parent = pixels()
+            assertOpaqueEdge(full, front, parent, half)
+            assertOpaqueEdge(full, front, parent, reversed)
         }
     }
 
@@ -745,7 +805,20 @@ class SceneMotionTest {
                 ui.mainClock.advanceTimeBy(600)
                 assertLivePatch(settled, pixels(), label)
                 start(input)
-                for (p in listOf(.02f, .20f, .50f, .80f, .98f)) { seek(input, p); checkFrame("back $p") }
+                // Reverse before cancellation as well. At a held fraction the real row must
+                // still have its settled width and position relative to the top of the window.
+                for (p in listOf(.02f, .20f, .50f, .80f, .20f, .80f, .98f)) {
+                    seek(input, p)
+                    val frame = bounds(route)
+                    val expected = androidx.compose.ui.geometry.lerp(page, launcher, p)
+                    assertEquals(expected.left, frame.left, 2f); assertEquals(expected.top, frame.top, 2f)
+                    assertEquals(expected.right, frame.right, 2f); assertEquals(expected.bottom, frame.bottom, 2f)
+                    val expectedWake = wake.translate(frame.topLeft - page.topLeft)
+                    val actualWake = windowRect(ui.onNodeWithTag("routine-wake"))
+                    assertEquals(expectedWake.left, actualWake.left, 1f); assertEquals(expectedWake.right, actualWake.right, 1f)
+                    assertEquals(expectedWake.top, actualWake.top, 1f); assertEquals(expectedWake.bottom, actualWake.bottom, 1f)
+                    checkFrame("back $p")
+                }
                 ui.runOnUiThread { input.backCancelled() }
                 repeat(22) { i -> ui.mainClock.advanceTimeByFrame(); checkFrame("cancel $i") }
                 ui.mainClock.advanceTimeBy(600)
@@ -776,6 +849,33 @@ class SceneMotionTest {
                 }
             }
         } finally { folder.deleteRecursively() }
+    }
+
+    @Test fun settingsReturnsToTheWindowEdgeWhenAnotherTabReplacesItsGear() {
+        show(glass = false)
+        val tag = "route:settings"
+        val settings = ui.activity.getString(R.string.ui_settings)
+        val emptyGraph = ui.activity.getString(R.string.ui_no_graphs)
+        ui.onNode(hasContentDescription(settings) and hasClickAction()).performClick()
+        val page = windowRect(ui.onNodeWithTag(tag))
+        val before = pixels()
+        runBlocking { store.apply(PlannerCommand.EditAppearance(AppearancePatch.Replace(
+            Appearance(start = Destination.GRAPHS, visible = setOf(Destination.GRAPHS), glass = false)))) }
+        withClockAndBack { input ->
+            start(input)
+            ui.waitUntil(12_000) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.onAllNodesWithText(emptyGraph).fetchSemanticsNodes().isNotEmpty()
+            }
+            seek(input, .5f)
+            val midway = edgeShot(tag, page, .5f)
+            seek(input, .25f)
+            val reversed = edgeShot(tag, page, .25f)
+            complete(input)
+            val after = pixels()
+            assertOpaqueEdge(page, before, after, midway)
+            assertOpaqueEdge(page, before, after, reversed)
+        }
     }
 
     @Test fun aSettingsRowExpandsWithoutRetractingSettingsIntoItsOwnGear() {
@@ -884,30 +984,93 @@ class SceneMotionTest {
         val (a, b) = runBlocking { store.state().queue }
         ui.onNodeWithTag("task:${a.id}").performClick()
         val key = "detail:task:${a.id}"
+        // The parent will use B in the same list slot while the detail is still open.
         runBlocking { store.apply(PlannerCommand.TaskFinish(a.id)) }
         ui.waitUntil(12_000) { ui.onAllNodes(hasText(ui.activity.getString(io.github.nakanomk.stacklife.R.string.today_done)) and hasAnyAncestor(hasTestTag(key))).fetchSemanticsNodes().size == 1 }
-        val full = bounds(key)
+        val full = windowRect(ui.onNodeWithTag(key))
         val before = pixels()
         withClockAndBack { input ->
             start(input); seek(input, .50f)
-            val outgoing = ui.onNodeWithTag(key).fetchSemanticsNode()
-            assertEquals("No source: do not contract toward its replacement", full, outgoing.boundsInRoot)
-            val midway = pixels()
+            val midway = edgeShot(key, full, .50f)
+            seek(input, .25f)
+            val reversed = edgeShot(key, full, .25f)
             complete(input)
             val after = pixels()
-            var blended = 0
-            var distinct = 0
-            val trim = (28 * ui.density.density).roundToInt()
-            for (y in trim until before.height - trim step 3) for (x in 3 until before.width - 3 step 3) {
-                val old = before[x, y]
-                val new = after[x, y]
-                if (delta(old, new) > .3f) {
-                    distinct++
-                    if (delta(midway[x, y], old.copy(alpha = .5f).compositeOver(new)) < .10f) blended++
-                }
+            assertOpaqueEdge(full, before, after, midway)
+            assertOpaqueEdge(full, before, after, reversed)
+        }
+        ui.onNodeWithTag("task:${b.id}").assertIsDisplayed()
+        ui.onNodeWithTag("task:${a.id}").assertDoesNotExist()
+    }
+
+    @Test fun restoredHelpPaneReturnsOpaquelyWithoutBorrowingTheNewLauncher() {
+        val restore = StateRestorationTester(ui)
+        restore.setContent {
+            StackLifeTheme(Appearance(glass = false)) {
+                HelpAboutScreen(back = { error("Unexpected exit") }, onGuide = { error("Unexpected guide") })
             }
-            assertTrue("Missing actual detail and parent at 50% unanchored Back: $blended / $distinct reference pixels",
-                distinct > 30 && blended > distinct * .75f)
+        }
+        ui.onNodeWithTag("about-help").performScrollTo().performClick()
+        restore.emulateSavedInstanceStateRestore() // Restores the pane, not a no-longer-placed origin.
+        val tag = "pane:HELP"
+        val full = windowRect(ui.onNodeWithTag(tag, useUnmergedTree = true))
+        val front = pixels()
+        withClockAndBack { input ->
+            start(input); seek(input, .5f)
+            val midway = edgeShot(tag, full, .5f)
+            seek(input, .25f)
+            val reversed = edgeShot(tag, full, .25f)
+            complete(input)
+            val parent = pixels()
+            assertOpaqueEdge(full, front, parent, midway)
+            assertOpaqueEdge(full, front, parent, reversed)
+        }
+        ui.onNodeWithTag("about-help").assertIsDisplayed()
+    }
+
+    @Test fun losingTheHeldCardCarriesItsCurrentWindowAndCanRetraceIt() {
+        show(PlannerCommand.TaskAdd(TaskInput("移动中的任务")), PlannerCommand.TaskAdd(TaskInput("保留的任务")))
+        val (a, b) = runBlocking { store.state().queue }
+        val source = "task:${a.id}"
+        val key = "detail:$source"
+        val row = bounds(source)
+        ui.onNodeWithTag(source).performClick()
+        val full = bounds(key)
+        fun checkRect(label: String, expected: Rect) {
+            // layoutInfo.coordinates is inside the inverse content transform; its
+            // full-size design plane isn't the window the user can see.
+            val actual = bounds(key)
+            val visible = expected.intersect(full)
+            assertEquals(label, visible.left, actual.left, 2f); assertEquals(label, visible.right, actual.right, 2f)
+            assertEquals(label, visible.top, actual.top, 2f); assertEquals(label, visible.bottom, actual.bottom, 2f)
+        }
+        withClockAndBack { input ->
+            start(input); seek(input, .4f)
+            val held = bounds(key)
+            between(row, held, full)
+            runBlocking { store.apply(PlannerCommand.TaskFinish(a.id)) }
+            ui.waitUntil(12_000) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.onAllNodes(hasText(ui.activity.getString(R.string.today_done)) and hasAnyAncestor(hasTestTag(key)))
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            checkRect("Losing the original cannot change the held frame", held)
+            // The queue independently animates its surviving row into the vacant
+            // slot. Hold the navigation seek until that real parent is stationary.
+            ui.mainClock.advanceTimeBy(1200)
+            checkRect("The held gesture cannot drift with the queue's row motion", held)
+            seek(input, .7f)
+            val carried = held.translate((full.right - held.left) / 2f, 0f)
+            checkRect("Carry the painted window, not its old landing rectangle", carried)
+            val forward = pixels()
+            seek(input, .4f)
+            checkRect("Reverse to the exact point of loss", held)
+            seek(input, .2f)
+            checkRect("Reverse past the point of loss toward the real detail", androidx.compose.ui.geometry.lerp(held, full, .5f))
+            complete(input)
+            val parent = pixels()
+            keepFrame("row-loss-parent", parent); keepFrame("row-loss-carried", forward)
+            assertUncoveredPixels(parent, forward, carried)
         }
         ui.onNodeWithTag("task:${b.id}").assertIsDisplayed()
         ui.onNodeWithTag("task:${a.id}").assertDoesNotExist()

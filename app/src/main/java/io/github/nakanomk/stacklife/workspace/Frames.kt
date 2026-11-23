@@ -25,6 +25,7 @@ import io.github.nakanomk.stacklife.transitions.CardSummary
 import io.github.nakanomk.stacklife.transitions.CardTitle
 import io.github.nakanomk.stacklife.transitions.DetailCard
 import io.github.nakanomk.stacklife.transitions.DetailListSource
+import io.github.nakanomk.stacklife.transitions.detailBodyMotion
 import io.github.nakanomk.stacklife.transitions.detailListSource
 import io.github.nakanomk.stacklife.transitions.title
 import androidx.compose.foundation.shape.CircleShape
@@ -145,7 +146,7 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
                 }
             }
         })) { top, bottom ->
-        LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
+        LazyColumn(Modifier.detailBodyMotion(), contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val source = when (frame.source) {

@@ -7,6 +7,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.rememberGraphicsLayer
@@ -16,6 +18,7 @@ import androidx.compose.ui.node.GlobalPositionAwareModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.platform.InspectorInfo
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.platform.LocalContext
 import io.github.nakanomk.stacklife.StackLifeApplication
 import io.github.nakanomk.stacklife.planner.WallpaperSpec
@@ -50,6 +53,22 @@ internal fun WallpaperHost(spec: WallpaperSpec, drawBehindContent: Boolean = tru
         CompositionLocalProvider(LocalWallpaperSpec provides spec, LocalWallpaperRecording provides donor,
             LocalCapsuleBackdrop provides donor, content = content)
     }
+}
+
+/** A genuinely uniform donor, not a snapshot of content that happens to look empty. */
+internal class UniformPagePaper(private val color: Color) : Backdrop {
+    override val isCoordinatesDependent = false
+    override fun DrawScope.drawBackdrop(density: Density, coordinates: LayoutCoordinates?,
+        layerBlock: (GraphicsLayerScope.() -> Unit)?, downscaleFactor: Float) = drawRect(color)
+}
+
+/** A plain page needs no window-sized recording and has no position to invalidate
+ * when a tab moves. A photo still samples the actual window-aligned wallpaper. */
+@Composable
+internal fun rememberPagePaper(color: Color): Backdrop? {
+    val a = LocalAppearance.current
+    if (!LocalPlannerGlassAllowed.current || !a.glass || glassUnavailableReason(a) != null) return null
+    return LocalWallpaperRecording.current ?: remember(color) { UniformPagePaper(color) }
 }
 
 @Composable

@@ -7,9 +7,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -23,10 +29,14 @@ import io.github.nakanomk.stacklife.StackLifeApp
 import io.github.nakanomk.stacklife.StackLifeTheme
 import io.github.nakanomk.stacklife.RootPages
 import io.github.nakanomk.stacklife.assistant.AssistantPage
+import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
+import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
+import io.github.nakanomk.stacklife.appearance.rememberPlannerBackdrop
 import io.github.nakanomk.stacklife.planner.Appearance
 import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -88,6 +98,44 @@ class UiRepairTest {
     @Test fun composerGrowsOnlyThroughFiveLinesAndKeepsTheHistoryHitTarget() = checkComposer(false)
     @Test fun narrowLargeFontComposerKeepsItsDraftAndIndependentActions() = checkComposer(true)
 
+    @Test fun glassDockTracksLiveBottomPixelsWhenOnlyPageDrawingChanges() {
+        val appearance = Appearance(glass = true)
+        var bottom by mutableStateOf(Color.Red)
+        var available = false
+        ui.setContent {
+            StackLifeTheme(appearance) {
+                available = glassUnavailableReason(appearance) == null
+                RootPages(appearance.visibleOrder, Destination.WORKSPACE, 0L, {}, AssistantPage.Terms) { _, _ ->
+                    Spacer(Modifier.fillMaxSize().drawBehind {
+                        drawRect(Color.Blue)
+                        drawRect(bottom, Offset(0f, size.height * .7f), Size(size.width, size.height * .3f))
+                    })
+                }
+            }
+        }
+        ui.runOnIdle { assumeTrue("Needs real glass", available) }
+        val dock = tag("navigation-capsule")
+        dock.assert(hasStateDescription(ui.activity.getString(R.string.ui_glass_capsule)))
+        fun expectBottom(red: Boolean) {
+            ui.waitUntil(5_000) {
+                val pixels = dock.captureToImage().toPixelMap()
+                var samples = 0
+                var hits = 0
+                for (y in pixels.height / 4 until pixels.height * 3 / 4 step 4)
+                    for (x in pixels.width / 5 until pixels.width * 4 / 5 step 4) {
+                        val c = pixels[x, y]
+                        val channel = if (red) c.red - maxOf(c.green, c.blue) else c.green - maxOf(c.red, c.blue)
+                        if (channel > .15f) hits++
+                        samples++
+                    }
+                hits > samples / 2
+            }
+        }
+        expectBottom(true)
+        ui.runOnIdle { bottom = Color.Green }
+        expectBottom(false)
+    }
+
     @Test fun distantTabTapPaintsOnlyItsTwoPagesThenRestoresTheRealSwipeOrder() {
         val fills = mapOf(Destination.TODAY to Color.Red, Destination.WORKSPACE to Color.Green,
             Destination.GRAPHS to Color.Blue, Destination.COURSES to Color.Magenta, Destination.COUNTDOWN to Color.Yellow)
@@ -131,6 +179,64 @@ class UiRepairTest {
         } finally { ui.mainClock.autoAdvance = true }
         root.performTouchInput { swipeLeft() }
         tag("nav:workspace").assertIsSelected()
+    }
+
+    @Test fun rootTabsRetainOnlyTwoVisitedNeighborsAndNeverPlaceTheirHiddenContent() {
+        val today = Destination.TODAY
+        val workspace = Destination.WORKSPACE
+        val courses = Destination.COURSES
+        val countdown = Destination.COUNTDOWN
+        val starts = mutableListOf<Destination>()
+        val live = mutableSetOf<Destination>()
+        val nodes = mutableMapOf<Destination, SemanticsNode>()
+        var appearance by mutableStateOf(Appearance(glass = true))
+        var capable = false
+        ui.setContent {
+            var active by remember { mutableStateOf(today) }
+            StackLifeTheme(appearance) {
+                capable = LocalMotionEnabled.current && glassUnavailableReason(appearance) == null
+                RootPages(appearance.visibleOrder, active, 0L, { active = it }, AssistantPage.Terms) { page, _ ->
+                    val material = rememberPlannerBackdrop()
+                    DisposableEffect(page, material) {
+                        starts.add(page)
+                        live.add(page)
+                        onDispose { live.remove(page) }
+                    }
+                    Spacer(Modifier.fillMaxSize().testTag("page:${page.key}"))
+                }
+            }
+        }
+        ui.runOnIdle { assumeTrue("Requires animated, hardware-accelerated roots", capable) }
+        fun at(current: Destination, vararg hidden: Destination) {
+            tag("nav:${current.key}").assertIsSelected()
+            nodes[current] = tag("page:${current.key}").assertIsDisplayed().fetchSemanticsNode()
+            ui.runOnIdle {
+                assertEquals(setOf(current, *hidden), live)
+                for (page in hidden) assertFalse("$page should stay composed but unplaced", nodes.getValue(page).layoutInfo.isPlaced)
+            }
+            for (page in hidden) ui.onNodeWithTag("page:${page.key}").assertDoesNotExist()
+        }
+        fun go(page: Destination, vararg hidden: Destination) {
+            val (old, expected) = ui.runOnIdle { starts.size to if (page in live) emptyList() else listOf(page) }
+            tag("nav:${page.key}").performClick()
+            at(page, *hidden)
+            ui.runOnIdle { assertEquals("Only a non-resident $page may start on this trip", expected, starts.drop(old)) }
+        }
+        at(today)
+        go(courses, today) // Unvisited slots between these keys must never start, even transiently.
+        go(workspace, courses, today)
+        go(today, workspace, courses)
+        go(countdown, today, workspace)
+        go(courses, countdown, today)
+        ui.runOnIdle {
+            assertEquals(listOf(today, courses, workspace, countdown, courses), starts)
+            appearance = appearance.copy(reduceMotion = true)
+        }
+        at(courses)
+        go(workspace)
+        ui.runOnIdle { appearance = appearance.copy(reduceMotion = false) }
+        at(workspace)
+        ui.runOnIdle { assertEquals(listOf(today, courses, workspace, countdown, courses, workspace), starts) }
     }
 
     @Test fun helpDoesNotOpenThePreferenceAndBackAndScrollDismissIt() {

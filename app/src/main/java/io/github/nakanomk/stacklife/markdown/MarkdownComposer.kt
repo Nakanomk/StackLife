@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.input.ImeAction
 import io.github.nakanomk.stacklife.markdown.kern.*
 
@@ -23,7 +24,7 @@ private val chatKeyboard = KeyboardOptions(imeAction = ImeAction.None, showKeybo
 
 @Composable
 internal fun MarkdownComposer(state: TextFieldState, modifier: Modifier = Modifier, onSend: (() -> Unit)? = null,
-    placeholder: (@Composable () -> Unit)? = null) {
+    placeholder: (@Composable () -> Unit)? = null, enabled: Boolean = true) {
     val colors = MaterialTheme.colorScheme
     val typography = MaterialTheme.typography
     val cache = remember(state) { MarkdownDocumentCache() }
@@ -33,18 +34,24 @@ internal fun MarkdownComposer(state: TextFieldState, modifier: Modifier = Modifi
         MarkdownDocumentOutputTransformation(state, cache, MarkdownSpanStyleProvider(typography, colors)) { focused.value }
     }
     val chat = onSend != null
-    val empty = if (placeholder == null) null else remember(state) { derivedStateOf { state.text.isEmpty() } }
+    // A modal window owns input while the dock is covered. Keep the field node,
+    // but never hand the underlying draft (including its selection) to a disabled
+    // field's layout, output transformation, or accessibility delegate.
+    val displayed = if (enabled) state else remember { TextFieldState() }
+    val empty = if (placeholder == null) null else remember(displayed) { derivedStateOf { displayed.text.isEmpty() } }
     val currentSend by rememberUpdatedState(onSend)
     val interceptor = remember(input) { PlatformTextInputInterceptor { request, next ->
         next.startInputMethod { attributes -> input.connection(request.createInputConnection(attributes)) }
     } }
     InterceptPlatformTextInput(interceptor) {
         BasicTextField(
-            state = state,
-            modifier = modifier.onFocusChanged {
+            state = displayed,
+            enabled = enabled,
+            modifier = modifier.then(if (enabled) Modifier else Modifier.clearAndSetSemantics {}).onFocusChanged {
                 focused.value = it.isFocused
                 if (!it.isFocused) input.hardwareEnter = false
             }.onPreviewKeyEvent { event ->
+                if (!enabled) return@onPreviewKeyEvent false
                 val enter = event.key == Key.Enter || event.key == Key.NumPadEnter
                 val down = event.type == KeyEventType.KeyDown
                 input.hardwareEnter = enter && down && !event.isCtrlPressed && state.composition == null
@@ -53,8 +60,8 @@ internal fun MarkdownComposer(state: TextFieldState, modifier: Modifier = Modifi
                     true
                 } else false // Multiline BasicTextField handles ordinary Enter, including undo grouping.
             },
-            inputTransformation = input,
-            outputTransformation = output,
+            inputTransformation = if (enabled) input else null,
+            outputTransformation = if (enabled) output else null,
             textStyle = typography.bodyLarge.copy(color = colors.onSurface),
             cursorBrush = SolidColor(colors.primary),
             lineLimits = if (chat) compactLines else TextFieldLineLimits.Default,

@@ -35,17 +35,17 @@ internal fun ReminderPreference() {
     val activity = LocalActivity.current ?: return
     val reminders = (activity.application as StackLifeApplication).reminders
     val failed by reminders.schedulingFailed.collectAsStateWithLifecycle()
-    val prefs = remember(activity) { activity.getSharedPreferences("reminder_permission", Context.MODE_PRIVATE) }
+    val prefs = remember(activity) { lazy(LazyThreadSafetyMode.NONE) { activity.getSharedPreferences("reminder_permission", Context.MODE_PRIVATE) } }
     var allowed by remember { mutableStateOf(reminders.canPost()) }
     var exact by remember { mutableStateOf(reminders.canBeExact()) }
     var open by rememberSaveable { mutableStateOf(false) }
     var unavailable by rememberSaveable { mutableStateOf(false) }
-    var asked by remember { mutableStateOf(prefs.getBoolean("requested", false)) }
+    var requestedHere by remember(activity) { mutableStateOf(false) }
     fun update() { allowed = reminders.canPost(); exact = reminders.canBeExact() }
     LifecycleResumeEffect(activity) { update(); onPauseOrDispose {} }
     val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        asked = true
-        prefs.edit().putBoolean("requested", true).apply()
+        requestedHere = true
+        prefs.value.edit().putBoolean("requested", true).apply()
         update()
         reminders.refreshAsync()
     }
@@ -64,6 +64,9 @@ internal fun ReminderPreference() {
         update(); open = true; unavailable = false
     }
     if (!open) return
+    // Rendering the settings row needs the real channel state, not a disk read
+    // of whether this installation has shown the runtime permission prompt.
+    val asked = remember(prefs) { prefs.value.getBoolean("requested", false) } || requestedHere
     PlannerAlertDialog(onDismissRequest = { open = false }, title = { Text(stringResource(R.string.reminder_channel)) }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (failed) TextButton(onClick = { reminders.refreshAsync() }) { Text(stringResource(R.string.reminder_retry)) }

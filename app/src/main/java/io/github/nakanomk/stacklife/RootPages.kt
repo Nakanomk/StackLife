@@ -6,8 +6,13 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
+import io.github.nakanomk.stacklife.appearance.LocalWallpaperRecording
+import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.workspace.Page
@@ -22,8 +27,31 @@ internal fun RootPages(order: List<Destination>, active: Destination, reveal: Lo
     val pager = remember(order, reveal) { PagerState(order.indexOf(active)) { order.size } }
     var slots by remember(pager) { mutableStateOf(order) }
     var request by remember(pager) { mutableStateOf<Destination?>(null) }
-    val publish by rememberUpdatedState(onSelect)
     val motion = LocalMotionEnabled.current
+    val appearance = LocalAppearance.current
+    val capable = glassUnavailableReason(appearance) == null
+    val keepVisited = motion && capable
+    // This is a working set of keys, not another owner of page content or saveable state.
+    // Dropping the capability also drops the history; enabling it never resurrects a tab.
+    var recent by remember(pager, keepVisited) { mutableStateOf(listOf(active)) }
+    val publish by rememberUpdatedState<(Destination) -> Unit> { page ->
+        if (keepVisited && recent.first() != page) {
+            recent = buildList(3) {
+                add(page)
+                for (previous in recent) if (previous != page && size < 3) add(previous)
+            }
+        }
+        onSelect(page)
+    }
+    // At most five cheap pager slots. Keep their keys stable across a far tap;
+    // only the three selected business trees below can occupy those slots.
+    val beyond = if (keepVisited) order.lastIndex else 0
+    // Keep the Pager item-provider lambda stable as the dock scope and selection change.
+    val activePage by rememberUpdatedState(active)
+    val showPage by rememberUpdatedState(content)
+    // A screen-anchored photo changes the samples under a sliding pane every frame.
+    // In that case a full-page texture would need repainting instead of being reused.
+    val cacheMovingGlass = appearance.glass && capable && LocalWallpaperRecording.current == null
 
     fun landed(page: Destination) {
         if (slots != order) {
@@ -77,13 +105,35 @@ internal fun RootPages(order: List<Destination>, active: Destination, reveal: Lo
                 // Reset the lazy key map when the order changes, but retain the same source-site
                 // identity when Home is recomposed on Back (a new PagerState instance is not a site).
                 key(order, reveal) {
-                    // Let Pager compose the visible pair. SaveableStateProvider owns tab state;
-                    // Back to one tab must not lay out the other four on its first frame.
-                    HorizontalPager(pager, Modifier.fillMaxSize(), key = { slots[it].key }) { index ->
-                        val page = slots[index]
-                        val selected = page == active
-                        val inViewport by remember(index) { derivedStateOf { abs(pager.getOffsetDistanceInPages(index)) < 1f } }
-                        PagerPane(selected, selected || inViewport) { content(page, selected) }
+                    HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = beyond, key = { slots[it].key }) { index ->
+                        // requestScrollToPage and the key lookup must see the new order in
+                        // the same measure. An existing keyed item, however, is still its
+                        // original tab even if that index now belongs to a different key.
+                        val page = remember { slots[index] }
+                        val selected = page == activePage
+                        val inViewport = remember(pager, page, index) { derivedStateOf {
+                            val info = pager.layoutInfo
+                            if (info.visiblePagesInfo.isEmpty()) index == pager.currentPage else
+                                info.visiblePagesInfo.any { it.key == page.key && it.offset < info.viewportEndOffset &&
+                                    it.offset + info.pageSize > info.viewportStartOffset }
+                        } }
+                        // Beyond-bounds slots and directional prefetch are not visits. Match the
+                        // *measured key*, not an index that can denote another tab during a remap.
+                        if (selected || inViewport.value || (keepVisited && page in recent)) {
+                            // The fixed dock stays outside the moving layer and samples live pixels.
+                            val plane = if (cacheMovingGlass) remember(pager, inViewport) {
+                                Modifier.graphicsLayer {
+                                    // A visited page that just slid offscreen needn't throw
+                                    // its raster away only to rebuild it on the next tap.
+                                    // The resting visible page scrolls without this pass.
+                                    compositingStrategy = if (pager.isScrollInProgress || !inViewport.value)
+                                        CompositingStrategy.Offscreen else CompositingStrategy.Auto
+                                }
+                            } else Modifier
+                            PagerPane(selected, selected || inViewport.value, plane, retainedViewport = if (keepVisited) inViewport else null) {
+                                showPage(page, selected)
+                            }
+                        }
                     }
                 }
             }

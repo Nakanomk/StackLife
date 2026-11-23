@@ -5,11 +5,14 @@ import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.text.TextRange
@@ -29,16 +32,17 @@ class MarkdownComposerImeTest {
     @get:Rule val ui = createAndroidComposeRule<ComponentActivity>()
     private val connection = AtomicReference<InputConnection?>()
     private val attributes = EditorInfo()
+    private var focused = false
     private val field get() = ui.onNodeWithTag("input")
 
-    private fun open(state: TextFieldState, send: (() -> Unit)? = null) {
+    private fun open(state: TextFieldState, enabled: () -> Boolean = { true }, send: (() -> Unit)? = null) {
         val intercept = PlatformTextInputInterceptor { request, _ ->
             val ic = request.createInputConnection(attributes)
             connection.set(ic)
             try { awaitCancellation() } finally { connection.compareAndSet(ic, null); ic.closeConnection() }
         }
         ui.setContent { StackLifeTheme { InterceptPlatformTextInput(intercept) {
-            MarkdownComposer(state, Modifier.testTag("input"), send)
+            MarkdownComposer(state, Modifier.testTag("input").onFocusChanged { focused = it.isFocused }, send, enabled = enabled())
         } } }
         field.performClick()
         ui.waitUntil(5_000) { connection.get() != null }
@@ -47,6 +51,42 @@ class MarkdownComposerImeTest {
 
     private fun ime(block: InputConnection.() -> Unit) = ui.runOnIdle { requireNotNull(connection.get()).block() }
     private fun InputConnection.visible(): String = requireNotNull(getExtractedText(ExtractedTextRequest(), 0)).text.toString()
+
+    @Test fun coveredDockDisconnectsInputAndRestoresTheOriginalSelection() {
+        val text = "private unsent draft"
+        val state = TextFieldState(text)
+        val enabled = mutableStateOf(true)
+        open(state, enabled = { enabled.value }, send = {})
+        val selection = TextRange(2, 7)
+        ime { setSelection(selection.start, selection.end) }
+        val at = field.fetchSemanticsNode().boundsInRoot.center
+        ui.runOnIdle {
+            assertTrue(focused)
+            assertEquals(selection, state.selection)
+            enabled.value = false
+        }
+        ui.waitUntil(5_000) { connection.get() == null }
+        ui.onRoot().performTouchInput { click(at) }
+        ui.onAllNodes(hasSetTextAction(), useUnmergedTree = true).assertCountEquals(0)
+        ui.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.EditableText), useUnmergedTree = true).assertCountEquals(0)
+        ui.onAllNodes(hasText(text), useUnmergedTree = true).assertCountEquals(0)
+        ui.runOnIdle {
+            assertFalse(focused)
+            assertNull(connection.get())
+            assertEquals(text, state.text.toString())
+            assertEquals(selection, state.selection)
+            enabled.value = true
+        }
+        field.assertIsNotFocused().assert(hasSetTextAction())
+        ui.runOnIdle { assertNull(connection.get()); assertEquals(selection, state.selection) }
+        field.performClick()
+        ui.waitUntil(5_000) { connection.get() != null }
+        ime {
+            setSelection(text.length, text.length)
+            commitText("!", 1)
+            assertEquals("$text!", state.text.toString())
+        }
+    }
 
     @Test fun cjkPreeditAndCandidateConfirmationDoNotSendOrOverwriteMarkdown() {
         val original = "__记录__ 😀 "

@@ -85,12 +85,56 @@ internal class PlannerBackdrop(val layer: GraphicsLayer, private val base: Color
         if (coordinates == null || !coordinates.isAttached || !origin.isSpecified) return
         val target = coordinates.localToScreen(Offset.Zero)
         if (!target.isSpecified) return
+        drawAt(origin - target, downscaleFactor)
+    }
+
+    private fun DrawScope.drawAt(offset: Offset, downscaleFactor: Float) {
         val factor = 1f / downscaleFactor
         withTransform({
-            translate((origin.x - target.x) * factor, (origin.y - target.y) * factor)
+            translate(offset.x * factor, offset.y * factor)
             if (factor != 1f) scale(factor, factor, Offset.Zero)
         }) { drawLayer(layer) }
     }
+
+    fun relativeTo(receiver: State<Offset>): Backdrop? {
+        if (windowFrame != null) return null
+        val parent = when {
+            below == null -> null
+            !below.isCoordinatesDependent -> below
+            below is PlannerBackdrop -> below.relativeTo(receiver) ?: return null
+            else -> return null
+        }
+        val offset = derivedStateOf(structuralEqualityPolicy()) {
+            val at = receiver.value
+            if (origin.isSpecified && at.isSpecified) origin - at else Offset.Unspecified
+        }
+        return object : Backdrop {
+            override val isCoordinatesDependent = false
+            override fun DrawScope.drawBackdrop(density: Density, coordinates: LayoutCoordinates?,
+                layerBlock: (GraphicsLayerScope.() -> Unit)?, downscaleFactor: Float) {
+                if (parent == null) drawRect(base) else with(parent) { drawBackdrop(density, null, layerBlock, downscaleFactor) }
+                val delta = offset.value
+                if (delta.isSpecified) drawAt(delta, downscaleFactor)
+            }
+        }
+    }
+}
+
+internal class GlassReader(val backdrop: Backdrop, val placement: Modifier)
+
+/** Miuix normally invalidates on *every* global placement. When a pager moves its
+ * toolbar and donor together their sampling rect has not moved. Observe only the
+ * difference; the RenderNode continues to supply live scroll/content changes. */
+@Composable
+internal fun rememberGlassReader(source: Backdrop): GlassReader = remember(source) {
+    if (source is PlannerBackdrop) {
+        val position = mutableStateOf(Offset.Unspecified)
+        val reader = source.relativeTo(position)
+        if (reader != null) return@remember GlassReader(reader, Modifier.onGloballyPositioned {
+            position.value = it.localToScreen(Offset.Zero)
+        })
+    }
+    GlassReader(source, Modifier)
 }
 
 @Composable
@@ -203,9 +247,14 @@ private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Back
     val specular = if (input || (hasLens && scene != CapsuleScene.PANEL)) rememberGlassEdge(-45) else null
     val shadow = if (inline || frost || inset) Modifier else Modifier.dropShadow(shape,
         remember(dark, course) { Shadow(radius = if (course) 4.dp else 10.dp, color = Color.Black, alpha = if (dark) .20f else .10f) })
-    val material = Modifier.drawBackdrop(source, shape = { shape }, layerBlock = transform, effects = {
+    val reader = rememberGlassReader(source)
+    val material = Modifier.drawBackdrop(reader.backdrop, shape = { shape }, layerBlock = transform, effects = {
         if (!inline || frost) {
             if (!inline) colorControls(saturation = 1.5f)
+            // Both the blur and the undispersed lens only resample their input.
+            // A constant paper is invariant; photos, recorded rows and exported
+            // shells are not. Keep the normal saturation, tint, shadow and rim.
+            if (source is UniformPagePaper) return@drawBackdrop
             if (hasLens) {
                 val depth = when {
                     inset -> minOf(8.dp.toPx(), size.minDimension * .35f)
@@ -224,21 +273,18 @@ private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Back
             drawRect(tint.copy(alpha = .75f))
         }
         drawRect(wash, blendMode = blend)
-    }, onDrawFront = if (specular == null || input) null else {
-        { drawEdgeStroke(shape, specular.value, .75f * dockGeometryScale(size.minDimension)) }
     })
-    // The editor's rim is over the wash and under the text (this spacer has no
-    // other content). Give just the moving light its own display list: a light
-    // change no longer records the backdrop, and Miuix needn't force a full-size
-    // offscreen buffer for onDrawFront. The receiver still clips both together.
-    val inputRim = if (!input || specular == null) Modifier else Modifier.graphicsLayer().drawBehind {
-        drawEdgeStroke(shape, specular.value, .75f * dockGeometryScale(size.minDimension))
+    // A front callback forces Miuix to composite the entire lens into another
+    // offscreen buffer. The highlight needs only a display list inside the same clip.
+    val rim = if (specular == null) Modifier else Modifier.graphicsLayer().drawBehind {
+        val scale = if (input) 1f else dockGeometryScale(size.minDimension)
+        drawEdgeStroke(shape, specular.value, .75f * scale)
     }
     val receiver = if (touch == null) modifier else modifier.observeGlassTouch(touch, ownsScrub = floating)
     Box(receiver, propagateMinConstraints = true) {
         Spacer(Modifier.matchParentSize().then(materialBounds)
-            .then(if (export == null) Modifier.plannerBackdrop(panelPlane) else Modifier.layerBackdrop(export))
-            .then(shadow).then(material).then(inputRim))
+            .then(if (export == null) Modifier.plannerBackdrop(panelPlane) else Modifier.layerBackdrop(export).graphicsLayer())
+            .then(shadow).then(material).then(reader.placement).then(rim))
         val body = if (transform == null) Modifier else Modifier.graphicsLayer(block = transform)
         Box(if (floating) body else body.clip(shape), propagateMinConstraints = true) {
             if (export == null && panelPlane == null && touch == null) content()
