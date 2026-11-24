@@ -12,10 +12,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +39,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
+import io.github.nakanomk.stacklife.appearance.CapsuleScene
+import io.github.nakanomk.stacklife.appearance.StackLifeSurface
 
 // Hero dimensions and container roles adapted from BiliPai's MaterialAboutOverview (GPL-3.0):
 // github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/ui/MaterialAboutContent.kt
@@ -44,22 +48,24 @@ import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 @Composable
 internal fun AboutIdentity(version: @Composable () -> Unit) {
     val colors = MaterialTheme.colorScheme
-    Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large,
-        color = colors.primaryContainer, contentColor = colors.onPrimaryContainer) {
-        BoxWithConstraints(Modifier.fillMaxWidth().padding(20.dp)) {
-            val faceSize = if (maxWidth < 300.dp) 72.dp else 88.dp
-            // Reserve text room at its actual font scale, not just at the default phone size.
-            val titleSize = MaterialTheme.typography.headlineMedium.fontSize
-            val textRoom = with(LocalDensity.current) { titleSize.toDp() * 5f }
-            if (maxWidth >= faceSize + 24.dp + 16.dp + textRoom) {
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    FumoBadge(faceSize)
-                    IdentityText(version)
-                }
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    FumoBadge(faceSize)
-                    IdentityText(version)
+    CompositionLocalProvider(LocalContentColor provides colors.onPrimaryContainer) {
+        StackLifeSurface(CapsuleScene.FROST, Modifier.fillMaxWidth(), solid = colors.primaryContainer,
+            shape = MaterialTheme.shapes.large, tint = colors.primaryContainer) {
+            BoxWithConstraints(Modifier.fillMaxWidth().padding(20.dp)) {
+                val faceSize = if (maxWidth < 300.dp) 72.dp else 88.dp
+                // Reserve text room at its actual font scale, not just at the default phone size.
+                val titleSize = MaterialTheme.typography.headlineMedium.fontSize
+                val textRoom = with(LocalDensity.current) { titleSize.toDp() * 5f }
+                if (maxWidth >= faceSize + 24.dp + 16.dp + textRoom) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        FumoBadge(faceSize)
+                        IdentityText(version)
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        FumoBadge(faceSize)
+                        IdentityText(version)
+                    }
                 }
             }
         }

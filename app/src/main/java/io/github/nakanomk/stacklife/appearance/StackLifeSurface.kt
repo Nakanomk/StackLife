@@ -13,11 +13,11 @@ import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.contentColorFor
 import androidx.compose.material3.Surface
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.platform.LocalInputModeManager
@@ -32,11 +32,13 @@ import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.DrawTransform
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.*
@@ -75,7 +77,7 @@ internal fun rememberGlassEdge(rotation: Int): State<EdgeStroke> {
 
 @Stable
 internal class PlannerBackdrop(val layer: GraphicsLayer, private val base: Color, private val below: Backdrop?,
-    private val windowFrame: MutableIntState?) : Backdrop {
+    private val windowFrame: MutableIntState?, val texelSize: Int = 1) : Backdrop {
     override val isCoordinatesDependent = true
     var origin: Offset by mutableStateOf(Offset.Unspecified)
 
@@ -90,9 +92,10 @@ internal class PlannerBackdrop(val layer: GraphicsLayer, private val base: Color
 
     private fun DrawScope.drawAt(offset: Offset, downscaleFactor: Float) {
         val factor = 1f / downscaleFactor
+        val scale = texelSize * factor
         withTransform({
             translate(offset.x * factor, offset.y * factor)
-            if (factor != 1f) scale(factor, factor, Offset.Zero)
+            if (scale != 1f) scale(scale, scale, Offset.Zero)
         }) { drawLayer(layer) }
     }
 
@@ -138,13 +141,13 @@ internal fun rememberGlassReader(source: Backdrop): GlassReader = remember(sourc
 }
 
 @Composable
-internal fun rememberPlannerBackdrop(enabled: Boolean = true): PlannerBackdrop? {
+internal fun rememberPlannerBackdrop(enabled: Boolean = true, texelSize: Int = 1): PlannerBackdrop? {
     val a = LocalAppearance.current
     if (!enabled || !LocalPlannerGlassAllowed.current || !a.glass || glassUnavailableReason(a) != null) return null
     val base = MaterialTheme.colorScheme.surface
     val layer = rememberGraphicsLayer()
     val below = LocalCapsuleBackdrop.current
-    return remember(layer, base, below) { PlannerBackdrop(layer, base, below, null) }
+    return remember(layer, base, below, texelSize) { PlannerBackdrop(layer, base, below, null, texelSize) }
 }
 
 internal fun Modifier.plannerBackdrop(source: PlannerBackdrop?, drawInPlace: Boolean = true): Modifier {
@@ -155,8 +158,19 @@ internal fun Modifier.plannerBackdrop(source: PlannerBackdrop?, drawInPlace: Boo
 }
 
 internal fun ContentDrawScope.drawRecordedBackdrop(source: PlannerBackdrop, drawInPlace: Boolean = true) {
-    source.layer.record { this@drawRecordedBackdrop.drawContent() }
-    if (drawInPlace) drawLayer(source.layer)
+    val step = source.texelSize
+    if (step == 1) {
+        source.layer.record { this@drawRecordedBackdrop.drawContent() }
+        if (drawInPlace) drawLayer(source.layer)
+    } else {
+        // Same coordinate contract as Miuix's downscaleFactor. Only the backdrop is sampled at
+        // lower resolution; neither card ink nor the visible canvas passes through this texture.
+        val reduced = IntSize((size.width.toInt() + step - 1) / step, (size.height.toInt() + step - 1) / step)
+        source.layer.record(size = reduced) {
+            withTransform({ scale(1f / step, 1f / step, Offset.Zero) }) { this@drawRecordedBackdrop.drawContent() }
+        }
+        if (drawInPlace) withTransform({ scale(step.toFloat(), step.toFloat(), Offset.Zero) }) { drawLayer(source.layer) }
+    }
 }
 
 @Composable
@@ -169,9 +183,81 @@ internal fun GlassBacking(modifier: Modifier = Modifier, background: @Composable
     }
 }
 
+private val cardBlur = 10.dp
+private const val CARD_TEXEL_SIZE = 4
+private val LocalCardFrost = compositionLocalOf<PlannerBackdrop?> { null }
+
+/** One filtered display list per visible collection. Only its wallpaper (or explicit canvas
+ * underlay) is recorded. Scrolling cards replay clipped regions; they never re-filter the page. */
+@Composable
+internal fun CardFrostGroup(enabled: Boolean, modifier: Modifier = Modifier,
+    underlay: (@Composable (Modifier) -> Unit)? = null, content: @Composable BoxScope.() -> Unit) {
+    val photo = LocalWallpaperRecording.current
+    val a = LocalAppearance.current
+    val base = MaterialTheme.colorScheme.surface
+    val active = enabled && (photo != null || underlay != null) && LocalPlannerGlassAllowed.current &&
+        a.glass && glassUnavailableReason(a) == null
+    val plane = if (!active) null else {
+        val layer = rememberGraphicsLayer()
+        val radius = with(LocalDensity.current) { cardBlur.toPx() } / CARD_TEXEL_SIZE
+        remember(layer, radius, base) {
+            layer.renderEffect = BlurEffect(radius, radius, TileMode.Clamp)
+            layer.colorFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(1.5f) })
+            PlannerBackdrop(layer, base, null, null, texelSize = CARD_TEXEL_SIZE)
+        }
+    }
+    Box(modifier) {
+        if (underlay == null) {
+            if (plane != null) Spacer(Modifier.matchParentSize().plannerBackdrop(plane, drawInPlace = false)
+                .wallpaperBackground(base, photo))
+        } else if (plane == null) underlay(Modifier.matchParentSize()) else {
+            underlay(Modifier.matchParentSize().onGloballyPositioned { plane.origin = it.localToScreen(Offset.Zero) }
+                .drawWithContent {
+                    drawRecordedBackdrop(plane, drawInPlace = false)
+                    drawContent()
+                }.graphicsLayer())
+        }
+        val chrome = if (underlay == null) LocalCapsuleBackdrop.current else plane
+        CompositionLocalProvider(LocalCardFrost provides plane, LocalCapsuleBackdrop provides chrome) { content() }
+    }
+}
+
+@Composable
+internal fun FrostedCard(modifier: Modifier = Modifier, shape: Shape = MaterialTheme.shapes.large,
+    color: Color = MaterialTheme.colorScheme.surfaceContainerLow, shadowElevation: Dp = 0.dp,
+    onClick: (() -> Unit)? = null, canvasTransform: (DrawTransform.() -> Unit)? = null,
+    content: @Composable () -> Unit) {
+    val plane = LocalCardFrost.current
+    val fill = if (plane == null) color else Color.Transparent
+    val body: @Composable () -> Unit = {
+        if (plane == null) content() else {
+            val wash = color.copy(alpha = .42f)
+            val paint = if (canvasTransform == null) {
+                val reader = rememberGlassReader(plane)
+                reader.placement.drawBehind {
+                    with(reader.backdrop) { drawBackdrop(this@drawBehind, null, null, 1f) }
+                    drawRect(wash)
+                }
+            } else Modifier.drawBehind {
+                withTransform({
+                    canvasTransform()
+                    scale(plane.texelSize.toFloat(), plane.texelSize.toFloat(), Offset.Zero)
+                }) { drawLayer(plane.layer) }
+                drawRect(wash)
+            }
+            Box(paint, propagateMinConstraints = true) { content() }
+        }
+    }
+    // Keep Material's own clipping, touch/keyboard semantics, elevation and ripple over the paint.
+    if (onClick == null) Surface(modifier, shape, fill, contentColorFor(color),
+        shadowElevation = shadowElevation, content = body)
+    else Surface(onClick, modifier, shape = shape, color = fill, contentColor = contentColorFor(color),
+        shadowElevation = shadowElevation, content = body)
+}
+
 @Composable
 internal fun StackLifeSurface(scene: CapsuleScene, modifier: Modifier, solid: Color, elevation: Dp = 0.dp,
-    shape: RoundedCornerShape = CircleShape, tint: Color = Color.Unspecified,
+    shape: Shape = CircleShape, tint: Color = Color.Unspecified,
     interactionSource: InteractionSource? = null, solidBorder: BorderStroke? = null, materialBounds: Modifier = Modifier,
     content: @Composable () -> Unit) {
     val a = LocalAppearance.current
@@ -211,7 +297,7 @@ internal fun StackLifeSurface(scene: CapsuleScene, modifier: Modifier, solid: Co
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Backdrop, nestedShell: Boolean,
-    shape: RoundedCornerShape, tint: Color, floating: Boolean, elastic: Boolean, materialBounds: Modifier,
+    shape: Shape, tint: Color, floating: Boolean, elastic: Boolean, materialBounds: Modifier,
     content: @Composable () -> Unit) {
     val touch = if (elastic) remember { GlassTouch() } else null
     val transform = touch?.let { rememberGlassTouchLayer(it) }
@@ -240,7 +326,7 @@ private fun OpticalSurface(scene: CapsuleScene, modifier: Modifier, source: Back
     val blurDp = when (scene) {
         CapsuleScene.INSET -> 0.dp
         CapsuleScene.COURSE -> 4.dp
-        CapsuleScene.ASSISTANT, CapsuleScene.FROST -> 10.dp
+        CapsuleScene.ASSISTANT, CapsuleScene.FROST -> cardBlur
         CapsuleScene.PANEL, CapsuleScene.TRAY -> 24.dp
         else -> 4.dp
     }

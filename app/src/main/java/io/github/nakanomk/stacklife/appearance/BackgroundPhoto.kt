@@ -13,6 +13,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -70,6 +73,11 @@ internal fun WallpaperPixels(spec: WallpaperSpec, base: Color, foreground: Color
     }.value
     val bitmap = (load as? PhotoLoad.Ready)?.bitmap
     val image = remember(bitmap) { bitmap?.asImageBitmap() }
+    val cachedBlur = remember(bitmap, base) { mutableStateOf<WallpaperBlur?>(null) }
+    val blur = cachedBlur.value
+    if (bitmap != null && spec.blur > 0f && blur == null) LaunchedEffect(bitmap, base) {
+        cachedBlur.value = withContext(Dispatchers.Default) { wallpaperBlur(bitmap, base.toArgb()) }
+    }
     val crop = remember(viewport, bitmap, spec.scale, spec.offsetX, spec.offsetY) {
         if (bitmap == null || viewport.width <= 0 || viewport.height <= 0) null
         else wallpaperCrop(viewport, IntSize(bitmap.width, bitmap.height), spec)
@@ -102,11 +110,13 @@ internal fun WallpaperPixels(spec: WallpaperSpec, base: Color, foreground: Color
             onDrawBehind {
                 drawRect(base)
                 if (image != null && frame != null && protection != null) clipRect {
-                    val rect = frame.rect
-                    withTransform({
-                        translate(rect.left, rect.top)
-                        scale(rect.width / image.width, rect.height / image.height, Offset.Zero)
-                    }) { drawImage(image) }
+                    val strength = spec.blur
+                    when {
+                        strength == 0f || blur == null -> drawCrop(image, frame.rect)
+                        strength <= .25f -> blendCrop(image, blur.quarter, strength * 4f, frame.rect)
+                        strength <= .5f -> blendCrop(blur.quarter, blur.half, strength * 4f - 1f, frame.rect)
+                        else -> blendCrop(blur.half, blur.full, strength * 2f - 1f, frame.rect)
+                    }
                     drawRect(protection)
                 }
             }
@@ -115,6 +125,18 @@ internal fun WallpaperPixels(spec: WallpaperSpec, base: Color, foreground: Color
             Modifier.align(Alignment.BottomCenter).semantics { liveRegion = LiveRegionMode.Polite }.padding(4.dp),
             color = foreground, style = MaterialTheme.typography.labelMedium)
     }
+}
+
+private fun DrawScope.blendCrop(low: ImageBitmap, high: ImageBitmap, fraction: Float, rect: Rect) {
+    if (fraction < 1f) drawCrop(low, rect)
+    if (fraction > 0f) drawCrop(high, rect, fraction)
+}
+
+private fun DrawScope.drawCrop(image: ImageBitmap, rect: Rect, opacity: Float = 1f) {
+    withTransform({
+        translate(rect.left, rect.top)
+        scale(rect.width / image.width, rect.height / image.height, Offset.Zero)
+    }) { drawImage(image, alpha = opacity) }
 }
 
 @Composable

@@ -15,6 +15,7 @@
     <string name="wallpaper_horizontal">Horizontal focus</string>
     <string name="wallpaper_vertical">Vertical focus</string>
     <string name="wallpaper_protection">Tint</string>
+    <string name="wallpaper_blur">Blur strength</string>
     <string name="wallpaper_reset_crop">Center and fit</string>
     <string name="wallpaper_percent">%1$d%%</string>
     <string name="wallpaper_solid_accessibility">Solid surfaces are active for readability. Your image is kept.</string>

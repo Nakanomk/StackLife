@@ -7,7 +7,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
-import androidx.compose.material3.Surface
+import io.github.nakanomk.stacklife.appearance.FrostedCard
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -52,7 +52,7 @@ internal fun DetailCard(
 ) {
     val open = { onDetail(id) }
     val link = source?.card(remember(kind, id) { DetailTarget(kind, id) }, shape, open)
-    Surface(onClick = link?.open ?: open, modifier = modifier.then(link?.modifier ?: Modifier),
+    FrostedCard(onClick = link?.open ?: open, modifier = modifier.then(link?.modifier ?: Modifier),
         shape = shape, color = color, shadowElevation = shadowElevation, content = content)
 }
 

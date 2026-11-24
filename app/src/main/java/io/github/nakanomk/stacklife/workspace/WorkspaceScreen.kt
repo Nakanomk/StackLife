@@ -2,6 +2,16 @@ package io.github.nakanomk.stacklife.workspace
 
 import androidx.compose.ui.res.stringResource
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -24,10 +34,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.dismiss
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -40,6 +54,8 @@ import io.github.nakanomk.stacklife.RootToolbar
 import io.github.nakanomk.stacklife.appearance.SegmentTrack
 import io.github.nakanomk.stacklife.appearance.CapsuleScene
 import io.github.nakanomk.stacklife.appearance.StackLifeSurface
+import io.github.nakanomk.stacklife.appearance.CardFrostGroup
+import io.github.nakanomk.stacklife.appearance.FrostedCard
 import io.github.nakanomk.stacklife.AddTaskFab
 import io.github.nakanomk.stacklife.taskFabClearance
 import io.github.nakanomk.stacklife.R
@@ -59,6 +75,7 @@ import io.github.nakanomk.stacklife.transitions.LocalCardList
 import io.github.nakanomk.stacklife.transitions.noCardBounds
 import io.github.nakanomk.stacklife.transitions.detailListSource
 import io.github.nakanomk.stacklife.transitions.title
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -87,35 +104,35 @@ internal fun WorkspaceScreen(
     val position = remember(pager) { derivedStateOf { pager.currentPage + pager.currentPageOffsetFraction } }
     val pushedId by actions.pushedFrame.collectAsStateWithLifecycle()
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
-    val snackbar = remember { SnackbarHostState() }
-    val context = androidx.compose.ui.platform.LocalContext.current
-    LaunchedEffect(pushedId, editingId) {
+    val accessibility = LocalAccessibilityManager.current
+    val mayAddReason = remember(pushedId, state.frames) {
+        pushedId != null && state.frames.firstOrNull { it.id == pushedId }?.reason.isNullOrBlank()
+    }
+    LaunchedEffect(pushedId, editingId, accessibility, mayAddReason) {
         val frameId = pushedId ?: return@LaunchedEffect
         if (editingId != null) return@LaunchedEffect
-        if (snackbar.showSnackbar(context.getString(R.string.ui_pushed), actionLabel = context.getString(R.string.ui_add_reason), withDismissAction = true,
-                duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) editingId = frameId
+        // Same long timeout and accessibility extension as a Material action snackbar.
+        delay(accessibility?.calculateRecommendedTimeoutMillis(10_000L,
+            containsIcons = true, containsText = true, containsControls = true) ?: 10_000L)
         actions.dismissPush(frameId)
     }
     var feedbackHeight by remember { mutableIntStateOf(0) }
     val hasFeedback = editingId != null || pushedId != null
-    val feedbackInset = if (hasFeedback) with(LocalDensity.current) { feedbackHeight.toDp() } else 0.dp
+    val feedbackInset = with(LocalDensity.current) { feedbackHeight.toDp() }
     RootPane(header = { RootToolbar(Destination.WORKSPACE, onSettings) { WorkspaceSegments(stack, setStack, position) } },
         overlay = { _, bottom ->
-            if (!stack) AddTaskFab(onAdd, bottomInset = bottom + feedbackInset)
-            if (hasFeedback) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = bottom)
-                .onSizeChanged { feedbackHeight = it.height }.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                val frameId = editingId
-                if (frameId == null) SnackbarHost(snackbar) { data ->
-                    PushFeedbackPanel(Modifier.testTag("push-feedback")) {
-                        Row(Modifier.padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(data.visuals.message, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyMedium)
-                            data.visuals.actionLabel?.let { label -> TextButton(onClick = data::performAction) { Text(label) } }
-                            IconButton(onClick = data::dismiss) { Icon(painterResource(R.drawable.ic_close), stringResource(R.string.ui_close_panel)) }
-                        }
+            // Measure the FAB and feedback together; neither waits a frame for the other's
+            // new size when the row unfolds or the IME moves the dock.
+            Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = bottom),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                if (!stack) Box(Modifier.fillMaxWidth()) { AddTaskFab(onAdd) }
+                PushFeedbackPanel(hasFeedback, editingId, Modifier.onSizeChanged { feedbackHeight = it.height }) { frameId ->
+                    if (frameId == null) PushReceiptRow(enabled = editingId == null && pushedId != null,
+                        mayAddReason = mayAddReason, onEdit = { editingId = pushedId },
+                        onDismiss = { pushedId?.let(actions::dismissPush) })
+                    else key(frameId) {
+                        PushReasonEditor(frameId, actions, active = frameId == editingId) { editingId = null }
                     }
-                } else PushFeedbackPanel(Modifier) {
-                    key(frameId) { PushReasonEditor(frameId, actions) { editingId = null } }
                 }
             }
         }) { top, bottom ->
@@ -124,9 +141,11 @@ internal fun WorkspaceScreen(
             val inViewport by remember(pager, index) { derivedStateOf { kotlin.math.abs(position.value - index) < 1f } }
             PagerPane(selected, selected || inViewport) {
                 val cardBounds = if (selected) shared else noCardBounds
-                CompositionLocalProvider(LocalCardList provides if (index == 0) queueScroll else stackScroll) {
-                    if (index == 1) FrameList(state.frames, stackScroll, onFrame, onCreateFrame, cardBounds, top, bottom + feedbackInset, state.revision, actions)
-                    else QueueList(state.queue, queueScroll, actions, onTask, actions::pushQueue, cardBounds, top, bottom + taskFabClearance + feedbackInset, state.revision)
+                CardFrostGroup(enabled = inViewport && if (index == 0) state.queue.isNotEmpty() else state.frames.isNotEmpty()) {
+                    CompositionLocalProvider(LocalCardList provides if (index == 0) queueScroll else stackScroll) {
+                        if (index == 1) FrameList(state.frames, stackScroll, onFrame, onCreateFrame, cardBounds, top, bottom + feedbackInset, state.revision, actions)
+                        else QueueList(state.queue, queueScroll, actions, onTask, actions::pushQueue, cardBounds, top, bottom + taskFabClearance + feedbackInset, state.revision)
+                    }
                 }
             }
         }
@@ -134,10 +153,42 @@ internal fun WorkspaceScreen(
 }
 
 @Composable
-private fun PushFeedbackPanel(modifier: Modifier, content: @Composable () -> Unit) {
-    StackLifeSurface(CapsuleScene.ACTION, modifier, MaterialTheme.colorScheme.surfaceContainerHigh,
-        elevation = 3.dp, shape = RoundedCornerShape(24.dp)) {
-        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface, content = content)
+private fun PushFeedbackPanel(visible: Boolean, editingId: String?, modifier: Modifier,
+    content: @Composable (String?) -> Unit) {
+    val spatial = MaterialTheme.motionScheme
+    val motion = LocalMotionEnabled.current
+    Box(modifier) {
+        AnimatedVisibility(visible,
+            enter = if (motion) expandVertically(spatial.defaultSpatialSpec(), Alignment.Bottom) else EnterTransition.None,
+            exit = if (motion) shrinkVertically(spatial.defaultSpatialSpec(), Alignment.Bottom) else ExitTransition.None) {
+            StackLifeSurface(CapsuleScene.ACTION, Modifier.padding(horizontal = 12.dp, vertical = 6.dp).testTag("push-feedback"),
+                MaterialTheme.colorScheme.surfaceContainerHigh, elevation = 3.dp, shape = RoundedCornerShape(24.dp)) {
+                CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+                    AnimatedContent(editingId, contentKey = { it != null }, contentAlignment = Alignment.BottomEnd,
+                        label = "push reason", transitionSpec = {
+                            if (!motion) (EnterTransition.None togetherWith ExitTransition.None).using(null)
+                            else (expandHorizontally(spatial.defaultSpatialSpec(), Alignment.End) togetherWith
+                                shrinkHorizontally(spatial.defaultSpatialSpec(), Alignment.End))
+                                .using(SizeTransform { _, _ -> spatial.defaultSpatialSpec() })
+                        }) { content(it) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PushReceiptRow(enabled: Boolean, mayAddReason: Boolean, onEdit: () -> Unit, onDismiss: () -> Unit) {
+    Row(Modifier.semantics {
+        liveRegion = LiveRegionMode.Polite
+        if (enabled) dismiss { onDismiss(); true }
+    }.padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(stringResource(R.string.ui_pushed), Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyMedium)
+        if (mayAddReason) TextButton(onClick = onEdit, enabled = enabled) { Text(stringResource(R.string.ui_add_reason)) }
+        IconButton(onClick = onDismiss, enabled = enabled) {
+            Icon(painterResource(R.drawable.ic_close), stringResource(R.string.ui_close_panel))
+        }
     }
 }
 
@@ -213,13 +264,11 @@ private fun QueueList(
             }
         }
         if (order.isEmpty()) item {
-            Surface(color = MaterialTheme.colorScheme.surface) {
-                Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(painterResource(R.drawable.fumo_face), contentDescription = null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
-                    Text(stringResource(R.string.ui_empty_queue), style = MaterialTheme.typography.titleMedium)
-                    Hint(stringResource(R.string.ui_empty_queue_hint))
-                }
+            Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(painterResource(R.drawable.fumo_face), contentDescription = null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+                Text(stringResource(R.string.ui_empty_queue), style = MaterialTheme.typography.titleMedium)
+                Hint(stringResource(R.string.ui_empty_queue_hint))
             }
         }
         itemsIndexed(order, key = { _, task -> task.id }) { index, task ->
@@ -229,7 +278,7 @@ private fun QueueList(
                 .padding(start = 16.dp, end = 8.dp, top = verticalInset, bottom = verticalInset)
             if (selected != null) {
                 val checked = task.id in selected
-                Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                FrostedCard {
                     Row(Modifier.toggleable(checked, enabled = !action.busy, role = Role.Checkbox) {
                         selection = ArrayList(selected.toggle(task.id))
                     }.then(row), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {

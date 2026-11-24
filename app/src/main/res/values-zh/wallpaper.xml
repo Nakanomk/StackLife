@@ -15,6 +15,7 @@
     <string name="wallpaper_horizontal">水平焦点</string>
     <string name="wallpaper_vertical">垂直焦点</string>
     <string name="wallpaper_protection">罩色强度</string>
+    <string name="wallpaper_blur">模糊程度</string>
     <string name="wallpaper_reset_crop">居中并适配</string>
     <string name="wallpaper_percent">%1$d%%</string>
     <string name="wallpaper_solid_accessibility">正使用实色表面以便阅读，你的图片会保留。</string>

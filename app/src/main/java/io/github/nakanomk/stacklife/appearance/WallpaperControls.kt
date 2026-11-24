@@ -143,6 +143,7 @@ internal fun WallpaperControls(value: Appearance, change: (Appearance) -> Unit, 
             WallpaperSlider(R.string.wallpaper_horizontal, spec.offsetX, -1f..1f) { update(spec.copy(offsetX = it)) }
             WallpaperSlider(R.string.wallpaper_vertical, spec.offsetY, -1f..1f) { update(spec.copy(offsetY = it)) }
             WallpaperSlider(R.string.wallpaper_protection, spec.tint, 0f..1f) { update(spec.copy(tint = it)) }
+            WallpaperSlider(R.string.wallpaper_blur, spec.blur, 0f..1f) { update(spec.copy(blur = it)) }
             TextButton(onClick = { update(spec.copy(scale = 1f, offsetX = 0f, offsetY = 0f)) },
                 enabled = spec.scale != 1f || spec.offsetX != 0f || spec.offsetY != 0f) { Text(stringResource(R.string.wallpaper_reset_crop)) }
         }

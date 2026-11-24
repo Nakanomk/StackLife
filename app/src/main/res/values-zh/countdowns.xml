@@ -1,5 +1,6 @@
 <resources>
     <string name="countdown_new">新建倒数日</string>
+    <string name="countdown_add_occurrence">添加倒数日</string>
     <string name="countdown_empty">还没有倒数日</string>
     <string name="countdown_empty_hint">选一个日期，看看还有多少天，或已过去多少天。</string>
     <string name="countdown_details">倒数日详情</string>

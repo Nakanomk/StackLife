@@ -12,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -39,6 +40,8 @@ import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.assistant.AssistantComposer
 import io.github.nakanomk.stacklife.assistant.AssistantPage
+import io.github.nakanomk.stacklife.countdown.AddOccurrenceCountdown
+import io.github.nakanomk.stacklife.transitions.LocalFrontEntry
 import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.planner.Terms
 import io.github.nakanomk.stacklife.workspace.ActionPill
@@ -228,12 +231,14 @@ private fun CourseWeekPage(model: WorkspaceViewModel, term: TermSpec, week: Cour
 
 internal fun ScheduledCourse.occurrenceKey(): String = CourseOccurrenceId.of(termId, source, meeting).stableKey()
 
+private fun ScheduledCourse.displayZone() = calendarFor(source)?.zone ?: java.time.ZoneId.systemDefault()
+
 @Composable
 private fun CourseInfo(course: ScheduledCourse, detail: Boolean = false) {
     val m = course.meeting
     val pattern = stringResource(R.string.courses_date_pattern)
     val locale = AppLanguage.locale
-    val zone = calendarFor(course.source)?.zone ?: java.time.ZoneId.systemDefault()
+    val zone = course.displayZone()
     val campusDate = remember(pattern, locale, zone) { DateTimeFormatter.ofPattern(pattern, locale).withZone(zone) }
     val clock = remember(zone) { courseClock.withZone(zone) }
     if (detail) SectionTitle(stringResource(R.string.courses_class_time))
@@ -254,6 +259,18 @@ private fun CourseInfo(course: ScheduledCourse, detail: Boolean = false) {
 @Composable
 internal fun CourseReadPanel(course: ScheduledCourse?, dayLabel: String?, dayCourses: List<ScheduledCourse>,
     model: WorkspaceViewModel? = null, open: ((ScheduledCourse) -> Unit)? = null, edit: ((ScheduledCourse) -> Unit)? = null, close: () -> Unit) {
+    // Material sheets have a separate window. Preserve the occurrence selection, but
+    // don't let the retained sheet paint over or intercept Back from its child route.
+    val state = rememberSaveableStateHolder()
+    if (LocalFrontEntry.current) state.SaveableStateProvider("reader") {
+        CourseReadingSheet(course, dayLabel, dayCourses, model, open, edit, close)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CourseReadingSheet(course: ScheduledCourse?, dayLabel: String?, dayCourses: List<ScheduledCourse>,
+    model: WorkspaceViewModel?, open: ((ScheduledCourse) -> Unit)?, edit: ((ScheduledCourse) -> Unit)?, close: () -> Unit) {
     val origins = remember { PaneOrigins() }
     val nested = course != null && dayLabel != null
     val dayList = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -270,6 +287,7 @@ internal fun CourseReadPanel(course: ScheduledCourse?, dayLabel: String?, dayCou
                         Text(detail.meeting.title, style = MaterialTheme.typography.titleLarge)
                         Hint(sourceLabel(detail.source))
                         CourseInfo(detail, detail = true)
+                        AddOccurrenceCountdown(detail.meeting.title, detail.meeting.startMillis, detail.displayZone())
                         val reader = requireNotNull(model)
                         val weeks by remember(reader, detail) { reader.courseWeeks(PlannerQuery.CourseWeeks(
                             detail.termId, detail.source, detail.meeting.pattern())) }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)

@@ -21,6 +21,8 @@ import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
+import io.github.nakanomk.stacklife.appearance.CardFrostGroup
+import io.github.nakanomk.stacklife.appearance.FrostedCard
 import io.github.nakanomk.stacklife.workspace.*
 
 import io.github.nakanomk.stacklife.transitions.CardMetadata
@@ -37,6 +39,7 @@ internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Uni
         RootPane(header = { RootToolbar(Destination.GRAPHS, onSettings) {
             TextButton(onClick = { creating = true }) { Text(stringResource(R.string.ui_new_graph)) }
         } }) { top, bottom ->
+            CardFrostGroup(enabled = list.graphs.isNotEmpty()) {
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = listSpacing,
                     contentPadding = dockListPadding(top, bottom)) {
                     if (list.graphs.isEmpty()) item {
@@ -45,7 +48,7 @@ internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Uni
                     }
                     items(list.graphs, key = { it.id }) { graph ->
                         val shape = MaterialTheme.shapes.large
-                        Surface(onClick = { onOpenGraph(graph.id) }, shape = shape, color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        FrostedCard(onClick = { onOpenGraph(graph.id) }, shape = shape,
                             modifier = Modifier.fillMaxWidth().routeOrigin("graph:${graph.id}", shape).testTag("open-graph:${graph.id}")) {
                             Row(Modifier.heightIn(min = 60.dp).padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f).padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -67,6 +70,7 @@ internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Uni
                         }
                     }
                 }
+            }
         }
         val renamed = list.graphs.find { it.id == rename }
         if (creating || renamed != null) key(renamed?.id) {

@@ -250,6 +250,7 @@ class AppearanceEditorInteractionTest {
         val title = ui.activity.getString(R.string.wallpaper_title)
         val builtIn = ui.activity.getString(R.string.wallpaper_built_in)
         val zoom = hasContentDescription(ui.activity.getString(R.string.wallpaper_zoom))
+        val blur = hasContentDescription(ui.activity.getString(R.string.wallpaper_blur))
         fun tile(preset: WallpaperPreset) = hasTestTag("wallpaper-preset:${preset.name}")
         fun select(preset: WallpaperPreset) {
             field(tile(preset)).assertTextContains(preset.label).assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).performClick()
@@ -283,36 +284,45 @@ class AppearanceEditorInteractionTest {
                 sameCrop(sample, blue) == (preset == WallpaperPreset.BLUE) }
         }
         assertEquals(4, designs.values.distinct().size)
+        field(blur).performSemanticsAction(SemanticsActions.SetProgress) { it(1f) }
         await(row("取消")).performClick(); await(row("材质与动态"))
         assertEquals(original, saved()); assertEquals(before, revision())
 
         openGroup(title); await(tile(WallpaperPreset.BLUE)).assertIsSelected()
         select(WallpaperPreset.BROWN)
+        field(blur).performSemanticsAction(SemanticsActions.SetProgress) { it(.5f) }
+        val brownBlur = pixels { !sameCrop(it, designs.getValue(WallpaperPreset.BROWN)) }
         choice("应用范围", WORKSPACE.label)
         field(row("背景")).assertTextContains("继承全局背景")
-        pixels { sameCrop(it, designs.getValue(WallpaperPreset.BROWN)) }
+        pixels { sameCrop(it, brownBlur) }
         ui.onNode(zoom).assertDoesNotExist()
+        ui.onNode(blur).assertDoesNotExist()
         choice("背景", builtIn)
         await(tile(WallpaperPreset.BROWN)).assertIsSelected()
         select(WallpaperPreset.ORANGE)
         field(zoom).performSemanticsAction(SemanticsActions.SetProgress) { it(1.5f) }
+        field(blur).performSemanticsAction(SemanticsActions.SetProgress) { it(1f) }
         val orangeCrop = pixels { sample -> designs.values.none { sameCrop(it, sample) } }
         ui.activityRule.scenario.recreate(); attach(selection = picker)
         field(tile(WallpaperPreset.ORANGE)).assertIsSelected()
         pixels { sameCrop(it, orangeCrop) }
         assertEquals(original, saved()); assertEquals(before, revision())
         await(row("保存外观") and isEnabled()).performClick(); await(row("材质与动态"))
-        assertEquals(original.copy(background = WallpaperSpec(preset = WallpaperPreset.BROWN),
-            pageBackgrounds = mapOf(WORKSPACE to WallpaperSpec(preset = WallpaperPreset.ORANGE, scale = 1.5f))), saved())
+        assertEquals(original.copy(background = WallpaperSpec(preset = WallpaperPreset.BROWN, blur = .5f),
+            pageBackgrounds = mapOf(WORKSPACE to WallpaperSpec(preset = WallpaperPreset.ORANGE, scale = 1.5f, blur = 1f))), saved())
         assertEquals(before + 1, revision())
 
         ui.activityRule.scenario.recreate(); attach(selection = picker)
         openGroup(title); field(tile(WallpaperPreset.BROWN)).assertIsSelected()
-        pixels { sameCrop(it, designs.getValue(WallpaperPreset.BROWN)) }
+        pixels { sameCrop(it, brownBlur) }
         choice("应用范围", WORKSPACE.label)
         field(tile(WallpaperPreset.ORANGE)).assertIsSelected()
         pixels { sameCrop(it, orangeCrop) }
         ui.runOnIdle { assertEquals(0, picker.launches) }
+        choice("背景", ui.activity.getString(R.string.wallpaper_inherit))
+        pixels { sameCrop(it, brownBlur) }
+        await(row("保存外观") and isEnabled()).performClick(); await(row("材质与动态"))
+        assertEquals(original.copy(background = WallpaperSpec(preset = WallpaperPreset.BROWN, blur = .5f)), saved())
     }
 
     @OptIn(ExperimentalTestApi::class)

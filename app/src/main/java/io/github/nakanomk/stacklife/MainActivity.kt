@@ -89,7 +89,7 @@ class MainActivity : LocalizedActivity() {
 @Serializable private data class TaskDetail(val id: String) : NavKey
 @Serializable private data class EditTask(val id: String, val frameId: String? = null, val revision: Long? = null) : NavKey
 @Serializable private data class CountDetail(val id: String) : NavKey
-@Serializable private data class CountEdit(val id: String? = null) : NavKey
+@Serializable private data class CountEdit(val id: String? = null, val seed: CountdownSeed? = null) : NavKey
 @Serializable private data class SourceOccurrence(val link: GraphLink.Occurrence) : NavKey
 @Serializable private data class FrameDetail(val id: String, val generated: Boolean = false) : NavKey
 @Serializable private data class Feature(val destination: Destination) : NavKey
@@ -179,7 +179,9 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
     val hostOwner = LocalLifecycleOwner.current
     val homePlane = remember(hostOwner) { HomePlane(hostOwner) }
     val back = {
-        if (stack.size > 1) origins.pop(stack.removeAt(stack.lastIndex).motionKey())
+        if (stack.size > 1) {
+            if (!origins.interceptPop(stack.last().motionKey())) origins.pop(stack.removeAt(stack.lastIndex).motionKey())
+        }
         else if (initialDetail != null) onDetailBack()
         Unit
     }
@@ -235,6 +237,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
     var historySource by rememberSaveable { mutableStateOf<String?>(null) }
     val rootDraft = rememberSaveable { java.util.UUID.randomUUID().toString() }
     CompositionLocalProvider(LocalRootDraftId provides rootDraft, LocalRouteOrigins provides origins, LocalOpenNote provides { navigate(it) },
+        LocalNewCountdown provides { navigate(CountEdit(seed = it)) },
         LocalOpenChatHistory provides { historySource = it.historyKey() }) {
     PlannerPopupHost(stack.last() != ModelConnection && stack.last() != ImportCourses && privateScreens.intValue == 0) {
     val latestAppearance by rememberUpdatedState(preferences.appearance)
@@ -286,8 +289,12 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                         while (stack.size > 1) back()
                         if (inNavigation) destination = Destination.WORKSPACE else navigate(Feature(Destination.WORKSPACE))
                     }) }
-                entry<CountDetail> { key -> CountdownDetail(model, key.id, { navigate(CountEdit(it)) }, back) }
-                entry<CountEdit> { key -> CountdownEditor(model, key.id, back) }
+                entry<CountDetail>(metadata = { key -> origins.sourceSceneMetadata(key.motionKey(), retainParent = true) }) { key ->
+                    CountdownDetail(model, key.id, { navigate(CountEdit(it)) }, back)
+                }
+                entry<CountEdit>(metadata = { key -> origins.sourceSceneMetadata(key.motionKey(), retainParent = true) }) { key ->
+                    CountdownEditor(model, key.id, back, seed = key.seed)
+                }
                 entry<SlotEditorKey> { key ->
                     SlotEditor(key, model, onBack = back, onSaved = { occurrence, start ->
                         if (start != null) {

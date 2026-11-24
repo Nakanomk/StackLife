@@ -92,7 +92,7 @@ private class Nullable(private val inner: Shape) : Shape() {
     override fun check(value: JsonElement, field: String) { if (value != JsonNull) inner.check(value, field) }
 }
 private val wallpaperShape = Record("imageId?" to Nullable(text), "preset?" to Nullable(choices(*WallpaperPreset.entries.map { it.name }.toTypedArray())),
-    "scale?" to number, "offsetX?" to number, "offsetY?" to number, "tint?" to number)
+    "scale?" to number, "offsetX?" to number, "offsetY?" to number, "tint?" to number, "blur?" to number)
 private fun prefField(key: String): Shape = when (key) {
     "theme" -> choices(*ThemeMode.entries.map { it.name }.toTypedArray())
     "palette" -> choices(*PaletteMode.entries.map { it.name }.toTypedArray())

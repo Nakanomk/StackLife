@@ -19,6 +19,8 @@ import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
+import io.github.nakanomk.stacklife.appearance.CardFrostGroup
+import io.github.nakanomk.stacklife.appearance.FrostedCard
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.transitions.CardMetadata
 import io.github.nakanomk.stacklife.transitions.CardSummary
@@ -145,7 +147,7 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
                     Secondary(stringResource(R.string.ui_cancel_selection), enabled = !action.busy, onClick = leaveSelection)
                 }
             }
-        })) { top, bottom ->
+        })) { top, bottom -> CardFrostGroup(enabled = entries.isNotEmpty()) {
         LazyColumn(Modifier.detailBodyMotion(), contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -193,7 +195,7 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
                 val title = current?.title ?: item.title
                 val notes = current?.notes ?: item.notes
                 val minutes = current?.minutes ?: item.minutes
-                Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large) {
+                FrostedCard {
                     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.weight(1f)) { CardMetadata {
@@ -228,7 +230,7 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
                 }
             }
         }
-    }
+    } }
 }
 
 @Composable

@@ -24,13 +24,14 @@ internal val privatePhotoId = Regex("[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}
 }
 
 @Serializable data class WallpaperSpec(val imageId: String? = null, val scale: Float = 1f,
-    val offsetX: Float = 0f, val offsetY: Float = 0f, val tint: Float = .28f, val preset: WallpaperPreset? = null) {
+    val offsetX: Float = 0f, val offsetY: Float = 0f, val tint: Float = .28f, val preset: WallpaperPreset? = null,
+    val blur: Float = 0f) {
     val hasImage: Boolean get() = preset != null || imageId != null
     init {
         require(imageId == null || privatePhotoId.matches(imageId)) { uiText("Invalid private image ID.", "背景图片 ID 无效。") }
         require(imageId == null || preset == null) { uiText("Choose a built-in wallpaper or a private photo, not both.", "内置背景和自选图片不能同时使用。") }
-        require(scale in 1f..3f && offsetX in -1f..1f && offsetY in -1f..1f && tint in 0f..1f) {
-            uiText("Wallpaper crop or tint is out of range.", "背景裁切或可读性参数超出范围。")
+        require(scale in 1f..3f && offsetX in -1f..1f && offsetY in -1f..1f && tint in 0f..1f && blur in 0f..1f) {
+            uiText("Wallpaper crop, tint or blur is out of range.", "壁纸裁切、罩色或模糊程度超出范围。")
         }
     }
 }

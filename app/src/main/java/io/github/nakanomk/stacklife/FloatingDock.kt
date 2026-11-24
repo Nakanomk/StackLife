@@ -79,7 +79,10 @@ private fun DockScaffold(short: Boolean, wideRow: Boolean, navigationBar: (@Comp
     val showNav by remember(hasNav, target, density) { derivedStateOf {
         hasNav && (!composerFocused || target.getBottom(density) == 0)
     } }
-    val source = rememberPlannerBackdrop((navigationBar != null && appearance.navGlass) || (composer != null && appearance.assistantGlass))
+    // Only the shared input to the 4–10dp dock blurs is sampled at half resolution.
+    // The moving page, labels, optical rim and input cursor stay at device resolution.
+    val source = rememberPlannerBackdrop((navigationBar != null && appearance.navGlass) ||
+        (composer != null && appearance.assistantGlass), texelSize = 2)
     val ms = if (LocalMotionEnabled.current) 150 else 0
     val shareRow = (short || wideRow) && composer != null && showNav
     val navSlot: @Composable () -> Unit = {

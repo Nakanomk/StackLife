@@ -12,8 +12,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -25,12 +29,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
-import io.github.nakanomk.stacklife.appearance.GlassBacking
+import io.github.nakanomk.stacklife.appearance.CardFrostGroup
+import io.github.nakanomk.stacklife.appearance.FrostedCard
+import io.github.nakanomk.stacklife.appearance.wallpaperBackground
 import io.github.nakanomk.stacklife.workspace.ActionPill
 import io.github.nakanomk.stacklife.workspace.ControlGroup
 import io.github.kotlinflow.components.KotlinFlow
 import io.github.kotlinflow.models.*
-import io.github.kotlinflow.types.BackgroundVariant
+import kotlin.math.roundToInt
 import io.github.kotlinflow.utils.KotlinFlowInstance
 import io.github.nakanomk.stacklife.planner.*
 import io.github.kotlinflow.types.EdgeStyle
@@ -70,6 +76,7 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
     val edit by rememberUpdatedState(onEdit)
     val colors = MaterialTheme.colorScheme
     val instance = remember { KotlinFlowInstance() }
+    val viewport = remember { mutableStateOf(Viewport.Identity) }
     val boxes = remember { mutableMapOf<String, LayoutCoordinates>() }
     var canvas by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var moving by remember { mutableStateOf<Moving?>(null) }
@@ -86,7 +93,7 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
         else DragFrame(fixed, index, fixed[index].copy(position = XYPosition(drag.position.x * scale, drag.position.y * scale + originY)))
     }
     val edges = remember(detail.edges, scale) { detail.edges.map { it.directedEdge(scale) } }
-    val theme = remember(colors, scale) { KotlinFlowTheme(canvasBackgroundColor = colors.surfaceContainerLow,
+    val theme = remember(colors, scale) { KotlinFlowTheme(canvasBackgroundColor = Color.Transparent,
         edgeColor = colors.onSurfaceVariant, edgeWidth = 2f * scale, nodeSelectedBorderColor = colors.primary,
         gridColor = colors.outlineVariant, gridSpacing = 22f) }
     fun fit() {
@@ -121,10 +128,12 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
         }
     }
 
-    GlassBacking(modifier.clip(MaterialTheme.shapes.large).onGloballyPositioned { canvas = it }.testTag("graph-canvas"), background = {
+    CardFrostGroup(enabled = nodes.isNotEmpty(),
+        modifier = modifier.clip(MaterialTheme.shapes.large).onGloballyPositioned { canvas = it }.testTag("graph-canvas"),
+        underlay = { plane -> GraphPaper(viewport, theme, plane.wallpaperBackground(colors.surfaceContainerLow)) }) {
         // 1.0.1 renders directed edges and handles pan/pinch. Its built-in node drag conflates
         // cancellation with release, and its onConnect isn't dispatched. Own just those gestures.
-        KotlinFlow(nodes, edges, theme = theme, kotlinFlowInstance = instance, backgroundVariant = BackgroundVariant.DOTS,
+        KotlinFlow(nodes, edges, theme = theme, kotlinFlowInstance = instance, onViewportChange = { viewport.value = it },
             nodesDraggable = false, elementsSelectable = false, onNodeClick = { onSelect(it.id) }, overlay = {
                 wire?.let { draft -> Canvas(Modifier.fillMaxSize()) {
                     drawLine(colors.primary, draft.start, draft.tip, 2.dp.toPx(), StrokeCap.Round)
@@ -132,8 +141,16 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
             }) { rendered ->
             val node = rendered.data
             DisposableEffect(node.id) { onDispose { boxes.remove(node.id) } }
-            Surface(color = if (rendered.selected) colors.primaryContainer else colors.surfaceContainerHighest,
-                shape = MaterialTheme.shapes.medium, modifier = Modifier.width(graphNodeWidth).onGloballyPositioned { boxes[node.id] = it }) {
+            FrostedCard(color = if (rendered.selected) colors.primaryContainer else colors.surfaceContainerHighest,
+                shape = MaterialTheme.shapes.medium, modifier = Modifier.width(graphNodeWidth).onGloballyPositioned { boxes[node.id] = it },
+                canvasTransform = {
+                    // KotlinFlow offsets each item by rounded logical pixels, then scales/pans the
+                    // entire world. Invert that transform to read this node's actual grid region.
+                    val vp = viewport.value
+                    translate(-rendered.position.x.roundToInt() - vp.x / vp.zoom,
+                        -rendered.position.y.roundToInt() - vp.y / vp.zoom)
+                    scale(1f / vp.zoom, 1f / vp.zoom, Offset.Zero)
+                }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).heightIn(min = graphNodeHeight).testTag("canvas-node:${node.id}")
                         .clickable(role = Role.Button, onClickLabel = stringResource(R.string.ui_select_node)) { onSelect(node.id) }
@@ -202,7 +219,6 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
             }
         }
         if (nodes.isEmpty()) Text(stringResource(R.string.ui_add_first_node), Modifier.align(Alignment.Center), color = colors.onSurfaceVariant)
-    }, foreground = {
         if (nodes.isNotEmpty()) ControlGroup(Modifier.align(Alignment.BottomEnd).padding(4.dp)) {
             ActionPill(stringResource(R.string.ui_auto_arrange), {
                 val height = boxes.values.maxOfOrNull { if (it.isAttached) it.size.height / scale else 0f } ?: 0f
@@ -211,6 +227,41 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
                 else if (onArrange(moves, detail.revision)) arranged = detail.revision to moves
             }, Modifier.testTag("graph-arrange"))
             ActionPill(stringResource(R.string.ui_fit_graph), ::fit)
+        }
+    }
+}
+
+/** KotlinFlow 1.0.1's DOTS geometry, painted on a separate sibling so nodes cannot
+ * sample themselves, other nodes, labels, connecting wires, or canvas controls. */
+@Composable
+private fun GraphPaper(viewport: State<Viewport>, theme: KotlinFlowTheme, modifier: Modifier) {
+    Spacer(modifier.drawWithCache {
+        val dots = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = theme.gridColor.toArgb()
+            strokeCap = android.graphics.Paint.Cap.ROUND
+        }
+        var points = FloatArray(0)
+        onDrawBehind {
+            val vp = viewport.value
+            val step = theme.gridSpacing.dp.toPx() * vp.zoom
+            if (step <= 6f) return@onDrawBehind
+            val left = (vp.x % step + step) % step
+            val top = (vp.y % step + step) % step
+            if (left > size.width || top > size.height) return@onDrawBehind
+            val columns = ((size.width - left) / step).toInt() + 1
+            val rows = ((size.height - top) / step).toInt() + 1
+            val needed = 2 * columns * rows
+            if (points.size < needed) points = FloatArray(needed)
+            dots.strokeWidth = 2f * (0.75.dp.toPx() * vp.zoom).coerceAtLeast(.75f)
+            var count = 0
+            for (col in 0 until columns) {
+                val x = left + col * step
+                for (row in 0 until rows) {
+                    points[count++] = x
+                    points[count++] = top + row * step
+                }
+            }
+            drawContext.canvas.nativeCanvas.drawPoints(points, 0, count, dots)
         }
     })
 }

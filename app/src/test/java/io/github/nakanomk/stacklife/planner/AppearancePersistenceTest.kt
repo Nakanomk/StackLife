@@ -48,7 +48,9 @@ class AppearancePersistenceTest {
         assertEquals(WallpaperSpec(imageId = id, scale = 2f), old.wallpaper(Destination.WORKSPACE))
         assertTrue(old.showCourseGrid)
         assertEquals(WallpaperSpec(), decodeAppearance("""{"background":{"imageId":null}}""").wallpaper(Destination.COURSES))
-        val perPage = old.copy(pageBackgrounds = mapOf(Destination.COURSES to WallpaperSpec(preset = WallpaperPreset.PINK, offsetX = .5f)))
+        assertEquals(0f, old.background.blur, 0f)
+        val perPage = old.copy(background = old.background.copy(blur = .5f),
+            pageBackgrounds = mapOf(Destination.COURSES to WallpaperSpec(preset = WallpaperPreset.PINK, offsetX = .5f, blur = 1f)))
         assertEquals(perPage, decodeAppearance(encodeAppearance(perPage)))
         assertEquals(setOf(id), perPage.backgroundIds())
         val reset = AppearanceFields(AppearanceGroup.MATERIAL, null).applyTo(perPage)

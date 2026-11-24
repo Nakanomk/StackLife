@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.graphics.layer.CompositingStrategy
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.node.GlobalPositionAwareModifierNode
@@ -37,6 +38,13 @@ internal fun WallpaperHost(spec: WallpaperSpec, drawBehindContent: Boolean = tru
     val inherited = !drawBehindContent && LocalWallpaperSpec.current == spec
     val visible = !inherited && spec.hasImage && !wallpaperUsesSolidSurface()
     val layer = if (visible) rememberGraphicsLayer() else null
+    if (layer != null) {
+        // A navigation plane serves the page, chrome and cards. Rasterize its static crop and
+        // protection once instead of resampling the original photo in every receiver's shaders.
+        // The layer contains wallpaper only; edits invalidate it, and previews stay lightweight.
+        val cache = !drawBehindContent && LocalPlannerGlassAllowed.current && glassUnavailableReason(LocalAppearance.current) == null
+        SideEffect { layer.compositingStrategy = if (cache) CompositingStrategy.Offscreen else CompositingStrategy.Auto }
+    }
     val base = MaterialTheme.colorScheme.surface
     val recording = remember(layer, base) { layer?.let { PlannerBackdrop(it, base, null, null) } }
     val donor = if (inherited) LocalWallpaperRecording.current else recording

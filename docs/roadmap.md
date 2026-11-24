@@ -4,9 +4,7 @@ StackLife 是用 Kotlin + Jetpack Compose 开发的、手机优先的原生 Andr
 
 **项目许可：** StackLife 采用 [GNU 通用公共许可证第 3 版或任何后续版本](../LICENSE)（`GPL-3.0-or-later`）。第三方代码与资源保留[各自的许可和署名](../app/src/main/assets/licenses/)。
 
-**当前候选版本：v0.11.1（37），Room v13。** [课表背景与关于子页](#v0111-课表背景与关于子页)更新外观，不改业务库。[首次使用示例](#v0110-首次使用示例)只由新用户在引导中确认创建，旧库升级不填充日程。M1–M6 是历史契约；原本“冲突拒绝写入”“节点都是模板”等规则已由[排程与链接升级](#v01012-排程链接倒数日与外观)替代。普通包不含联盟 SDK。
-
-**下一版：[v0.11.2 迭代计划](#v0112-迭代计划)**，目标构建号 38；尚未实现，不作为当前安装包的功能说明。
+**当前候选版本：v0.11.2（38），Room v13。** [壁纸、卡片与倒数日](#v0112-壁纸卡片与倒数日)不需要数据迁移。[首次使用示例](#v0110-首次使用示例)只由新用户在引导中确认创建，升级不填充日程。M1–M6 是历史契约；排程和图节点以[排程与链接升级](#v01012-排程链接倒数日与外观)为准。普通包不含联盟 SDK。
 
 ## 起点与产品决定
 
@@ -425,17 +423,18 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 - 「设置 → 外观 → 背景图片」按原顺序提供可可棕格、玫瑰粉格、雾蓝格、枫叶橙格；四份用户原图随 APK 离线提供，不占用相册授权或私图引用。全局和单页共用现有裁切、保护罩与「保存外观」流程；高对比或减少透明度时仍使用实色阅读表面，保留选图。
 - 关于的四个一级子页区分指南主题、测量与导出、运行版本与更新、项目许可与第三方条目；第五页按段落阅读许可，可一键复制未经改写的完整原文。分组与操作顺序参考 [BiliPai 设置偏好](https://github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/design-system/src/main/java/com/android/purebilibili/core/ui/components/AppPreferenceComponents.kt)和 [Now in Android 设置分节](https://github.com/android/nowinandroid/blob/2982e63cb691ad49cd009aab43dc206fee6699c2/feature/settings/impl/src/main/kotlin/com/google/samples/apps/nowinandroid/feature/settings/impl/SettingsDialog.kt)，使用 StackLife 已有组件，不引入外部视觉资源。
 
-### v0.11.2 迭代计划
+### v0.11.2 壁纸、卡片与倒数日
 
-**基线：** 0.11.1（37），默认雾蓝格、课表辅助线关闭。以下七项均待实现、待验收。按[工程约束](../AGENTS.md)逐项交付；先取 0.11.1 对照，再改对应的页面、命令与用例。本版不换导航框架、不引入新的玻璃库，不扩张模型权限，升级不改写已有日程。
+**基线：** 0.11.1（37），默认雾蓝格，课表辅助线关闭。沿用[工程约束](../AGENTS.md)中的现有项目来源、数据边界、材质降级和真机帧预算。不新增依赖，不扩张模型权限。
 
-1. **空队列：去掉 Fumo 背后的矩形色块。** [队列空态](../app/src/main/java/io/github/nakanomk/stacklife/workspace/WorkspaceScreen.kt#L215-L224)用不透明 `Surface` 包住脸和两行文字。采用[倒数日空列表](../app/src/main/java/io/github/nakanomk/stacklife/countdown/CountdownRoute.kt#L57-L60)直接在页面上排文字的做法：只移除局部填色，保留脸、文案、留白，不为一个空提示新增模糊层。
+1. **空队列。** [Fumo 和两行说明](../app/src/main/java/io/github/nakanomk/stacklife/workspace/WorkspaceScreen.kt)像[倒数日空列表](../app/src/main/java/io/github/nakanomk/stacklife/countdown/CountdownRoute.kt)一样直接排在页面上，保留原留白，不加色块或模糊层。
    **验收：** 从有一项的队列压栈至空，格纹在提示边界内外连续；换深色、浅色和主题纯色，脸与文字仍可读，「新增任务」仍可点。
 
 2. **背景图片：单独调节模糊程度。** 借 [Muzei 效果页](https://github.com/muzei/muzei/blob/fcd0e8799c04343b8820e074d33a38b44d41a257/main/src/main/java/com/google/android/apps/muzei/settings/EffectsScreen.kt#L166-L211)将模糊与变暗分成两个滑杆的交互（[Apache-2.0](https://github.com/muzei/muzei/blob/fcd0e8799c04343b8820e074d33a38b44d41a257/LICENSE)，只借行为）。在现有[背景图片卡](../app/src/main/java/io/github/nakanomk/stacklife/appearance/WallpaperControls.kt#L128-L147)中按本项目惯例显示 0–100%，新旧设置默认为 0%。沿用 `WallpaperSpec` 的全局／单页继承、草稿与保存；内置图、私图都支持，纯色不显示滑杆。只滤壁纸像素，复用已解码图；0% 不启用滤镜，拖动不重解码、不逐帧存图。卡片玻璃开关不改变壁纸强度。
    **验收：** 同一裁切、同一罩色，在 0%／50%／100% 对照看格纹边缘逐步变软，课名与日期字形不变。全局调节后单页可覆盖、可恢复继承；取消不改旧值，保存后冷启仍一致。用私图在 API 26 也验静态壁纸；高对比／减少透明度沿用实色保护，退出后恢复所选效果。
+   **实现与检验：** 首次需要模糊时，在后台从同一张已解码图生成三个有界层级，滑杆只混合已有层。滤波采用 [OpenCV 4.10 高斯金字塔的五点核](https://docs.opencv.org/4.10.0/d4/d1f/tutorial_pyramids.html)，未移植代码或引入其库。Android 8.0 私图实屏中，同一区域的红通道极差在 0%、50%、100% 分别为 107、65、4（8 位）；前景色始终为 `#FF0000`。
 
-3. **倒数日：一镜到底返回当前那张卡。** [现有列表与详情](../app/src/main/java/io/github/nakanomk/stacklife/countdown/CountdownRoute.kt#L62-L109)分别持有卡片 ID 和纵向翻页后选中的 ID。沿用工作台的[真实来源与预测返回](../app/src/main/java/io/github/nakanomk/stacklife/transitions/RouteMotion.kt#L45-L79)（[BiliPai 共享容器来源与许可](../app/src/main/assets/licenses/BiliPai-GPL-3.0.txt)）。按当前 ID 和可见边界收回，普通返回用默认非线性曲线。编辑返回详情、新建返回启动入口也要配对；不把普通版接入联盟 SDK。
+3. **倒数日：一镜到底返回当前那张卡。** [列表与详情](../app/src/main/java/io/github/nakanomk/stacklife/countdown/CountdownRoute.kt)以翻页落定的卡片 ID 选择返回目标，编辑和新建按可见按钮边界返回。沿用工作台的[真实来源与预测返回](../app/src/main/java/io/github/nakanomk/stacklife/transitions/RouteMotion.kt)（[BiliPai 共享容器来源与许可](../app/src/main/assets/licenses/BiliPai-GPL-3.0.txt)）。普通返回非线性，手势可反拖取消；不接联盟 SDK。
    **验收：** 打开 A，翻到 B，分别用顶栏和边缘手势返回到可见的 B；反拖取消仍停在 B。置顶换位跟随同一卡；源卡离屏或被删时沿父视口边缘不透明退出。全程可见真实父页与壁纸，不借邻卡、不闪黑帧、不用整页渐变。关闭动效直接落位。
 
 4. **帮助与关于：蓝色身份卡使用玻璃。** 只改[含 Fumo、应用名和版本的 `AboutIdentity`](../app/src/main/java/io/github/nakanomk/stacklife/about/AboutIdentity.kt#L41-L65)。保留原主题主色、徽章和窄屏排版，复用设置表单的 [`CapsuleScene.FROST`](../app/src/main/java/io/github/nakanomk/stacklife/appearance/StackLifeSurface.kt#L218-L245)，不把许可阅读页一起变透明。
@@ -447,12 +446,32 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 6. **从某一节课或某一次事件创建倒数日。** 在[课次详情](../app/src/main/java/io/github/nakanomk/stacklife/courses/CourseHome.kt#L229-L266)和「今天」的[已排事件详情](../app/src/main/java/io/github/nakanomk/stacklife/today/SlotEditor.kt#L50-L63)提供「添加倒数日」。按[本次发生项](../app/src/main/java/io/github/nakanomk/stacklife/planner/AgendaModels.kt#L9-L14)预填标题和实际开始日期：课程沿用课次详情显示的时区，其他事件沿用日程显示的时区。复用[倒数日编辑器](../app/src/main/java/io/github/nakanomk/stacklife/countdown/CountdownEditor.kt#L118-L130)及其 [TimeTrace 来源（MIT）](../app/src/main/assets/licenses/TimeTrace-MIT.txt)。用户可以改标题和日期；点保存才经 `PlannerApi` 提交 `CountdownAdd`。保存后是独立记录，不复制备注、地点或提醒，不随源事件改期或删除，无需新建关系表。
    **验收：** 同名课程在 12 月 3 日和 10 日各有一节，从第二节打开应预填 10 日；每日事件只把 3 日那次移到 4 日，应预填 4 日。跨午夜事件用开始日。分别验证取消新增零条、连点保存只新增一条、重启仍可见；原课程、排程和提醒不变。
 
-7. **压栈后点「补充原因」：在原反馈条内展开输入框。** [现有反馈条](../app/src/main/java/io/github/nakanomk/stacklife/workspace/WorkspaceScreen.kt#L88-L120)在提示行和输入行间直接切换。借[课程默认提醒的单一编辑区和 Material 尺寸动效](../app/src/main/java/io/github/nakanomk/stacklife/reminders/ReminderRulesEditor.kt#L69-L76)，沿同一底边展开、收回；两行等高时也要看得到从按钮到输入区域的展开。不新开弹窗、不延迟压栈事务，始终只保留一个可聚焦的输入框。
+7. **压栈后点「补充原因」：在原反馈条内展开输入框。** [压栈反馈条](../app/src/main/java/io/github/nakanomk/stacklife/workspace/WorkspaceScreen.kt)沿用[课程默认提醒的单一编辑区和 Material 尺寸动效](../app/src/main/java/io/github/nakanomk/stacklife/reminders/ReminderRulesEditor.kt)：输入区从反馈条右侧展开，收回时仍沿同一底边。两行等高也有过渡。不新开弹窗，不延迟压栈事务，只有当前帧的输入框可聚焦。
    **验收：** 整队压栈和多选压栈都在回执后出现入口；点开、唤起／收回键盘、取消或保存时反馈条和新增按钮不跳位。取消保留已建帧，保存只补本次帧的原因，快速连点不二次压栈。减少动效时直接展开，仍能输入和保存。
 
-**实施与取证顺序：** 先验证单卡材质，再推广到多卡；倒数日的真实返回路径先于跨页创建入口验收。其他项可独立交付。截图固定壁纸、数据、窗口与字体；动效录制完整往返和取消；倒数日与补原因核对事务及重启后的记录。
+**功能取证：** 模拟器按固定壁纸、窗口与字号核对卡底、字形和命中区域；API 37 另外验证了 320dp／200% 字号，以及倒数日来回翻页、反拖取消、删除和离屏后的去向。发生项测试重新打开业务库核对新增条数、发生日期和源记录。
+
+**性能实现边界：** 同一列表的卡片只取一份 10dp 高斯底图，纹理宽高各取原来的 1/4，文字、图标、手柄仍按物理像素绘制。画布上的点阵沿用 KotlinFlow 的间距与缩放；卡片只读壁纸与点阵，不读节点。页面共用已裁切并完成对比度保护的壁纸；这份缓存不含日程、输入框或导航。图层录制与回放沿用 [Miuix Blur 0.9.5-beta02](../gradle/libs.versions.toml#L18) 的 `BackdropEffectScope.downscaleFactor` 坐标契约（[Apache-2.0](../app/src/main/assets/licenses/Backdrop-Miuix-Apache-2.0.txt)），更新由 Android 的 [GraphicsLayer](https://developer.android.com/reference/kotlin/androidx/compose/ui/graphics/layer/GraphicsLayer) 处理。
 
 **真机放行条件：** 同一台 PLR110、同一刷新率设置、1× 动效，对照 0.11.1 与候选版。[独立 `.bench` 包](../macrobenchmark/src/main/java/io/github/nakanomk/stacklife/macrobenchmark/AppearanceBenchmark.kt#L27-L36)沿用 30 项任务、5 门课，为新增场景准备相同的两张倒数日卡和一张测试图，不碰用户数据。预热后玻璃／实色各五轮，分测卡片滚动与返回（含倒数日）、流程图拖动、补原因、打开／返回设置、今天 → 课表切换、日程助理消息面板开／合。沿用[既有门槛](#v01018-真机帧预算)：每项 `frameOverrunMs` P95 ≤ 0 ms，`App Deadline Missed` 或 `Dropped Frame` 占比 < 1%。未过的场景单列，不靠合并数据或改用渐变达标。
+
+**0.11.2（38）真机结果：未达到公开预发布门槛。** PLR110，Android 16，1272×2800，560 dpi，120 Hz，系统字号和动效 1×。两版均用相同数据和编译模式；测试前后热状态均为 0。下表每格是 **P95 超出帧截止线的毫秒数；系统标记错过截止线或丢弃的帧数 / 应用总帧数**。负数表示提前完成。标记来自 Perfetto FrameTimeline，按窗口和操作分段；压栈原因在旧版无过渡，样本数相应较少。
+
+| 操作 | 0.11.1 玻璃 | 0.11.2 玻璃 | 0.11.1 实色 | 0.11.2 实色 |
+|---|---:|---:|---:|---:|
+| 队列滚动 | −0.8；8/1795 | −1.3；10/1892 | −2.6；0/1809 | −4.0；0/1842 |
+| 任务卡返回 | +14.4；13/191 | +11.7；10/194 | +10.2；9/191 | −2.4；1/200 |
+| 倒数日翻页后返回 | +12.4；13/189 | +9.4；6/194 | −0.7；2/194 | −1.5；0/195 |
+| 流程图平移 | +7.9；12/209 | +5.6；9/217 | −1.6；1/217 | −1.9；1/217 |
+| 展开压栈原因 | −0.7；0/17 | −0.2；0/251 | −2.1；0/16 | −4.9；0/250 |
+| 收回压栈原因 | −0.5；0/10 | −0.5；0/190 | −5.5；0/5 | −4.4；0/190 |
+| 打开设置 | +5.5；10/195 | +6.1；14/192 | +0.1；5/206 | −0.3；5/207 |
+| 设置返回 | +15.5；12/191 | +8.8；14/223 | +6.4；9/194 | −3.0；0/228 |
+| 今天 → 课表 | +7.8；12/204 | +4.3；6/209 | −0.7；3/225 | −2.7；1/226 |
+| 助理消息面板打开 | −2.6；0/350 | −1.9；5/350 | −3.8；2/345 | −7.4；4/345 |
+| 助理消息面板关闭 | −3.1；4/155 | −3.5；3/155 | −8.6；4/155 | −4.5；5/155 |
+
+玻璃档通过队列滚动和压栈原因开合（3/11）；实色档未过的是打开设置、消息面板打开和关闭（8/11 通过）。保留静态壁纸与卡底缓存，回退了额外缓存整页的试验：该试验把玻璃档打开设置的 P95 从 +6.1 ms 拉长到 +12.6 ms。另在 API 37 模拟器录制倒数日翻页、反拖取消与返回，119 帧中未出现全黑内容区；录屏不计入真机帧预算。
 
 ### 历史里程碑验收用例（M1–M6）
 

@@ -28,6 +28,9 @@ import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.images.PhotoProblem
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.today.deviceDay
+import io.github.nakanomk.stacklife.transitions.LocalFrontEntry
+import io.github.nakanomk.stacklife.transitions.LocalRouteOrigins
+import io.github.nakanomk.stacklife.transitions.RememberRouteLanding
 import io.github.nakanomk.stacklife.workspace.*
 import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
@@ -37,10 +40,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-internal fun CountdownEditor(model: WorkspaceViewModel, id: String?, onBack: () -> Unit) = key(id) {
+internal fun CountdownEditor(model: WorkspaceViewModel, id: String?, onBack: () -> Unit, seed: CountdownSeed? = null) = key(id, seed) {
+    RememberRouteLanding()
     if (id == null) {
         val state by remember(model) { model.read<CountdownsView>(PlannerQuery.Countdowns) }.collectAsStateWithLifecycle(ReadState.Loading)
-        ReadPanel(state) { CountdownForm(model, null, null, it.revision, onBack) }
+        ReadPanel(state) { CountdownForm(model, null, null, it.revision, onBack, seed) }
     } else {
         val state by remember(id, model) { model.read<CountdownView>(PlannerQuery.Countdown(id)) }.collectAsStateWithLifecycle(ReadState.Loading)
         ReadPanel(state) { view ->
@@ -52,13 +56,14 @@ internal fun CountdownEditor(model: WorkspaceViewModel, id: String?, onBack: () 
 }
 
 @Composable
-private fun CountdownForm(model: WorkspaceViewModel, id: String?, saved: Countdown?, currentRevision: Long, back: () -> Unit) {
+private fun CountdownForm(model: WorkspaceViewModel, id: String?, saved: Countdown?, currentRevision: Long, back: () -> Unit,
+    seed: CountdownSeed? = null) {
     val today = deviceDay().date
     val revision = rememberSaveable { currentRevision }
     val oldPinned = rememberSaveable { saved?.pinned ?: false }
     val originalImage by rememberSaveable { mutableStateOf(saved?.backgroundId) }
-    var title by rememberSaveable { mutableStateOf(saved?.title.orEmpty()) }
-    var day by rememberSaveable { mutableLongStateOf(saved?.targetDay ?: today.toEpochDay()) }
+    var title by rememberSaveable { mutableStateOf(saved?.title ?: seed?.title.orEmpty()) }
+    var day by rememberSaveable { mutableLongStateOf(saved?.targetDay ?: seed?.day ?: today.toEpochDay()) }
     var mode by rememberSaveable { mutableStateOf(saved?.mode ?: CountdownMode.COUNT_DOWN) }
     var pinned by rememberSaveable { mutableStateOf(oldPinned) }
     var opacity by rememberSaveable { mutableFloatStateOf(saved?.maskOpacity ?: .3f) }
@@ -91,7 +96,13 @@ private fun CountdownForm(model: WorkspaceViewModel, id: String?, saved: Countdo
     val busy = importing || receipt.busy || closing
     val editable = !busy && !applied && !stale
     val leave: () -> Unit = { if (!busy) closing = true }
-    BackHandler(onBack = leave)
+    // Let Nav3 seek the actual route. Release a private import only on commit;
+    // cancelling a held gesture leaves both the draft and its file in place.
+    val origins = LocalRouteOrigins.current
+    if (owned != null) origins?.GuardCommittedPop {
+        if (owned == null) false else { leave(); true }
+    }
+    BackHandler(enabled = LocalFrontEntry.current && (busy || owned != null && origins == null), onBack = leave)
     val picker = rememberLauncherForActivityResult(PickVisualMedia()) { uri ->
         if (uri != null && editable) {
             importing = true; photoError = null

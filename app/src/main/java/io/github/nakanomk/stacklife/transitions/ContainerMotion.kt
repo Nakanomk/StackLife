@@ -156,10 +156,12 @@ internal open class ContainerOrigins {
     var size by mutableStateOf(IntSize.Zero)
     fun attach(anchor: ContainerAnchor) { anchors[anchor.site] = anchor }
     fun detach(anchor: ContainerAnchor) { anchors.remove(anchor.site, anchor) }
+    fun source(site: OriginSite) = anchors[site]
+    protected open fun tracks(site: OriginSite) = links[site.target]?.site == site
     fun place(anchor: ContainerAnchor, node: LayoutCoordinates) {
         // Only the captured launcher needs live clipped geometry. Keep the other
         // buttons' coordinates so a later click can resolve them at that instant.
-        anchor.place(node, if (links[anchor.site.target]?.site == anchor.site) host else null)
+        anchor.place(node, if (tracks(anchor.site)) host else null)
     }
     protected open fun keepSource(anchor: ContainerAnchor) = false
     fun capture(target: String, owner: String?, chosen: OriginSite? = null) {

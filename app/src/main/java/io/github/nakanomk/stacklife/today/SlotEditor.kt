@@ -27,6 +27,8 @@ import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.assistant.AssistantPage
+import io.github.nakanomk.stacklife.countdown.AddOccurrenceCountdown
+import io.github.nakanomk.stacklife.transitions.LocalFrontEntry
 import io.github.nakanomk.stacklife.notes.NoteField
 import io.github.nakanomk.stacklife.notes.rememberNoteLink
 import io.github.nakanomk.stacklife.planner.*
@@ -58,7 +60,7 @@ internal fun SlotEditor(entry: SlotEditorKey, model: WorkspaceViewModel, onBack:
                 .collectAsStateWithLifecycle(initialValue = ReadState.Loading)
             ReadPanel(items) { view ->
                 val item = remember(entry) { view.occurrence }
-                if (item != null) ScheduleForm(entry, summary, item, item.notes, model, onBack, onSaved)
+                if (item != null) ScheduleForm(entry, summary, item, item.notes, model, onBack, onSaved, view.occurrence)
                 else MissingDetail(entry.title, stringResource(R.string.slot_missing), onBack)
             }
         } else if (entry.role != null) ScheduleForm(entry, summary, null, "", model, onBack, onSaved)
@@ -75,7 +77,8 @@ internal fun SlotEditor(entry: SlotEditorKey, model: WorkspaceViewModel, onBack:
 
 @Composable
 private fun ScheduleForm(entry: SlotEditorKey, summary: ScheduleSummary?, item: AgendaOccurrence?, originalNotes: String,
-    model: WorkspaceViewModel, onBack: () -> Unit, onSaved: (OccurrenceKey.Schedule?, Instant?) -> Unit) {
+    model: WorkspaceViewModel, onBack: () -> Unit, onSaved: (OccurrenceKey.Schedule?, Instant?) -> Unit,
+    countdownOccurrence: AgendaOccurrence? = null) {
     val pattern = summary?.pattern
     val daily = pattern as? SchedulePattern.Daily
     val originalDay = entry.occurrence?.originalDay
@@ -155,13 +158,14 @@ private fun ScheduleForm(entry: SlotEditorKey, summary: ScheduleSummary?, item: 
     }
     val editable = !submission.busy
     val leave = { if (editable) abandon() }
-    BackHandler(enabled = submission.busy || note.ownsFile || note.opening, onBack = leave)
+    BackHandler(enabled = LocalFrontEntry.current && (submission.busy || note.ownsFile || note.opening), onBack = leave)
     EditorPage(stringResource(if (summary?.enabled == true) R.string.today_adjust_slot else R.string.today_schedule), leave,
         if (entry.role == null) AssistantPage.Task(entry.id) else AssistantPage.Settings, backEnabled = editable) { top, bottom ->
         Column(Modifier.fillMaxSize().padding(top = top, bottom = bottom).verticalScroll(rememberScrollState())
             .padding(dockListPadding(0.dp, 0.dp)),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(entry.title, style = MaterialTheme.typography.titleMedium)
+            countdownOccurrence?.let { AddOccurrenceCountdown(it.title, it.startMillis, deviceZone, editable && !note.opening) }
             if (item != null && (!repeating || originalDay != null)) {
                 val label = stringResource(if (item.daily) R.string.slot_this_completed else R.string.today_done)
                 Row(Modifier.fillMaxWidth().toggleable(completed, editable, Role.Checkbox) { completed = it }.heightIn(min = 48.dp),

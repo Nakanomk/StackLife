@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -41,6 +42,7 @@ internal val LocalFrontEntry = compositionLocalOf { true }
 internal val LocalRouteOrigins = staticCompositionLocalOf<RouteOrigins?> { null }
 internal val LocalRouteOriginsEnabled = compositionLocalOf { true }
 internal val LocalRouteOwner = compositionLocalOf<String?> { null }
+private val LocalRouteParent = compositionLocalOf<String?> { null }
 
 @Composable
 internal fun AnimatedVisibilityScope.routeOpen(enabled: Boolean): State<Float> {
@@ -64,6 +66,31 @@ internal class RouteOrigins : ContainerOrigins() {
     var canKeepSource = false
     private val removed = mutableSetOf<String>()
     private val levels = mutableStateMapOf<String, Int>()
+    private val landings = mutableStateMapOf<String, OriginSite?>()
+    private val popGuards = mutableMapOf<String, () -> Boolean>()
+
+    /** Invoked only for a committed pop, never for a held or cancelled seek. */
+    fun interceptPop(entry: String) = popGuards[entry]?.invoke() == true
+
+    @Composable
+    fun GuardCommittedPop(guard: () -> Boolean) {
+        val entry = LocalRouteOwner.current ?: return
+        val current by rememberUpdatedState(guard)
+        DisposableEffect(this, entry) {
+            val callback = { current() }
+            popGuards[entry] = callback
+            onDispose { popGuards.remove(entry, callback) }
+        }
+    }
+
+    fun selectLanding(entry: String, site: OriginSite?) {
+        if (entry in landings && landings[entry] == site) return
+        landings[entry] = site
+        // The next card can already be placed; don't wait for a scroll/layout to acquire it.
+        site?.let { source(it)?.locate(host) }
+    }
+
+    override fun tracks(site: OriginSite) = super.tracks(site) || site in landings.values
 
     override fun keepSource(anchor: ContainerAnchor) = canKeepSource &&
         (anchor.rowVisible != null || (anchor.site.owner == "home" && anchor.site.target == "settings"))
@@ -75,8 +102,11 @@ internal class RouteOrigins : ContainerOrigins() {
     }
     fun pop(key: String) { removed.add(key) }
     fun isPopped(key: String) = key in removed
-    fun sourceSceneMetadata(key: String): Map<String, Any> =
-        if (links[key]?.keepSource == true) liveSourceMetadata else emptyMap()
+    fun sourceSceneMetadata(key: String, retainParent: Boolean = false): Map<String, Any> = when {
+        retainParent -> placedParentMetadata
+        links[key]?.keepSource == true -> liveSourceMetadata
+        else -> emptyMap()
+    }
 
     // When a deeper editor returns to a disposed detail there is no live list to keep.
     // Don't build an invisible Home on the way back from editing.
@@ -87,18 +117,23 @@ internal class RouteOrigins : ContainerOrigins() {
         ordinary: Boolean, content: @Composable () -> Unit) {
         DisposableEffect(key) {
             levels[key] = depth
-            onDispose { levels.remove(key); if (removed.remove(key)) links.remove(key) }
+            onDispose {
+                levels.remove(key)
+                if (removed.remove(key)) { links.remove(key); landings.remove(key) }
+            }
         }
         val front = depth >= stackTop && levels.values.none { it > depth }
-        CompositionLocalProvider(LocalRouteOwner provides key, LocalFrontEntry provides front) {
+        CompositionLocalProvider(LocalRouteOwner provides key, LocalRouteParent provides from, LocalFrontEntry provides front) {
             EntryWindow(front, animate) {
                 if (ordinary) {
                     val visibility = LocalNavAnimatedContentScope.current
                     val moving = animate && front && visibility.transition.currentState != visibility.transition.targetState
                     val open = visibility.routeOpen(animate && front)
                     val link = links[key]?.takeIf { it.site.owner == from }
+                    val site = if (key in landings) landings[key] else link?.site
+                    val source = site?.takeIf { it.owner == from }?.let { source(it) }
                     val returning = visibility.transition.currentState == EnterExitState.Visible
-                    RoutePage(this, link, open, returning, moving, Modifier.testTag("route:$key"), content)
+                    RoutePage(this, link, source, open, returning, moving, Modifier.testTag("route:$key"), content)
                 } else content()
             }
         }
@@ -148,12 +183,13 @@ private fun EntryWindow(front: Boolean, animate: Boolean, content: @Composable (
 }
 
 @Composable
-internal fun rememberRouteLaunch(key: String, shape: Shape = RectangleShape, siteId: Long? = null): RouteLaunch {
+internal fun rememberRouteLaunch(key: String, shape: Shape = RectangleShape, siteId: Long? = null,
+    visible: (() -> Boolean)? = null): RouteLaunch {
     val host = LocalRouteOrigins.current.takeIf { LocalRouteOriginsEnabled.current }
     val owner = LocalRouteOwner.current
     val density = LocalDensity.current
     val site = OriginSite(owner, key, siteId ?: currentCompositeKeyHashCode)
-    val anchor = remember(site, density, shape) { ContainerAnchor(site, shape, density) }
+    val anchor = remember(site, density, shape, visible) { ContainerAnchor(site, shape, density, visible) }
     val modifier = if (host == null) Modifier else Modifier.containerSource(host, anchor)
     return remember(modifier, host, site) { RouteLaunch(modifier, host, site) }
 }
@@ -161,3 +197,25 @@ internal fun rememberRouteLaunch(key: String, shape: Shape = RectangleShape, sit
 @Composable
 internal fun Modifier.routeOrigin(key: String, shape: Shape = RectangleShape, siteId: Long? = null): Modifier =
     then(rememberRouteLaunch(key, shape, siteId).modifier)
+
+/** A paged entry keeps its navigation key, but its return endpoint follows the settled item. */
+@Composable
+internal fun PagedRouteLanding(target: String?) {
+    val origins = LocalRouteOrigins.current ?: return
+    val entry = LocalRouteOwner.current ?: return
+    val parent = LocalRouteParent.current ?: return
+    val site = remember(parent, target) { target?.let { OriginSite(parent, it, 0L) } }
+    SideEffect { origins.selectLanding(entry, site) }
+}
+
+/** Restore only a previously matched control. A separate-window or missing launcher
+ * never acquires a different button merely because the restored route key matches. */
+@Composable
+internal fun RememberRouteLanding() {
+    val origins = LocalRouteOrigins.current ?: return
+    val entry = LocalRouteOwner.current ?: return
+    val parent = LocalRouteParent.current ?: return
+    val captured by rememberSaveable(entry) { mutableStateOf(origins.links[entry]?.site?.site) }
+    val site = remember(entry, parent, captured) { captured?.let { OriginSite(parent, entry, it) } }
+    SideEffect { origins.selectLanding(entry, site) }
+}

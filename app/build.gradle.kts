@@ -25,8 +25,8 @@ android {
         applicationId = "io.github.nakanomk.stacklife"
         minSdk = 26
         targetSdk = 37
-        versionCode = 37
-        versionName = "0.11.1"
+        versionCode = 38
+        versionName = "0.11.2"
         testInstrumentationRunner = "io.github.nakanomk.stacklife.acceptance.StackLifeTestRunner"
     }
     buildTypes {

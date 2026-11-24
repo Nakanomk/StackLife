@@ -2,6 +2,7 @@ package io.github.nakanomk.stacklife.planner
 
 import io.github.nakanomk.stacklife.i18n.uiText
 import kotlinx.serialization.json.*
+import kotlin.math.roundToInt
 
 private val appearanceFormat = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 internal fun encodeAppearance(value: Appearance): String = appearanceFormat.encodeToString(value)
@@ -66,7 +67,12 @@ internal fun appearanceLabel(value: JsonElement): String = when (value) {
             val source = if (preset != null) WallpaperPreset.entries.firstOrNull { it.name == preset }?.label
                 else value["imageId"]?.jsonPrimitive?.contentOrNull?.let { uiText("Photo", "图片") }
             if (source == null) uiText("Theme color", "主题纯色")
-            else source + " · " + uiText("Scale", "缩放") + " " + value["scale"] + " · " + uiText("Offset", "偏移") + " (" + value["offsetX"] + ", " + value["offsetY"] + ") · " + uiText("Tint", "遮罩") + " " + value["tint"]
+            else {
+                val blur = ((value["blur"]?.jsonPrimitive?.floatOrNull ?: 0f) * 100).roundToInt()
+                source + " · " + uiText("Scale", "缩放") + " " + value["scale"] + " · " + uiText("Offset", "偏移") +
+                    " (" + value["offsetX"] + ", " + value["offsetY"] + ") · " + uiText("Tint", "罩色") + " " + value["tint"] +
+                    " · " + uiText("Blur", "模糊") + " $blur%"
+            }
         } else value.entries.joinToString("\n") { (key, spec) -> (Destination.entries.firstOrNull { it.name == key }?.label ?: key) + ": " + appearanceLabel(spec) }
     is JsonArray -> value.joinToString(" → ") { appearanceLabel(it) }
     else -> when (val s = value.jsonPrimitive.content) {

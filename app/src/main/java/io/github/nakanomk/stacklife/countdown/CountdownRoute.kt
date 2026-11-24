@@ -5,9 +5,11 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -15,7 +17,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -25,7 +29,8 @@ import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.today.deviceDay
-import io.github.nakanomk.stacklife.transitions.routeOrigin
+import io.github.nakanomk.stacklife.transitions.PagedRouteLanding
+import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch
 import io.github.nakanomk.stacklife.workspace.*
 
 /** TimeTrace HomeScreen's 600dp breakpoint and card spacing; order belongs to the local planner transaction. */
@@ -45,12 +50,11 @@ internal fun CountdownRoute(model: WorkspaceViewModel, onOpen: (String) -> Unit,
                 arranging = !arranging; error = null
             }
         }) {
-            TextButton(onClick = onAdd, enabled = !receipt.busy, modifier = Modifier.testTag("countdown-add").routeOrigin("countdown:new")) {
-                Text(stringResource(R.string.countdown_new))
-            }
+            CountdownLaunchButton("countdown:new", stringResource(R.string.countdown_new), "countdown-add", !receipt.busy, onAdd)
         } }) { top, bottom ->
             BoxWithConstraints(Modifier.fillMaxSize()) {
-                LazyVerticalGrid(GridCells.Fixed(if (maxWidth < 600.dp) 1 else 2), Modifier.fillMaxSize().testTag("countdown-list"),
+                val grid = rememberLazyGridState()
+                LazyVerticalGrid(GridCells.Fixed(if (maxWidth < 600.dp) 1 else 2), Modifier.fillMaxSize().testTag("countdown-list"), state = grid,
                     contentPadding = dockListPadding(top, bottom), verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     error?.let { message -> item(span = { GridItemSpan(maxLineSpan) }) { Text(message, color = MaterialTheme.colorScheme.error) } }
@@ -61,8 +65,16 @@ internal fun CountdownRoute(model: WorkspaceViewModel, onOpen: (String) -> Unit,
                     }
                     items(view.items, key = { it.id }) { card ->
                         Column {
-                            CountdownCard(card, today, Modifier.routeOrigin("countdown:${card.id}", RoundedCornerShape(24.dp))
-                                .testTag("open-countdown:${card.id}"), onClick = { onOpen(card.id) })
+                            var height by remember { mutableIntStateOf(0) }
+                            val visible: () -> Boolean = remember(grid, card.id) { {
+                                val viewport = grid.layoutInfo
+                                val item = viewport.visibleItemsInfo.firstOrNull { it.key == card.id }
+                                item != null && height > 0 && item.offset.y >= viewport.viewportStartOffset + viewport.beforeContentPadding &&
+                                    item.offset.y + height <= viewport.viewportEndOffset - viewport.afterContentPadding
+                            } }
+                            val launch = rememberRouteLaunch("countdown:${card.id}", RoundedCornerShape(24.dp), siteId = 0L, visible = visible)
+                            CountdownCard(card, today, launch.modifier.onSizeChanged { height = it.height }
+                                .testTag("open-countdown:${card.id}"), onClick = { launch.open { onOpen(card.id) } })
                             if (arranging) {
                                 val groupStart = if (card.pinned) 0 else pinnedCount
                                 val count = if (card.pinned) pinnedCount else view.items.size - pinnedCount
@@ -95,6 +107,7 @@ internal fun CountdownDetail(model: WorkspaceViewModel, id: String, onEdit: (Str
     ReadPanel(state) { view ->
         val list = view.items
         val index = remember(list, selected) { list.indexOfFirst { it.id == selected } }
+        PagedRouteLanding(if (index < 0) null else "countdown:$selected")
         if (index < 0) { CountdownMissing(onBack); return@ReadPanel }
         val pager = rememberPagerState(initialPage = index) { list.size }
         LaunchedEffect(list, pager) {
@@ -103,8 +116,8 @@ internal fun CountdownDetail(model: WorkspaceViewModel, id: String, onEdit: (Str
             snapshotFlow { pager.settledPage }.collect { page -> list.getOrNull(page)?.let { selected = it.id } }
         }
         EditorPage(stringResource(R.string.countdown_details), onBack, AssistantPage.Countdown(selected), headerAction = {
-            TextButton(enabled = !pager.isScrollInProgress, onClick = { onEdit(selected) },
-                modifier = Modifier.testTag("countdown-edit").routeOrigin("countdown:edit:$selected")) { Text(stringResource(R.string.countdown_edit_action)) }
+            CountdownLaunchButton("countdown:edit:$selected", stringResource(R.string.countdown_edit_action), "countdown-edit",
+                !pager.isScrollInProgress) { onEdit(selected) }
         }) { top, bottom ->
             VerticalPager(state = pager, key = { list[it].id }, modifier = Modifier.fillMaxSize().padding(top = top, bottom = bottom)
                 .testTag("countdown-detail-pager")) { page ->
@@ -121,5 +134,18 @@ internal fun CountdownDetail(model: WorkspaceViewModel, id: String, onEdit: (Str
 internal fun CountdownMissing(back: () -> Unit) {
     EditorPage(stringResource(R.string.countdown_details), back) { top, bottom ->
         Text(stringResource(R.string.countdown_not_found), Modifier.padding(dockListPadding(top, bottom)))
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun CountdownLaunchButton(target: String, label: String, tag: String, enabled: Boolean, onClick: () -> Unit) {
+    val launch = rememberRouteLaunch(target, CircleShape)
+    // Reserve Material's full touch slot outside the button: Nav3 needs the painted
+    // capsule, not the extra space Material places above and below a 40dp button.
+    Box(Modifier.minimumInteractiveComponentSize(), contentAlignment = Alignment.Center) {
+        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+            TextButton(enabled = enabled, onClick = { launch.open(onClick) }, modifier = launch.modifier.testTag(tag)) { Text(label) }
+        }
     }
 }

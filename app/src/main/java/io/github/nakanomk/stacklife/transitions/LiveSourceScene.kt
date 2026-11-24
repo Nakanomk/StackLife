@@ -23,6 +23,8 @@ import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
 
 private const val LiveSource = "stacklife.liveSource"
+private const val PlacedParent = "stacklife.placedParent"
+internal val placedParentMetadata: Map<String, Any> = mapOf(LiveSource to true, PlacedParent to true)
 internal val liveSourceMetadata: Map<String, Any> = mapOf(LiveSource to true)
 internal val LocalCoveredSource = compositionLocalOf { false }
 
@@ -45,9 +47,10 @@ private data class LiveSourceScene<T : Any>(
     override val entries = listOf(previousEntries.last(), detail)
     override val content: @Composable () -> Unit = {
         val origins = LocalRouteOrigins.current
-        val directReturn = remember { origins?.hasEntryAbove(previousEntries.size) != true }
+        val placedParent = detail.metadata[PlacedParent] == true
+        val directReturn = remember { placedParent || origins?.hasEntryAbove(previousEntries.size) != true }
         val scene = LocalNavAnimatedContentScope.current.transition
-        val capable = LocalMotionEnabled.current && glassUnavailableReason(LocalAppearance.current) == null
+        val capable = LocalMotionEnabled.current && (placedParent || glassUnavailableReason(LocalAppearance.current) == null)
         Box(Modifier.fillMaxSize()) {
             if (directReturn && (capable || scene.currentState != scene.targetState)) {
                 val owner = rememberLifecycleOwner(maxLifecycle = Lifecycle.State.STARTED)

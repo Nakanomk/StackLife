@@ -14,6 +14,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.runtime.saveable.SaverScope
@@ -118,14 +120,20 @@ private fun ReasonField(reason: TextFieldValue, onChange: (TextFieldValue) -> Un
 }
 
 @Composable
-internal fun PushReasonEditor(frameId: String, actions: WorkspaceActions, close: () -> Unit) {
+internal fun PushReasonEditor(frameId: String, actions: WorkspaceActions, active: Boolean = true, close: () -> Unit) {
     var reason by rememberSaveable(frameId, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
-    val action = rememberSubmission(actions) { if (it != SaveOutcome.REJECTED) close() }
+    val focus = LocalFocusManager.current
+    var fieldFocused by remember { mutableStateOf(false) }
+    fun finish() {
+        if (fieldFocused) focus.clearFocus()
+        close()
+    }
+    val action = rememberSubmission(actions) { if (it != SaveOutcome.REJECTED) finish() }
     Row(Modifier.fillMaxWidth().testTag("push-reason-editor"), verticalAlignment = Alignment.CenterVertically) {
-        TextField(reason, { reason = it }, Modifier.weight(1f).testTag("push-reason"),
-            enabled = !action.busy, singleLine = true, colors = lineFieldColors(), label = { Text(stringResource(R.string.ui_push_reason)) })
-        TextButton(onClick = close, enabled = !action.busy) { Text(stringResource(R.string.ui_cancel)) }
+        TextField(reason, { reason = it }, Modifier.weight(1f).testTag("push-reason").onFocusChanged { fieldFocused = it.isFocused },
+            enabled = active && !action.busy, singleLine = true, colors = lineFieldColors(), label = { Text(stringResource(R.string.ui_push_reason)) })
+        TextButton(onClick = { reason = TextFieldValue(); finish() }, enabled = active && !action.busy) { Text(stringResource(R.string.ui_cancel)) }
         TextButton(onClick = { action.send(PlannerCommand.FrameAddReason(frameId, reason.text)) },
-            enabled = !action.busy && reason.text.isNotBlank()) { Text(stringResource(R.string.ui_save)) }
+            enabled = active && !action.busy && reason.text.isNotBlank()) { Text(stringResource(R.string.ui_save)) }
     }
 }

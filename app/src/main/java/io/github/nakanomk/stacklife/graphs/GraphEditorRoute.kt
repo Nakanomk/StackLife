@@ -26,6 +26,8 @@ import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
 import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
+import io.github.nakanomk.stacklife.appearance.CardFrostGroup
+import io.github.nakanomk.stacklife.appearance.FrostedCard
 import io.github.nakanomk.stacklife.transitions.CardMetadata
 import io.github.nakanomk.stacklife.transitions.CardSummary
 import io.github.nakanomk.stacklife.transitions.CardTitle
@@ -156,9 +158,11 @@ private fun GraphEditor(model: WorkspaceViewModel, detail: GraphDetail, onBack: 
                 tools()
             }
         }) { top, bottom ->
-            if (listMode) GraphDependencies(detail, selected?.id, select, top, bottom, onRemove = { edge ->
-                edgeFrom = edge.from; edgeTo = edge.to; form("unlink")
-            })
+            if (listMode) CardFrostGroup(enabled = detail.nodes.isNotEmpty()) {
+                GraphDependencies(detail, selected?.id, select, top, bottom, onRemove = { edge ->
+                    edgeFrom = edge.from; edgeTo = edge.to; form("unlink")
+                })
+            }
             else GraphCanvas(detail, selected?.id, select, { id -> if (sourceId != null) select(id) else linkFrom(id) }, patch,
                 { moves, revision -> submission.send(PlannerCommand.GraphPatch(graph.id, moves, revision)) },
                 Modifier.fillMaxSize().padding(start = 8.dp, end = 8.dp, bottom = bottom + 8.dp), headerInset = top)
@@ -211,8 +215,7 @@ private fun GraphDependencies(detail: GraphDetail, selected: String?, onSelect: 
     LazyColumn(Modifier.fillMaxSize().testTag("graph-list"), contentPadding = dockListPadding(top, bottom), verticalArrangement = listSpacing) {
         item { SectionTitle(stringResource(R.string.ui_node_count, detail.nodes.size)) }
         items(detail.nodes, key = { it.id }) { node ->
-            Surface(shape = MaterialTheme.shapes.large,
-                color = if (node.id == selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow) {
+            FrostedCard(color = if (node.id == selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow) {
                 Column(Modifier.fillMaxWidth().testTag("list-node:${node.id}").selectable(node.id == selected, role = Role.RadioButton) { onSelect(node.id) }
                     .heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     CardTitle(node.title)
@@ -231,7 +234,7 @@ private fun GraphDependencies(detail: GraphDetail, selected: String?, onSelect: 
         item { SectionTitle(stringResource(R.string.ui_dependency_count, detail.edges.size)); if (detail.edges.isEmpty()) Hint(stringResource(R.string.ui_no_dependencies)) }
         items(detail.edges, key = { "edge:${it.from}:${it.to}" }) { edge ->
             val from = byId[edge.from]; val to = byId[edge.to]
-            if (from != null && to != null) Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+            if (from != null && to != null) FrostedCard {
                 FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp), itemVerticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.ui_dependency_order, from.title, to.title), style = MaterialTheme.typography.bodyMedium)

@@ -57,12 +57,26 @@ class FixtureProvider : ContentProvider() {
         val settings = planner.observe(PlannerQuery.Settings).first() as PolicyView
         val weekQuery = PlannerQuery.Week(term.id, 1)
         val week = planner.observe(weekQuery).first() as CourseWeek
+        val countdowns = (planner.observe(PlannerQuery.Countdowns).first() as CountdownsView).items
+        val graphs = (planner.observe(PlannerQuery.Graphs).first() as GraphList).graphs
         val staged = planner.stageCourseImport(term, courses)
         try {
             val commands = buildList {
                 if (queue.isEmpty()) for (n in 1..30) add(PlannerCommand.TaskAdd(TaskInput("基准任务 ${n.toString().padStart(2, '0')}", "滚动样本 $n", 20)))
                 else check(queue.size == 30 && queue.first().title == "基准任务 01") { "Unexpected data in dedicated .bench package" }
                 if (week.term != term || week.classes.map { it.meeting } != courses) add(PlannerCommand.CourseImport(staged))
+                if (countdowns.isEmpty()) {
+                    add(PlannerCommand.CountdownAdd("基准日期 A", date.plusDays(7).toEpochDay()))
+                    add(PlannerCommand.CountdownAdd("基准日期 B", date.plusDays(14).toEpochDay()))
+                }
+                if (graphs.isEmpty()) {
+                    add(PlannerCommand.GraphCreate("基准流程", ref = "benchGraph"))
+                    add(PlannerCommand.GraphPatch("@benchGraph", listOf(
+                        GraphEdit.AddNode("基准起点", x = 16f, y = 16f, ref = "source"),
+                        GraphEdit.AddNode("基准终点", x = 190f, y = 150f, ref = "target"),
+                        GraphEdit.AddEdge("@source", "@target"),
+                    )))
+                }
                 if (settings.appearance != expected) add(PlannerCommand.EditAppearance(AppearancePatch.Replace(expected)))
                 if (settings.onboardingVersion != 1) add(PlannerCommand.CompleteOnboarding())
             }

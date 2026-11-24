@@ -46,7 +46,7 @@ private fun edgePixel(start: Float, end: Float, open: Float) = lerp(start, end, 
  * in the child: ordinary pages travel with the window's origin, unlike fixed card chrome.
  * The child's native round-rect outline is therefore in real pixels, including its corners. */
 @Composable
-internal fun RoutePage(origins: RouteOrigins, link: ContainerLink?, open: State<Float>, returning: Boolean,
+internal fun RoutePage(origins: RouteOrigins, link: ContainerLink?, source: ContainerAnchor?, open: State<Float>, returning: Boolean,
     moving: Boolean, tag: Modifier, content: @Composable () -> Unit) {
     val density = LocalDensity.current
     val direction = LocalLayoutDirection.current
@@ -57,17 +57,18 @@ internal fun RoutePage(origins: RouteOrigins, link: ContainerLink?, open: State<
     val page = remember(hostSize) {
         if (hostSize.width > 0 && hostSize.height > 0) Rect(0f, 0f, hostSize.width.toFloat(), hostSize.height.toFloat()) else null
     }
-    val window by remember(origins, link, open, moving, density, departure, direction, page) {
+    val window by remember(link, source, open, moving, density, departure, direction, page) {
         derivedStateOf {
             val end = page ?: return@derivedStateOf null
             if (!moving) return@derivedStateOf null
             val t = open.value
-            val start = if (!departure.detached && link != null && density == link.density && origins.live(link))
-                origins.sourceBounds(link) else null
-            if (start != null && link != null) {
+            val start = source?.bounds?.takeIf { !departure.detached && source.density == density &&
+                source.coordinates?.isAttached == true && source.rowVisible?.invoke() != false &&
+                (link == null || link.hostSize == hostSize && link.density == density) }
+            if (start != null && source != null) {
                 val rect = Rect(edgePixel(start.left, end.left, t), edgePixel(start.top, end.top, t),
                     edgePixel(start.right, end.right, t), edgePixel(start.bottom, end.bottom, t))
-                val corner = link.radius * (1f - t)
+                val corner = source.radius(start) * (1f - t)
                 departure.placed(rect, corner, t)
                 RouteWindow(rect, end, corner, start)
             } else {

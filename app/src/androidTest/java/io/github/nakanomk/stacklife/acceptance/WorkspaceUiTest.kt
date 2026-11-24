@@ -187,6 +187,70 @@ class WorkspaceUiTest {
         assertEquals(0, restored.frames.single().remaining)
     }
 
+    @Test fun pushReasonRevealsOneFieldInTheOriginalBottomBarAndCancelsBackToItsReceipt() {
+        org.junit.Assume.assumeTrue(android.animation.ValueAnimator.areAnimatorsEnabled())
+        runBlocking { store.apply(PlannerCommand.TaskAdd(TaskInput("唯一待办"))) }
+        show()
+        ui.onNodeWithTag("queue-push").performClick()
+        val pushed = awaitQueue().frames.single()
+        val edit = await(hasText("补充原因") and isEnabled())
+        val shell = ui.onNodeWithTag("push-feedback")
+        val before = shell.fetchSemanticsNode()
+        val bottom = before.boundsInRoot.bottom
+        val editor = ui.onNodeWithTag("push-reason-editor")
+        ui.mainClock.autoAdvance = false
+        try {
+            edit.performClick()
+            ui.mainClock.advanceTimeBy(64)
+            val revealing = editor.fetchSemanticsNode().boundsInRoot.width
+            ui.mainClock.advanceTimeBy(1000)
+            val expanded = editor.fetchSemanticsNode().boundsInRoot.width
+            assertTrue("An equal-height row still needs a horizontal reveal ($revealing / $expanded)",
+                revealing > 0f && revealing < expanded)
+            assertEquals(before.id, shell.fetchSemanticsNode().id)
+            assertEquals(bottom, shell.fetchSemanticsNode().boundsInRoot.bottom, 1f)
+        } finally { ui.mainClock.autoAdvance = true }
+        ui.onAllNodes(hasTestTag("push-reason") and isEnabled()).assertCountEquals(1)
+        ui.onNodeWithTag("push-reason").performClick().performTextInput("不应保存")
+        fun checkClearances() {
+            val bar = shell.fetchSemanticsNode().boundsInRoot
+            assertTrue(ui.onNodeWithTag("add-task").fetchSemanticsNode().boundsInRoot.bottom <= bar.top)
+            assertTrue(bar.bottom <= ui.onNodeWithTag("assistant-input").fetchSemanticsNode().boundsInRoot.top)
+        }
+        checkClearances()
+        ui.onNodeWithText("取消").performClick()
+        await(hasText("补充原因") and isEnabled()).assertIsDisplayed()
+        ui.onNodeWithTag("push-reason").assertDoesNotExist()
+        assertEquals(before.id, shell.fetchSemanticsNode().id)
+        checkClearances()
+        assertEquals(pushed, runBlocking { store.state() }.frames.single())
+    }
+
+    @Test fun reducedMotionPushShowsTheWholeReasonFieldWithoutWaitingForAReveal() {
+        runBlocking { store.apply(PlannerCommand.EditAppearance(AppearancePatch.Replace(
+            Appearance(start = Destination.WORKSPACE, reduceMotion = true))), PlannerCommand.TaskAdd(TaskInput("立即压栈"))) }
+        show()
+        ui.onNodeWithTag("queue-push").performClick()
+        val pushed = awaitQueue().frames.single()
+        val edit = await(hasText("补充原因") and isEnabled())
+        ui.mainClock.autoAdvance = false
+        try {
+            edit.performClick()
+            ui.mainClock.advanceTimeByFrame()
+            ui.mainClock.advanceTimeByFrame()
+            val editor = ui.onNodeWithTag("push-reason-editor")
+            val immediate = editor.fetchSemanticsNode().boundsInRoot
+            assertTrue(immediate.width > 0f)
+            ui.mainClock.advanceTimeBy(1000)
+            assertEquals(immediate, editor.fetchSemanticsNode().boundsInRoot)
+        } finally { ui.mainClock.autoAdvance = true }
+        ui.onNodeWithTag("push-reason").performTextInput("减少动效")
+        ui.onNodeWithText("保存").performClick()
+        await(hasText("已压栈")).assertIsDisplayed()
+        assertEquals(pushed.copy(reason = "减少动效"), runBlocking { store.state() }.frames.single())
+        ui.onNodeWithText("补充原因").assertDoesNotExist()
+    }
+
     @Test fun editTaskInFrameThenRestoreKeepsTheEditAndTheOriginalRecord() {
         val frame = runBlocking {
             store.apply(PlannerCommand.FrameCreate("复习", listOf(TaskInput("旧标题", "旧备注", 35))))
