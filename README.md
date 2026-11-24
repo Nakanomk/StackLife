@@ -4,9 +4,9 @@ StackLife 是为 Android 手机设计的离线日程工具。用队列决定先�
 
 [![Android 8.0 及以上](https://img.shields.io/badge/Android-8.0%2B-356345)](app/build.gradle.kts) [![GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE) [![Android CI](https://github.com/Nakanomk/StackLife/actions/workflows/android-ci.yml/badge.svg?branch=main)](https://github.com/Nakanomk/StackLife/actions/workflows/android-ci.yml)
 
-## [下载 Android APK · 0.11.1 预发布](https://github.com/Nakanomk/StackLife/releases/download/v0.11.1/StackLife-0.11.1-preview.apk)
+## [下载 Android APK · 0.11.2 预发布](https://github.com/Nakanomk/StackLife/releases/download/v0.11.2/StackLife-0.11.2-preview.apk)
 
-[本版更新说明](https://github.com/Nakanomk/StackLife/releases/tag/v0.11.1) · [历史版本](https://github.com/Nakanomk/StackLife/releases)
+[本版更新说明](https://github.com/Nakanomk/StackLife/releases/tag/v0.11.2) · [历史版本](https://github.com/Nakanomk/StackLife/releases)
 
 ## 初次使用
 
