@@ -36,6 +36,11 @@ android {
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += "release"
         }
+        create("gallery") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".gallery"
+            matchingFallbacks += "debug"
+        }
         create("benchmark") {
             initWith(getByName("release"))
             applicationIdSuffix = ".bench"
@@ -55,6 +60,13 @@ android {
         it.systemProperty("user.country", "CN")
     }
     sourceSets.getByName("androidTest").assets.directories.add("schemas")
+    if (providers.gradleProperty("stacklifeGalleryTest").orNull == "true") {
+        testBuildType = "gallery"
+        sourceSets.getByName("androidTest").kotlin.directories.add("src/gallery/tests")
+    }
+    for (variant in listOf("benchmark", "gallery")) {
+        sourceSets.getByName(variant).kotlin.directories.add("src/benchmark/fixtures")
+    }
     buildFeatures { compose = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

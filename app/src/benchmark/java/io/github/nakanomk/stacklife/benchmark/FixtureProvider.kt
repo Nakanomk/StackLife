@@ -13,9 +13,10 @@ import io.github.nakanomk.stacklife.StackLifeApplication
 import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.i18n.AppLocales
 import io.github.nakanomk.stacklife.planner.*
-import java.time.DayOfWeek
+import io.github.nakanomk.stacklife.fixtures.sampleCourses
+import io.github.nakanomk.stacklife.fixtures.sampleTask
+import io.github.nakanomk.stacklife.fixtures.sampleTerm
 import java.time.LocalDate
-import java.time.temporal.TemporalAdjusters
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -51,8 +52,8 @@ class FixtureProvider : ContentProvider() {
         check(app.connections.profile() == null) { "The .bench fixture must not have a model connection." }
         val queue = (planner.observe(PlannerQuery.Queue).first() as QueueView).tasks
         val date = LocalDate.now(campusZone)
-        val term = TermSpec("benchmark-day", date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)), 1, BellSchedule.SUMMER)
-        val courses = (1..9 step 2).map { period -> term.meeting(1, date.dayOfWeek.value, "基准课程 $period", "", period, period + 1) }
+        val term = sampleTerm("benchmark-day", date, 1)
+        val courses = sampleCourses(term, date.dayOfWeek.value, week = 1)
         val expected = Appearance(start = Destination.WORKSPACE, glass = glass)
         val settings = planner.observe(PlannerQuery.Settings).first() as PolicyView
         val weekQuery = PlannerQuery.Week(term.id, 1)
@@ -62,7 +63,7 @@ class FixtureProvider : ContentProvider() {
         val staged = planner.stageCourseImport(term, courses)
         try {
             val commands = buildList {
-                if (queue.isEmpty()) for (n in 1..30) add(PlannerCommand.TaskAdd(TaskInput("基准任务 ${n.toString().padStart(2, '0')}", "滚动样本 $n", 20)))
+                if (queue.isEmpty()) for (n in 1..30) add(PlannerCommand.TaskAdd(sampleTask(n)))
                 else check(queue.size == 30 && queue.first().title == "基准任务 01") { "Unexpected data in dedicated .bench package" }
                 if (week.term != term || week.classes.map { it.meeting } != courses) add(PlannerCommand.CourseImport(staged))
                 if (countdowns.isEmpty()) {

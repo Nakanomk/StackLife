@@ -10,4 +10,9 @@ https://github.com/android/nowinandroid/blob/2982e63cb691ad49cd009aab43dc206fee6
 
 StackLife 0.10.12: onboarding/OnboardingScreen.kt adapts actual selectable items and explicit completion. Completion and skip are stored locally; no account, interest data, telemetry, sample tasks or NiA resources are included.
 
+AndroidX Material 3 Catalog (Gallery build only)
+Copyright 2021 The Android Open Source Project. Apache License, Version 2.0.
+https://github.com/androidx/androidx/tree/841411143e849ef66c3e8d49cc0dd70d62d7a3c0/compose/material3/material3/integration-tests/material3-catalog/src/main/java/androidx/compose/material3/catalog/library
+CatalogApp.kt, model/Components.kt, model/Examples.kt, ui/common/CatalogScaffold.kt: GalleryEntry and Catalog adapt the source-labelled example registry and independent theme sheet. Examples call StackLife components with an isolated in-memory workspace; no AndroidX example screens or artwork are bundled.
+
 Full Apache License, Version 2.0: see the license text in Backdrop-Miuix-Apache-2.0.txt in this directory.

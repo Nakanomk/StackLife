@@ -34,6 +34,8 @@ sdkmanager 'platform-tools' 'platforms;android-37.2' 'build-tools;37.0.0'
 ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest :app:assemblePreview
 ```
 
+开发用组件目录通过 `./gradlew :app:assembleGallery` 单独构建，APK 在 `app/build/outputs/apk/gallery/app-gallery.apk`。启动 **StackLife Gallery**，选组件、动效或材质，再点示例。顶栏调色板只改变 Gallery 的主题、字号、方向、预览宽度和降级设置；信息按钮显示来源和可操作的验收输入。示例在 `.gallery` 的内存库中，结束进程后重置；它没有联网、安装更新或安排闹钟的权限。不要用 Gallery 测正式包的帧预算。
+
 ## 签名与发布
 
 版本标签采用 `vX.Y.Z`，须为带注释的标签，指向已推送到 `main` 的源码提交。`X.Y.Z` 对应 `versionName`；标签注释会用作 Release 说明。推送标签后，从 `main` 手动运行 [Android prerelease](https://github.com/Nakanomk/StackLife/actions/workflows/release.yml)。工作流按标签构建，在独立任务中签名和测试；已存在的同名 Release 不会被覆盖。

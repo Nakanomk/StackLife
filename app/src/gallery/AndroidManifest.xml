@@ -1,0 +1,23 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Allowlist this variant's components. Do not inherit production or library receivers,
+         installer callbacks, startup providers or permissions as new features are added. -->
+    <uses-permission tools:node="removeAll" />
+    <application tools:node="replace"
+        android:name=".gallery.GalleryApplication"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:enableOnBackInvokedCallback="true"
+        android:supportsRtl="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="StackLife Gallery"
+        android:theme="@style/Theme.StackLife">
+        <activity android:name=".gallery.GalleryActivity" android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
