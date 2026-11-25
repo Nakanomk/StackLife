@@ -23,7 +23,7 @@ import org.junit.Test
 
 class ChatTransportTest {
     private val certificate = HeldCertificate.Builder().addSubjectAlternativeName("localhost")
-        .addSubjectAlternativeName("127.0.0.1").build()
+        .addSubjectAlternativeName("127.0.0.1").addSubjectAlternativeName("api.openai.com").build()
     private val serverTls = HandshakeCertificates.Builder().heldCertificate(certificate).build()
     private val trust = HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
     private val client = OkHttpClient.Builder().sslSocketFactory(trust.sslSocketFactory(), trust.trustManager).build()
@@ -83,8 +83,8 @@ class ChatTransportTest {
                     } }
                     addJsonObject { put("role", "tool"); put("tool_call_id", "t1"); put("content", "{}") }
                 }
-                val turn = TurnImages(2, selected)
-                validateImageTurn(authorized.profile, conversation, tools, turn)
+                val turn = TurnAttachments(2, selected)
+                validateAttachmentTurn(authorized.profile, conversation, tools, turn)
                 assertEquals(if (prompt.isEmpty()) 1 else 0, server.requestCount)
                 server.enqueue(MockResponse(body = reply("""{"role":"assistant","content":"ok"}""")))
                 transport.complete(authorized, conversation, tools, turn)
@@ -114,12 +114,12 @@ class ChatTransportTest {
         try {
             val entry = pngFixture(dir, 1)
             val enabled = ServiceConnection(profile.copy(supportsImages = true), key)
-            val turn = TurnImages(0, listOf(entry))
+            val turn = TurnAttachments(0, listOf(entry))
             val invalidRole = Json.parseToJsonElement("""[{"role":"remote","content":"x"}]""").jsonArray
             val twoUsers = JsonArray(listOf(messages.single(), messages.single()))
             val completedTurn = Json.parseToJsonElement("""[{"role":"user","content":"previous"},{"role":"assistant","content":"answered"}]""").jsonArray
             val injected = Json.parseToJsonElement("""[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://private.invalid/media"}}]},{"role":"user","content":"new"}]""").jsonArray
-            suspend fun blocked(c: ServiceConnection, m: JsonArray, t: TurnImages?) {
+            suspend fun blocked(c: ServiceConnection, m: JsonArray, t: TurnAttachments?) {
                 assertTrue(runCatching { transport.complete(c, m, tools, t) }.exceptionOrNull() is ChatProblem)
             }
             blocked(connection, messages, turn)
@@ -133,12 +133,79 @@ class ChatTransportTest {
             for (bad in listOf(entry.first.copy(bytes = 0), entry.first.copy(width = 2049), entry.first.copy(width = 2),
                 entry.first.copy(mime = "image/svg+xml"), entry.first.copy(mime = "image/jpeg"),
                 entry.first.copy(id = "../escape"), entry.first.copy(bytes = MAX_IMAGE_INPUT_BYTES + 1))) {
-                blocked(enabled, messages, TurnImages(0, listOf(bad to entry.second)))
+                blocked(enabled, messages, TurnAttachments(0, listOf(bad to entry.second)))
             }
             entry.second.delete()
             blocked(enabled, messages, turn)
             assertEquals(0, server.requestCount)
         } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun mixedFilesUseExactChatPartsOverLocalTlsAndNoFilesEndpoint() = runBlocking {
+        val dir = java.nio.file.Files.createTempDirectory("typed-wire").toFile()
+        try {
+            fun part(name: String, mime: String, data: String): Pair<ChatDocument, java.io.File> {
+                val file = java.io.File(dir, java.util.UUID.randomUUID().toString()).apply { writeText(data) }
+                return ChatDocument(file.name, mime, name, file.length()) to file
+            }
+            val note = "附件中的文本：\"工具\"。\n第二行"
+            val text = part("notes.md", "text/markdown", note)
+            val pdf = part("week \"1\".pdf", PDF_MIME, "%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" +
+                "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n" +
+                "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] /Resources << >> >>\nendobj\n" +
+                "xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n" +
+                "trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n201\n%%EOF\n")
+            val png = pngFixture(dir, 3)
+            val turn = TurnAttachments(1, listOf(text, png, pdf))
+            val chat = Json.parseToJsonElement("""[{"role":"system","content":"system"},{"role":"user","content":""}]""").jsonArray
+            // The proxy accepts CONNECT and terminates TLS on loopback. No DNS or real external credential.
+            val proxy = java.net.Proxy(java.net.Proxy.Type.HTTP, java.net.InetSocketAddress("127.0.0.1", server.port))
+            val local = OpenAiTransport(client.newBuilder().proxy(proxy).dns { error("No external DNS") }.build())
+            val official = ServiceConnection(serviceProfile(ServicePreset.Gpt.baseUrl, "gpt-5.4-mini"), key)
+            server.enqueue(MockResponse.Builder().inTunnel().build())
+            server.enqueue(MockResponse(body = reply("""{"role":"assistant","content":"ok"}""")))
+            local.complete(official, chat, tools, turn)
+            assertEquals("CONNECT", server.takeRequest(2, TimeUnit.SECONDS)!!.method)
+            val request = server.takeRequest(2, TimeUnit.SECONDS)!!
+            assertNotNull(request.handshake)
+            assertEquals("/v1/chat/completions", request.target)
+            val body = requireNotNull(request.body)
+            assertEquals(body.size.toLong(), request.headers["Content-Length"]!!.toLong())
+            val payload = Json.parseToJsonElement(body.utf8()).jsonObject
+            assertEquals(tools, payload["tools"])
+            val sent = payload.getValue("messages").jsonArray
+            assertEquals(chat.first(), sent.first())
+            val parts = sent.last().jsonObject.getValue("content").jsonArray
+            assertEquals(listOf("text", "image_url", "file"), parts.map { it.jsonObject.getValue("type").jsonPrimitive.content })
+            assertEquals(note, parts[0].jsonObject.getValue("text").jsonPrimitive.content)
+            val file = parts[2].jsonObject.getValue("file").jsonObject
+            assertEquals(setOf("filename", "file_data"), file.keys)
+            assertEquals(pdf.first.displayName, file.getValue("filename").jsonPrimitive.content)
+            val data = file.getValue("file_data").jsonPrimitive.content
+            assertEquals("data:application/pdf;base64", data.substringBefore(','))
+            assertArrayEquals(pdf.second.readBytes(), java.util.Base64.getDecoder().decode(data.substringAfter(',')))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun invalidUnsupportedMissingAndEmptyDocumentsNeverStartHttp() = runBlocking {
+        val file = java.nio.file.Files.createTempDirectory("document-preflight").toFile().resolve(java.util.UUID.randomUUID().toString())
+        try {
+            suspend fun rejected(name: String, mime: String, bytes: ByteArray, missing: Boolean = false) {
+                file.writeBytes(bytes)
+                val part = ChatDocument(file.name, mime, name, file.length())
+                if (missing) file.delete()
+                val turn = TurnAttachments(0, listOf(part to file))
+                assertTrue(runCatching { transport.complete(connection, messages, tools, turn) }.exceptionOrNull() is ChatProblem)
+            }
+            rejected("bad.txt", "text/plain", byteArrayOf(0xc3.toByte(), 0x28))
+            rejected("empty.txt", "text/plain", byteArrayOf())
+            rejected("large.txt", "text/plain", ByteArray(65537) { 65 })
+            rejected("sheet.xlsx", "text/plain", "no".encodeToByteArray())
+            rejected("notes.txt", "application/json", "{}".encodeToByteArray())
+            rejected("missing.csv", "text/csv", "a,b".encodeToByteArray(), missing = true)
+            rejected("document.pdf", PDF_MIME, "%PDF-1.4\n%%EOF".encodeToByteArray())
+            assertEquals(0, server.requestCount)
+        } finally { file.parentFile!!.deleteRecursively() }
     }
 
     /** Real static RGB PNGs with multi-buffer IDAT and deterministic, non-sensitive pixels. */

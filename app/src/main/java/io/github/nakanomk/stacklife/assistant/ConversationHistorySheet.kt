@@ -103,7 +103,7 @@ internal fun ConversationHistoryPane(model: AssistantModel, fallback: AssistantP
                     val messages by remember(history, id) { history.observeMessages(id) }.collectAsStateWithLifecycle(initialValue = emptyList())
                     val draft = model.draft("history:$id")
                     ChatMessages(messages, model.attachments, Modifier.weight(1f), "assistant-history-messages",
-                        reattach = if (canReply) ({ draft.add(listOf(ImageSource.Saved(it))) }) else null)
+                        reattach = if (canReply) ({ draft.add(listOf(AttachmentSource.SavedImage(it))) }) else null)
                     val receiver = (recipient as? ReadState.Loaded)?.value
                     if (receiver != null && selected != null) {
                         Text(stringResource(R.string.assistant_history_recipient, receiver.profile.origin, receiver.profile.model),
@@ -113,7 +113,7 @@ internal fun ConversationHistoryPane(model: AssistantModel, fallback: AssistantP
                             if (model.continueConversation(id, page, receiver)) onClose()
                         }, active = canReply, tagPrefix = "history-reply")
                     } else if (recipient != ReadState.Loading) {
-                        if (active && draft.images.isNotEmpty()) DraftImageStrip(model.attachments, draft)
+                        if (active && draft.items.isNotEmpty()) DraftAttachmentStrip(model.attachments, draft)
                         val launch = rememberRouteLaunch("model")
                         TextButton(onClick = { launch.open(onSettings) }, modifier = Modifier.align(Alignment.CenterHorizontally).then(launch.modifier)) {
                             Text(if (recipient == ReadState.ReadFailed) stringResource(R.string.assistant_repair_to_continue) else stringResource(R.string.assistant_configure_to_continue))

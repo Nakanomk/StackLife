@@ -32,6 +32,16 @@ internal fun photoPickerReturning(pick: () -> List<Uri>) = object : ActivityResu
     }
 }
 
+internal fun documentPickerReturning(pick: (Array<*>) -> Uri?) = object : ActivityResultRegistryOwner {
+    override val activityResultRegistry = object : ActivityResultRegistry() {
+        override fun <I, O> onLaunch(requestCode: Int, contract: ActivityResultContract<I, O>, input: I, options: ActivityOptionsCompat?) {
+            check(contract is ActivityResultContracts.OpenDocument)
+            val selected = pick(input as Array<*>)
+            dispatchResult(requestCode, if (selected == null) Activity.RESULT_CANCELED else Activity.RESULT_OK, Intent().setData(selected))
+        }
+    }
+}
+
 /** A real provider URI owned by the isolated test app, never a grant or photo from the user's library. */
 @RequiresApi(29)
 internal fun withChatPhoto(context: Context, width: Int, block: (Uri) -> Unit) {
@@ -60,5 +70,20 @@ internal fun withChatPhoto(context: Context, width: Int, block: (Uri) -> Unit) {
             requireNotNull(resolver.openOutputStream(uri)).use { check(image.compress(Bitmap.CompressFormat.PNG, 100, it)) }
         } finally { image.recycle() }
         block(uri)
+    } finally { resolver.delete(uri, null, null) }
+}
+
+@RequiresApi(29)
+internal inline fun <T> withChatDocument(context: Context, extension: String, mime: String, bytes: ByteArray, block: (Uri) -> T): T {
+    val resolver = context.contentResolver
+    val uri = requireNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, ContentValues().apply {
+        put(MediaStore.MediaColumns.DISPLAY_NAME, "stacklife-${UUID.randomUUID()}.$extension")
+        put(MediaStore.MediaColumns.MIME_TYPE, mime)
+        put(MediaStore.MediaColumns.IS_PENDING, 1)
+    }))
+    try {
+        requireNotNull(resolver.openOutputStream(uri)).use { it.write(bytes) }
+        resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+        return block(uri)
     } finally { resolver.delete(uri, null, null) }
 }

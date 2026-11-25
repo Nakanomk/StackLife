@@ -1,5 +1,4 @@
 <resources>
-    <string name="chat_attach">附加图片</string>
     <string name="chat_image_message">图片消息</string>
     <string name="chat_image_label">图片 %1$d，%2$d × %3$d</string>
     <string name="chat_remove_image">移除图片 %1$d</string>

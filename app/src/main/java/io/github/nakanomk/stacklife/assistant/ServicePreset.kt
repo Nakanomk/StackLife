@@ -25,7 +25,7 @@ internal enum class ServicePreset(private val nameLabel: String, val baseUrl: St
             DeepSeek -> 48L * 1024 * 1024
             Claude -> 128_000_000L
             Gpt -> 512_000_000L
-            Custom -> MAX_CHAT_IMAGES * base64Length(MAX_IMAGE_INPUT_BYTES) + 4L * 1024 * 1024
+            Custom -> MAX_CHAT_ATTACHMENTS * base64Length(MAX_IMAGE_INPUT_BYTES) + 4L * 1024 * 1024
         }
         if (total > limit) throw ChatProblem(uiText(
             { "This encoded request is $total bytes; the limit is $limit. Shorten the message or select smaller images." },

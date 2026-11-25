@@ -32,34 +32,49 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 
 @Composable
-internal fun DraftImageStrip(store: AttachmentStore, draft: ChatDraft) {
+internal fun DraftAttachmentStrip(store: AttachmentStore, draft: ChatDraft) {
     draft.issue?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-    if (draft.images.isEmpty()) return
+    if (draft.items.isEmpty()) return
+    val document = draft.items.firstNotNullOfOrNull { it.source as? AttachmentSource.Document }
+    if (document != null) Text(stringResource(if (document.recipient.acceptsPdf) R.string.chat_document_pdf_limits else R.string.chat_document_text_limits),
+        style = MaterialTheme.typography.labelSmall)
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        draft.images.forEachIndexed { index, item -> key(item.id) {
+        draft.items.forEachIndexed { index, item -> key(item.id) {
             Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     when (val status = item.status) {
-                        ImagePreparation.Preparing -> Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                        AttachmentPreparation.Preparing -> Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator(Modifier.size(20.dp))
                         }
-                        is ImagePreparation.Ready -> ChatImageThumbnail(store, status.image, index + 1, 48, null)
-                        is ImagePreparation.Failed -> {
+                        is AttachmentPreparation.Ready -> when (val part = status.attachment) {
+                            is ChatImage -> ChatImageThumbnail(store, part, index + 1, 48, null)
+                            is ChatDocument -> DocumentLabel(part)
+                        }
+                        is AttachmentPreparation.Failed -> {
                             var details by rememberSaveable { mutableStateOf(false) }
-                            TextButton(onClick = { details = true }) { Text(stringResource(R.string.chat_failed_image, index + 1)) }
-                            if (details) PlannerAlertDialog({ details = false }, title = { Text(stringResource(R.string.chat_failed_image, index + 1)) },
+                            val label = stringResource(if (item.source is AttachmentSource.Document) R.string.chat_failed_document else R.string.chat_failed_image, index + 1)
+                            TextButton(onClick = { details = true }) { Text(label) }
+                            if (details) PlannerAlertDialog({ details = false }, title = { Text(label) },
                                 text = { Text(status.reason) }, confirmButton = { TextButton(onClick = { details = false; draft.retry(item) }) {
                                     Text(stringResource(R.string.chat_retry))
                                 } }, dismissButton = { TextButton(onClick = { details = false }) { Text(stringResource(R.string.assistant_close)) } })
                         }
                     }
                     IconButton(onClick = { draft.remove(item) }, modifier = Modifier.size(48.dp)) {
-                        Icon(painterResource(R.drawable.ic_close), stringResource(R.string.chat_remove_image, index + 1))
+                        Icon(painterResource(R.drawable.ic_close), stringResource(if (item.source is AttachmentSource.Document) R.string.chat_remove_document else R.string.chat_remove_image, index + 1))
                     }
                 }
             }
         } }
+    }
+}
+
+@Composable
+internal fun DocumentLabel(part: ChatDocument) {
+    Column(Modifier.widthIn(max = 240.dp).padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Text(part.displayName, style = MaterialTheme.typography.labelLarge)
+        Text("${part.mime} · ${part.bytes} B", style = MaterialTheme.typography.labelSmall)
     }
 }
 

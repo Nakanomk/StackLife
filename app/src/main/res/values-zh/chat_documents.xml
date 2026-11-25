@@ -1,0 +1,12 @@
+<resources>
+    <string name="chat_add_attachment">添加附件</string>
+    <string name="chat_pick_images">选择图片</string>
+    <string name="chat_pick_document">选择手机文件</string>
+    <string name="chat_image_limits">每张图片最大 50 MiB，附件合计最多五个。</string>
+    <string name="chat_document_text_limits">UTF-8 TXT、MD、CSV、JSON 最大 64 KiB。当前连接不支持 PDF。</string>
+    <string name="chat_document_pdf_limits">UTF-8 TXT、MD、CSV、JSON 最大 64 KiB，PDF 最大 4 MiB。附件合计最多五个。</string>
+    <string name="chat_reading_capabilities">正在读取本机连接设置…</string>
+    <string name="chat_recipient_unavailable">无法读取本机连接设置。</string>
+    <string name="chat_remove_document">移除文件 %1$d</string>
+    <string name="chat_failed_document">文件 %1$d 准备失败</string>
+</resources>

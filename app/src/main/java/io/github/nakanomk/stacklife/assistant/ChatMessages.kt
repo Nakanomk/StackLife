@@ -124,8 +124,11 @@ private fun ChatBubble(line: ChatLine, store: AttachmentStore, reattach: ((ChatI
         contentAlignment = if (user) Alignment.CenterEnd else Alignment.CenterStart) {
         if (user) Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.secondaryContainer) {
             Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), horizontalAlignment = Alignment.End) {
-                if (line.images.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    line.images.forEachIndexed { index, image -> key(image.id) { ChatImageThumbnail(store, image, index + 1, 80, reattach) } }
+                if (line.attachments.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    line.attachments.forEachIndexed { index, part -> key(part.id) { when (part) {
+                        is ChatImage -> ChatImageThumbnail(store, part, index + 1, 80, reattach)
+                        is ChatDocument -> DocumentLabel(part)
+                    } } }
                 }
                 if (line.text.isNotEmpty()) PlannerMarkdown(line.text)
             }

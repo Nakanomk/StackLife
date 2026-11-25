@@ -27,7 +27,7 @@ class ConversationPaneMotionTest {
     @Test fun readingEarlierMessagesDoesNotMoveUntilExplicitJumpOrOwnSend() {
         val rows = androidx.compose.runtime.mutableStateOf((1L..45L).map { ChatLine(it, HistoryRole.ASSISTANT, "Message $it") })
         val history = store.db.conversationHistory()
-        val images = AttachmentStore(InstrumentationRegistry.getInstrumentation().targetContext, { history.imageIds().toSet() },
+        val images = AttachmentStore(InstrumentationRegistry.getInstrumentation().targetContext, { history.attachmentIds().toSet() },
             "transcript-${java.util.UUID.randomUUID()}")
         ui.setContent { ChatMessages(rows.value, images, androidx.compose.ui.Modifier, "transcript", live = true) }
         fun awaitText(s: String): SemanticsNodeInteraction {
@@ -58,7 +58,7 @@ class ConversationPaneMotionTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         ui.setContent {
             val assistant = viewModel { AssistantModel(store.api, ConnectionStore(instrumentation.targetContext, "pane-motion"), OpenAiTransport(), history,
-                AttachmentStore(instrumentation.targetContext, { history.imageIds().toSet() }, "pane-images-${java.util.UUID.randomUUID()}")) }
+                AttachmentStore(instrumentation.targetContext, { history.attachmentIds().toSet() }, "pane-images-${java.util.UUID.randomUUID()}")) }
             StackLifeApp(viewModel { WorkspaceViewModel(store.api) }, assistant)
         }
         fun tag(value: String): SemanticsNodeInteraction {

@@ -41,10 +41,6 @@ import io.github.nakanomk.stacklife.transitions.paneOrigin
 import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch
 import io.github.nakanomk.stacklife.workspace.CheckRow
 import androidx.activity.compose.LocalActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia
-import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import io.github.nakanomk.stacklife.markdown.MarkdownComposer
@@ -81,7 +77,7 @@ private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: As
     val active = !blocked && !model.browsingHistory
     val currentPage by rememberUpdatedState(page)
     LaunchedEffect(draft, active) {
-        if (active) snapshotFlow { draft.field.text.isNotEmpty() || draft.images.isNotEmpty() }.collect { hasContent ->
+        if (active) snapshotFlow { draft.field.text.isNotEmpty() || draft.items.isNotEmpty() }.collect { hasContent ->
             draft.origin = if (hasContent) draft.origin ?: currentPage else null
         }
     }
@@ -116,11 +112,6 @@ internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: Strin
         else -> null
     }
     val fieldDescription = stringResource(R.string.assistant_message_field, scope)
-    val picker = key(draft) {
-        rememberLauncherForActivityResult(remember { PickMultipleVisualMedia(MAX_CHAT_IMAGES) }) { uris ->
-            draft.receivePicker(uris, active)
-        }
-    }
     val submit: () -> Unit = {
         if (active && draft.sendable) {
             keyboard?.hide()
@@ -132,7 +123,7 @@ internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: Strin
     val lineHeight = with(LocalDensity.current) { MaterialTheme.typography.bodyLarge.lineHeight.toDp() }
     val singleLine = maxOf(48.dp, lineHeight + 16.dp)
     Column(if (active) Modifier.testTag("$tagPrefix-composer") else Modifier.clearAndSetSemantics {}) {
-        if (active) DraftImageStrip(model.attachments, draft)
+        if (active) DraftAttachmentStrip(model.attachments, draft)
         if (originHint != null) Text(originHint, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
         StackLifeSurface(CapsuleScene.ASSISTANT, Modifier.fillMaxWidth(), colors.surfaceContainerHigh,
@@ -152,12 +143,7 @@ internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: Strin
                     val label = if (active) Modifier.testTag("$tagPrefix-input").semantics { contentDescription = fieldDescription } else Modifier
                     MarkdownComposer(draft.field, field.then(label).onFocusChanged { editing = it.isFocused }, submit, placeholder, enabled = active)
                 } else Box(field) { placeholder() }
-                IconButton(onClick = {
-                    if (draft.beginPicker()) picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
-                }, enabled = active,
-                    modifier = button.testTag("$tagPrefix-attach")) {
-                    Icon(painterResource(R.drawable.ic_add), stringResource(R.string.chat_attach), Modifier.size(24.dp))
-                }
+                AttachmentMenu(model.connections, draft, active, tagPrefix, button)
                 IconButton(onClick = submit, enabled = active && draft.sendable, modifier = button.testTag("$tagPrefix-send"),
                     colors = IconButtonDefaults.iconButtonColors(contentColor = colors.primary)) {
                     Icon(painterResource(R.drawable.ic_assistant_send), stringResource(R.string.assistant_send), Modifier.size(24.dp))
@@ -321,7 +307,7 @@ private fun ChatPanel(model: AssistantModel, ui: AssistantState, active: Boolean
                     ui.work == AssistantWork.LOADING -> stringResource(R.string.assistant_loading_settings)
                     service == null -> stringResource(R.string.assistant_not_connected)
                     else -> stringResource(R.string.assistant_empty_hint)
-                }, live = true, requestedLine = ui.requestedPreview, reattach = if (active && canChangeGrant) ({ draft.add(listOf(ImageSource.Saved(it))) }) else null) { line ->
+                }, live = true, requestedLine = ui.requestedPreview, reattach = if (active && canChangeGrant) ({ draft.add(listOf(AttachmentSource.SavedImage(it))) }) else null) { line ->
                 if (active && line.id == ui.eventId && ui.work == AssistantWork.IDLE) {
                     if (ready != null) FlowRow {
                         TextButton(onClick = model::cancel) { Text(stringResource(R.string.assistant_discard)) }

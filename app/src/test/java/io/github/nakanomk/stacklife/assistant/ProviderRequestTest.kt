@@ -23,6 +23,15 @@ class ProviderRequestTest {
         }
     }
 
+    @Test fun pdfRequiresDocumentedOriginPathModelAndImageConsent() {
+        assertTrue(serviceProfile(ServicePreset.Gpt.baseUrl, "gpt-5.4-mini").acceptsPdf)
+        assertTrue(serviceProfile(ServicePreset.Gpt.baseUrl, "gpt-5.4-mini-2026-03-17", true).acceptsPdf)
+        for (url in listOf("https://api.openai.com:8443/v1", "https://api.openai.com/v1/other", "https://api.openai.com.example/v1"))
+            assertFalse(serviceProfile(url, "gpt-5.4-mini", true).acceptsPdf)
+        assertFalse(serviceProfile(ServicePreset.Gpt.baseUrl, "gpt-5.4-mini-new", true).acceptsPdf)
+        assertFalse(serviceProfile(ServicePreset.Gpt.baseUrl, "gpt-5.4-mini", false).acceptsPdf)
+    }
+
     @Test fun inlineLimitsCountRealBase64PaddingAndEntireEncodedRequest() {
         assertEquals(4L, ServicePreset.Claude.inlineImageLength(1))
         assertEquals(10_000_000L, ServicePreset.Claude.inlineImageLength(7_500_000))

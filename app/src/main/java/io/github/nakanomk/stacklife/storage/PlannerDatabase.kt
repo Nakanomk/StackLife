@@ -20,6 +20,7 @@ import androidx.room.migration.AutoMigrationSpec
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.execSQL
 import io.github.nakanomk.stacklife.assistant.ConversationImageRow
+import io.github.nakanomk.stacklife.assistant.ConversationDocumentRow
 import io.github.nakanomk.stacklife.planner.Owner
 import io.github.nakanomk.stacklife.assistant.ConversationHistory
 import io.github.nakanomk.stacklife.assistant.ConversationMessageRow
@@ -36,15 +37,15 @@ import io.github.nakanomk.stacklife.planner.TaskIcon
 @Database(
     entities = [TaskRow::class, FrameRow::class, FrameItemRow::class, SettingsRow::class,
         TermRow::class, CourseRow::class, GraphRow::class, GraphNodeRow::class, GraphEdgeRow::class,
-        ConversationRow::class, ConversationMessageRow::class, ConversationImageRow::class, ScheduleRow::class,
+        ConversationRow::class, ConversationMessageRow::class, ConversationImageRow::class, ConversationDocumentRow::class, ScheduleRow::class,
         SegmentRow::class, ExceptionRow::class, CompletionRow::class, ReminderSettingRow::class, ReminderRuleRow::class,
         ReminderReceiptRow::class, CountdownRow::class],
-    version = 15,
+    version = 16,
     autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7),
         AutoMigration(from = 7, to = 8), AutoMigration(from = 8, to = 9, spec = ExistingInstall::class), AutoMigration(from = 11, to = 12),
         AutoMigration(from = 12, to = 13, spec = ExistingInstall::class), AutoMigration(from = 13, to = 14),
-        AutoMigration(from = 14, to = 15)],
+        AutoMigration(from = 14, to = 15), AutoMigration(from = 15, to = 16)],
     exportSchema = true,
 )
 abstract class PlannerDatabase : RoomDatabase() {

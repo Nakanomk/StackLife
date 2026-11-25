@@ -16,7 +16,7 @@ internal enum class HistoryRole { USER, ASSISTANT, NOTICE }
 @Serializable internal data class ChatEvent(val status: ProposalStatus, val changes: List<PlannerChange>, val reason: String? = null)
 
 internal data class ChatLine(val id: Long, val role: HistoryRole, val text: String = "",
-    val images: List<ChatImage> = emptyList(), val event: ChatEvent? = null)
+    val attachments: List<ChatAttachment> = emptyList(), val event: ChatEvent? = null)
 
 @Entity(tableName = "conversations", indices = [Index(value = ["lastMessageId"])])
 internal data class ConversationRow(
@@ -49,17 +49,25 @@ internal data class ConversationMessageRow(
 internal data class ConversationImageRow(@PrimaryKey val id: String, val messageId: Long, val ordinal: Int,
     val mime: String, val width: Int, val height: Int, val bytes: Long)
 
+@Entity(tableName = "conversation_documents",
+    foreignKeys = [ForeignKey(entity = ConversationMessageRow::class, parentColumns = ["id"], childColumns = ["messageId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index(value = ["messageId", "ordinal"], unique = true)])
+internal data class ConversationDocumentRow(@PrimaryKey val id: String, val messageId: Long, val ordinal: Int,
+    val mime: String, val displayName: String, val bytes: Long)
+
 internal data class SavedChatLine(@Embedded val row: ConversationMessageRow,
-    @Relation(parentColumn = "id", entityColumn = "messageId") val images: List<ConversationImageRow>) {
+    @Relation(parentColumn = "id", entityColumn = "messageId") val images: List<ConversationImageRow>,
+    @Relation(parentColumn = "id", entityColumn = "messageId") val documents: List<ConversationDocumentRow>) {
     fun line(): ChatLine {
         val event = if (row.payloadVersion == 1 && row.eventJson != null) try {
             Json.decodeFromString<ChatEvent>(row.eventJson)
         } catch (_: IllegalArgumentException) { null } else null
         val text = if (row.payloadVersion != 0 && event == null)
             uiText("This saved preview cannot be displayed.", "无法显示这条已保存的预览。") else row.text
-        return ChatLine(row.id, row.role, text, images.sortedBy { it.ordinal }.map {
-            ChatImage(it.id, it.mime, it.width, it.height, it.bytes)
-        }, event)
+        val ordered = arrayOfNulls<ChatAttachment>(images.size + documents.size)
+        for (i in images) ordered[i.ordinal] = ChatImage(i.id, i.mime, i.width, i.height, i.bytes)
+        for (d in documents) ordered[d.ordinal] = ChatDocument(d.id, d.mime, d.displayName, d.bytes)
+        return ChatLine(row.id, row.role, text, ordered.requireNoNulls().asList(), event)
     }
 }
 
@@ -96,28 +104,31 @@ internal abstract class ConversationHistory {
         }
     }
 
-    @Query("SELECT id FROM conversation_images")
-    abstract suspend fun imageIds(): List<String>
+    @Query("SELECT id FROM conversation_images UNION ALL SELECT id FROM conversation_documents")
+    abstract suspend fun attachmentIds(): List<String>
 
-    @Query("SELECT i.id FROM conversation_images i INNER JOIN conversation_messages m ON m.id = i.messageId WHERE m.conversationId = :id")
-    protected abstract suspend fun threadImages(id: Long): List<String>
+    @Query("""SELECT i.id FROM conversation_images i INNER JOIN conversation_messages m ON m.id = i.messageId WHERE m.conversationId = :id
+        UNION ALL SELECT d.id FROM conversation_documents d INNER JOIN conversation_messages m ON m.id = d.messageId WHERE m.conversationId = :id""")
+    protected abstract suspend fun threadAttachments(id: Long): List<String>
 
     @Query("DELETE FROM conversations WHERE id = :id")
     protected abstract suspend fun deleteRows(id: Long)
 
     @Transaction
-    open suspend fun delete(id: Long): List<String> = threadImages(id).also { deleteRows(id) }
+    open suspend fun delete(id: Long): List<String> = threadAttachments(id).also { deleteRows(id) }
 
     @Transaction
-    open suspend fun sendUser(threadId: Long?, scope: String, prompt: String, scopeKey: String?, images: List<ChatImage>): SentMessage {
-        require((prompt.isNotBlank() || images.isNotEmpty()) && images.size <= MAX_CHAT_IMAGES)
+    open suspend fun sendUser(threadId: Long?, scope: String, prompt: String, scopeKey: String?, attachments: List<ChatAttachment>): SentMessage {
+        require((prompt.isNotBlank() || attachments.isNotEmpty()) && attachments.size <= MAX_CHAT_ATTACHMENTS)
+        require(attachments.map { it.id }.distinct().size == attachments.size)
         val title = prompt.trimStart().take(80).trimEnd { it.isWhitespace() || it.isHighSurrogate() }
         val id = threadId ?: insertConversation(ConversationRow(scope = scope, scopeKey = scopeKey,
-            title = title.ifEmpty { uiText("Image message", "图片消息") }))
+            title = title.ifEmpty { if (attachments.any { it is ChatDocument }) uiText("File message", "文件消息") else uiText("Image message", "图片消息") }))
         val message = record(ConversationMessageRow(conversationId = id, role = HistoryRole.USER, text = prompt))
-        if (images.isNotEmpty()) insertImages(images.mapIndexed { ordinal, image ->
-            ConversationImageRow(image.id, message, ordinal, image.mime, image.width, image.height, image.bytes)
-        })
+        attachments.forEachIndexed { ordinal, part -> when (part) {
+            is ChatImage -> insertImage(ConversationImageRow(part.id, message, ordinal, part.mime, part.width, part.height, part.bytes))
+            is ChatDocument -> insertDocument(ConversationDocumentRow(part.id, message, ordinal, part.mime, part.displayName, part.bytes))
+        } }
         return SentMessage(id, message)
     }
 
@@ -144,7 +155,8 @@ internal abstract class ConversationHistory {
         return message
     }
 
-    @Insert protected abstract suspend fun insertImages(rows: List<ConversationImageRow>)
+    @Insert protected abstract suspend fun insertImage(row: ConversationImageRow)
+    @Insert protected abstract suspend fun insertDocument(row: ConversationDocumentRow)
 
     @Insert protected abstract suspend fun insertConversation(row: ConversationRow): Long
     @Insert protected abstract suspend fun insertMessage(row: ConversationMessageRow): Long

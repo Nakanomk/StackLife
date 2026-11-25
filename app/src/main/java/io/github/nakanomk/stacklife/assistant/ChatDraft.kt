@@ -8,91 +8,110 @@ import java.util.UUID
 import kotlinx.coroutines.*
 
 
-internal sealed interface ImageSource {
-    data class Picker(val uri: Uri) : ImageSource
-    data class Saved(val image: ChatImage) : ImageSource
+internal sealed interface AttachmentSource {
+    data class Photo(val uri: Uri) : AttachmentSource
+    data class Document(val uri: Uri, val recipient: ServiceProfile?) : AttachmentSource
+    data class SavedImage(val image: ChatImage) : AttachmentSource
 }
-internal sealed interface ImagePreparation {
-    data object Preparing : ImagePreparation
-    data class Ready(val image: ChatImage) : ImagePreparation
-    data class Failed(val reason: String) : ImagePreparation
+internal sealed interface AttachmentPreparation {
+    data object Preparing : AttachmentPreparation
+    data class Ready(val attachment: ChatAttachment) : AttachmentPreparation
+    data class Failed(val reason: String) : AttachmentPreparation
 }
-internal data class DraftImage(val id: String, val source: ImageSource, val status: ImagePreparation)
+internal data class DraftAttachment(val id: String, val source: AttachmentSource, val status: AttachmentPreparation)
 
 /** The editor owns prepared files until the user message and its references commit together. */
 internal class ChatDraft(private val store: AttachmentStore, private val scope: CoroutineScope) {
     val field = TextFieldState()
     var origin by mutableStateOf<AssistantPage?>(null)
-    val images = mutableStateListOf<DraftImage>()
+    val items = mutableStateListOf<DraftAttachment>()
     var issue by mutableStateOf<String?>(null)
         private set
     private val preparing = mutableMapOf<String, Job>()
     private var disposed = false
+    var pickerEpoch by mutableLongStateOf(0L)
+        private set
     private var awaitingPicker = false
+    private var documentRecipient: ServiceProfile? = null
 
-    fun beginPicker(): Boolean {
-        if (disposed) return false
+    fun launchPicker(recipient: ServiceProfile? = null, launch: () -> Unit) {
+        if (disposed || awaitingPicker) return
+        documentRecipient = recipient
         awaitingPicker = true
-        return true
+        try {
+            launch()
+        } catch (_: android.content.ActivityNotFoundException) {
+            pickerUnavailable()
+        } catch (_: SecurityException) {
+            pickerUnavailable()
+        }
     }
 
-    fun receivePicker(uris: List<Uri>, active: Boolean) {
-        val requested = awaitingPicker
+    private fun pickerUnavailable() {
         awaitingPicker = false
-        if (requested && active) add(uris.map { ImageSource.Picker(it) })
+        documentRecipient = null
+        issue = uiText("Cannot open the system picker on this device.", "无法在此设备上打开系统选择器。")
+    }
+
+    fun receivePicker(epoch: Long, uris: List<Uri>, active: Boolean, document: Boolean) {
+        if (disposed || epoch != pickerEpoch || !awaitingPicker) return
+        awaitingPicker = false
+        if (active) add(uris.map { if (document) AttachmentSource.Document(it, documentRecipient) else AttachmentSource.Photo(it) })
+        documentRecipient = null
     }
     // Keystrokes, composing ranges and caret moves belong to the native field.
     // Its enclosing dock only needs to observe an actual change of send eligibility.
     val sendable by derivedStateOf(structuralEqualityPolicy()) {
         val text = field.text
-        text.length <= 8000 && images.all { it.status is ImagePreparation.Ready } &&
-            (text.isNotBlank() || images.isNotEmpty())
+        text.length <= 8000 && items.all { it.status is AttachmentPreparation.Ready } &&
+            (text.isNotBlank() || items.isNotEmpty())
     }
 
-    fun add(sources: List<ImageSource>) {
+    fun add(sources: List<AttachmentSource>) {
         if (disposed || sources.isEmpty()) return
-        if (sources.size > MAX_CHAT_IMAGES - images.size) {
-            issue = uiText("Select again: at most five images per message. None of this selection was added.", "请重新选择：每条消息最多五张图片，本次选择未添加。")
+        if (sources.size > MAX_CHAT_ATTACHMENTS - items.size) {
+            issue = uiText("Select again: at most five attachments per message. None of this selection was added.", "请重新选择：每条消息最多五个附件，本次选择未添加。")
             return
         }
         issue = null
         for (source in sources) {
-            val item = DraftImage(UUID.randomUUID().toString(), source, ImagePreparation.Preparing)
-            images.add(item)
+            val item = DraftAttachment(UUID.randomUUID().toString(), source, AttachmentPreparation.Preparing)
+            items.add(item)
             prepare(item)
         }
     }
 
-    fun retry(item: DraftImage) {
-        val index = images.indexOf(item)
-        if (index < 0 || item.status !is ImagePreparation.Failed) return
-        val next = item.copy(status = ImagePreparation.Preparing)
-        images[index] = next
+    fun retry(item: DraftAttachment) {
+        val index = items.indexOf(item)
+        if (index < 0 || item.status !is AttachmentPreparation.Failed) return
+        val next = item.copy(status = AttachmentPreparation.Preparing)
+        items[index] = next
         prepare(next)
     }
 
-    private fun prepare(item: DraftImage) {
+    private fun prepare(item: DraftAttachment) {
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 val result = try {
-                    ImagePreparation.Ready(when (val source = item.source) {
-                        is ImageSource.Picker -> store.prepare(source.uri)
-                        is ImageSource.Saved -> store.duplicate(source.image)
+                    AttachmentPreparation.Ready(when (val source = item.source) {
+                        is AttachmentSource.Photo -> store.prepare(source.uri)
+                        is AttachmentSource.Document -> store.prepareDocument(source.uri, source.recipient.acceptsPdf)
+                        is AttachmentSource.SavedImage -> store.duplicate(source.image)
                     })
                 } catch (e: CancellationException) { throw e }
-                  catch (e: Exception) { ImagePreparation.Failed(e.localizedMessage?.take(200) ?: uiText("Could not prepare this image.", "无法准备此图片。")) }
-                val index = images.indexOf(item)
-                if (index >= 0) images[index] = item.copy(status = result)
-                else if (result is ImagePreparation.Ready) delete(result.image.id)
+                  catch (e: Exception) { AttachmentPreparation.Failed(e.localizedMessage?.take(200) ?: uiText("Could not prepare this attachment.", "无法准备此附件。")) }
+                val index = items.indexOf(item)
+                if (index >= 0) items[index] = item.copy(status = result)
+                else if (result is AttachmentPreparation.Ready) delete(result.attachment.id)
             } finally { preparing.remove(item.id) }
         }
         preparing[item.id] = job
         job.start()
     }
 
-    fun remove(item: DraftImage) {
+    fun remove(item: DraftAttachment) {
         preparing.remove(item.id)?.cancel()
-        if (images.remove(item)) (item.status as? ImagePreparation.Ready)?.let { delete(it.image.id) }
+        if (items.remove(item)) (item.status as? AttachmentPreparation.Ready)?.let { delete(it.attachment.id) }
         issue = null
     }
 
@@ -110,9 +129,11 @@ internal class ChatDraft(private val store: AttachmentStore, private val scope: 
 
     fun clear() {
         awaitingPicker = false
-        images.forEach { (it.status as? ImagePreparation.Ready)?.let { ready -> delete(ready.image.id) } }
+        documentRecipient = null
+        pickerEpoch++
+        items.forEach { (it.status as? AttachmentPreparation.Ready)?.let { ready -> delete(ready.attachment.id) } }
         preparing.values.toList().forEach { it.cancel() }
-        images.clear()
+        items.clear()
         clearText()
     }
 

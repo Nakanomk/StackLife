@@ -26,7 +26,7 @@ class GalleryApplication : Application() {
     private val history by lazy { db.conversationHistory() }
     // The catalog offers built-in wallpapers only; Gallery history is the only possible private donor.
     internal val backgrounds by lazy { BackgroundStore(this, history::backgroundIds) }
-    private val attachments by lazy { AttachmentStore(this, { history.imageIds().toSet() }) }
+    private val attachments by lazy { AttachmentStore(this, { history.attachmentIds().toSet() }) }
     internal val planner by lazy { RoomPlannerApi(db, imageExists = backgrounds::exists) }
     private val connections by lazy { ConnectionStore(this, "gallery-connection") }
 

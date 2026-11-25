@@ -18,7 +18,7 @@ class ConversationHistoryTest {
     @Test fun imageReferenceInsertRollsBackAsAUnitAndRecoveryOnlyUnlinksOrphans() = runBlocking {
         val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
         val directory = "history-images-${java.util.UUID.randomUUID()}"
-        fun files() = AttachmentStore(context, { store.db.conversationHistory().imageIds().toSet() }, directory)
+        fun files() = AttachmentStore(context, { store.db.conversationHistory().attachmentIds().toSet() }, directory)
         val files = files()
         val history = store.db.conversationHistory()
         try {
@@ -39,14 +39,14 @@ class ConversationHistoryTest {
             val failed = runCatching { history.sendUser(null, "Today", "", null, listOf(orphan, first)) }.exceptionOrNull()
             assertTrue("Duplicate image identity must reject the entire transaction", failed != null)
             assertEquals(original, history.observeConversations().first())
-            assertEquals(setOf(first.id, second.id), history.imageIds().toSet())
+            assertEquals(setOf(first.id, second.id), history.attachmentIds().toSet())
             assertTrue(history.recentDialogue(sent.conversationId, chatContextLimit).isEmpty())
             assertTrue(files.file(orphan.id).isFile)
             store.reopen()
             val recovered = files()
             recovered.recover()
             assertTrue(!recovered.file(orphan.id).exists())
-            assertEquals(listOf(second, first), store.db.conversationHistory().observeMessages(sent.conversationId).first().single().images)
+            assertEquals(listOf(second, first), store.db.conversationHistory().observeMessages(sent.conversationId).first().single().attachments)
             assertEquals(18, recovered.bitmap(first, 128).let { bitmap -> try { bitmap.width } finally { bitmap.recycle() } })
             assertTrue(runCatching { recovered.remove(first.id) }.isFailure)
         } finally { java.io.File(context.noBackupFilesDir, directory).deleteRecursively() }
@@ -65,15 +65,46 @@ class ConversationHistoryTest {
         val draft = ChatDraft(files, kotlinx.coroutines.CoroutineScope(job + kotlinx.coroutines.Dispatchers.Main.immediate))
         try {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                draft.add(listOf(ImageSource.Picker(android.net.Uri.parse("content://unused/selection"))))
+                draft.add(listOf(AttachmentSource.Photo(android.net.Uri.parse("content://unused/selection"))))
             }
             kotlinx.coroutines.withTimeout(5_000) { entered.await() }
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { draft.remove(draft.images.single()) }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { draft.remove(draft.items.single()) }
             kotlinx.coroutines.withTimeout(5_000) { canceled.await() }
-            assertTrue(draft.images.isEmpty()); assertTrue(!draft.sendable)
+            assertTrue(draft.items.isEmpty()); assertTrue(!draft.sendable)
             assertTrue(java.io.File(context.noBackupFilesDir, directory).listFiles().orEmpty().isEmpty())
-            assertTrue(store.db.conversationHistory().imageIds().isEmpty())
+            assertTrue(store.db.conversationHistory().attachmentIds().isEmpty())
         } finally { job.cancel(); java.io.File(context.noBackupFilesDir, directory).deleteRecursively() }
+    }
+
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
+    @Test fun coldMixedOwnershipSurvivesLostGrantsAndDeletionRemovesBothTypes() = runBlocking {
+        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        val directory = "typed-history-${java.util.UUID.randomUUID()}"
+        fun files() = AttachmentStore(context, { store.db.conversationHistory().attachmentIds().toSet() }, directory)
+        val files = files()
+        try {
+            val text = "周三,15:45\n"
+            val doc = withChatDocument(context, "csv", "text/csv", text.encodeToByteArray()) { files.prepareDocument(it, false) }
+            lateinit var photo: ChatImage
+            withChatPhoto(context, 180) { photo = runBlocking { files.prepare(it) } }
+            val other = withChatDocument(context, "txt", "text/plain", "end".encodeToByteArray()) { files.prepareDocument(it, false) }
+            val order = listOf(doc, photo, other)
+            val sent = store.db.conversationHistory().sendUser(null, "Today", "", null, order)
+            val orphan = withChatDocument(context, "md", "text/markdown", "# note".encodeToByteArray()) { files.prepareDocument(it, false) }
+            store.reopen()
+            val history = store.db.conversationHistory()
+            val cold = files().also { it.recover() }
+            assertEquals(order, history.observeMessages(sent.conversationId).first().single().attachments)
+            assertTrue(history.recentDialogue(sent.conversationId, chatContextLimit).isEmpty())
+            assertEquals(text, doc.readValidated(cold.file(doc.id)))
+            assertTrue(!cold.file(orphan.id).exists())
+            assertTrue(runCatching { cold.remove(doc.id) }.isFailure)
+            val removed = history.delete(sent.conversationId)
+            assertEquals(order.map { it.id }.toSet(), removed.toSet())
+            removed.forEach { cold.remove(it) }
+            assertTrue(history.attachmentIds().isEmpty())
+            assertTrue(order.none { cold.file(it.id).exists() })
+        } finally { java.io.File(context.noBackupFilesDir, directory).deleteRecursively() }
     }
 
     @Test fun recentActivityAndFullTranscriptSurviveReopenButDeletedMessagesDoNot() = runBlocking {

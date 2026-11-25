@@ -1,5 +1,4 @@
 <resources>
-    <string name="chat_attach">Attach images</string>
     <string name="chat_image_message">Image message</string>
     <string name="chat_image_label">Image %1$d, %2$d × %3$d</string>
     <string name="chat_remove_image">Remove image %1$d</string>

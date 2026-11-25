@@ -59,6 +59,26 @@ class AttachmentStoreTest {
         withSelectedPhoto(context, body, type) { block(it) }
 
     @SdkSuppress(minSdkVersion = 29)
+    @Test fun badUtf8EmptyOversizedUnsupportedAndExpiredDocumentsLeaveNoPrivateFiles() = runBlocking {
+        val folder = "doc-rejections-${UUID.randomUUID()}"
+        val files = AttachmentStore(context, { emptySet() }, folder)
+        try {
+            for ((extension, mime, bytes) in listOf(
+                Triple("txt", "text/plain", byteArrayOf(0xc3.toByte(), 0x28)),
+                Triple("txt", "text/plain", byteArrayOf()),
+                Triple("txt", "text/plain", ByteArray(65537) { 65 }),
+                Triple("zip", "application/zip", byteArrayOf(80, 75, 3, 4)),
+                Triple("pdf", PDF_MIME, "not a PDF".encodeToByteArray()),
+            )) withChatDocument(context, extension, mime, bytes) { uri ->
+                assertTrue(runCatching { files.prepareDocument(uri, allowPdf = true) }.exceptionOrNull() is ChatProblem)
+            }
+            val expired = withChatDocument(context, "txt", "text/plain", "gone".encodeToByteArray()) { it }
+            assertTrue(runCatching { files.prepareDocument(expired, false) }.exceptionOrNull() is ChatProblem)
+            assertTrue(File(context.noBackupFilesDir, folder).list()!!.isEmpty())
+        } finally { File(context.noBackupFilesDir, folder).deleteRecursively() }
+    }
+
+    @SdkSuppress(minSdkVersion = 29)
     @Test fun preparesExifUprightPixelsStripsGpsAndSamplesTheActualSentFile() = runBlocking {
         val folder = "image-fixture-${UUID.randomUUID()}"
         val store = AttachmentStore(context, { emptySet() }, folder)
@@ -116,8 +136,8 @@ class AttachmentStoreTest {
                 assertTrue(image.matchesPreparedFile(file))
                 image to file
             }
-            val turn = TurnImages(0, entries)
-            validateImageTurn(profile, messages, tools, turn)
+            val turn = TurnAttachments(0, entries)
+            validateAttachmentTurn(profile, messages, tools, turn)
             val disabled = ServiceConnection(profile.copy(supportsImages = false), "fixture")
             assertTrue(runCatching { transport.complete(disabled, messages, tools, turn) }.exceptionOrNull() is ChatProblem)
             assertEquals(0, server.requestCount)
@@ -153,7 +173,7 @@ class AttachmentStoreTest {
                 assertTrue(runCatching { store.bitmap(corrupt, 64) }.exceptionOrNull() is ChatProblem)
                 assertTrue(runCatching { store.duplicate(corrupt) }.exceptionOrNull() is ChatProblem)
                 assertTrue(runCatching { transport.complete(ServiceConnection(profile, "fixture"), messages, tools,
-                    TurnImages(0, listOf(corrupt to file))) }.exceptionOrNull() is ChatProblem)
+                    TurnAttachments(0, listOf(corrupt to file))) }.exceptionOrNull() is ChatProblem)
             }
             assertEquals(entries.map { it.first.id }.toSet(), root.list()!!.toSet())
             assertEquals(1, server.requestCount)

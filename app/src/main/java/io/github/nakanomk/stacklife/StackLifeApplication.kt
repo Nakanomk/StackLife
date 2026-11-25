@@ -43,7 +43,7 @@ open class StackLifeApplication : Application() {
     internal val chat by lazy { OpenAiTransport() }
     private val database by lazy { PlannerDatabase.open(this, "stacklife.db") }
     internal val history by lazy { database.conversationHistory() }
-    internal val attachments by lazy { AttachmentStore(this, { history.imageIds().toSet() }) }
+    internal val attachments by lazy { AttachmentStore(this, { history.attachmentIds().toSet() }) }
     internal val reminders by lazy { AgendaReminders(this, database) { planner } }
     internal val backgrounds by lazy { BackgroundStore(this) { database.withTransaction {
         buildSet { addAll(database.countdownDao().backgroundIds()); addAll(history.backgroundIds())

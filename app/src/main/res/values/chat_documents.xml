@@ -1,0 +1,12 @@
+<resources>
+    <string name="chat_add_attachment">Add an attachment</string>
+    <string name="chat_pick_images">Choose photos</string>
+    <string name="chat_pick_document">Choose a phone file</string>
+    <string name="chat_image_limits">Photos up to 50 MiB; five attachments total.</string>
+    <string name="chat_document_text_limits">UTF-8 TXT, MD, CSV or JSON up to 64 KiB. PDF is unavailable for this connection.</string>
+    <string name="chat_document_pdf_limits">UTF-8 TXT, MD, CSV or JSON up to 64 KiB; PDF up to 4 MiB. Five attachments total.</string>
+    <string name="chat_reading_capabilities">Reading local connection settings…</string>
+    <string name="chat_recipient_unavailable">Cannot read the local connection settings.</string>
+    <string name="chat_remove_document">Remove file %1$d</string>
+    <string name="chat_failed_document">File %1$d could not be prepared</string>
+</resources>

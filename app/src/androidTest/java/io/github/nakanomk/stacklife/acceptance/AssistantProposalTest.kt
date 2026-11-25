@@ -77,7 +77,7 @@ class AssistantProposalTest {
     private val preference = AssistantPreference(preferenceContext)
     private val requestCanceled = CompletableDeferred<Unit>()
     private val imageDirectory = "proposal-images-${UUID.randomUUID()}"
-    private val images by lazy { AttachmentStore(inst.targetContext, { store.db.conversationHistory().imageIds().toSet() }, imageDirectory) }
+    private val images by lazy { AttachmentStore(inst.targetContext, { store.db.conversationHistory().attachmentIds().toSet() }, imageDirectory) }
     private lateinit var transport: ChatTransport
     private lateinit var assistant: AssistantModel
     private var call = 0
@@ -125,6 +125,10 @@ class AssistantProposalTest {
         return ui.onNode(matcher)
     }
     private fun tag(value: String) = await(hasTestTag(value))
+    private fun pickPhotos() {
+        tag("assistant-attach").performClick()
+        tag("assistant-pick-photos").performClick()
+    }
     private fun checkReplyFootprint(prefix: String) {
         val field = tag("$prefix-input")
         val shell = tag("$prefix-composer")
@@ -463,11 +467,11 @@ class AssistantProposalTest {
     @Test fun overLimitAndFailedPickerResultsRetainTheDraftUntilExplicitRemoval() {
         var selection = (1..6).map { android.net.Uri.parse("content://stacklife-fixture-missing/item/$it") }
         attach(photos = { selection })
-        tag("assistant-attach").performClick()
+        pickPhotos()
         await(hasText("本次选择未添加", substring = true))
         tag("assistant-send").assertIsNotEnabled()
         selection = selection.take(1)
-        tag("assistant-attach").performClick()
+        pickPhotos()
         val failed = await(hasText("图片 1 准备失败"))
         tag("assistant-input").performTextReplacement("还在编辑")
         tag("assistant-send").assertIsNotEnabled()
@@ -491,13 +495,13 @@ class AssistantProposalTest {
         val history = store.db.conversationHistory()
         withChatPhoto(inst.targetContext, 180) { uri ->
             attach(photos = { listOf(uri) })
-            tag("assistant-attach").performClick()
+            pickPhotos()
             tag("assistant-input").performTextReplacement("不能省略这张图")
             await(hasTestTag("assistant-send") and isEnabled()).performClick()
         }
         await(hasText("未启用图片输入", substring = true))
         val draft = assistant.draft(requireNotNull(assistant.state.value.composerId))
-        val image = (draft.images.single().status as ImagePreparation.Ready).image
+        val image = (draft.items.single().status as AttachmentPreparation.Ready).attachment
         assertTrue(images.file(image.id).isFile)
         assertTrue(runBlocking { history.observeConversations().first().isEmpty() })
         await(hasContentDescription("移除图片 1")).performClick()
@@ -514,13 +518,13 @@ class AssistantProposalTest {
         withChatPhoto(context, 180) { first -> withChatPhoto(context, 240) { second ->
             var selection = listOf(first, second)
             attach(photos = { selection })
-            tag("assistant-attach").performClick()
+            pickPhotos()
             await(hasTestTag("assistant-send") and isEnabled())
             selection = (1..4).map { android.net.Uri.parse("content://unused/$it") }
-            tag("assistant-attach").performClick()
+            pickPhotos()
             await(hasText("本次选择未添加", substring = true))
             assertEquals(0, server.requestCount)
-            assertTrue(runBlocking { history.imageIds().isEmpty() })
+            assertTrue(runBlocking { history.attachmentIds().isEmpty() })
             reply("### 看到了两张图片\n\n第一张是**蓝色三角形**，第二张是**绿色圆形**。\n\n- 两张图片都在这条消息中\n- 未更改日程")
             tag("assistant-send").performClick(); await(hasText("看到了两张图片"))
         } }
@@ -530,8 +534,8 @@ class AssistantProposalTest {
         val thread = runBlocking { history.observeConversations().first().single() }
         assertTrue(thread.title.isNotBlank())
         val user = runBlocking { history.observeMessages(thread.id).first().first() }
-        assertEquals("", user.text); assertEquals(listOf(180, 240), user.images.map { it.width })
-        assertTrue(user.images.all { images.file(it.id).isFile })
+        assertEquals("", user.text); assertEquals(listOf(180, 240), user.attachments.map { (it as ChatImage).width })
+        assertTrue(user.attachments.all { images.file(it.id).isFile })
         expandTranscriptForCapture()
         tag("assistant-scroll").performScrollToIndex(0)
         await(hasContentDescription("图片 1，180 × 120")).assertIsDisplayed()
@@ -540,7 +544,7 @@ class AssistantProposalTest {
         capture("u3-chat-images-markdown.png")
         await(hasText("关闭")).performClick()
         tag("assistant-history").performClick(); tag("assistant-history-thread-${thread.id}").performClick()
-        val image = user.images.first()
+        val image = user.attachments.first()
         val transcript = tag("assistant-history-messages")
         expandTranscriptForCapture()
         transcript.performScrollToIndex(0)
@@ -554,7 +558,7 @@ class AssistantProposalTest {
         await(hasTestTag("history-reply-send") and isEnabled())
         assertEquals(1, server.requestCount)
         val replyDraft = assistant.draft("history:${thread.id}")
-        val duplicate = (replyDraft.images.single().status as ImagePreparation.Ready).image
+        val duplicate = (replyDraft.items.single().status as AttachmentPreparation.Ready).attachment
         assertNotEquals(image.id, duplicate.id); assertTrue(images.file(duplicate.id).isFile)
         await(hasContentDescription("移除图片 1")).performClick()
         ui.waitUntil(5_000) { !images.file(duplicate.id).exists() }
@@ -575,7 +579,7 @@ class AssistantProposalTest {
         val attached = mixed.last().jsonObject["content"]!!.jsonArray
         assertEquals(listOf("text", "image_url"), attached.map { it.jsonObject["type"]!!.jsonPrimitive.content })
         assertEquals(parts.first(), attached.last())
-        val orderedImages = runBlocking { history.observeMessages(thread.id).first().flatMap { it.images } }
+        val orderedImages = runBlocking { history.observeMessages(thread.id).first().flatMap { line -> line.attachments.map { it as ChatImage } } }
         assertEquals(listOf(180, 240, 180), orderedImages.map { it.width })
         assertEquals(3, orderedImages.map { it.id }.distinct().size)
         await(hasText("关闭")).performClick()
@@ -583,7 +587,7 @@ class AssistantProposalTest {
         tag("assistant-history-delete").performClick(); tag("assistant-history-confirm-delete").performClick()
         tag("assistant-history-empty")
         ui.waitUntil(5_000) { orderedImages.none { images.file(it.id).exists() } }
-        assertTrue(runBlocking { history.imageIds().isEmpty() })
+        assertTrue(runBlocking { history.attachmentIds().isEmpty() })
         assertEquals(3, server.requestCount)
     }
 
@@ -758,18 +762,18 @@ class AssistantProposalTest {
         runBlocking { connection.save("https://127.0.0.1:${server.port}/acceptance/v1", "本地验收模型", null, supportsImages = true) }
         withChatPhoto(inst.targetContext, 180) { uri ->
             attach(photos = { listOf(uri) })
-            tag("assistant-attach").performClick()
+            pickPhotos()
             reply("图片已收到")
             await(hasTestTag("assistant-send") and isEnabled()).performClick(); await(hasText("图片已收到"))
         }
         val thread = runBlocking { history.observeConversations().first().single().id }
-        val saved = runBlocking { history.observeMessages(thread).first().first().images.single() }
+        val saved = runBlocking { history.observeMessages(thread).first().first().attachments.single() }
         await(hasText("关闭")).performClick()
         tag("assistant-history").performClick(); tag("assistant-history-thread-$thread").performClick()
         tag("assistant-history-messages").performScrollToNode(hasTestTag("chat-image-${saved.id}"))
         tag("chat-image-${saved.id}").performClick(); tag("chat-reattach").performClick()
         await(hasTestTag("history-reply-send") and isEnabled())
-        val clone = (assistant.draft("history:$thread").images.single().status as ImagePreparation.Ready).image
+        val clone = (assistant.draft("history:$thread").items.single().status as AttachmentPreparation.Ready).attachment
         tag("history-reply-input").performTextReplacement("不要保存草稿")
         ui.runOnIdle { preference.setEnabled(false) }
         ui.waitUntil(5_000) { !images.file(clone.id).exists() }
@@ -778,7 +782,7 @@ class AssistantProposalTest {
         ui.runOnIdle { preference.setEnabled(true) }
         tag("assistant-history").performClick(); tag("assistant-history-thread-$thread").performClick()
         tag("history-reply-send").assertIsNotEnabled()
-        assertEquals(listOf(saved.id), runBlocking { history.imageIds() })
+        assertEquals(listOf(saved.id), runBlocking { history.attachmentIds() })
         assertEquals(1, server.requestCount)
         tag("assistant-history-messages").performScrollToNode(hasTestTag("chat-image-${saved.id}"))
         tag("chat-image-${saved.id}").performClick(); tag("chat-reattach").performClick()
@@ -786,7 +790,7 @@ class AssistantProposalTest {
         await(hasTestTag("history-reply-send") and isEnabled()).performClick(); await(hasText("已重新发送"))
         ui.runOnIdle { preference.setEnabled(false) }
         ui.onNodeWithTag("assistant-sheet").assertDoesNotExist()
-        val owned = runBlocking { history.imageIds() }
+        val owned = runBlocking { history.attachmentIds() }
         assertEquals(2, owned.distinct().size)
         assertTrue(owned.all { images.file(it).isFile })
         assertEquals(2, server.requestCount)
@@ -813,6 +817,77 @@ class AssistantProposalTest {
         reply("新会话")
         send("重新开始"); await(hasText("新会话"))
         assertEquals(listOf("重新开始", "新会话"), assistant.state.value.lines.map { it.text })
+    }
+
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
+    @Test fun documentOnlySendSurvivesCancellationAndHistoryContinuationDoesNotReplayFile() = runBlocking {
+        val note = "unique-file-content/只在本轮发送"
+        withChatDocument(inst.targetContext, "txt", "text/plain", note.encodeToByteArray()) { uri ->
+            attach(picker = documentPickerReturning { accepted ->
+                check("text/plain" in accepted && PDF_MIME !in accepted)
+                uri
+            })
+            tag("assistant-attach").performClick()
+            await(hasText("当前连接不支持 PDF", substring = true))
+            await(hasTestTag("assistant-pick-document") and isEnabled()).performClick()
+            await(hasTestTag("assistant-send") and isEnabled())
+        } // URI is no longer readable
+        assertEquals(0, server.requestCount)
+        tag("assistant-send").performClick()
+        val request = requireNotNull(server.takeRequest(3, TimeUnit.SECONDS))
+        assertNotNull(request.handshake)
+        val messages = Json.parseToJsonElement(request.body!!.utf8()).jsonObject.getValue("messages").jsonArray
+        val part = messages.last().jsonObject.getValue("content").jsonArray.single().jsonObject
+        assertEquals("text", part.getValue("type").jsonPrimitive.content)
+        assertEquals(note, part.getValue("text").jsonPrimitive.content)
+        assertTrue(messages.dropLast(1).none { note in it.toString() })
+        val history = store.db.conversationHistory()
+        val thread = history.observeConversations().first().single().id
+        ui.runOnIdle { preference.setEnabled(false) }
+        ui.waitUntil(5_000) { assistant.state.value.page == null }
+        withTimeout(5_000) { requestCanceled.await() }
+        reply("已取消的答复")
+        val line = history.observeMessages(thread).first().single()
+        assertEquals(HistoryRole.USER, line.role); assertEquals("", line.text)
+        val document = line.attachments.single() as ChatDocument
+        assertEquals(note, images.file(document.id).readText())
+        ui.runOnIdle { preference.setEnabled(true) }
+        tag("assistant-history").performClick(); tag("assistant-history-thread-$thread").performClick()
+        await(hasText(document.displayName))
+        tag("history-reply-input").performTextReplacement("只发送这条新消息")
+        reply("收到新消息")
+        tag("history-reply-send").performClick(); await(hasText("收到新消息"))
+        val resumed = requireNotNull(server.takeRequest(3, TimeUnit.SECONDS)).body!!.utf8()
+        assertTrue("只发送这条新消息" in resumed)
+        assertFalse(note in resumed || document.displayName in resumed)
+        assertEquals(2, server.requestCount)
+    }
+
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
+    @Test fun canceledFilePickerKeepsTextAndChangedRecipientCannotClaimTheDraft(): Unit = runBlocking {
+        withChatDocument(inst.targetContext, "txt", "text/plain", "私有正文".encodeToByteArray()) { uri ->
+            var selection: android.net.Uri? = null
+            attach(picker = documentPickerReturning { selection })
+            tag("assistant-input").performTextReplacement("保留草稿")
+            fun pick() {
+                tag("assistant-attach").performClick()
+                await(hasTestTag("assistant-pick-document") and isEnabled()).performClick()
+            }
+            pick()
+            tag("assistant-input").assertTextContains("保留草稿")
+            ui.onNodeWithContentDescription("移除文件 1").assertDoesNotExist()
+            selection = uri
+            pick()
+            await(hasContentDescription("移除文件 1"))
+            await(hasTestTag("assistant-send") and isEnabled())
+        }
+        connection.save("https://127.0.0.1:${server.port}/different/v1", "另一个模型", null)
+        tag("assistant-send").performClick()
+        await(hasText("文件接收方已更改", substring = true))
+        assertEquals(0, server.requestCount)
+        assertTrue(store.db.conversationHistory().observeConversations().first().isEmpty())
+        await(hasContentDescription("移除文件 1")).performClick()
+        tag("assistant-input").assertTextContains("保留草稿")
     }
 
     @Test fun disablingRevokesThePendingProposalButKeepsItsDiscardReceipt() = runBlocking {
@@ -877,7 +952,7 @@ class AssistantProposalTest {
         }
         attach(picker = picker)
         tag("assistant-input").performTextReplacement("不保留")
-        tag("assistant-attach").performClick()
+        pickPhotos()
         ui.runOnIdle { preference.setEnabled(false) }
         ui.onNodeWithTag("assistant-composer").assertDoesNotExist()
         ui.runOnIdle { preference.setEnabled(true) }

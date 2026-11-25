@@ -28,10 +28,10 @@ import okio.Buffer
 import okio.ByteString
 import okio.BufferedSink
 
-internal data class TurnImages(val messageIndex: Int, val entries: List<Pair<ChatImage, File>>)
+internal data class TurnAttachments(val messageIndex: Int, val entries: List<Pair<ChatAttachment, File>>)
 
 internal interface ChatTransport {
-    suspend fun complete(connection: ServiceConnection, messages: JsonArray, tools: JsonArray, images: TurnImages? = null): JsonObject
+    suspend fun complete(connection: ServiceConnection, messages: JsonArray, tools: JsonArray, attachments: TurnAttachments? = null): JsonObject
 }
 
 internal class ChatProblem(message: String) : IllegalStateException(message)
@@ -52,7 +52,7 @@ internal class OpenAiTransport(client: OkHttpClient = OkHttpClient()) : ChatTran
         .writeTimeout(capped(client.writeTimeoutMillis, 20_000), TimeUnit.MILLISECONDS)
         .build()
 
-    override suspend fun complete(connection: ServiceConnection, messages: JsonArray, tools: JsonArray, images: TurnImages?): JsonObject {
+    override suspend fun complete(connection: ServiceConnection, messages: JsonArray, tools: JsonArray, attachments: TurnAttachments?): JsonObject {
         val profile = serviceProfile(connection.profile.baseUrl, connection.profile.model, connection.profile.supportsImages)
         if (profile.origin != connection.profile.origin) throw ChatProblem(uiText("The service origin has changed. Enter your key again to authorize it.", "服务域已变化，请重新填写密钥并授权。"))
         val names = tools.mapTo(mutableSetOf()) { tool ->
@@ -62,8 +62,8 @@ internal class OpenAiTransport(client: OkHttpClient = OkHttpClient()) : ChatTran
             name
         }
         if (names.size != tools.size) throw ChatProblem(uiText("Duplicate assistant tool definition.", "助理工具定义重复。"))
-        val body = if (images == null) prepareBody(profile, messages, tools, null)
-            else withContext(Dispatchers.IO) { prepareBody(profile, messages, tools, images) }
+        val body = if (attachments == null) prepareBody(profile, messages, tools, null)
+            else withContext(Dispatchers.IO) { prepareBody(profile, messages, tools, attachments) }
         val endpoint = profile.baseUrl.toHttpUrl().newBuilder().addPathSegments("chat/completions").build()
         val request = Request.Builder().url(endpoint).header("Authorization", "Bearer ${connection.key}")
             .header("Accept", "application/json").post(body).build()
@@ -88,16 +88,16 @@ internal class OpenAiTransport(client: OkHttpClient = OkHttpClient()) : ChatTran
 }
 
 /** Same local preflight before history claims the files and before each explicitly authorized tool round. */
-internal suspend fun validateImageTurn(profile: ServiceProfile, messages: JsonArray, tools: JsonArray, images: TurnImages) {
-    withContext(Dispatchers.IO) { prepareBody(profile, messages, tools, images) }
+internal suspend fun validateAttachmentTurn(profile: ServiceProfile, messages: JsonArray, tools: JsonArray, attachments: TurnAttachments) {
+    withContext(Dispatchers.IO) { prepareBody(profile, messages, tools, attachments) }
 }
 
-private fun invalidTurn(): Nothing = throw ChatProblem(uiText("Invalid message or attachment position. Attach images to the current message only.", "消息或附件位置无效。只能给本次发送的消息附加图片。"))
+private fun invalidTurn(): Nothing = throw ChatProblem(uiText("Attach files or images to the current user message only.", "只能给本次发送的用户消息附加文件或图片。"))
 private fun imageNotReady(): Nothing = throw ChatProblem(uiText("An image is not ready or no longer available. Remove it or select it again.", "有图片尚未就绪或已失效，请移除或重新选择。"))
 
-private data class UploadPart(val prefix: ByteString, val image: ChatImage, val file: File)
+private data class UploadPart(val prefix: ByteString, val bytes: Long, val file: File)
 
-private fun prepareBody(profile: ServiceProfile, messages: JsonArray, tools: JsonArray, images: TurnImages?): RequestBody {
+private fun prepareBody(profile: ServiceProfile, messages: JsonArray, tools: JsonArray, attachments: TurnAttachments?): RequestBody {
         var lastUser = -1
         for ((index, element) in messages.withIndex()) {
             val message = element as? JsonObject ?: invalidTurn()
@@ -114,7 +114,7 @@ private fun prepareBody(profile: ServiceProfile, messages: JsonArray, tools: Jso
                     !(role == "tool" && it == "tool_call_id") && !(role == "assistant" && it == "tool_calls") }) invalidTurn()
         }
         if (lastUser < 0) invalidTurn()
-        if (images != null) {
+        if (attachments != null) {
             // After the explicit prompt the only valid suffix is completed tool exchanges from this send.
             var tail = lastUser + 1
             while (tail < messages.size) {
@@ -125,20 +125,20 @@ private fun prepareBody(profile: ServiceProfile, messages: JsonArray, tools: Jso
                 if (reply.string("role") != "assistant" || result.string("role") != "tool" || result.string("tool_call_id") != id) invalidTurn()
                 tail += 2
             }
-            if (images.messageIndex != lastUser) invalidTurn()
-            if (!profile.supportsImages) throw ChatProblem(uiText(
+            if (attachments.messageIndex != lastUser) invalidTurn()
+            if (!profile.supportsImages && attachments.entries.any { it.first is ChatImage }) throw ChatProblem(uiText(
                 "Image input is not enabled for this endpoint and model. Check the service settings or remove the images.",
                 "此服务地址和模型未启用图片输入。请检查服务配置或移除图片。"))
-            if (images.entries.size !in 1..MAX_CHAT_IMAGES) throw ChatProblem(uiText("Select one to five images per message.", "每条消息请选择一至五张图片。"))
+            if (attachments.entries.size !in 1..MAX_CHAT_ATTACHMENTS) throw ChatProblem(uiText("Select one to five attachments per message.", "每条消息请选择一至五个附件。"))
         } else if (messages[lastUser].jsonObject.string("content").isNullOrBlank()) invalidTurn()
 
         val preset = ServicePreset.forProfile(profile)
         val header = Buffer().writeUtf8("{\"model\":").writeUtf8(JsonPrimitive(profile.model).toString()).writeUtf8(",\"messages\":[")
-        val parts = ArrayList<UploadPart>(images?.entries?.size ?: 0)
+        val parts = ArrayList<UploadPart>(attachments?.entries?.size ?: 0)
         var uploadLength = 0L
         for ((index, message) in messages.withIndex()) {
             if (index > 0) header.writeByte(','.code)
-            if (images == null || index != images.messageIndex) {
+            if (attachments == null || index != attachments.messageIndex) {
                 header.writeUtf8(message.toString())
                 continue
             }
@@ -147,14 +147,30 @@ private fun prepareBody(profile: ServiceProfile, messages: JsonArray, tools: Jso
             val includeText = text.content.isNotEmpty()
             if (includeText) header.writeUtf8("{\"type\":\"text\",\"text\":").writeUtf8(text.toString()).writeByte('}'.code)
             val ids = mutableSetOf<String>()
-            for ((ordinal, entry) in images.entries.withIndex()) {
-                val (image, file) = entry
-                if (!ids.add(image.id) || !image.matchesPreparedFile(file)) imageNotReady()
-                val length = preset.inlineImageLength(image.bytes)
+            for ((ordinal, entry) in attachments.entries.withIndex()) {
+                val (attachment, file) = entry
+                if (!ids.add(attachment.id) || file.name != attachment.id) invalidTurn()
                 if (includeText || ordinal > 0) header.writeByte(','.code)
-                header.writeUtf8("{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:").writeUtf8(image.mime).writeUtf8(";base64,")
+                val length = when (attachment) {
+                    is ChatImage -> {
+                        if (!attachment.matchesPreparedFile(file)) imageNotReady()
+                        header.writeUtf8("{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:").writeUtf8(attachment.mime).writeUtf8(";base64,")
+                        preset.inlineImageLength(attachment.bytes)
+                    }
+                    is ChatDocument -> {
+                        if (attachment.mime == PDF_MIME && !profile.acceptsPdf) pdfUnavailable()
+                        val content = attachment.readValidated(file)
+                        if (content != null) {
+                            header.writeUtf8("{\"type\":\"text\",\"text\":").writeUtf8(JsonPrimitive(content).toString()).writeByte('}'.code)
+                            continue
+                        }
+                        header.writeUtf8("{\"type\":\"file\",\"file\":{\"filename\":").writeUtf8(JsonPrimitive(attachment.displayName).toString())
+                            .writeUtf8(",\"file_data\":\"data:application/pdf;base64,")
+                        ((attachment.bytes + 2) / 3) * 4
+                    }
+                }
                 val prefix = header.readByteString()
-                parts += UploadPart(prefix, image, file)
+                parts += UploadPart(prefix, attachment.bytes, file)
                 uploadLength += prefix.size + length
                 header.writeUtf8("\"}}")
             }
@@ -182,14 +198,14 @@ private fun prepareBody(profile: ServiceProfile, messages: JsonArray, tools: Jso
                         sink.write(part.prefix)
                         part.file.inputStream().use { input ->
                             Base64.getEncoder().wrap(output).use { encoder ->
-                                var left = part.image.bytes
+                                var left = part.bytes
                                 while (left > 0) {
                                     val count = input.read(buffer, 0, minOf(left, buffer.size.toLong()).toInt())
-                                    if (count <= 0) throw IOException("Image length changed")
+                                    if (count <= 0) throw IOException("Attachment length changed")
                                     encoder.write(buffer, 0, count)
                                     left -= count
                                 }
-                                if (input.read() != -1) throw IOException("Image length changed")
+                                if (input.read() != -1) throw IOException("Attachment length changed")
                             }
                         }
                     }

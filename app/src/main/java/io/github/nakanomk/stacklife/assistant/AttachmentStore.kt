@@ -21,17 +21,18 @@ import kotlinx.coroutines.withContext
 
 // Bounds-first sampling and preparation thresholds adapted from GPTMobile v0.9.1, FileUtils.kt
 // (e3a14c38b59012c88bc78bf327050ecffa44798f, GPL-3.0). Even small inputs are re-encoded here.
-internal const val MAX_CHAT_IMAGES = 5
+internal const val MAX_CHAT_ATTACHMENTS = 5
 internal const val MAX_IMAGE_INPUT_BYTES = MAX_PHOTO_BYTES
 
-internal data class ChatImage(val id: String, val mime: String, val width: Int, val height: Int, val bytes: Long)
+internal data class ChatImage(override val id: String, override val mime: String, val width: Int, val height: Int,
+    override val bytes: Long) : ChatAttachment
 
 /** Only immutable, normalized UUID files can be passed to the offline viewer or streaming sender. */
 internal fun ChatImage.matchesPreparedFile(file: File): Boolean =
     privatePhotoId.matches(id) && file.name == id && bytes in 1..MAX_IMAGE_INPUT_BYTES &&
         PhotoInfo(mime, width, height, bytes).matchesFile(file)
 
-private fun unavailable(): Nothing = throw ChatProblem(uiText("Could not read or store this image. Check the selection and available storage.", "无法读取或存储这张图片，请检查选取权限和存储空间。"))
+private fun unavailable(): Nothing = throw ChatProblem(uiText("Could not read or store this attachment. Check the selection and available storage.", "无法读取或存储附件，请检查选取权限和存储空间。"))
 
 internal class AttachmentStore(context: Context, private val retainedIds: suspend () -> Set<String>, directoryName: String = "chat-images") {
     private val app = context.applicationContext
@@ -69,7 +70,7 @@ internal class AttachmentStore(context: Context, private val retainedIds: suspen
 
     suspend fun remove(id: String) = access {
         val target = file(id)
-        if (id in retainedIds()) throw ChatProblem(uiText("This image still belongs to conversation history.", "这张图片仍属于历史消息。"))
+        if (id in retainedIds()) throw ChatProblem(uiText("This attachment still belongs to conversation history.", "此附件仍属于历史消息。"))
         target.unlink()
     }
 
@@ -81,6 +82,10 @@ internal class AttachmentStore(context: Context, private val retainedIds: suspen
         } finally { source.unlink() }
     }
 
+    suspend fun prepareDocument(uri: Uri, allowPdf: Boolean): ChatDocument = publish { pending, id ->
+        copyDocument(app.contentResolver, uri, pending, id, allowPdf)
+    }
+
     suspend fun duplicate(image: ChatImage): ChatImage = publish { pending, id ->
         val original = file(image.id)
         if (!image.matchesPreparedFile(original)) unavailable()
@@ -88,7 +93,7 @@ internal class AttachmentStore(context: Context, private val retainedIds: suspen
         image.copy(id = id)
     }
 
-    private suspend fun publish(write: suspend (File, String) -> ChatImage): ChatImage {
+    private suspend fun <T : ChatAttachment> publish(write: suspend (File, String) -> T): T {
         val id = UUID.randomUUID().toString()
         var published: File? = null
         try {
