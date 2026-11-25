@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.courses.ScheduledCourse
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 import io.github.nakanomk.stacklife.appearance.scrollBoundaryHaptics
+import io.github.nakanomk.stacklife.workspace.TaskIconTitle
 import io.github.nakanomk.stacklife.planner.*
 import androidx.compose.ui.text.style.TextDecoration
 import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch

@@ -231,7 +231,8 @@ private fun QueueTray(
         Box(Modifier.fillMaxSize().pointerInput(Unit) { awaitCancellation() }) {
             if (progress > 0f) {
                 LazyColumn(Modifier.fillMaxSize().wrapContentWidth(Alignment.End, unbounded = true).width(openWidth)
-                    .plannerBackdrop(edgeSource).testTag("day-tray"), state = listState,
+                    .plannerBackdrop(edgeSource).testTag("day-tray").scrollBoundaryHaptics(listState)
+                    .then(if (drag != null && schedule != null && rows != null) Modifier.trayDrag(drag, plan, enabled && expanded, listState, rows, schedule) else Modifier), state = listState,
                     contentPadding = PaddingValues(start = 8.dp, end = if (inlineToggle) taskFabSize else 8.dp,
                         top = if (inlineToggle) 0.dp else header, bottom = if (inlineToggle) 0.dp else 6.dp),
                     verticalArrangement = Arrangement.spacedBy(if (appearance.compact) 2.dp else 4.dp)) {
@@ -291,6 +292,23 @@ private fun QueueTray(
 }
 
 /** Same content on the placed row and above the axis; only the placed row owns actions and semantics. */
+@Composable
+private fun TrayTaskRow(task: QueueTask, draggable: Boolean, modifier: Modifier) {
+    val appearance = LocalAppearance.current
+    Row(modifier.heightIn(min = 48.dp).padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(task.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (appearance.showNotes && task.notes.isNotBlank()) Text(remember(task.notes) { markdownSummary(task.notes) }, style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val action = stringResource(if (draggable) R.string.today_hold_to_drag else R.string.today_tap_to_schedule)
+            Text(if (appearance.showDuration) stringResource(R.string.today_tray_duration, task.minutes, action) else action,
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(painterResource(symbolResource(task.icon)), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
 @Composable
 private fun TrayChevron(progress: Float, modifier: Modifier) {
     Icon(painterResource(R.drawable.ic_expand_less), null, modifier.graphicsLayer { rotationZ = 180f * progress },
