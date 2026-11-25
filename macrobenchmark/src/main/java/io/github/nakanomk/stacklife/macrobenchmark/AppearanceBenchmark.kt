@@ -38,19 +38,28 @@ class AppearanceBenchmark(private val glass: Boolean) {
     private fun appString(name: String) = targetResources.getString(targetResources.getIdentifier(name, "string", TARGET))
     private val automation get() = InstrumentationRegistry.getInstrumentation().getUiAutomation(Configurator.getInstance().uiAutomationFlags)
     private val oldIdleTimeout = Configurator.getInstance().waitForIdleTimeout
-    @Before fun limitIdleWait() { Configurator.getInstance().setWaitForIdleTimeout(250) }
+    private val viewport = Rect()
+    private val candidateBounds = Rect()
+    @Before fun limitIdleWait() {
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        viewport.set(0, 0, device.displayWidth, device.displayHeight)
+        Configurator.getInstance().setWaitForIdleTimeout(250)
+    }
     @After fun restoreIdleWait() { Configurator.getInstance().setWaitForIdleTimeout(oldIdleTimeout) }
 
     // UiDevice.findObject scans every display/window root; UiObject2 construction also asks
     // the window manager for each hit's window. Only the foreground .bench tree is relevant.
     private fun activeRoot() = automation.rootInActiveWindow?.takeIf { it.packageName?.toString() == TARGET }
     private fun AccessibilityNodeInfo.find(match: AccessibilityNodeInfo.() -> Boolean): AccessibilityNodeInfo? {
-        if (isVisibleToUser && match()) return this
+        if (isVisibleToUser && match()) {
+            getBoundsInScreen(candidateBounds)
+            if (Rect.intersects(candidateBounds, viewport)) return this
+        }
         for (index in 0 until childCount) getChild(index)?.find(match)?.let { return it }
         return null
     }
     private fun UiDevice.await(label: String, match: AccessibilityNodeInfo.() -> Boolean): AccessibilityNodeInfo =
-        checkNotNull(wait({ activeRoot()?.find(match) }, 8_000)) { "Missing $label in the foreground $TARGET window" }
+        checkNotNull(wait({ activeRoot()?.find(match) }, 8_000)) { "Missing $label in the foreground $TARGET viewport" }
     private fun UiDevice.tag(id: String, match: AccessibilityNodeInfo.() -> Boolean = { true }) =
         await(id) { viewIdResourceName == id && match() }
     private fun UiDevice.awaitGone(label: String, timeout: Long, match: AccessibilityNodeInfo.() -> Boolean) {
@@ -58,7 +67,7 @@ class AppearanceBenchmark(private val glass: Boolean) {
     }
     private val AccessibilityNodeInfo.bounds get() = Rect().also(::getBoundsInScreen)
     private fun UiDevice.tap(node: AccessibilityNodeInfo) = node.bounds.let {
-        check(!it.isEmpty && click(it.centerX(), it.centerY())) { "Could not tap ${node.viewIdResourceName} at $it" }
+        check(it.intersect(viewport) && click(it.centerX(), it.centerY())) { "Could not tap ${node.viewIdResourceName} at $it" }
     }
     private fun AccessibilityNodeInfo.replaceText(value: String) {
         check(performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
@@ -94,11 +103,14 @@ class AppearanceBenchmark(private val glass: Boolean) {
     private fun measure(assistant: Boolean = false, restart: Boolean = false, reset: UiDevice.() -> Unit = {},
         prepare: UiDevice.() -> Unit = {}, action: UiDevice.() -> Unit) {
         var seeded = false
+        val activity = Intent().setClassName(TARGET, "io.github.nakanomk.stacklife.MainActivity")
         rule.measureRepeated(packageName = TARGET, metrics = listOf(FrameTimingMetric()), compilationMode = CompilationMode.Full(), iterations = 5,
             setupBlock = {
                 val launch = !seeded || restart
-                if (launch) killProcess()
                 if (!seeded) {
+                    // A force-stopped package may not expose its provider to another app.
+                    // Launch it explicitly before the signed call; restart below with the seeded preferences.
+                    startActivityAndWait(activity)
                     val locale = seedFixture()
                     val target = InstrumentationRegistry.getInstrumentation().context.createPackageContext(TARGET, 0)
                     targetResources = target.createConfigurationContext(Configuration().apply {
@@ -107,7 +119,8 @@ class AppearanceBenchmark(private val glass: Boolean) {
                     seeded = true
                 }
                 if (launch) {
-                    startActivityAndWait(Intent().setClassName(TARGET, "io.github.nakanomk.stacklife.MainActivity"))
+                    killProcess()
+                    startActivityAndWait(activity)
                 } else {
                     device.reset()
                     // A measured edit leaves the IME up; reset on the same activity outside the trace.
