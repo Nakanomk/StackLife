@@ -214,6 +214,9 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
         else -> Home
     }
     val stack = rememberNavBackStack(start)
+    val trial = LocalContext.current.applicationContext as? TaskCardTrial
+    // Save route identities with the host. HomePlane may replace the entry that owns the live card layers.
+    val trialStack = if (trial == null) null else rememberNavBackStack(Home)
     var selectedDate by rememberSaveable { mutableStateOf<Long?>(null) }
     var revealIdentity by rememberSaveable { mutableStateOf<String?>(null) }
     val revealKey = remember(revealIdentity) { revealIdentity?.let { Json.decodeFromString<OccurrenceKey>(it) } }
@@ -295,7 +298,6 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
         val shared: SharedModifier = { key ->
             if (animate && initialDetail == null) cardBoundsModifier(key) else Modifier
         }
-        val trial = LocalContext.current.applicationContext as? TaskCardTrial
         val showFeature: @Composable (Destination, Boolean, TrialQueueLinks?) -> Unit = { page, front, links ->
             pages.SaveableStateProvider(page.key) {
             when (page) {
@@ -324,7 +326,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     val order = preferences.appearance.visibleOrder
                     val active = preferences.appearance.nearestVisible(destination)
                     if (trial == null) RootPages(order, active, visitToday, { destination = it }, featureScope(active)) { p, f -> showFeature(p, f, null) }
-                    else trial.Show(model, edit = { id, frame, rev -> navigate(EditTask(id, frame, rev)) }) { links ->
+                    else trial.Show(checkNotNull(trialStack), model, edit = { id, frame, rev -> navigate(EditTask(id, frame, rev)) }) { links ->
                         RootPages(order, active, visitToday, { destination = it }, featureScope(active)) { p, f -> showFeature(p, f, links) }
                     }
                 }

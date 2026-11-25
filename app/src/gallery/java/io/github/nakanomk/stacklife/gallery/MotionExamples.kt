@@ -40,15 +40,15 @@ internal val motionExamples: List<GalleryEntry> = listOf(
         "workspace/Frames.kt",
         "workspace/Frames.kt::FrameScreen、workspace/WorkspaceScreen.kt::WorkspaceScreen、WorkspaceViewModel.kt::pushQueue；Reorderable 3.1.0 (66de5751227c440bcdbd63acc94999231ed67487)。",
         "$appLicense；Reorderable Apache-2.0",
-        "只操作 Gallery Planner。显示当前真实的恢复、压栈回执与补原因面板；不模拟 U2 撤回或 U3 跨页飞行动画。",
-        "打开现有栈帧，选择恢复一项；返回并切到队列，核对任务。多选压栈、补充原因，再到栈页打开刚保存的帧。acceptance/WorkspaceUiTest#pushSelectBThenResumeAThroughTheWorkbench。") {
+        "只操作 Gallery Planner。压栈后可补原因或撤回；恢复后可撤回，取空的栈帧可保留为历史。未启用 U3 跨页转场。",
+        "打开一个栈帧，恢复一项后点底栏的撤回，再从原帧找到该项。切到队列，多选压栈后给新帧补原因。acceptance/WorkspaceUiTest#pushSelectBThenResumeAThroughTheWorkbench。") {
         MotionWorkbench(Destination.WORKSPACE, startOnStack = true)
     },
     GalleryEntry("motion-tray", GalleryGroup.MOTION, "今天 · 待排拾取、时间轴与事件行",
         "today/DayTray.kt",
         "today/TodayScreen.kt::TodayRoute、today/{DayTray,DayAxisDrag,DayAxis,EventDay,DayEventRows}.kt；today/TimeGridPlacement.kt 使用 FullCalendar Standard 6.1.22。",
         "$appLicense；FullCalendar Standard MIT",
-        "操作当前生产托盘、拖动预览及日程查询；松手经 Planner 保存。不会演示尚未接入的 U4 托盘补位。",
+        "操作生产待排托盘和时间轴。长按后原列表补位，浮窗只预览位置；松手安排才通过 Gallery Planner 写入时段。",
         "长按一个未排任务，拖到轴上后取消，核对待排列表不变；再拖入并松手，在事件模式打开对应行，核对同一任务和时间。acceptance/DayTimelineTest#dragFromTrayThenMoveSameBlockAndCancelInEditor。") {
         MotionWorkbench(Destination.TODAY)
     },

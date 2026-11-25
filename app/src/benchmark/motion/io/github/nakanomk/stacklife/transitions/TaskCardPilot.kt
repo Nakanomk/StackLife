@@ -12,7 +12,8 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.navigation3.runtime.rememberNavBackStack
+import androidx.navigation3.runtime.NavBackStack
+import androidx.navigation3.runtime.NavKey
 import io.github.nakanomk.stacklife.Home
 import io.github.nakanomk.stacklife.SourcePanel
 import io.github.nakanomk.stacklife.TaskDetail
@@ -28,9 +29,8 @@ import top.yukonga.miuix.kmp.nav.transition.NavTransition
 
 /** Only the queue → actual task boundary is on trial. All commands, editors and other routes keep their owners. */
 internal object TaskCardPilot : TaskCardTrial {
-    @Composable override fun Show(model: WorkspaceViewModel, edit: (String, String?, Long) -> Unit,
+    @Composable override fun Show(stack: NavBackStack<NavKey>, model: WorkspaceViewModel, edit: (String, String?, Long) -> Unit,
         home: @Composable (TrialQueueLinks) -> Unit) {
-        val stack = rememberNavBackStack(Home)
         val sources = remember { MotionCardSources() }
         val motions = remember { mutableMapOf<TaskDetail, NavTransition>() }
         val enabled = LocalMotionEnabled.current

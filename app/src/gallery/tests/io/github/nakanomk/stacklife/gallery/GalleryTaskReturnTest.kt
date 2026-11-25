@@ -162,6 +162,51 @@ class GalleryTaskReturnTest {
         assertEquals(before, runBlocking { app.planner.observe(PlannerQuery.Workspace).first() })
     }
 
+    @Test fun recreatingTheGalleryKeepsTheSameTaskUntilOneBackReturnsToTheQueue() {
+        val app = ui.activity.application as GalleryApplication
+        val before = runBlocking { app.ready.await(); app.planner.observe(PlannerQuery.Workspace).first() as Workspace }
+        val task = before.queue[1]
+        val row = "task:${task.id}"
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("category:MOTION").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithTag("category:MOTION").performClick()
+        ui.onNodeWithTag("example:motion-task").performClick()
+        ui.onNodeWithTag("queue").performScrollToKey(task.id)
+        ui.onNodeWithTag(row).performClick()
+        ui.onNodeWithTag("detail-title/$row").assertTextContains(task.title)
+
+        ui.activityRule.scenario.recreate()
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("detail-title/$row").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithTag("detail-title/$row").assertIsDisplayed().assertTextContains(task.title)
+        ui.runOnIdle { ui.activity.onBackPressedDispatcher.onBackPressed() }
+        ui.onNodeWithTag("detail:$row").assertDoesNotExist()
+        ui.onNodeWithTag("queue").performScrollToKey(task.id)
+        ui.onNodeWithTag(row).assertIsDisplayed()
+        assertEquals(before, runBlocking { app.planner.observe(PlannerQuery.Workspace).first() })
+    }
+
+    @Test fun theStackExampleCanUndoRestoringItsLastItemsFromTheList() {
+        val app = ui.activity.application as GalleryApplication
+        fun workspace() = runBlocking { app.ready.await(); app.planner.observe(PlannerQuery.Workspace).first() as Workspace }
+        val before = workspace()
+        val frame = before.frames.first { it.remaining > 0 }
+        val frameTag = "frame:${frame.id}"
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("category:MOTION").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithTag("category:MOTION").performClick()
+        ui.onNodeWithTag("example:motion-stack").performClick()
+        ui.onNodeWithTag("frames").performScrollToKey(frame.id)
+        ui.onNodeWithTag(frameTag).performClick()
+        ui.onNodeWithText(ui.activity.getString(io.github.nakanomk.stacklife.R.string.ui_restore_all)).performScrollTo().performClick()
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("frames").fetchSemanticsNodes().isNotEmpty() &&
+            ui.onAllNodesWithTag("receipt-undo").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithTag(frameTag).assertDoesNotExist()
+        ui.onNodeWithTag("receipt-keep").assertIsDisplayed()
+        ui.onNodeWithTag("receipt-undo").performClick()
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag(frameTag).fetchSemanticsNodes().isNotEmpty() }
+        val restored = workspace()
+        assertEquals(frame, restored.frames.single { it.id == frame.id })
+        assertEquals(before.queue, restored.queue)
+    }
+
     @Test fun cancelledBackExpandsTheSameTaskAndLeavesTheGalleryWorkspaceUntouched() {
         val app = ui.activity.application as GalleryApplication
         val before = runBlocking { app.ready.await(); app.planner.observe(PlannerQuery.Workspace).first() as Workspace }

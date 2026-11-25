@@ -21,6 +21,7 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import io.github.nakanomk.stacklife.Home
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.ReadState
@@ -84,6 +85,7 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
     val model = LocalGalleryWorkspace.current
     val settings = LocalOpenGallerySettings.current
     val stack = rememberNavBackStack(MotionHome)
+    val taskStack = if (start == Destination.WORKSPACE && !startOnStack && !calendarNavigation) rememberNavBackStack(Home) else null
     val origins = remember { RouteOrigins() }
     val owner = LocalLifecycleOwner.current
     val plane = remember(owner) { HomePlane(owner) }
@@ -153,9 +155,11 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
                 if (calendarNavigation) {
                     RootPages(scopedAppearance.visibleOrder, destination, 0L, { destination = it },
                         if (destination == Destination.TODAY) AssistantPage.Day(date, local.zone) else courseScope) { p, f -> features(p, f, null) }
-                } else if (start == Destination.WORKSPACE && !startOnStack) {
-                    TaskCardPilot.Show(model, edit = { id, frame, rev -> navigate(MotionEdit(id, frame, rev)) }) { links ->
-                        Page { features(start, true, links) }
+                } else if (start == Destination.WORKSPACE) {
+                    val scope = if (frames) AssistantPage.Frames else AssistantPage.Queue
+                    if (taskStack == null) Page(scope) { features(start, true, null) }
+                    else TaskCardPilot.Show(taskStack, model, edit = { id, frame, rev -> navigate(MotionEdit(id, frame, rev)) }) { links ->
+                        Page(scope) { features(start, true, links) }
                     }
                 } else Page { features(start, true, null) }
             }

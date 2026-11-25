@@ -499,7 +499,11 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 
 **隔离 Gallery（第 29 项）：** `.gallery` 包装配五个组件示例、五个动效示例及一个材质对照，直接使用生产组件。目录、源码入口和主题面板取自 [AndroidX Material3 Catalog `8414111`](https://github.com/androidx/androidx/tree/841411143e849ef66c3e8d49cc0dd70d62d7a3c0/compose/material3/material3/integration-tests/material3-catalog)，Apache-2.0。`.bench` 与 `.gallery` 只共享合成输入；Gallery 无网络权限、更新器、闹钟或正式库。API 37 模拟器（1080×2340、440 dpi、字号 1×）实测任务返回半程反拖取消仍停在原任务、课格打开对应详情、无连接历史仅有合成用户消息、深色及 320 dp 预览冷启动保留。preview／release 合并清单均无 Gallery 和夹具入口；真机预算仍以 `.bench` 单独验收。
 
+Gallery 的队列、栈示例共用工作台底部回执：只选第一项压栈，撤回后回到原 ID 和原序；恢复整帧后，源帧从列表消失，点「撤回」找回同一帧及两项。「保留历史」与撤回采用不同操作。这里只验事务反馈，第 8 项的跨页转场仍待 U1。
+
 **U1 任务卡试验：** 只在 `.gallery` 和 `.bench` 装配 [BiliPai `c7f835b` 的导航 fork](https://github.com/jay3-yy/BiliPai/tree/c7f835b34d8323358be57be298f86f29fecb53c8/miuix-navigation)（独立 Apache-2.0，33 个 Kotlin 文件）及[固定 Scene 适配](https://github.com/jay3-yy/BiliPai/blob/c7f835b34d8323358be57be298f86f29fecb53c8/app/src/main/java/com/android/purebilibili/navigation3/BiliPaiAndroidXNavDisplay.kt)（GPL-3.0）。任务仍通过已有 `PlannerApi` 读取、编辑。窗口与来源消失时不采用上游的整页淡出或位图；无落点走不透明边缘退出。上游所需的 Miuix squircle 0.9.5-beta02 也只进入这两个包。普通版待任务返回真机预算通过后切换。
+
+修复开启完整动效时旋转会从任务详情退回队列的问题。导航栈现在由宿主持有；来源坐标和图层不跨重建保存。API 37 模拟器上，Gallery（200% 字号、RTL）和基准包打开第二项后，从 1080×2340 旋转到 2340×1080 均保留同一任务，按一次返回回到队列；Gallery 缩到 880×1950 后也保留原任务。`GalleryTaskReturnTest` 六项通过。
 
 PLR110（Android 16、1272×2800、560 dpi、120 Hz、字号和动效 1×、热状态 0）用 `.bench` 的 30 任务／5 课次，按导航栏实际材质分组，预热后各测五轮。下表取系统 FrameTimeline；门槛为 P95 ≤ 0 ms 且应用错期或丢帧 < 1%。
 
