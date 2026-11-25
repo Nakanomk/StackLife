@@ -1,0 +1,21 @@
+StackLife launcher widgets — source adaptations, 2026-11-25
+
+BiliPai — jay3-yy/BiliPai and contributors, GPL-3.0
+https://github.com/jay3-yy/BiliPai/blob/c7f835b34d8323358be57be298f86f29fecb53c8/app/src/main/java/com/android/purebilibili/feature/widget/PlaybackWidgetProvider.kt
+PlaybackWidgetProvider.runPending, onAppWidgetOptionsChanged and its immutable, explicit control and shortcut intents are adapted in widget/WorkspaceWidgets.kt and WidgetViews.kt. The receiver keeps the broadcast alive for an eight-second bounded read, finishes even when superseded, and updates on resize. No playback controller, foreground service, Toast or media snapshot is used. StackLife opens its existing occurrence route using the original occurrence key and actual start instant.
+
+Sleepy — lingion/sleepy and contributors, GPL-3.0 (own widget code)
+https://github.com/lingion/sleepy/tree/bedb2e38f6c57f2c2d1070a9e8c7e228a3c157ba/app/src/main/java/com/lingion/sleepy/widget
+  WidgetContent.kt: WidgetData carries dated data and semester status to a renderer that does not read storage.
+  RemoteViewsWidgetHelper.kt: computeSizeDp/renderAndPush consume instance-specific options and prevent stale results from replacing newer renders. StackLife publishes actual size-keyed RemoteViews on API 31+, leaves selection to the host, and uses conservative cell dimensions for legacy hosts.
+  WidgetBoundaryScheduler.kt: one alarm for the earliest future boundary among active widgets. Adapted to actual event starts/ends and civil midnight in the agenda/academic zones, including DST. No 15-minute periodic fallback, no permission request, no wakeup alarm. Without exact-alarm access the system may defer delivery.
+  WeekGridWidgetProvider.kt and app/src/main/res/xml/week_grid_widget_info.xml: background loads, responsive weekly grid, horizontal/vertical resize metadata and disabled periodic updates. StackLife uses conditional day/period text cells and compact dated rows with individually actionable occurrences, not bitmap text or strips. It has no Sleepy database, theme, raster renderer, glass module, or OEM integration. Concurrent courses occupy separate reachable cells/rows.
+Full GPL version 3 text for both projects: StackLife-GPL-3.0-or-later.txt in this directory.
+
+Android platform samples — Copyright 2023 The Android Open Source Project, Apache-2.0
+https://github.com/android/platform-samples/tree/2a01001118c8ac66363bb4d38cf5b4155b2e3d24/samples/user-interface/appwidgets/src/main/java/com/example/platform/ui/appwidgets
+AppWidgets.kt and AppWidgetPinnedReceiver.kt: provider metadata discovery and explicit immutable broadcasts. StackLife uses provider metadata in the system picker and provider enumeration in its host acceptance test, not a separate Compose gallery or pin success Toast. It renders only standard RemoteViews widgets. Full Apache License 2.0: reorderable-3.1.0-LICENSE.txt in this directory.
+
+Investigated, not included:
+WakeUp 3.612 derivative, https://github.com/Matey-ace/wakeup-course-schedule/tree/43631a54cb70ceb2d983a4d646022d84352c9d85 — NOTICE names YZune and Apache-2.0. today_appwidget/TodayCourseAppWidget.kt and schedule_appwidget/ScheduleAppWidget.kt were inspected. The named original https://github.com/YZune/WakeupSchedule_Kotlin returned 404; no code, layout, or artwork from the fork is included.
+Blur Widget Demo, https://github.com/thatjoshguy67/blur-widget-demo/tree/c93b1a847e1cf4406afc2804ac2abda1a20ccc55 — MIT, README.md, BlurWidget.kt, widget_blur.xml and widget_provider_blur.xml. The host samples wallpaper on Samsung One UI Home using private colorful/size metadata. This is not a portable refraction backend. The public RemoteViews-supported class list (https://developer.android.com/reference/android/widget/RemoteViews) does not provide a launcher backdrop sampler. No licensed applicable PLR110 launcher backend was established. StackLife ships an opaque text renderer only; no wallpaper capture, screenshot, glass simulation or Samsung attributes.

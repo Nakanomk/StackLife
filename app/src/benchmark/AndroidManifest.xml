@@ -4,6 +4,9 @@
     <queries><package android:name="io.github.nakanomk.stacklife.macrobenchmark" /></queries>
     <application android:name=".benchmark.BenchmarkApplication" tools:replace="android:name">
         <profileable android:shell="true" />
+        <receiver android:name=".widget.TodayWidgetProvider" tools:node="remove" />
+        <receiver android:name=".widget.WeekWidgetProvider" tools:node="remove" />
+        <receiver android:name=".widget.WidgetRefreshReceiver" tools:node="remove" />
         <provider android:name=".benchmark.FixtureProvider" android:authorities="${applicationId}.fixture"
             android:exported="true" android:readPermission="android.permission.DUMP"
             android:writePermission="${applicationId}.permission.SEED_FIXTURE" />

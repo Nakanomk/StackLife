@@ -35,6 +35,7 @@ open class StackLifeApplication : Application() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         AppLocales.sync(this)
+        io.github.nakanomk.stacklife.widget.WorkspaceWidgets.refresh(this)
     }
 
     internal val updates by lazy { AppUpdates(this) }
@@ -50,5 +51,12 @@ open class StackLifeApplication : Application() {
             database.plannerDao().settings()?.let { addAll(decodeAppearance(it.appearance).backgroundIds()) } }
     } } }
     internal val planner: PlannerApi by lazy { RoomPlannerApi(database, imageExists = backgrounds::exists,
-        collectBackgrounds = backgrounds::collect, afterCommit = { reminders.refresh() }) }
+        collectBackgrounds = backgrounds::collect, receiptTimeoutMillis = {
+            val manager = getSystemService(android.view.accessibility.AccessibilityManager::class.java)
+            if (android.os.Build.VERSION.SDK_INT >= 29) manager.getRecommendedTimeoutMillis(10_000,
+                android.view.accessibility.AccessibilityManager.FLAG_CONTENT_ICONS or
+                    android.view.accessibility.AccessibilityManager.FLAG_CONTENT_TEXT or
+                    android.view.accessibility.AccessibilityManager.FLAG_CONTENT_CONTROLS).toLong()
+            else if (manager.isTouchExplorationEnabled) Long.MAX_VALUE else 10_000L
+        }, onPlannerChanged = { io.github.nakanomk.stacklife.widget.WorkspaceWidgets.refresh(this) }, afterCommit = { reminders.refresh() }) }
 }

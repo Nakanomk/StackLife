@@ -1,0 +1,22 @@
+<resources>
+    <string name="widget_today">今日概览</string>
+    <string name="widget_week">本周课表</string>
+    <string name="widget_today_description">今天的任务和课程安排。轻点查看具体事件。</string>
+    <string name="widget_week_description">按周查看上课时间和教室。轻点查看具体课次。</string>
+    <string name="widget_day_empty">今天没有已安排的事件</string>
+    <string name="widget_week_empty">这周没有课程</string>
+    <string name="widget_no_term">还没有课表</string>
+    <string name="widget_outside_term">不在学期内</string>
+    <string name="widget_week_label">第 %1$d 周 · %2$s</string>
+    <string name="widget_previous_week">上一周</string>
+    <string name="widget_next_week">下一周</string>
+    <string name="widget_this_week">回到本周</string>
+    <string name="widget_page">%1$d/%2$d</string>
+    <string name="widget_next_page">第 %1$d 页，共 %2$d 页。轻点查看下一页。</string>
+    <string name="widget_now">进行中</string>
+    <string name="widget_done">已完成</string>
+    <string name="widget_class">课程</string>
+    <string name="widget_event">日程事件</string>
+    <string name="widget_loading">正在读取日程…</string>
+    <string name="widget_retry">无法读取日程，轻点重试。</string>
+</resources>

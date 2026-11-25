@@ -1,0 +1,13 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_item"
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp"
+    android:orientation="horizontal" android:gravity="center_vertical" android:paddingVertical="3dp">
+    <ImageView android:id="@+id/widget_event_icon" android:layout_width="20dp" android:layout_height="20dp"
+        android:layout_marginEnd="7dp" android:tint="@color/widget_accent" android:importantForAccessibility="no" />
+    <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+        android:orientation="vertical" android:importantForAccessibility="noHideDescendants">
+        <TextView android:id="@+id/widget_event_title" style="@style/WidgetText" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:maxLines="1" />
+        <TextView android:id="@+id/widget_event_time" style="@style/WidgetText" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:maxLines="1" android:textSize="13sp" android:textColor="@color/widget_accent" />
+    </LinearLayout>
+</LinearLayout>

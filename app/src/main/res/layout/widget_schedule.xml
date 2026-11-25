@@ -1,0 +1,17 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_surface" android:paddingHorizontal="10dp" android:paddingVertical="4dp"
+    android:orientation="vertical">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+        <TextView android:id="@+id/widget_title" style="@style/WidgetText" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:minHeight="42dp" android:maxLines="1" android:textStyle="bold" android:textSize="17sp" android:text="@string/app_name" />
+        <TextView android:id="@+id/widget_page" style="@style/WidgetControl" android:layout_width="wrap_content" android:layout_height="wrap_content" android:visibility="gone" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/widget_week_bar" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone" android:gravity="center_vertical">
+        <ImageButton android:id="@+id/widget_back" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_chevron_left" android:tint="@color/widget_accent" android:background="@android:color/transparent" android:contentDescription="@string/widget_previous_week" />
+        <TextView android:id="@+id/widget_current" style="@style/WidgetControl" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/widget_this_week" />
+        <ImageButton android:id="@+id/widget_forward" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_chevron_right" android:tint="@color/widget_accent" android:background="@android:color/transparent" android:contentDescription="@string/widget_next_week" />
+    </LinearLayout>
+    <TextView android:id="@+id/widget_message" style="@style/WidgetText" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_loading" />
+    <LinearLayout android:id="@+id/widget_rows" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="vertical" />
+</LinearLayout>

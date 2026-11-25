@@ -1,0 +1,3 @@
+<TextView xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_cell" style="@style/WidgetText"
+    android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:minHeight="48dp" android:textSize="13sp"
+    android:paddingHorizontal="2dp" android:paddingVertical="3dp" android:maxLines="3" />

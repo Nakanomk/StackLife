@@ -1,0 +1,22 @@
+<resources>
+    <string name="widget_today">Today overview</string>
+    <string name="widget_week">Weekly timetable</string>
+    <string name="widget_today_description">Scheduled tasks and classes for today. Tap an event to open it.</string>
+    <string name="widget_week_description">Browse class times and rooms by week. Tap a class to open it.</string>
+    <string name="widget_day_empty">No scheduled events today</string>
+    <string name="widget_week_empty">No classes this week</string>
+    <string name="widget_no_term">No timetable yet</string>
+    <string name="widget_outside_term">Outside the academic term</string>
+    <string name="widget_week_label">Week %1$d · %2$s</string>
+    <string name="widget_previous_week">Previous week</string>
+    <string name="widget_next_week">Next week</string>
+    <string name="widget_this_week">This week</string>
+    <string name="widget_page">%1$d/%2$d</string>
+    <string name="widget_next_page">Page %1$d of %2$d. Show next page.</string>
+    <string name="widget_now">Now</string>
+    <string name="widget_done">Done</string>
+    <string name="widget_class">Class</string>
+    <string name="widget_event">Scheduled event</string>
+    <string name="widget_loading">Loading schedule…</string>
+    <string name="widget_retry">Schedule unavailable. Tap to retry.</string>
+</resources>

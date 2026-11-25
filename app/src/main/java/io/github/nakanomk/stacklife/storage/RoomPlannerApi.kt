@@ -18,6 +18,7 @@ import android.os.SystemClock
 class RoomPlannerApi(private val db: PlannerDatabase, private val importCalendars: Map<String, CourseCalendar> = SchoolImports.calendars,
     private val imageExists: (String) -> Boolean = { false }, private val collectBackgrounds: (suspend () -> Unit)? = null,
     private val receiptTimeoutMillis: () -> Long = { 10_000L }, private val elapsed: () -> Long = SystemClock::elapsedRealtime,
+    private val onPlannerChanged: () -> Unit = {},
     private val afterCommit: suspend () -> Unit = {}) : PlannerApi {
     private val dao = db.plannerDao()
     private val agenda = db.scheduleDao()
@@ -199,6 +200,7 @@ class RoomPlannerApi(private val db: PlannerDatabase, private val importCalendar
             CommitResult.Rejected(CommitFailure.STORAGE, uiText({ "Could not save changes: ${e.localizedMessage ?: e.javaClass.simpleName}" }, { "未能保存更改：${e.localizedMessage ?: e.javaClass.simpleName}" }))
         }.also { result ->
             AppDiagnostics.recordCommit(result)
+            if (result is CommitResult.Applied) notifyPlannerChanged()
             if (result is CommitResult.Applied && proposal.backgroundsChanged) try { collectBackgrounds?.invoke() }
             catch (e: Exception) { android.util.Log.w("StackLife", "Saved backgrounds; file cleanup deferred", e) }
             if (result is CommitResult.Applied && proposal.agendaChanged) {
@@ -235,8 +237,13 @@ class RoomPlannerApi(private val db: PlannerDatabase, private val importCalendar
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { CommitResult.Rejected(CommitFailure.STORAGE, uiText("Could not save the undo. No changes were applied.", "未能保存撤回，本次更改没有应用。")) }
         AppDiagnostics.recordCommit(result)
+        if (result is CommitResult.Applied) notifyPlannerChanged()
         if (refresh) try { afterCommit() } catch (e: Exception) { android.util.Log.w("StackLife", "Undo saved; reminder reconciliation failed", e) }
         return result
+    }
+
+    private fun notifyPlannerChanged() {
+        try { onPlannerChanged() } catch (e: Exception) { android.util.Log.w("StackLife", "Changes saved; widget refresh deferred", e) }
     }
 }
 
