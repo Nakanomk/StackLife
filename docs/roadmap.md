@@ -515,6 +515,8 @@ PLR110（Android 16、1272×2800、560 dpi、120 Hz、字号和动效 1×、热�
 
 闹钟响起时的未完成采样整轮排除。用户确认手机空闲后，07:33–07:34（设备时间）按原口径重新采集十份 FrameTimeline，期间未观察到闹钟音频事件，每次返回前都核对 `.bench` 在前台。上表最后一行只取这十份记录。
 
+可用仓库的[离线复算工具](../macrobenchmark/frame_gate.py)复核同一场景。将空闲时预热后的两组独立 trace 放入 `$dir`，执行 `python3 macrobenchmark/frame_gate.py --trace-processor "$TP" --glass "$dir"/*-glass-[1-5].pftrace --solid "$dir"/*-solid-[1-5].pftrace`，`$TP` 指向 [Perfetto v59.1](https://github.com/google/perfetto/blob/1e9c61e9844affd7dccd3d42d9ea9f3a3d10cf6d/src/trace_processor/perfetto_sql/stdlib/android/frames/timeline.sql)（Apache-2.0）。只计算 `.bench` 主窗口的实际／预期配对帧。退出码 0 表示两档通过，1 表示样本有效但未达预算，2 表示输入无效；同一 trace 改名复用也会被拒绝。材质和是否有闹钟仍须在采集时核实。
+
 基准工具参照 [Android 的 LoginBenchmark](https://github.com/android/performance-samples/blob/05c8130adfd2d7e35d4cd25033cb4f89b1008c1f/MacrobenchmarkSample/macrobenchmark/src/main/kotlin/com/example/macrobenchmark/benchmark/LoginBenchmark.kt#L54-L61) 和 [UI Automator 的可见边界](https://github.com/androidx/androidx/blob/841411143e849ef66c3e8d49cc0dd70d62d7a3c0/test/uiautomator/uiautomator/src/main/java/androidx/test/uiautomator/AccessibilityNodeInfoHelper.java)（均为 Apache-2.0）：在计时外启动被强停的 `.bench`，经原签名校验准备数据，重启读回材质；只点击节点在屏内的部分。PLR110 已能准备签名夹具。AndroidX `cardReturn` 在 API 37 模拟器以相同分辨率和密度跑通两档；PLR110 的单独流程检查超时，没有 JUnit 完成回执。这次超时不计入上表。
 
 **已验证的独立单元：** 工作台提交回执携带真实移动 ID、策略和新帧；API 37 工作台、图及助理 21 项用例通过。第 13 项将手势预览与业务选择分开，旧学期的迟到回执不抢回当前选择；日周、通知、手动编辑 12 项设备用例通过。第 5、6、16 项使用普通版首次前台检查、独立更新专页及稳定／测试渠道；API 37 状态与关于返回 8 项通过。设置列表中从「帮助与关于」下一行进入更新、返回后仍在该行；未发布任何版本。
