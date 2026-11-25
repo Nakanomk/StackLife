@@ -507,12 +507,15 @@ PLR110（Android 16、1272×2800、560 dpi、120 Hz、字号和动效 1×、热�
 |---|---:|---:|
 |第一版隔离候选|+4.57 ms · 14/331|−3.38 ms · 0/340|
 |保留活动父页、按真实容器裁去被遮挡区域|+6.33 ms · 12/332|−3.29 ms · 0/340|
+|同一候选，手机空闲时复测|+5.79 ms · 12/333|−4.49 ms · 0/340|
 
-两版玻璃均未达标。第二版五轮的 12 个应用错期帧全部出现在各轮前十个窗口帧。另在同机先后只缓存飞行源卡、改用平台圆角裁切、去掉相同壁纸的重复取样；三次单轮诊断各有 3 个应用错期帧，未进入五轮放行测试，也未并入普通版。隔离 Gallery 验过来源删除后退出、反拖取消和嵌套编辑返回。普通版保留原导航；跨页压栈／恢复转场仍等待 U1。
+两版玻璃均未达标。第二版首次五轮和空闲复测各有 12 个应用错期帧，全部出现在各轮前十个窗口帧。另在同机先后只缓存飞行源卡、改用平台圆角裁切、去掉相同壁纸的重复取样；三次单轮诊断各有 3 个应用错期帧，未进入五轮放行测试，也未并入普通版。隔离 Gallery 验过来源删除后退出、反拖取消和嵌套编辑返回。普通版保留原导航；跨页压栈／恢复转场仍等待 U1。
 
 去掉重复壁纸取样的单轮中，第一个错期帧从 `doFrame` 到 `DrawFrames` 为 10.30 ms，主线程实际运行 8.37 ms；同一轮另一个错期帧在 `postAndWait` 等待 16.38 ms。两帧的耗时位置不同。
 
-基准工具参照 [Android 的 LoginBenchmark](https://github.com/android/performance-samples/blob/05c8130adfd2d7e35d4cd25033cb4f89b1008c1f/MacrobenchmarkSample/macrobenchmark/src/main/kotlin/com/example/macrobenchmark/benchmark/LoginBenchmark.kt#L54-L61) 和 [UI Automator 的可见边界](https://github.com/androidx/androidx/blob/841411143e849ef66c3e8d49cc0dd70d62d7a3c0/test/uiautomator/uiautomator/src/main/java/androidx/test/uiautomator/AccessibilityNodeInfoHelper.java)（均为 Apache-2.0）：在计时外启动被强停的 `.bench`，经原签名校验准备数据，重启读回材质；只从屏内部分点击任务。PLR110 的签名夹具已成功，但该次运行与系统闹钟相邻且未完成，整轮排除。API 37 模拟器以相同分辨率和密度完成实色、玻璃两次任务卡开返，只验基准流程。固定真机数据须在无打断窗口重新采集；不从受干扰的轮次挑帧。
+闹钟响起时的未完成采样整轮排除。用户确认手机空闲后，07:33–07:34（设备时间）按原口径重新采集十份 FrameTimeline，期间未观察到闹钟音频事件，每次返回前都核对 `.bench` 在前台。上表最后一行只取这十份记录。
+
+基准工具参照 [Android 的 LoginBenchmark](https://github.com/android/performance-samples/blob/05c8130adfd2d7e35d4cd25033cb4f89b1008c1f/MacrobenchmarkSample/macrobenchmark/src/main/kotlin/com/example/macrobenchmark/benchmark/LoginBenchmark.kt#L54-L61) 和 [UI Automator 的可见边界](https://github.com/androidx/androidx/blob/841411143e849ef66c3e8d49cc0dd70d62d7a3c0/test/uiautomator/uiautomator/src/main/java/androidx/test/uiautomator/AccessibilityNodeInfoHelper.java)（均为 Apache-2.0）：在计时外启动被强停的 `.bench`，经原签名校验准备数据，重启读回材质；只点击节点在屏内的部分。PLR110 已能准备签名夹具。AndroidX `cardReturn` 在 API 37 模拟器以相同分辨率和密度跑通两档；PLR110 的单独流程检查超时，没有 JUnit 完成回执。这次超时不计入上表。
 
 **已验证的独立单元：** 工作台提交回执携带真实移动 ID、策略和新帧；API 37 工作台、图及助理 21 项用例通过。第 13 项将手势预览与业务选择分开，旧学期的迟到回执不抢回当前选择；日周、通知、手动编辑 12 项设备用例通过。第 5、6、16 项使用普通版首次前台检查、独立更新专页及稳定／测试渠道；API 37 状态与关于返回 8 项通过。设置列表中从「帮助与关于」下一行进入更新、返回后仍在该行；未发布任何版本。
 
