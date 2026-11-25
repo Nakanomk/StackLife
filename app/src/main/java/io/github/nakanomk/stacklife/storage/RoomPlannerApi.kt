@@ -140,7 +140,7 @@ class RoomPlannerApi(private val db: PlannerDatabase, private val importCalendar
         return items.map { (item,current) ->
             val saved = item.savedSchedule()
             FrameEntry(item.taskId,item.originalPosition,item.title,item.notes,item.minutes,saved?.schedule,
-                current?.view(loaded[current.id]?.summary()), item.referenceOnly, item.occurrenceDay, saved?.occurrenceInterval)
+                current?.view(loaded[current.id]?.summary()), item.referenceOnly, item.occurrenceDay, saved?.occurrenceInterval, item.icon)
         }
     }
 

@@ -69,6 +69,7 @@ data class Workspace(
 data class QueueTask(
     val id: String, val title: String, val notes: String, val minutes: Int,
     val schedule: ScheduleSummary? = null,
+    val icon: TaskIcon = TaskIcon.AUTO,
 )
 
 data class DayPlan(
@@ -107,18 +108,19 @@ data class FrameEntry(
     val referenceOnly: Boolean = false,
     val occurrenceDay: Long? = null,
     val occurrenceInterval: ExactInterval? = null,
+    val icon: TaskIcon = TaskIcon.AUTO,
 ) {
     val restorable: Boolean get() = !referenceOnly && current != null
     val link: GraphLink? get() = if (!referenceOnly) null else occurrenceDay?.let { GraphLink.Occurrence(taskId, it) } ?: GraphLink.Task(taskId)
 }
 
 /** A creation ref is batch-local: declare `ref = "a"`, then address it as `@a`. */
-data class TaskInput(val title: String, val notes: String = "", val minutes: Int = 30, val ref: String? = null)
+data class TaskInput(val title: String, val notes: String = "", val minutes: Int = 30, val ref: String? = null, val icon: TaskIcon = TaskIcon.AUTO)
 
 sealed interface PlannerCommand {
     data class TaskAdd(val task: TaskInput) : PlannerCommand
     data class TaskEdit(val taskId: String, val title: String? = null, val notes: String? = null, val minutes: Int? = null,
-        val expectedFrameId: String? = null, val expectedRevision: Long? = null) : PlannerCommand
+        val expectedFrameId: String? = null, val expectedRevision: Long? = null, val icon: TaskIcon? = null) : PlannerCommand
     data class TaskFinish(val taskId: String) : PlannerCommand
     data class SetSchedule(val id: String, val pattern: SchedulePattern?, val enabled: Boolean = true,
         val expectedRevision: Long? = null) : PlannerCommand

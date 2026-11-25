@@ -8,7 +8,7 @@ internal data class LoadedSchedule(val header: AgendaHeader, val pattern: Schedu
     fun row(key: OccurrenceKey.Schedule, interval: ExactInterval, version: Long = header.root.version): AgendaOccurrence {
         val (root, title, notes, owner) = header
         return AgendaOccurrence(key, root.role?.label() ?: requireNotNull(title), notes.orEmpty(), interval.startMillis,
-            interval.endMillis, owner == Owner.DONE, version, root.taskId, owner, role = root.role)
+            interval.endMillis, owner == Owner.DONE, version, root.taskId, owner, role = root.role, icon = header.icon ?: TaskIcon.AUTO)
     }
 }
 internal fun ScheduleRow.pattern(segments: List<DailySegment>) = if (startMillis != null)

@@ -9,6 +9,7 @@ import io.github.nakanomk.stacklife.planner.GraphNode
 import io.github.nakanomk.stacklife.planner.GraphSummary
 import io.github.nakanomk.stacklife.planner.Owner
 import io.github.nakanomk.stacklife.planner.RoutineKind
+import io.github.nakanomk.stacklife.planner.TaskIcon
 
 @Entity(tableName = "plan_graphs")
 internal data class GraphRow(@PrimaryKey val id: String, val title: String)
@@ -22,9 +23,9 @@ internal data class GraphRow(@PrimaryKey val id: String, val title: String)
         Index(value = ["linkedTaskId"])])
 internal data class GraphNodeRow(val graphId: String, val id: String, val title: String, val notes: String,
     val minutes: Int, val creationOrder: Long, val x: Float, val y: Float,
-    val linkKey: String? = null, val linkedTaskId: String? = null) {
+    val linkKey: String? = null, val linkedTaskId: String? = null, @ColumnInfo(defaultValue = "'AUTO'") val icon: TaskIcon = TaskIcon.AUTO) {
     fun node() = GraphNode(id, title, notes, minutes, creationOrder, x, y,
-        link = linkKey?.let { snapshotJson.decodeFromString<GraphLink>(it) })
+        link = linkKey?.let { snapshotJson.decodeFromString<GraphLink>(it) }, icon = icon)
 }
 
 @Entity(tableName = "graph_edges", primaryKeys = ["graphId", "fromId", "toId"], foreignKeys = [

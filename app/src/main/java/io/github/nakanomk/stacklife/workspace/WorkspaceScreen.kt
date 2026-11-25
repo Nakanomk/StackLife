@@ -325,7 +325,7 @@ private fun QueueList(
 private fun QueueTaskInfo(task: QueueTask, index: Int, modifier: Modifier, titleModifier: Modifier = Modifier) {
     val appearance = LocalAppearance.current
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        CardTitle(task.title, titleModifier)
+        TaskIconTitle(task.icon) { CardTitle(task.title, titleModifier) }
         CardMetadata {
             if (index == 0) Text(stringResource(R.string.ui_current_priority), color = MaterialTheme.colorScheme.primary)
             else Text(stringResource(R.string.ui_queue_position, index + 1))

@@ -13,16 +13,19 @@ data class PlannerChange(val entityId: String, val before: ChangeSnapshot?, val 
 @Serializable sealed interface ChangeSnapshot
 
 @Serializable enum class Owner { QUEUE, FRAME, DONE, REMOVED }
+/** Enum names are the durable SQLite/JSON identifiers; never store a drawable resource ID. */
+@Serializable enum class TaskIcon { AUTO, TASK, EVENT, PERSON, SCHOOL }
 @Serializable @SerialName("task")
 data class TaskSnapshot(val title: String, val notes: String, val minutes: Int, val owner: Owner,
-    val frameId: String?, val queuePosition: Int?) : ChangeSnapshot
+    val frameId: String?, val queuePosition: Int?, val icon: TaskIcon = TaskIcon.AUTO) : ChangeSnapshot
 
 @Serializable data class NamedId(val id: String, val title: String)
 @Serializable @SerialName("queue") data class QueueSnapshot(val items: List<NamedId>) : ChangeSnapshot
 
 @Serializable data class FrameItemSnapshot(val taskId: String, val originalPosition: Int, val title: String,
     val notes: String, val minutes: Int, val startMillis: Long?, val endMillis: Long?, val restorable: Boolean,
-    val schedule: ScheduleSummary? = null, val referenceOnly: Boolean = false, val occurrenceDay: Long? = null)
+    val schedule: ScheduleSummary? = null, val referenceOnly: Boolean = false, val occurrenceDay: Long? = null,
+    val icon: TaskIcon = TaskIcon.AUTO)
 @Serializable data class FrameRestoreAction(val mode: RestoreMode, val policy: RestorePolicy,
     val taskIds: List<String>, val savedQueueFrameId: String?)
 @Serializable @SerialName("frame")

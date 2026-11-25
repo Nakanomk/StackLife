@@ -66,6 +66,31 @@ class WorkspaceUiTest {
         }
     }
 
+    @Test fun eventIconIsDraftUntilSavedThenMarksTheQueueAndTheZeroMinuteEvent() {
+        val now = java.time.ZonedDateTime.now().withSecond(0).withNano(0)
+        val id = runBlocking {
+            val start = store.proposal(PlannerCommand.TaskAdd(TaskInput("见面", ref = "meet")), exact("@meet", now.toOffsetDateTime(), 0))
+            assertTrue(store.api.commit(start.proposalId) is CommitResult.Applied); start.refs.getValue("meet")
+        }
+        show()
+        await(hasTestTag("task:$id")).performClick()
+        fun edit() = await(hasText("编辑任务") and hasClickAction()).performClick()
+        fun choose(label: String) {
+            await(hasTestTag("task-icon:0")).performScrollTo().performClick()
+            await(hasText(label) and isSelectable()).performClick()
+        }
+        fun back() { ui.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() } }
+        edit(); choose("学习"); back()
+        assertEquals(TaskIcon.AUTO, runBlocking { store.state().queue.single().icon })
+        edit(); choose("人物"); await(hasText("保存修改") and hasClickAction()).performClick()
+        await(hasContentDescription("人物")); back()
+        await(hasTestTag("task:$id") and hasContentDescription("人物")).assertIsDisplayed()
+        await(hasTestTag("nav:today")).performClick()
+        await(hasTestTag("block:$id") and hasContentDescription("人物")).assertIsDisplayed()
+        val saved = runBlocking { store.state().queue.single() }
+        assertEquals(TaskIcon.PERSON, saved.icon); assertEquals(id, saved.id)
+    }
+
     @Test fun referenceFrameOpensCompletedTaskAndDatedOccurrenceWithoutChangingTheSnapshot() = runBlocking {
         val date = java.time.LocalDate.now().plusDays(2); val zone = java.time.ZoneId.systemDefault()
         val p = store.proposal(PlannerCommand.TaskAdd(TaskInput("已完成原项", "源笔记", ref="done")),

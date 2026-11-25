@@ -44,7 +44,7 @@ enum class EditScope { THIS, FOLLOWING, ALL }
 /** Local read result. No raw note or course identity is automatically authorized for a provider. */
 data class AgendaOccurrence(val key: OccurrenceKey, val title: String, val notes: String, val startMillis: Long,
     val endMillis: Long, val completed: Boolean, val version: Long, val taskId: String? = null, val owner: Owner? = null,
-    val course: ScheduledCourse? = null, val role: RoutineKind? = null, val conflicts: List<String> = emptyList()) {
+    val course: ScheduledCourse? = null, val role: RoutineKind? = null, val conflicts: List<String> = emptyList(), val icon: TaskIcon = TaskIcon.AUTO) {
     internal val stableKey = key.storageKey()
     val point: Boolean get() = startMillis == endMillis
     val daily: Boolean get() = (key as? OccurrenceKey.Schedule)?.originalDay != null

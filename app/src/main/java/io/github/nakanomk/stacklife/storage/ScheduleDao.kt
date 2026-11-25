@@ -3,8 +3,8 @@ package io.github.nakanomk.stacklife.storage
 import androidx.room.*
 import io.github.nakanomk.stacklife.planner.*
 
-internal data class AgendaHeader(@Embedded val root: ScheduleRow, val title: String?, val notes: String?, val owner: Owner?)
-private const val HEAD = "SELECT s.*,t.title,t.notes,t.owner FROM agenda_schedules s LEFT JOIN tasks t ON t.id=s.taskId "
+internal data class AgendaHeader(@Embedded val root: ScheduleRow, val title: String?, val notes: String?, val owner: Owner?, val icon: TaskIcon?)
+private const val HEAD = "SELECT s.*,t.title,t.notes,t.owner,t.icon FROM agenda_schedules s LEFT JOIN tasks t ON t.id=s.taskId "
 private const val WINDOW = "startMillis < :until AND (endMillis > :from OR startMillis=endMillis AND startMillis=:from)"
 
 @Dao

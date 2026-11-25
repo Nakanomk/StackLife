@@ -222,8 +222,10 @@ internal fun AgendaEventCard(entry: AgendaOccurrence, day: PlannerQuery.Day, rev
                 .padding(horizontal = 4.dp)) {
                 val lines = if (wrap) Int.MAX_VALUE else 1
                 Text(range, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = lines, overflow = TextOverflow.Ellipsis)
-                Text(entry.title, style = MaterialTheme.typography.titleSmall, textDecoration = if (entry.completed) TextDecoration.LineThrough else null,
-                    maxLines = lines, overflow = TextOverflow.Ellipsis)
+                TaskIconTitle(entry.icon) {
+                    Text(entry.title, style = MaterialTheme.typography.titleSmall, textDecoration = if (entry.completed) TextDecoration.LineThrough else null,
+                        maxLines = lines, overflow = TextOverflow.Ellipsis)
+                }
                 Text(if (entry.conflicts.isEmpty()) state else stringResource(R.string.today_conflict_state, state), style = MaterialTheme.typography.labelMedium, color = scheme.secondary, maxLines = lines, overflow = TextOverflow.Ellipsis)
             }
         }

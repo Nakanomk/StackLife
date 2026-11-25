@@ -84,6 +84,7 @@ internal fun NodeForm(model: WorkspaceViewModel, graphId: String, revision: Long
     var title by rememberSaveable { mutableStateOf(node?.title.orEmpty()) }
     val note = rememberNoteLink(node?.notes.orEmpty())
     var minutes by rememberSaveable { mutableIntStateOf(node?.minutes ?: 30) }
+    var icon by rememberSaveable { mutableStateOf(node?.icon ?: TaskIcon.AUTO) }
     // A Dialog is a separate Android window: withdraw it while the note route is in front,
     // keeping all form fields in the graph entry's saved-state scope, not in the Dialog.
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
@@ -92,8 +93,8 @@ internal fun NodeForm(model: WorkspaceViewModel, graphId: String, revision: Long
             (node?.link == null || node.linkState?.let { !it.missing && !it.system } == true),
         command = {
             val notes = checkNotNull(note.source)
-            val edits = if (node == null) positionedEdits(nodes, 1) { _, x, y -> GraphEdit.AddNode(title, notes, minutes, x, y) }
-                else listOf(GraphEdit.EditNode(node.id, title, notes, minutes.takeIf { node.link == null }))
+            val edits = if (node == null) positionedEdits(nodes, 1) { _, x, y -> GraphEdit.AddNode(title, notes, minutes, x, y, icon = icon) }
+                else listOf(GraphEdit.EditNode(node.id, title, notes, minutes.takeIf { node.link == null }, icon.takeIf { it != node.icon }))
             PlannerCommand.GraphPatch(graphId, edits, revision)
         }, onClose = { note.release(); onClose() }, visible = lifecycle == Lifecycle.State.RESUMED) { enabled ->
         node?.link?.let {
@@ -104,6 +105,7 @@ internal fun NodeForm(model: WorkspaceViewModel, graphId: String, revision: Long
         NoteField(note, enabled, "node-notes")
         if (node?.link == null) DurationWheelField(stringResource(R.string.ui_estimated_duration), minutes, enabled,
             Modifier.testTag("node-minutes")) { minutes = it }
+        TaskIconField(icon, enabled, Modifier.testTag("node-icon")) { icon = it }
     }
 }
 

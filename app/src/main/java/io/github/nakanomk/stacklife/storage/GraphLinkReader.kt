@@ -18,7 +18,7 @@ internal class GraphLinkReader(db: PlannerDatabase) {
             is GraphLink.Task -> {
                 val task = graphs.linkableTask(link.taskId) ?: return null
                 LinkedSource(link, task.title, task.notes, task.minutes, task.owner, task.id, reader.load(task.id)?.summary(), null,
-                    frameId = task.frameId, queuePosition = task.queuePosition)
+                    frameId = task.frameId, queuePosition = task.queuePosition, icon = task.icon)
             }
             is GraphLink.Occurrence -> {
                 val series = reader.load(link.scheduleId) ?: return null
@@ -26,7 +26,7 @@ internal class GraphLinkReader(db: PlannerDatabase) {
                 val task = occurrence.taskId?.let { graphs.linkableTask(it) ?: return null }
                 LinkedSource(link, occurrence.title, occurrence.notes, task?.minutes ?: occurrence.elapsedMinutes(),
                     occurrence.owner, occurrence.taskId, series.summary(), occurrence,
-                    frameId = task?.frameId, queuePosition = task?.queuePosition)
+                    frameId = task?.frameId, queuePosition = task?.queuePosition, icon = occurrence.icon)
             }
         }
     }

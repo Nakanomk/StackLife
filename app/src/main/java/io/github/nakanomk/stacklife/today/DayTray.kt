@@ -53,6 +53,7 @@ import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.ScrollEdge
 import io.github.nakanomk.stacklife.TaskAddButton
 import io.github.nakanomk.stacklife.appearance.*
+import io.github.nakanomk.stacklife.workspace.symbolResource
 import io.github.nakanomk.stacklife.markdown.markdownSummary
 import io.github.nakanomk.stacklife.planner.DayPlan
 import io.github.nakanomk.stacklife.planner.PlannerCommand

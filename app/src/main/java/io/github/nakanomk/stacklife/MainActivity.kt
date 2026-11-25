@@ -360,7 +360,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     val task = view.source
                     if (task == null || key.frameId != null && task.frameId != key.frameId) MissingDetail(stringResource(R.string.ui_edit_task),
                         stringResource(if (key.frameId == null) R.string.graph_source_removed else R.string.ui_task_not_in_frame), back)
-                    else TaskEditor(model, back, original = QueueTask(key.id, task.title, task.notes, task.minutes, task.schedule),
+                    else TaskEditor(model, back, original = QueueTask(key.id, task.title, task.notes, task.minutes, task.schedule, task.icon),
                         frameId = key.frameId, expectedRevision = key.revision ?: rememberSaveable { view.revision })
                 } }
                 entry<FrameDetail>(metadata = { key -> origins.sourceSceneMetadata(key.motionKey()) }) { key ->

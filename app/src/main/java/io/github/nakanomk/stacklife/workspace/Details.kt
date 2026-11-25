@@ -40,7 +40,7 @@ internal fun TaskScreen(id: String, view: SourceView, actions: WorkspaceActions,
     shared: SharedModifier, onEdit: () -> Unit) {
     val source = view.source
     val index = source?.queuePosition
-    val task = source?.let { QueueTask(id, it.title, it.notes, it.minutes, it.schedule) }
+    val task = source?.let { QueueTask(id, it.title, it.notes, it.minutes, it.schedule, it.icon) }
     // Room may publish the removal before our receipt arrives. Await it even without a card.
     val action = rememberSubmission(actions) { if (it != SaveOutcome.REJECTED) onBack() }
     val back = { if (!action.busy) onBack() }
@@ -60,7 +60,7 @@ internal fun TaskScreen(id: String, view: SourceView, actions: WorkspaceActions,
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (index == 0) Text(stringResource(R.string.ui_current_priority), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    Text(task.title, shared.title("task:$id"), style = MaterialTheme.typography.titleLarge)
+                    TaskIconTitle(task.icon) { Text(task.title, shared.title("task:$id"), style = MaterialTheme.typography.titleLarge) }
                     if (index != null && index != 0) Text(stringResource(R.string.ui_queue_position, index + 1), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     if (source.owner == Owner.FRAME) Text(stringResource(R.string.graph_stays_frame), style = MaterialTheme.typography.labelMedium)
                     if (source.owner == Owner.DONE) Text(stringResource(R.string.today_done), style = MaterialTheme.typography.labelMedium)

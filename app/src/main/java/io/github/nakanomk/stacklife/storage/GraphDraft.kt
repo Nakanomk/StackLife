@@ -13,6 +13,7 @@ import io.github.nakanomk.stacklife.planner.GraphSummary
 import io.github.nakanomk.stacklife.planner.PlannerChange
 import io.github.nakanomk.stacklife.planner.SchedulePattern
 import io.github.nakanomk.stacklife.planner.storageKey
+import io.github.nakanomk.stacklife.planner.TaskIcon
 
 internal class GraphWrites(
     private val id: String, private val remove: Boolean, private val graph: GraphRow?,
@@ -53,14 +54,14 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
         when (edit) {
             is GraphEdit.Rename -> title = graphTitle(edit.title)
             is GraphEdit.AddNode -> {
-                add(newNodeId(edit.ref), nodeTitle(edit.title, edit.minutes), edit.notes, edit.minutes, edit.x, edit.y, null)
+                add(newNodeId(edit.ref), nodeTitle(edit.title, edit.minutes), edit.notes, edit.minutes, edit.x, edit.y, null, edit.icon)
             }
             is GraphEdit.LinkExisting -> {
                 val selected = requireSource(edit.link)
                 validateNewLink(selected)
                 if (!links.add(edit.link)) throw InvalidCommand(uiText({ "“${selected.title}” is already linked to this graph." },
                     { "「${selected.title}」已链接到此图。" }))
-                add(newNodeId(edit.ref), selected.title, selected.notes, selected.minutes, edit.x, edit.y, edit.link)
+                add(newNodeId(edit.ref), selected.title, selected.notes, selected.minutes, edit.x, edit.y, edit.link, selected.icon)
             }
             is GraphEdit.SetLinkedCompletion -> {
                 val old = node(resolveNode(edit.nodeId))
@@ -71,10 +72,10 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
             }
             is GraphEdit.EditNode -> {
                 val old = node(resolveNode(edit.nodeId))
-                if (edit.title == null && edit.notes == null && edit.minutes == null) throw InvalidCommand(uiText("Select a node field to edit.", "请选择需要修改的节点字段。"))
+                if (edit.title == null && edit.notes == null && edit.minutes == null && edit.icon == null) throw InvalidCommand(uiText("Select a node field to edit.", "请选择需要修改的节点字段。"))
                 if (old.link == null) {
                     val minutes = edit.minutes ?: old.minutes
-                    put(old.copy(title = nodeTitle(edit.title ?: old.title, minutes), notes = edit.notes ?: old.notes, minutes = minutes))
+                    put(old.copy(title = nodeTitle(edit.title ?: old.title, minutes), notes = edit.notes ?: old.notes, minutes = minutes, icon = edit.icon ?: old.icon))
                 } else {
                     val selected = requireSource(old.link, old.title)
                     if (selected.state.system) throw InvalidCommand(uiText("System routine fields cannot be edited as task fields.", "系统作息不能当作任务修改字段。"))
@@ -113,12 +114,12 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
             throw InvalidCommand(uiText("Select a specific date of this daily event.", "请选择该每日事件的具体日期。"))
     }
 
-    private fun add(id: String, label: String, notes: String, minutes: Int, x: Float, y: Float, link: GraphLink?) {
+    private fun add(id: String, label: String, notes: String, minutes: Int, x: Float, y: Float, link: GraphLink?, icon: TaskIcon) {
         checkPosition(x, y)
         val last = lastOrder ?: (nodes.values.maxOfOrNull { it.creationOrder } ?: -1L)
         if (last == Long.MAX_VALUE) throw InvalidCommand(uiText("The graph has run out of node creation numbers.", "流程图的节点创建序号已用尽。"))
         lastOrder = last + 1
-        put(GraphNode(id, label, notes, minutes, last + 1, x, y, link = link))
+        put(GraphNode(id, label, notes, minutes, last + 1, x, y, link = link, icon = icon))
         if (topology.isInitialized()) topology.value.addNode(id)
     }
 
@@ -158,10 +159,10 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
                 if (touched && old == null) requireSource(link, node.title).also(::validateNewLink) else source(link)
             }
             val projected = node.project(live)
-            if (touched && (old != node || node.title != projected.title || node.notes != projected.notes || node.minutes != projected.minutes)) {
+            if (touched && (old != node || node.title != projected.title || node.notes != projected.notes || node.minutes != projected.minutes || node.icon != projected.icon)) {
                 val taskId = if (live == null && node.link != null && old != null) dao.linkedTaskId(id, node.id) else live?.taskId
                 writes.add(GraphNodeRow(id, node.id, projected.title, projected.notes, projected.minutes, node.creationOrder,
-                    node.x, node.y, node.link?.storageKey(), taskId))
+                    node.x, node.y, node.link?.storageKey(), taskId, projected.icon))
             }
             projected
         }
@@ -199,7 +200,7 @@ internal class GraphDraft(private val dao: GraphDao, val id: String, private val
 }
 
 private fun GraphNode.withSource(live: LinkedSource): GraphNode =
-    copy(title = live.title, notes = live.notes, minutes = live.minutes, linkState = live.state)
+    copy(title = live.title, notes = live.notes, minutes = live.minutes, linkState = live.state, icon = live.icon)
 
 private fun GraphNode.project(live: LinkedSource?): GraphNode = when {
     link == null -> this

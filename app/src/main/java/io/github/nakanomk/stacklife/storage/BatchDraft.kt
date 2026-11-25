@@ -47,16 +47,16 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     private fun applyCommands(commands: List<PlannerCommand>) {
         for (cmd in commands) when (cmd) {
             is PlannerCommand.TaskAdd -> {
-                val row = newTask(cmd.task.title, cmd.task.notes, cmd.task.minutes, cmd.task.ref, frameId = null)
+                val row = newTask(cmd.task.title, cmd.task.notes, cmd.task.minutes, cmd.task.ref, frameId = null, cmd.task.icon)
                 edited[row.id] = row
             }
             is PlannerCommand.TaskEdit -> {
                 checkRevision(cmd.expectedRevision)
-                if (cmd.title == null && cmd.notes == null && cmd.minutes == null) invalid(uiText("Select a task field to edit.", "请选择需要修改的任务字段。"))
+                if (cmd.title == null && cmd.notes == null && cmd.minutes == null && cmd.icon == null) invalid(uiText("Select a task field to edit.", "请选择需要修改的任务字段。"))
                 val row = task(resolve(cmd.taskId, Kind.TASK))
                 if (cmd.expectedFrameId != null && row.frameId != cmd.expectedFrameId)
                     invalid(uiText("This task is no longer in this frame.", "这项任务已不在此栈帧中。"))
-                editTask(row, cmd.title, cmd.notes, cmd.minutes)
+                editTask(row, cmd.title, cmd.notes, cmd.minutes, cmd.icon)
             }
             is PlannerCommand.TaskFinish -> retire(cmd.taskId, Owner.DONE)
             is PlannerCommand.SetSchedule -> {
@@ -89,7 +89,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
                 val frame = newFrame(cmd.reason, FrameSource.MANUAL, cmd.ref)
                 populateFrame(frame, cmd.tasks.size) { index ->
                     val input = cmd.tasks[index]
-                    newTask(input.title, input.notes, input.minutes, input.ref, frame.id)
+                    newTask(input.title, input.notes, input.minutes, input.ref, frame.id, input.icon)
                 }
             }
             is PlannerCommand.FramePush -> {
@@ -204,25 +204,25 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
 
     private fun linkedSource(link: GraphLink): LinkedSource? = when (link) {
         is GraphLink.Task -> findTask(link.taskId)?.takeUnless { it.owner == Owner.REMOVED }?.let { t ->
-            LinkedSource(link, t.title, t.notes, t.minutes, t.owner, t.id, agenda.current(t.id), null, t.frameId, t.queuePosition)
+            LinkedSource(link, t.title, t.notes, t.minutes, t.owner, t.id, agenda.current(t.id), null, t.frameId, t.queuePosition, t.icon)
         }
         is GraphLink.Occurrence -> agenda.resolve(link.key())?.let { o ->
             val t = o.taskId?.let(::findTask)
             LinkedSource(link, o.title, o.notes, t?.minutes ?: o.elapsedMinutes(),
-                o.owner, o.taskId, agenda.current(link.scheduleId), o, t?.frameId, t?.queuePosition)
+                o.owner, o.taskId, agenda.current(link.scheduleId), o, t?.frameId, t?.queuePosition, o.icon)
         }
     }
 
-    private fun editTask(row: TaskRow, name: String?, notes: String?, minutes: Int?) {
+    private fun editTask(row: TaskRow, name: String?, notes: String?, minutes: Int?, icon: TaskIcon?) {
         if (row.owner == Owner.REMOVED) invalid(uiText("Removed tasks cannot be edited.", "来源已移除，无法编辑。"))
         val duration = minutes ?: row.minutes
-        edited[row.id] = row.copy(title = title(name ?: row.title, duration), notes = notes ?: row.notes, minutes = duration)
+        edited[row.id] = row.copy(title = title(name ?: row.title, duration), notes = notes ?: row.notes, minutes = duration, icon = icon ?: row.icon)
     }
 
     private fun editLinkedSource(link: GraphLink, cmd: GraphEdit.EditNode) {
         val source = linkedSource(link) ?: invalid(uiText("The source was removed.", "来源已移除。"))
         val taskId = source.taskId ?: invalid(uiText("Edit a system routine in its schedule.", "请在日程中编辑系统作息。"))
-        editTask(task(taskId), cmd.title, cmd.notes, cmd.minutes)
+        editTask(task(taskId), cmd.title, cmd.notes, cmd.minutes, cmd.icon)
     }
 
     private fun completeOccurrence(cmd: PlannerCommand.SetOccurrenceCompletion) {
@@ -262,7 +262,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         val ordered = checkedGoal(graph(cmd.graphId), cmd.goalId)
         if (ordered.none { it.link == null }) invalid(uiText("All sources already exist. No tasks to append.", "全部为已有事件，没有可追加的新任务。"))
         for (node in ordered) if (node.link == null) {
-            val t = newTask(node.title, node.notes, node.minutes, null, null)
+            val t = newTask(node.title, node.notes, node.minutes, null, null, node.icon)
             edited[t.id] = t
         }
         changes.add(PlannerChange("goal:" + cmd.goalId + ":" + changes.size, null, GoalGenerationSnapshot(false, ordered)))
@@ -283,7 +283,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         for ((index, node) in ordered.withIndex()) {
             val link = node.link
             if (link == null) {
-                val t = newTask(node.title, node.notes, node.minutes, refs?.remove(node.id), frame.id)
+                val t = newTask(node.title, node.notes, node.minutes, refs?.remove(node.id), frame.id, node.icon)
                 edited[t.id] = t; owned.add(t.id); snapshot(frame.id, index, t, null)
             } else {
                 if (refs?.containsKey(node.id) == true) invalid(uiText("Only templates create a task alias.", "只有新建模板任务可以声明别名。"))
@@ -293,7 +293,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
                 val saved = source.schedule?.let { s -> SavedSchedule(schedule = s,
                     occurrenceInterval = source.occurrence?.let { ExactInterval(it.startMillis, it.endMillis) }) }
                 items.add(FrameItemRow(frame.id, index, id, source.title, source.notes, source.minutes,
-                    saved?.let { snapshotJson.encodeToString(it) }, referenceOnly = true, occurrenceDay = day))
+                    saved?.let { snapshotJson.encodeToString(it) }, referenceOnly = true, occurrenceDay = day, icon = source.icon))
             }
         }
         members[frame.id] = owned
@@ -312,11 +312,11 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         return raw.trim().ifEmpty { invalid(uiText("Enter a task title.", "任务标题不能为空。")) }
     }
 
-    private fun newTask(raw: String, notes: String, minutes: Int, ref: String?, frameId: String?): TaskRow {
+    private fun newTask(raw: String, notes: String, minutes: Int, ref: String?, frameId: String?, icon: TaskIcon): TaskRow {
         val id = newId(ref, Kind.TASK)
         return TaskRow(id, title(raw, minutes), notes, minutes,
             if (frameId == null) Owner.QUEUE else Owner.FRAME, frameId,
-            if (frameId == null) append(id) else null)
+            if (frameId == null) append(id) else null, icon = icon)
     }
 
     private fun newFrame(reason: String, source: FrameSource, ref: String?): FrameRow {
@@ -354,7 +354,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
 
     private fun snapshot(frameId: String, position: Int, row: TaskRow, slot: ScheduleSummary?) {
         items.add(FrameItemRow(frameId, position, row.id, row.title, row.notes, row.minutes,
-            slot?.let { snapshotJson.encodeToString(SavedSchedule(schedule = it)) }))
+            slot?.let { snapshotJson.encodeToString(SavedSchedule(schedule = it)) }, icon = row.icon))
     }
 
     private fun append(id: String): Int = queue().let { it.add(id); it.lastIndex }
@@ -568,7 +568,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             countdownWrites?.imagesChanged == true || appearance?.let { it.backgroundIds() != originalAppearance.backgroundIds() } == true)
     }
 
-    private fun TaskRow.snapshot() = if (owner == Owner.REMOVED) null else TaskSnapshot(title, notes, minutes, owner, frameId, queuePosition)
+    private fun TaskRow.snapshot() = if (owner == Owner.REMOVED) null else TaskSnapshot(title, notes, minutes, owner, frameId, queuePosition, icon)
 
     private fun snapshotFrames() {
         val addressed = buildSet {
@@ -586,7 +586,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             val saved = savedSchedule()
             val interval = saved?.occurrenceInterval ?: (saved?.schedule?.pattern as? SchedulePattern.Once)?.interval
             return FrameItemSnapshot(taskId, originalPosition, title, notes, minutes, interval?.startMillis, interval?.endMillis,
-                !referenceOnly && available, saved?.schedule, referenceOnly, occurrenceDay)
+                !referenceOnly && available, saved?.schedule, referenceOnly, occurrenceDay, icon)
         }
         for (id in addressed) {
             val created = newFrames[id]

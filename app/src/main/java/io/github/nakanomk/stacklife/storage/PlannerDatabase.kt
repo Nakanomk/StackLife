@@ -31,6 +31,7 @@ import io.github.nakanomk.stacklife.planner.FrameSummary
 import io.github.nakanomk.stacklife.planner.FrameSource
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.planner.RestorePolicy
+import io.github.nakanomk.stacklife.planner.TaskIcon
 
 @Database(
     entities = [TaskRow::class, FrameRow::class, FrameItemRow::class, SettingsRow::class,
@@ -38,11 +39,12 @@ import io.github.nakanomk.stacklife.planner.RestorePolicy
         ConversationRow::class, ConversationMessageRow::class, ConversationImageRow::class, ScheduleRow::class,
         SegmentRow::class, ExceptionRow::class, CompletionRow::class, ReminderSettingRow::class, ReminderRuleRow::class,
         ReminderReceiptRow::class, CountdownRow::class],
-    version = 14,
+    version = 15,
     autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7),
         AutoMigration(from = 7, to = 8), AutoMigration(from = 8, to = 9, spec = ExistingInstall::class), AutoMigration(from = 11, to = 12),
-        AutoMigration(from = 12, to = 13, spec = ExistingInstall::class), AutoMigration(from = 13, to = 14)],
+        AutoMigration(from = 12, to = 13, spec = ExistingInstall::class), AutoMigration(from = 13, to = 14),
+        AutoMigration(from = 14, to = 15)],
     exportSchema = true,
 )
 abstract class PlannerDatabase : RoomDatabase() {
@@ -83,6 +85,7 @@ internal data class TaskRow(
     val queuePosition: Int?,
     val completedFromFrame: String? = null,
     val completedFromPosition: Int? = null,
+    @ColumnInfo(defaultValue = "'AUTO'") val icon: TaskIcon = TaskIcon.AUTO,
 )
 
 @Entity(tableName = "frames", indices = [Index(value = ["savedAtMillis"])])
@@ -113,6 +116,7 @@ internal data class FrameItemRow(
     @ColumnInfo(defaultValue = "0") val referenceOnly: Boolean = false,
     val occurrenceDay: Long? = null,
     val ownedTaskId: String? = if (referenceOnly) null else taskId,
+    @ColumnInfo(defaultValue = "'AUTO'") val icon: TaskIcon = TaskIcon.AUTO,
 ) {
     fun savedSchedule() = scheduleJson?.let { snapshotJson.decodeFromString<SavedSchedule>(it).also { p -> check(p.payloadVersion == 1) } }
 }
@@ -130,11 +134,11 @@ internal data class SettingsRow(
     @ColumnInfo(defaultValue = "0") val keepRestoredFrames: Boolean = false,
 )
 
-internal data class TaskFields(val id: String, val title: String, val notes: String, val minutes: Int) {
-    fun view(schedule: ScheduleSummary? = null) = QueueTask(id, title, notes, minutes, schedule)
+internal data class TaskFields(val id: String, val title: String, val notes: String, val minutes: Int, val icon: TaskIcon) {
+    fun view(schedule: ScheduleSummary? = null) = QueueTask(id, title, notes, minutes, schedule, icon)
 }
 internal data class ItemState(@Embedded val item: FrameItemRow, @Embedded(prefix = "live_") val current: TaskFields?)
-private const val FRAME_ITEMS = """SELECT i.*, t.id AS live_id, t.title AS live_title, t.notes AS live_notes, t.minutes AS live_minutes
+private const val FRAME_ITEMS = """SELECT i.*, t.id AS live_id, t.title AS live_title, t.notes AS live_notes, t.minutes AS live_minutes, t.icon AS live_icon
     FROM frame_items i LEFT JOIN tasks t ON NOT i.referenceOnly AND t.id=i.ownedTaskId AND t.frameId=i.frameId AND t.owner='FRAME' """
 internal data class PositionUpdate(val id: String, val queuePosition: Int)
 internal data class QueuePositionLabel(val id: String, val queuePosition: Int, val title: String)
@@ -144,13 +148,13 @@ internal interface PlannerDao {
     @Query("SELECT * FROM planner_settings WHERE id = 1")
     fun settings(): SettingsRow?
 
-    @Query("SELECT id,title,notes,minutes FROM tasks WHERE owner='QUEUE' ORDER BY queuePosition")
+    @Query("SELECT id,title,notes,minutes,icon FROM tasks WHERE owner='QUEUE' ORDER BY queuePosition")
     fun visibleQueue(): List<TaskFields>
 
-    @Query("SELECT id,title,notes,minutes FROM tasks WHERE id=:id AND owner!='REMOVED'")
+    @Query("SELECT id,title,notes,minutes,icon FROM tasks WHERE id=:id AND owner!='REMOVED'")
     fun currentTask(id: String): TaskFields?
 
-    @Query("""SELECT t.id,t.title,t.notes,t.minutes FROM tasks t WHERE t.owner='QUEUE'
+    @Query("""SELECT t.id,t.title,t.notes,t.minutes,t.icon FROM tasks t WHERE t.owner='QUEUE'
         AND NOT EXISTS (SELECT 1 FROM agenda_schedules s WHERE s.taskId=t.id AND s.enabled) ORDER BY t.queuePosition""")
     fun dayTray(): List<TaskFields>
 

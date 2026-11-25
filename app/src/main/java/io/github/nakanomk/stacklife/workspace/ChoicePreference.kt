@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -18,16 +19,18 @@ import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 
 @Composable
 internal fun <T> Choice(title: String, options: List<T>, selected: T, label: @Composable (T) -> String,
-    modifier: Modifier = Modifier, leadingIcon: Int? = null, help: String? = null, change: (T) -> Unit) {
+    modifier: Modifier = Modifier, leadingIcon: Int? = null, help: String? = null, enabled: Boolean = true,
+    optionIcon: ((T) -> Int)? = null, change: (T) -> Unit) {
     var open by rememberSaveable { mutableStateOf(false) }
-    PreferenceRow(title, label(selected), modifier, leadingIcon = leadingIcon, help = help) { open = true }
-    if (open) PlannerAlertDialog(onDismissRequest = { open = false }, title = { Text(title) }, text = {
+    PreferenceRow(title, label(selected), modifier, enabled = enabled, leadingIcon = leadingIcon, help = help) { open = true }
+    if (open && enabled) PlannerAlertDialog(onDismissRequest = { open = false }, title = { Text(title) }, text = {
         Column(Modifier.selectableGroup().verticalScroll(rememberScrollState())) {
             for (option in options) Row(Modifier.fillMaxWidth()
                 .selectable(option == selected, role = Role.RadioButton) { open = false; change(option) }
                 .heightIn(min = 48.dp).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 RadioButton(option == selected, onClick = null)
+                if (optionIcon != null) Icon(painterResource(optionIcon(option)), null, Modifier.size(24.dp))
                 Text(label(option), style = MaterialTheme.typography.bodyLarge)
             }
         }

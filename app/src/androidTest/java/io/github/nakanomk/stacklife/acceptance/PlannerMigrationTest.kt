@@ -42,6 +42,28 @@ class PlannerMigrationTest {
         try { read(db) } finally { db.close() }
     }
 
+    @Test fun version14IconsDefaultWithoutChangingTaskSnapshotOrTemplateIdentities() {
+        val name = "task-icon-${UUID.randomUUID()}.db"
+        try {
+            oldDatabase(name, 14) { old ->
+                old.execSQL("INSERT INTO tasks(id,title,notes,minutes,owner,queuePosition) VALUES ('same','Review','keep',0,'QUEUE',0)")
+                old.execSQL("INSERT INTO frames(id,reason,savedAtMillis,source) VALUES ('past','Archive',123,'PUSH')")
+                old.execSQL("INSERT INTO frame_items(frameId,originalPosition,taskId,title,notes,minutes,ownedTaskId) VALUES ('past',0,'same','Earlier','snapshot',10,'same')")
+                old.execSQL("INSERT INTO plan_graphs(id,title) VALUES ('g','Plan')")
+                old.execSQL("INSERT INTO graph_nodes(graphId,id,title,notes,minutes,creationOrder,x,y) VALUES ('g','n','Template','',0,0,0,0)")
+            }
+            repeat(2) { database(name) { db -> runBlocking {
+                val api = RoomPlannerApi(db)
+                val ws = api.observe(PlannerQuery.Workspace).first() as Workspace
+                assertEquals(QueueTask("same", "Review", "keep", 0, icon = TaskIcon.AUTO), ws.queue.single())
+                val saved = ws.frames.single().items.single()
+                assertEquals("Earlier", saved.title); assertEquals(TaskIcon.AUTO, saved.icon); assertNull(saved.current)
+                val node = (api.observe(PlannerQuery.Graph("g")).first() as GraphDetail).nodes.single()
+                assertEquals("n", node.id); assertEquals(TaskIcon.AUTO, node.icon)
+            } } }
+        } finally { context.deleteDatabase(name) }
+    }
+
     @Test fun upgradeKeepsLiteralHistoryAndNeverRetriggersOnboarding() {
         val name = "upgrade-${UUID.randomUUID()}.db"
         try {

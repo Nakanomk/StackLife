@@ -175,7 +175,7 @@ internal fun ChangePreview(change: PlannerChange, modifier: Modifier = Modifier)
 }
 
 @Composable private fun TaskPreview(task: TaskSnapshot, other: TaskSnapshot?) {
-    PreviewTitle(task.title)
+    io.github.nakanomk.stacklife.workspace.TaskIconTitle(task.icon) { PreviewTitle(task.title) }
     CardMetadata {
         Text(uiText("${task.minutes} min", "${task.minutes} 分钟"))
         Text(when (task.owner) {
@@ -226,7 +226,7 @@ internal fun snapshotTime(millis: Long, zone: ZoneId): String = Instant.ofEpochM
     }
     val restored = remember(value.restores) { value.restores.flatMap { it.taskIds }.toHashSet() }
     for (item in value.items) {
-        Text("${item.originalPosition + 1}. ${item.title}")
+        io.github.nakanomk.stacklife.workspace.TaskIconTitle(item.icon) { Text("${item.originalPosition + 1}. ${item.title}") }
         CardMetadata { Text(uiText("${item.minutes} min", "${item.minutes} 分钟")); Text(when {
             item.referenceOnly -> uiText("Reference only; not restorable", "仅引用，不可恢复")
             item.taskId in restored -> uiText("Restored to queue", "已恢复到队列"); item.restorable -> uiText("Available to restore", "可恢复")

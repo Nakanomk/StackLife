@@ -183,7 +183,7 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
                 if (task == null || key.frame != null && task.frameId != key.frame) {
                     MissingDetail(stringResource(R.string.ui_edit_task),
                         stringResource(if (key.frame == null) R.string.graph_source_removed else R.string.ui_task_not_in_frame), back)
-                } else TaskEditor(model, back, original = QueueTask(key.id, task.title, task.notes, task.minutes, task.schedule),
+                } else TaskEditor(model, back, original = QueueTask(key.id, task.title, task.notes, task.minutes, task.schedule, task.icon),
                     expectedRevision = key.revision, frameId = key.frame)
             } }
             entry<MotionOccurrence> { key -> SourceData(model, key.link) { data ->

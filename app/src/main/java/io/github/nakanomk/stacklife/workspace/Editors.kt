@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.planner.TaskInput
+import io.github.nakanomk.stacklife.planner.TaskIcon
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.appearance.DurationWheelField
 import io.github.nakanomk.stacklife.notes.NoteField
@@ -33,6 +34,7 @@ private data class Draft(
     val key: Int,
     val title: TextFieldValue = TextFieldValue(),
     val minutes: TextFieldValue = TextFieldValue(),
+    val icon: TaskIcon = TaskIcon.AUTO,
 ) {
     fun duration(): Int? = if (minutes.text.isBlank()) 30 else minutes.text.toIntOrNull()
 }
@@ -41,8 +43,13 @@ private fun SaverScope.saveField(field: TextFieldValue): Any = with(TextFieldVal
 private fun Any.restoreField(): TextFieldValue = checkNotNull(TextFieldValue.Saver.restore(this))
 
 private val draftSaver = listSaver<SnapshotStateList<Draft>, Any>(
-    save = { rows -> rows.flatMap { listOf(it.key, saveField(it.title), saveField(it.minutes)) } },
-    restore = { values -> values.chunked(3).map { Draft(it[0] as Int, it[1].restoreField(), it[2].restoreField()) }.toMutableStateList() },
+    save = { rows -> rows.map { arrayListOf(it.key, saveField(it.title), saveField(it.minutes), it.icon.name) } },
+    restore = { values -> (if (values.firstOrNull() is Int) {
+        // A form saved by a pre-icon build used flat three-field rows.
+        values.chunked(3).map { Draft(it[0] as Int, it[1].restoreField(), it[2].restoreField()) }
+    } else values.map { packed -> val row = packed as List<*>
+        Draft(row[0] as Int, checkNotNull(row[1]).restoreField(), checkNotNull(row[2]).restoreField(), TaskIcon.valueOf(row[3] as String))
+    }).toMutableStateList() },
 )
 
 @Composable
@@ -55,7 +62,7 @@ internal fun TaskEditor(
     expectedRevision: Long? = null,
 ) {
     val drafts = rememberSaveable(saver = draftSaver) {
-        mutableStateListOf(if (original == null) Draft(0) else Draft(0, TextFieldValue(original.title), TextFieldValue(original.minutes.toString())))
+        mutableStateListOf(if (original == null) Draft(0) else Draft(0, TextFieldValue(original.title), TextFieldValue(original.minutes.toString()), original.icon))
     }
     // Hoist all note identities out of the lazy list: off-screen frame rows still belong to the form.
     val notes = drafts.map { row -> key(row.key) { rememberNoteLink(original?.notes.orEmpty()) } }
@@ -76,10 +83,10 @@ internal fun TaskEditor(
                 }
                 Primary(if (createFrame) stringResource(R.string.ui_save_frame) else if (original != null) stringResource(R.string.ui_save_changes) else stringResource(R.string.ui_add_task_to_queue),
                     enabled = !action.busy && notes.all { it.source != null && !it.opening } && drafts.all { it.duration() != null }) {
-                    val inputs = drafts.mapIndexed { index, row -> TaskInput(row.title.text, checkNotNull(notes[index].source), checkNotNull(row.duration())) }
+                    val inputs = drafts.mapIndexed { index, row -> TaskInput(row.title.text, checkNotNull(notes[index].source), checkNotNull(row.duration()), icon = row.icon) }
                     val command = when {
                         createFrame -> PlannerCommand.FrameCreate(reason.text, inputs)
-                        original != null -> inputs.single().let { PlannerCommand.TaskEdit(original.id, it.title, it.notes, it.minutes, expectedFrameId = frameId, expectedRevision = expectedRevision) }
+                        original != null -> inputs.single().let { PlannerCommand.TaskEdit(original.id, it.title, it.notes, it.minutes, expectedFrameId = frameId, expectedRevision = expectedRevision, icon = it.icon.takeIf { icon -> icon != original.icon }) }
                         else -> PlannerCommand.TaskAdd(inputs.single())
                     }
                     action.send(command)
@@ -105,6 +112,7 @@ internal fun TaskEditor(
                     NoteField(notes[index], !action.busy, "notes:$index")
                     DurationWheelField(stringResource(R.string.ui_estimated_duration), row.duration() ?: 30, !action.busy,
                         Modifier.testTag("duration:$index")) { drafts[index] = row.copy(minutes = TextFieldValue(it.toString())) }
+                    TaskIconField(row.icon, !action.busy, Modifier.testTag("task-icon:$index")) { drafts[index] = row.copy(icon = it) }
                 }
             }
         }

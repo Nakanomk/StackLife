@@ -215,13 +215,13 @@ internal fun FrameScreen(id: String, state: Workspace, actions: io.github.nakano
                         }
                         if (choosing && item.restorable) {
                             CheckRow(title, item.taskId in selected) { selected = ArrayList(selected.toggle(item.taskId)) }
-                        } else Text(title, style = MaterialTheme.typography.titleMedium)
+                        } else TaskIconTitle(current?.icon ?: item.icon) { Text(title, style = MaterialTheme.typography.titleMedium) }
                         Hint(stringResource(R.string.ui_minutes_value, minutes))
                         if (current != null && !choosing) CurrentTaskNote(current, state.revision, enabled = !action.busy, frameId = id)
                         else if (notes.isNotBlank()) PlannerMarkdown(notes, Modifier.fillMaxWidth())
-                        if (current != null && (title != item.title || minutes != item.minutes || notes != item.notes)) {
+                        if (current != null && (title != item.title || minutes != item.minutes || notes != item.notes || current.icon != item.icon)) {
                             SectionTitle(stringResource(R.string.frame_saved_snapshot))
-                            Text(item.title, style = MaterialTheme.typography.bodyMedium)
+                            TaskIconTitle(item.icon) { Text(item.title, style = MaterialTheme.typography.bodyMedium) }
                             Hint(stringResource(R.string.ui_minutes_value, item.minutes))
                             if (item.notes.isNotBlank()) PlannerMarkdown(item.notes, Modifier.fillMaxWidth())
                         }

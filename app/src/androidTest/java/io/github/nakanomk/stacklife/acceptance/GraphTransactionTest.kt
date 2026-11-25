@@ -30,6 +30,33 @@ class GraphTransactionTest {
     private suspend fun page(g: String, date: LocalDate, filter: LinkFilter = LinkFilter.ALL, search: String = "", offset: Int = 0) =
         store.api.observe(PlannerQuery.LinkableEvents(g, search, filter, date, offset, 50)).first() as LinkablePage
 
+    @Test fun iconFollowsLiveTaskAndOccurrenceWhileOwnedAndLinkedSnapshotsKeepTheSavedGlyph() = runBlocking {
+        val date = LocalDate.of(2026, 9, 7)
+        val zone = ZoneId.of("Asia/Shanghai")
+        val setup = store.proposal(KeepRestoredFrames(true), TaskAdd(TaskInput("Review", ref = "a", icon = TaskIcon.PERSON)),
+            exact("@a", date.atTime(14, 0).atZone(zone).toOffsetDateTime(), 0),
+            GraphCreate("Plan", "g"), GraphPatch("@g", listOf(LinkExisting(GraphLink.Task("@a"), ref = "linked"),
+                AddNode("Class", ref = "goal", icon = TaskIcon.SCHOOL), AddEdge("@linked", "@goal"))),
+            GraphFrame("@g", "@goal", ref = "history"), FramePush("owned", listOf("@a"), ref = "owned"))
+        accept(setup)
+        val a = setup.refs.getValue("a"); val g = setup.refs.getValue("g")
+        store.apply(TaskEdit(a, notes = "Later"), GraphPatch(g, listOf(EditNode(setup.refs.getValue("linked"), icon = TaskIcon.EVENT))),
+            FrameRestore(setup.refs.getValue("owned"), RestoreMode.ALL), GraphQueue(g, setup.refs.getValue("goal")))
+        store.reopen()
+        val workspace = store.state()
+        assertEquals(listOf(TaskIcon.EVENT, TaskIcon.SCHOOL), workspace.queue.map { it.icon })
+        assertEquals("Later", workspace.queue.first().notes)
+        assertEquals(listOf(TaskIcon.PERSON, TaskIcon.SCHOOL), workspace.frames.single { it.id == setup.refs["history"] }.items.map { it.icon })
+        val old = workspace.frames.single { it.id == setup.refs["owned"] }.items.single()
+        assertEquals(TaskIcon.PERSON, old.icon); assertNull(old.current)
+        assertEquals(TaskIcon.EVENT, graph(g).nodes.single { it.link != null }.icon)
+        val occurrence = (store.api.observe(PlannerQuery.Day(date, zone)).first() as DayPlan).occurrences.single()
+        assertEquals(TaskIcon.EVENT, occurrence.icon); assertTrue(occurrence.point)
+        store.apply(TaskEdit(a, icon = TaskIcon.AUTO))
+        assertEquals(TaskIcon.AUTO, source(GraphLink.Task(a))!!.icon)
+        assertEquals(TaskIcon.AUTO, graph(g).nodes.single { it.link != null }.icon)
+    }
+
     @Test fun pagedPickerSeparatesSameNamedSourcesWithoutDuplicatingOneOffsOrListingCourses() = runBlocking {
         val monday = LocalDate.of(2026, 9, 7)
         val term = TermSpec("Link picker", monday, 1, BellSchedule.SUMMER)

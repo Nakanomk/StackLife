@@ -19,7 +19,7 @@ internal fun GraphLink.storageKey(): String = Json.encodeToString(this)
 
 data class LinkedSource(val link: GraphLink, val title: String, val notes: String, val minutes: Int,
     val owner: Owner?, val taskId: String?, val schedule: ScheduleSummary?, val occurrence: AgendaOccurrence?,
-    val frameId: String? = null, val queuePosition: Int? = null) {
+    val frameId: String? = null, val queuePosition: Int? = null, val icon: TaskIcon = TaskIcon.AUTO) {
     val state: LinkState get() = LinkState(owner, occurrence?.completed ?: (owner == Owner.DONE),
         schedule?.enabled == true, system = schedule?.role != null)
 }
@@ -32,7 +32,7 @@ data class LinkablePage(val revision: Long, val total: Int, val items: List<Link
 @Serializable
 data class GraphNode(val id: String, val title: String, val notes: String, val minutes: Int,
     val creationOrder: Long, val x: Float, val y: Float, val link: GraphLink? = null,
-    val linkState: LinkState? = null)
+    val linkState: LinkState? = null, val icon: TaskIcon = TaskIcon.AUTO)
 @Serializable
 data class GraphEdge(val from: String, val to: String)
 
@@ -45,10 +45,11 @@ data class GoalOrder(val revision: Long, val nodes: List<GraphNode>, val error: 
 sealed interface GraphEdit {
     data class Rename(val title: String) : GraphEdit
     data class AddNode(val title: String, val notes: String = "", val minutes: Int = 30,
-        val x: Float = 0f, val y: Float = 0f, val ref: String? = null) : GraphEdit
+        val x: Float = 0f, val y: Float = 0f, val ref: String? = null, val icon: TaskIcon = TaskIcon.AUTO) : GraphEdit
     data class LinkExisting(val link: GraphLink, val x: Float = 0f, val y: Float = 0f, val ref: String? = null) : GraphEdit
     data class SetLinkedCompletion(val nodeId: String, val completed: Boolean) : GraphEdit
-    data class EditNode(val nodeId: String, val title: String? = null, val notes: String? = null, val minutes: Int? = null) : GraphEdit
+    data class EditNode(val nodeId: String, val title: String? = null, val notes: String? = null, val minutes: Int? = null,
+        val icon: TaskIcon? = null) : GraphEdit
     data class MoveNode(val nodeId: String, val x: Float, val y: Float) : GraphEdit
     data class RemoveNode(val nodeId: String) : GraphEdit
     data class AddEdge(val from: String, val to: String) : GraphEdit

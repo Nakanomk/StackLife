@@ -70,7 +70,8 @@ internal class AgendaDraft(private val dao: ScheduleDao, private val courses: Co
     private fun scheduleRow(s: ScheduleSummary, key: OccurrenceKey.Schedule, interval: ExactInterval, occurrenceVersion: Long): AgendaOccurrence {
         val t = if (s.role == null) edited[s.id] ?: task(s.id) else null
         return AgendaOccurrence(key, s.role?.label() ?: requireNotNull(t).title, t?.notes.orEmpty(), interval.startMillis, interval.endMillis,
-            marks[key] ?: (t?.owner == Owner.DONE || dao.completed(key.storageKey())), occurrenceVersion, t?.id, t?.owner, role = s.role)
+            marks[key] ?: (t?.owner == Owner.DONE || dao.completed(key.storageKey())), occurrenceVersion, t?.id, t?.owner, role = s.role,
+            icon = t?.icon ?: TaskIcon.AUTO)
     }
     fun resolve(key: OccurrenceKey): AgendaOccurrence? = when (key) {
         is OccurrenceKey.Course -> courses.resolve(key.occurrence)?.let { it.agenda(marks[key] ?: dao.completed(key.storageKey())) }
@@ -157,7 +158,7 @@ internal class AgendaDraft(private val dao: ScheduleDao, private val courses: Co
             if (key.scheduleId in roots || key in exceptions) continue
             val t = edited[key.scheduleId]
             if (t?.owner == Owner.REMOVED || t?.owner == Owner.DONE && key.originalDay != null) continue
-            out.add(if (t == null) row else row.copy(title = t.title, notes = t.notes, owner = t.owner))
+            out.add(if (t == null) row else row.copy(title = t.title, notes = t.notes, owner = t.owner, icon = t.icon))
         }
         for ((id, s) in roots) {
             if (s == null || !s.enabled) continue
