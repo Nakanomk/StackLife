@@ -61,6 +61,8 @@ import io.github.nakanomk.stacklife.markdown.MarkdownReadCache
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.reminders.ReminderTarget
 import io.github.nakanomk.stacklife.reminders.reminderTarget
+import io.github.nakanomk.stacklife.settings.SettingsScreen
+import io.github.nakanomk.stacklife.settings.WallpaperSettingsOrigin
 import io.github.nakanomk.stacklife.i18n.uiText
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
