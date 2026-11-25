@@ -98,6 +98,9 @@ private fun DockScaffold(short: Boolean, wideRow: Boolean, navigationBar: (@Comp
     Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), bottomBar = {
         CompositionLocalProvider(LocalCapsuleBackdrop provides source) {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                io.github.nakanomk.stacklife.workspace.LocalWorkspaceFeedback.current?.let {
+                    io.github.nakanomk.stacklife.workspace.WorkspaceFeedbackBar(it)
+                }
                 if (composer != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                     Box(Modifier.weight(if (short && shareRow) 2f else 1f), contentAlignment = Alignment.Center) {
                         Box(chromeRail(top = 0.dp).onFocusChanged { composerFocused = it.hasFocus }.focusGroup()) {

@@ -68,6 +68,7 @@ class DailyAgendaUiTest {
     }
     @Test fun deletingFromDetailsThenClearingHistoryLeavesTasksAndLiveFrameUntouched() {
         runBlocking {
+            store.apply(KeepRestoredFrames(true))
             store.apply(FrameCreate("已恢复甲", listOf(TaskInput("写提纲")), "first"), FrameRestore("@first", RestoreMode.ALL),
                 FrameCreate("已恢复乙", listOf(TaskInput("校对")), "second"), FrameRestore("@second", RestoreMode.ALL),
                 FrameCreate("保留", listOf(TaskInput("新任务"))))

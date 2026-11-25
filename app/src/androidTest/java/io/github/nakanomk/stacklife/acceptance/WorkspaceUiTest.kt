@@ -184,7 +184,12 @@ class WorkspaceUiTest {
         ui.onNode(all).performClick()
         val restored = awaitQueue("A", "B", "X")
         assertEquals(interrupted.frames.single().items.map { it.taskId } + interrupted.queue.single().id, restored.queue.map { it.id })
-        assertEquals(0, restored.frames.single().remaining)
+        assertTrue(restored.frames.isEmpty())
+        await(hasTestTag("receipt-keep")).performClick()
+        val kept = await(hasTestTag("frame:${pushed.id}")); kept.assertIsDisplayed()
+        assertEquals(0, runBlocking { store.state() }.frames.single().remaining)
+        await(hasTestTag("receipt-undo")).performClick()
+        assertEquals(partial.copy(revision = restored.revision + 2), awaitQueue("B", "X"))
     }
 
     @Test fun pushReasonRevealsOneFieldInTheOriginalBottomBarAndCancelsBackToItsReceipt() {
@@ -253,6 +258,7 @@ class WorkspaceUiTest {
 
     @Test fun editTaskInFrameThenRestoreKeepsTheEditAndTheOriginalRecord() {
         val frame = runBlocking {
+            store.apply(PlannerCommand.KeepRestoredFrames(true))
             store.apply(PlannerCommand.FrameCreate("复习", listOf(TaskInput("旧标题", "旧备注", 35))))
             store.state().frames.single()
         }

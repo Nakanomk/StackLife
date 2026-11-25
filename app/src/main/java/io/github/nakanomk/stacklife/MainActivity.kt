@@ -407,7 +407,9 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                         val page: @Composable () -> Unit = {
                             WallpaperHost(appearance.wallpaper(owner), drawBehindContent = false) {
                                 origins.Entry(key.motionKey(), depth, stack.lastIndex, parent, animate && initialDetail == null,
-                                    ordinary = key != Home && key !is TaskDetail && (key !is FrameDetail || key.generated)) { entry.Content() }
+                                    ordinary = key != Home && key !is TaskDetail && (key !is FrameDetail || key.generated)) {
+                                    CompositionLocalProvider(LocalWorkspaceFeedback provides model.takeIf { key == stack.last() }) { entry.Content() }
+                                }
                             }
                         }
                         if (key == Home && depth == 0) homePlane.Entry(page) else page()

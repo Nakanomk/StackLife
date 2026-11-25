@@ -120,8 +120,8 @@ private fun ReasonField(reason: TextFieldValue, onChange: (TextFieldValue) -> Un
 }
 
 @Composable
-internal fun PushReasonEditor(frameId: String, actions: WorkspaceActions, active: Boolean = true, close: () -> Unit) {
-    var reason by rememberSaveable(frameId, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
+internal fun PushReasonEditor(frameId: String, actions: WorkspaceActions, field: androidx.compose.runtime.MutableState<TextFieldValue>? = null, close: () -> Unit) {
+    var reason by field ?: rememberSaveable(frameId, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
     val focus = LocalFocusManager.current
     var fieldFocused by remember { mutableStateOf(false) }
     fun finish() {
@@ -131,9 +131,9 @@ internal fun PushReasonEditor(frameId: String, actions: WorkspaceActions, active
     val action = rememberSubmission(actions) { if (it != SaveOutcome.REJECTED) finish() }
     Row(Modifier.fillMaxWidth().testTag("push-reason-editor"), verticalAlignment = Alignment.CenterVertically) {
         TextField(reason, { reason = it }, Modifier.weight(1f).testTag("push-reason").onFocusChanged { fieldFocused = it.isFocused },
-            enabled = active && !action.busy, singleLine = true, colors = lineFieldColors(), label = { Text(stringResource(R.string.ui_push_reason)) })
-        TextButton(onClick = { reason = TextFieldValue(); finish() }, enabled = active && !action.busy) { Text(stringResource(R.string.ui_cancel)) }
+            enabled = !action.busy, singleLine = true, colors = lineFieldColors(), label = { Text(stringResource(R.string.ui_push_reason)) })
+        TextButton(onClick = ::finish, enabled = !action.busy) { Text(stringResource(R.string.ui_cancel)) }
         TextButton(onClick = { action.send(PlannerCommand.FrameAddReason(frameId, reason.text)) },
-            enabled = active && !action.busy && reason.text.isNotBlank()) { Text(stringResource(R.string.ui_save)) }
+            enabled = !action.busy && reason.text.isNotBlank()) { Text(stringResource(R.string.ui_save)) }
     }
 }

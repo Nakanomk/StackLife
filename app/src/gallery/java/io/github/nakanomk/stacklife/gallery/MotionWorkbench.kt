@@ -124,6 +124,7 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
         if (glassAllowed) scoped else scoped.copy(glass = false)
     }
     CompositionLocalProvider(LocalAppearance provides scopedAppearance, LocalAssistant provides null,
+        io.github.nakanomk.stacklife.workspace.LocalWorkspaceFeedback provides model,
         LocalRouteOrigins provides origins, LocalOpenNote provides { navigate(it) }) {
         val features: @Composable (Destination, Boolean, TrialQueueLinks?) -> Unit = { page, front, links ->
             pages.SaveableStateProvider(page.key) {

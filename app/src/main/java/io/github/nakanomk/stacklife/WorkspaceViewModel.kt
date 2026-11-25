@@ -4,6 +4,10 @@ import io.github.nakanomk.stacklife.i18n.uiText
 
 import android.database.sqlite.SQLiteException
 import androidx.lifecycle.ViewModel
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.viewModelScope
 import io.github.nakanomk.stacklife.courses.CourseMeeting
 import io.github.nakanomk.stacklife.courses.TermSpec
@@ -78,7 +82,8 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
         }
     }
 
-    fun reviewedRef(requestId: String, ref: String): String? = latest?.takeIf { it.id == requestId }?.receipt?.refs?.get(ref)
+    fun receipt(requestId: String): CommitResult.Applied? = latest?.takeIf { it.id == requestId }?.receipt
+    fun reviewedRef(requestId: String, ref: String): String? = receipt(requestId)?.refs?.get(ref)
 
     /** A hover or editor check never leaves a committable proposal behind. */
     suspend fun checkSchedule(command: PlannerCommand): String? = try {
@@ -98,30 +103,49 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
     }
     private var latest: Ticket? = null
 
-    // Keep the confirmed frame ID separate from the most recent write ticket: another task or
-    // restore may commit before the user taps the snackbar. Never infer it from frame list order.
-    private val pushed = MutableStateFlow<String?>(null)
-    val pushedFrame = pushed.asStateFlow()
-    fun dismissPush(id: String) { pushed.compareAndSet(id, null) }
-
-    fun pushQueue(taskIds: List<String>): String? {
-        // A previous success must not be mistaken for the outcome of this attempt.
-        pushed.value = null
-        return submit(PlannerCommand.FramePush(taskIds = taskIds)) { pushed.value = (it.effects.single() as WorkspaceEffect.Pushed).frameId }
+    data class Feedback(val receipt: CommitResult.Applied, val kept: Boolean = false) {
+        val effect: WorkspaceEffect get() = receipt.effects.single()
     }
-
-    override fun start(command: PlannerCommand): String? = submit(command)
-
-    private fun submit(command: PlannerCommand, applied: ((CommitResult.Applied) -> Unit)? = null): String? = startWrite(notifyOnFailure = true) {
-        when (val preview = planner.preview(listOf(command))) {
-            is PreviewResult.Rejected -> preview.message
-            is PreviewResult.Ready -> commit(preview.proposalId, applied)
+    private val feedbackState = MutableStateFlow<Feedback?>(null)
+    val feedback = feedbackState.asStateFlow()
+    // The dock's subtree is transient (IME, rotation, nested destinations). An open reason
+    // editor keeps its original frame even after another push takes over the Undo action.
+    internal class PushReason(val frameId: String) { val field = mutableStateOf(TextFieldValue()) }
+    var pushReason by mutableStateOf<PushReason?>(null)
+        private set
+    fun editReason(frameId: String) { if (pushReason == null) pushReason = PushReason(frameId) }
+    fun closeReason(frameId: String) { if (pushReason?.frameId == frameId) pushReason = null }
+    fun dismissFeedback(request: String) {
+        feedbackState.value?.takeIf { it.receipt.requestId == request }?.let { feedbackState.compareAndSet(it, null) }
+    }
+    fun applyFeedback(request: String, action: WorkspaceReceiptAction): String? = startWrite(notifyOnFailure = true) {
+        val shown = feedbackState.value?.takeIf { it.receipt.requestId == request }
+        when (val result = planner.applyWorkspaceReceipt(request, action)) {
+            is CommitResult.Rejected -> { dismissFeedback(request); result.message }
+            is CommitResult.Applied -> {
+                receipt = result
+                if (shown != null && action == WorkspaceReceiptAction.KEEP_HISTORY) feedbackState.compareAndSet(shown, shown.copy(kept = true))
+                else dismissFeedback(request)
+                if (result.overlappingSchedule) errors.send(uiText("Schedule restored. It overlaps another event.", "排程已恢复，与其他日程重叠。"))
+                null
+            }
         }
     }
 
-    private suspend fun Ticket.commit(id: String, applied: ((CommitResult.Applied) -> Unit)? = null): String? = try {
+    override fun start(command: PlannerCommand): String? = startWrite(notifyOnFailure = true) {
+        when (val preview = planner.preview(listOf(command))) {
+            is PreviewResult.Rejected -> preview.message
+            is PreviewResult.Ready -> commit(preview.proposalId)
+        }
+    }
+
+    private suspend fun Ticket.commit(id: String): String? = try {
         when (val result = planner.commit(id)) {
-            is CommitResult.Applied -> { receipt = result; applied?.invoke(result); null }
+            is CommitResult.Applied -> {
+                receipt = result
+                if (result.effects.isNotEmpty()) feedbackState.value = if (result.expiresAtElapsed == null) null else Feedback(result)
+                null
+            }
             is CommitResult.Rejected -> result.message
         }
     } finally {

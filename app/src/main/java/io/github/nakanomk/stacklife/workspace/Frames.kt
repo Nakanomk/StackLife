@@ -108,7 +108,7 @@ private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: Share
 }
 
 @Composable
-internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions, onBack: () -> Unit, shared: SharedModifier,
+internal fun FrameScreen(id: String, state: Workspace, actions: io.github.nakanomk.stacklife.WorkspaceViewModel, onBack: () -> Unit, shared: SharedModifier,
     onSource: (GraphLink) -> Unit, onEdit: (String) -> Unit) {
     val frame = state.frames.find { it.id == id }
     var deleting by rememberSaveable(id) { mutableStateOf(false) }
@@ -119,16 +119,23 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
     if (deleting) ConfirmFrameDeletion(1, deletion.busy, { deleting = false }) {
         deletion.send(PlannerCommand.DeleteFrameHistory(listOf(id)))
     }
+    var restoreTicket by rememberSaveable(id) { mutableStateOf<String?>(null) }
+    var choosing by rememberSaveable(id) { mutableStateOf(false) }
+    var selected by rememberSaveable(id) { mutableStateOf(arrayListOf<String>()) }
+    var editingReason by rememberSaveable(id) { mutableStateOf(false) }
+    val entries = frame?.items.orEmpty()
+    val leaveSelection = { choosing = false; selected = arrayListOf() }
+    val action = rememberSubmission(actions) { outcome ->
+        val effect = restoreTicket?.let(actions::receipt)?.effects?.singleOrNull() as? WorkspaceEffect.Restored
+        restoreTicket = null
+        if (outcome != SaveOutcome.REJECTED) leaveSelection()
+        if (outcome == SaveOutcome.APPLIED && effect?.frameId == id && effect.sourceDeleted) onBack()
+    }
+    fun restore(cmd: PlannerCommand.FrameRestore) = action.submit { actions.start(cmd)?.also { restoreTicket = it } }
     if (frame == null) {
         MissingDetail(stringResource(R.string.ui_frame_details), stringResource(R.string.ui_frame_missing), onBack)
         return
     }
-    var choosing by rememberSaveable(id) { mutableStateOf(false) }
-    var selected by rememberSaveable(id) { mutableStateOf(arrayListOf<String>()) }
-    var editingReason by rememberSaveable(id) { mutableStateOf(false) }
-    val entries = frame.items
-    val leaveSelection = { choosing = false; selected = arrayListOf() }
-    val action = rememberSubmission(actions) { if (it != SaveOutcome.REJECTED) leaveSelection() }
     val selectionIds = remember(entries, selected) {
         val ids = selected.toHashSet()
         entries.mapNotNull { if (it.restorable && it.taskId in ids) it.taskId else null }
@@ -142,7 +149,7 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
                 Hint(stringResource(R.string.frame_restore_order))
                 Actions {
                     Primary(stringResource(R.string.ui_restore_selected), enabled = !action.busy && selectionIds.isNotEmpty()) {
-                        action.send(PlannerCommand.FrameRestore(id, RestoreMode.SELECTED, selectionIds))
+                        restore(PlannerCommand.FrameRestore(id, RestoreMode.SELECTED, selectionIds))
                     }
                     Secondary(stringResource(R.string.ui_cancel_selection), enabled = !action.busy, onClick = leaveSelection)
                 }
@@ -179,7 +186,7 @@ internal fun FrameScreen(id: String, state: Workspace, actions: WorkspaceActions
                     SectionTitle(if (choosing) stringResource(R.string.ui_select_to_restore) else stringResource(R.string.ui_restore_to_queue))
                     Hint(restoreHint(state.restorePolicy, choosing, state.queue.size))
                     if (!choosing) Actions {
-                        Primary(stringResource(R.string.ui_restore_all), enabled = !action.busy) { action.send(PlannerCommand.FrameRestore(id, RestoreMode.ALL)) }
+                        Primary(stringResource(R.string.ui_restore_all), enabled = !action.busy) { restore(PlannerCommand.FrameRestore(id, RestoreMode.ALL)) }
                         Secondary(stringResource(R.string.ui_select_to_restore), enabled = !action.busy) { editingReason = false; choosing = true }
                     }
                 }

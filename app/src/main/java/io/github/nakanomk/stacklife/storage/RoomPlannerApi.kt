@@ -214,19 +214,20 @@ class RoomPlannerApi(private val db: PlannerDatabase, private val importCalendar
         val result = try {
             writeGate.withLock {
                 val token = activeReceipt
-                if (token == null || token.id != requestId || elapsed() >= token.deadline) {
-                    if (token != null && elapsed() >= token.deadline) activeReceipt = null
-                    return@withLock CommitResult.Rejected(CommitFailure.UNKNOWN_PROPOSAL, uiText("This action has expired or was already used.", "操作已超时或已使用。"))
-                }
+                fun expired() = CommitResult.Rejected(CommitFailure.UNKNOWN_PROPOSAL,
+                    uiText("This action has expired or was already used.", "操作已超时或已使用。"))
+                if (token == null || token.id != requestId) return@withLock expired()
                 val keep = action == WorkspaceReceiptAction.KEEP_HISTORY
                 val applied = db.withTransaction {
+                    if (elapsed() >= token.deadline) return@withTransaction expired()
                     val settings = requireNotNull(dao.settings())
                     val revision = settings.revision + 1
                     val overlap = token.reverse(db, keep, keptHistory, revision)
                     dao.saveSettings(settings.copy(revision = revision))
                     CommitResult.Applied(revision, UUID.randomUUID().toString(), overlappingSchedule = overlap)
                 }
-                if (keep) keptHistory = true else { refresh = token.restoresSchedule; activeReceipt = null }
+                if (applied is CommitResult.Applied && keep) keptHistory = true
+                else { refresh = applied is CommitResult.Applied && token.restoresSchedule; activeReceipt = null }
                 applied
             }
         } catch (e: InvalidCommand) {

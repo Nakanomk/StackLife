@@ -33,9 +33,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalAccessibilityManager
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -64,6 +61,12 @@ import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.planner.Workspace
+import io.github.nakanomk.stacklife.planner.WorkspaceEffect
+import io.github.nakanomk.stacklife.planner.WorkspaceReceiptAction
+import io.github.nakanomk.stacklife.planner.PlannerQuery
+import io.github.nakanomk.stacklife.planner.FrameDetailResult
+import io.github.nakanomk.stacklife.ReadState
+import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
@@ -102,39 +105,9 @@ internal fun WorkspaceScreen(
         }
     }
     val position = remember(pager) { derivedStateOf { pager.currentPage + pager.currentPageOffsetFraction } }
-    val pushedId by actions.pushedFrame.collectAsStateWithLifecycle()
-    var editingId by rememberSaveable { mutableStateOf<String?>(null) }
-    val accessibility = LocalAccessibilityManager.current
-    val mayAddReason = remember(pushedId, state.frames) {
-        pushedId != null && state.frames.firstOrNull { it.id == pushedId }?.reason.isNullOrBlank()
-    }
-    LaunchedEffect(pushedId, editingId, accessibility, mayAddReason) {
-        val frameId = pushedId ?: return@LaunchedEffect
-        if (editingId != null) return@LaunchedEffect
-        // Same long timeout and accessibility extension as a Material action snackbar.
-        delay(accessibility?.calculateRecommendedTimeoutMillis(10_000L,
-            containsIcons = true, containsText = true, containsControls = true) ?: 10_000L)
-        actions.dismissPush(frameId)
-    }
-    var feedbackHeight by remember { mutableIntStateOf(0) }
-    val hasFeedback = editingId != null || pushedId != null
-    val feedbackInset = with(LocalDensity.current) { feedbackHeight.toDp() }
     RootPane(header = { RootToolbar(Destination.WORKSPACE, onSettings) { WorkspaceSegments(stack, setStack, position) } },
         overlay = { _, bottom ->
-            // Measure the FAB and feedback together; neither waits a frame for the other's
-            // new size when the row unfolds or the IME moves the dock.
-            Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = bottom),
-                horizontalAlignment = Alignment.CenterHorizontally) {
-                if (!stack) Box(Modifier.fillMaxWidth()) { AddTaskFab(onAdd) }
-                PushFeedbackPanel(hasFeedback, editingId, Modifier.onSizeChanged { feedbackHeight = it.height }) { frameId ->
-                    if (frameId == null) PushReceiptRow(enabled = editingId == null && pushedId != null,
-                        mayAddReason = mayAddReason, onEdit = { editingId = pushedId },
-                        onDismiss = { pushedId?.let(actions::dismissPush) })
-                    else key(frameId) {
-                        PushReasonEditor(frameId, actions, active = frameId == editingId) { editingId = null }
-                    }
-                }
-            }
+            if (!stack) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = bottom)) { AddTaskFab(onAdd) }
         }) { top, bottom ->
         HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = false) { index ->
             val selected = index == mode
@@ -143,12 +116,41 @@ internal fun WorkspaceScreen(
                 val cardBounds = if (selected) shared else noCardBounds
                 CardFrostGroup(enabled = inViewport && if (index == 0) state.queue.isNotEmpty() else state.frames.isNotEmpty()) {
                     CompositionLocalProvider(LocalCardList provides if (index == 0) queueScroll else stackScroll) {
-                        if (index == 1) FrameList(state.frames, stackScroll, onFrame, onCreateFrame, cardBounds, top, bottom + feedbackInset, state.revision, actions)
-                        else QueueList(state.queue, queueScroll, actions, onTask, actions::pushQueue, cardBounds, top, bottom + taskFabClearance + feedbackInset, state.revision)
+                        if (index == 1) FrameList(state.frames, stackScroll, onFrame, onCreateFrame, cardBounds, top, bottom, state.revision, actions)
+                        else QueueList(state.queue, queueScroll, actions, onTask, cardBounds, top, bottom + taskFabClearance, state.revision)
                     }
                 }
             }
         }
+    }
+}
+
+internal val LocalWorkspaceFeedback = staticCompositionLocalOf<WorkspaceViewModel?> { null }
+
+@Composable
+internal fun WorkspaceFeedbackBar(actions: WorkspaceViewModel) {
+    val feedback by actions.feedback.collectAsStateWithLifecycle()
+    val shown = feedback
+    val editor = actions.pushReason
+    val editingId = editor?.frameId
+    val pushId = (shown?.effect as? WorkspaceEffect.Pushed)?.frameId
+    val mayAddReason = if (pushId == null) false else {
+        val frame by remember(actions, pushId) { actions.read<FrameDetailResult>(PlannerQuery.Frame(pushId)) }
+            .collectAsStateWithLifecycle(initialValue = ReadState.Loading)
+        (frame as? ReadState.Loaded)?.value?.frame?.reason?.isBlank() == true
+    }
+    LaunchedEffect(shown?.receipt?.requestId) {
+        val receipt = shown?.receipt ?: return@LaunchedEffect
+        delay((requireNotNull(receipt.expiresAtElapsed) - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0L))
+        actions.dismissFeedback(receipt.requestId)
+    }
+    val command = rememberSubmission(actions)
+    PushFeedbackPanel(shown != null || editingId != null, editingId, Modifier) { frameId ->
+        if (frameId != null) key(frameId) {
+            if (editor?.frameId == frameId) PushReasonEditor(frameId, actions, editor.field) { actions.closeReason(frameId) }
+        } else if (shown != null) ReceiptRow(shown, enabled = editingId == null && !command.busy, mayAddReason,
+            onAction = { command.submit { actions.applyFeedback(shown.receipt.requestId, it) } },
+            onEdit = { pushId?.let(actions::editReason) }, onDismiss = { actions.dismissFeedback(shown.receipt.requestId) })
     }
 }
 
@@ -178,13 +180,23 @@ private fun PushFeedbackPanel(visible: Boolean, editingId: String?, modifier: Mo
 }
 
 @Composable
-private fun PushReceiptRow(enabled: Boolean, mayAddReason: Boolean, onEdit: () -> Unit, onDismiss: () -> Unit) {
-    Row(Modifier.semantics {
+private fun ReceiptRow(shown: WorkspaceViewModel.Feedback, enabled: Boolean, mayAddReason: Boolean,
+    onAction: (WorkspaceReceiptAction) -> Unit, onEdit: () -> Unit, onDismiss: () -> Unit) {
+    val effect = shown.effect
+    FlowRow(Modifier.semantics {
         liveRegion = LiveRegionMode.Polite
         if (enabled) dismiss { onDismiss(); true }
-    }.padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically,
+    }.padding(start = 16.dp, end = 4.dp), itemVerticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(stringResource(R.string.ui_pushed), Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyMedium)
+        Text(when (effect) {
+            is WorkspaceEffect.Pushed -> stringResource(R.string.ui_pushed)
+            is WorkspaceEffect.Restored -> if (shown.kept) uiText("History kept", "已保留历史") else uiText("Restored to queue", "已恢复到队列")
+            is WorkspaceEffect.Removed -> uiText("Removed from queue", "已移出队列")
+            is WorkspaceEffect.DeletedHistory -> uiText("History deleted", "已删除历史")
+        }, style = MaterialTheme.typography.bodyMedium)
+        TextButton({ onAction(WorkspaceReceiptAction.UNDO) }, Modifier.testTag("receipt-undo"), enabled = enabled) { Text(uiText("Undo", "撤回")) }
+        if (effect is WorkspaceEffect.Restored && effect.sourceDeleted && !shown.kept)
+            TextButton({ onAction(WorkspaceReceiptAction.KEEP_HISTORY) }, Modifier.testTag("receipt-keep"), enabled = enabled) { Text(uiText("Keep history", "保留历史")) }
         if (mayAddReason) TextButton(onClick = onEdit, enabled = enabled) { Text(stringResource(R.string.ui_add_reason)) }
         IconButton(onClick = onDismiss, enabled = enabled) {
             Icon(painterResource(R.drawable.ic_close), stringResource(R.string.ui_close_panel))
@@ -216,7 +228,7 @@ private fun WorkspaceSegments(stack: Boolean, change: (Boolean) -> Unit, positio
 @Composable
 private fun QueueList(
     tasks: List<QueueTask>, scroll: LazyListState, actions: WorkspaceActions, onTask: (String) -> Unit,
-    onPush: (List<String>) -> String?, shared: SharedModifier, topClearance: Dp, bottomClearance: Dp, revision: Long,
+    shared: SharedModifier, topClearance: Dp, bottomClearance: Dp, revision: Long,
 ) {
     val compact = LocalAppearance.current.compact
     val source = detailListSource(scroll, topClearance, bottomClearance, revision)
@@ -260,7 +272,7 @@ private fun QueueList(
                 if (tasks.isNotEmpty()) ActionPill(if (selected == null) stringResource(R.string.ui_push) else stringResource(R.string.ui_push_selected),
                     modifier = Modifier.testTag("queue-push"),
                     enabled = !action.busy && (selected == null || selected.isNotEmpty()),
-                    onClick = { action.submit { onPush(selected ?: tasks.map { it.id }) } })
+                    onClick = { action.send(PlannerCommand.FramePush(taskIds = selected ?: tasks.map { it.id })) })
             }
         }
         if (order.isEmpty()) item {
