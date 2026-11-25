@@ -21,15 +21,15 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.job
 
 @Composable
-private fun rememberScenePulse(level: HapticLevel, standard: HapticFeedbackType): () -> Unit {
+private fun rememberScenePulse(level: HapticLevel, tick: HapticFeedbackType): () -> Unit {
     // StackLifeTheme already gates this delegate on the device setting and the master switch.
     val feedback = LocalHapticFeedback.current
-    return remember(level, standard, feedback) {
+    return remember(level, tick, feedback) {
         {
             when (level) {
                 HapticLevel.OFF -> Unit
-                HapticLevel.LIGHT -> feedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
-                HapticLevel.STANDARD -> feedback.performHapticFeedback(standard)
+                HapticLevel.LIGHT -> feedback.performHapticFeedback(tick)
+                HapticLevel.STANDARD -> feedback.performHapticFeedback(HapticFeedbackType.Confirm)
             }
         }
     }

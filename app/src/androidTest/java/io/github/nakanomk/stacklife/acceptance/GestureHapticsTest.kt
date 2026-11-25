@@ -53,9 +53,9 @@ class GestureHapticsTest {
     private val delegate = object : HapticFeedback {
         override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) { effects.add(hapticFeedbackType) }
     }
-    private val light = HapticFeedbackType.SegmentFrequentTick
-    private val navigation = HapticFeedbackType.SegmentTick
-    private val boundary = HapticFeedbackType.GestureThresholdActivate
+    private val light = HapticFeedbackType.SegmentTick
+    private val lightEdge = HapticFeedbackType.GestureThresholdActivate
+    private val standard = HapticFeedbackType.Confirm
     private val systemEnabled = mutableStateOf(true)
 
     // Exercise the real nested StackLifeTheme gate without changing the device's system setting.
@@ -119,14 +119,14 @@ class GestureHapticsTest {
         record { StackLifeTheme(Appearance(navigationHaptics = HapticLevel.STANDARD, glass = false)) {
             CoursesRoute(viewModel { WorkspaceViewModel(store.api) }, owner.value, { owner.value = it }, {}, { _, _ -> }, {}, {})
         } }
-        tag("course-next").performClick(); tag("week-grid"); pulses(navigation)
+        tag("course-next").performClick(); tag("week-grid"); pulses(standard)
         ui.runOnIdle { owner.value = CourseSelection(term.id, 3) }
         tag("course-week").assertTextContains(ui.activity.getString(R.string.courses_week, 3)); pulses()
         val grid = tag("week-grid")
         grid.performTouchInput { down(center); moveBy(Offset(-width * .22f, 0f), 160); cancel() }
         ui.runOnIdle { assertEquals(3, owner.value.week) }; pulses()
         grid.performTouchInput { swipeLeft() }
-        ui.waitUntil(5_000) { owner.value.week == 4 }; pulses(navigation)
+        ui.waitUntil(5_000) { owner.value.week == 4 }; pulses(standard)
     }
 
     @Test fun navigationUsesTheSelectedSystemEffectAndHonorsBothSwitches() {
@@ -135,7 +135,7 @@ class GestureHapticsTest {
         record { StackLifeTheme(appearance) { rememberDestinationCapsule(active) { active = it }.invoke() } }
         tag("nav:workspace").performClick(); pulses(light)
         ui.runOnIdle { appearance = appearance.copy(navigationHaptics = HapticLevel.STANDARD) }
-        tag("nav:today").performClick(); pulses(navigation)
+        tag("nav:today").performClick(); pulses(standard)
         ui.runOnIdle { appearance = appearance.copy(haptics = false) }
         tag("nav:workspace").performClick(); pulses()
         ui.runOnIdle { appearance = appearance.copy(haptics = true, navigationHaptics = HapticLevel.OFF) }
@@ -195,12 +195,12 @@ class GestureHapticsTest {
         }
         drag("short", -.45f); pulses()
         ui.runOnIdle { runBlocking { inner.scrollTo(inner.maxValue - 4) } }; pulses()
-        drag("inner", -.45f); pulses(boundary)
+        drag("inner", -.45f); pulses(standard)
         drag("inner", -.45f); pulses()
         drag("inner", .4f); pulses()
-        drag("inner", -.7f); pulses(boundary)
+        drag("inner", -.7f); pulses(standard)
         ui.runOnIdle { level = HapticLevel.LIGHT; runBlocking { inner.scrollTo(4) } }; pulses()
-        drag("inner", .45f); pulses(light)
+        drag("inner", .45f); pulses(lightEdge)
         ui.runOnIdle { level = HapticLevel.OFF; runBlocking { inner.scrollTo(inner.maxValue - 4) } }
         drag("inner", -.45f); pulses()
     }
