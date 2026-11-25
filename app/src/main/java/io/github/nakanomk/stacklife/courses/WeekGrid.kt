@@ -5,6 +5,8 @@ import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle as DateTextStyle
 import io.github.nakanomk.stacklife.i18n.AppLanguage
 import io.github.nakanomk.stacklife.R
+import io.github.nakanomk.stacklife.ReadPanel
+import io.github.nakanomk.stacklife.ReadState
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -124,20 +126,22 @@ private fun periodRail(term: TermSpec, monday: LocalDate, calendars: Set<CourseC
 }
 
 @Composable
-internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, sources: List<String> = emptyList(),
-    openDay: ((Int) -> Unit)? = null, open: (ScheduledCourse) -> Unit) {
-    val monday = remember(term.firstMonday, week.week) { term.firstMonday.plusWeeks(week.week - 1L) }
-    val calendars = remember(sources, week.classes) {
+internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, open: (ScheduledCourse) -> Unit) {
+    WeekGrid(term, week.week, remember(week) { ReadState.Loaded(week) }, top, bottom, emptyList(), null, open)
+}
+
+@Composable
+internal fun WeekGrid(term: TermSpec, number: Int, state: ReadState<CourseWeek>, top: Dp, bottom: Dp, sources: List<String>,
+    openDay: ((Int) -> Unit)?, open: (ScheduledCourse) -> Unit) {
+    val monday = remember(term.firstMonday, number) { term.firstMonday.plusWeeks(number - 1L) }
+    val ready = (state as? ReadState.Loaded)?.value
+    val calendars = remember(sources, ready?.classes) {
         buildSet {
             sources.forEach { add(calendarFor(it)) }
-            week.classes.forEach { add(calendarFor(it.source)) }
+            ready?.classes?.forEach { add(calendarFor(it.source)) }
             if (isEmpty()) add(SchoolImports.default.calendar) // Empty manual timetable.
         }
     }
-    val railLayout = remember(term, monday, calendars, week.classes) {
-        periodRail(term, monday, calendars, week.classes.maxOfOrNull { it.meeting.lastPeriod } ?: 0)
-    }
-    val changeover = railLayout.changeover
     val today = LocalDate.now(calendars.singleOrNull()?.zone ?: java.time.ZoneId.systemDefault())
     val typography = MaterialTheme.typography
     val density = LocalDensity.current
@@ -150,9 +154,9 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, sou
     val locale = AppLanguage.locale
     val dateFormat = remember(locale) { DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(locale) }
     var selectedDay by rememberSaveable { mutableIntStateOf(0) }
-    if (selectedDay != 0) {
+    if (openDay == null && selectedDay != 0 && ready != null) {
         val day = monday.plusDays(selectedDay - 1L)
-        val courses = remember(week.classes, selectedDay) { week.classes.filter { it.meeting.day == selectedDay } }
+        val courses = remember(ready.classes, selectedDay) { ready.classes.filter { it.meeting.day == selectedDay } }
         CourseReadPanel(null, day.format(dateFormat), courses, open = { selectedDay = 0; open(it) }, close = { selectedDay = 0 })
     }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("week-grid")) {
@@ -169,7 +173,7 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, sou
                             val date = monday.plusDays(i.toLong())
                             val dateDescription = date.format(dateFormat)
                             Column(Modifier.width(dayWidth).heightIn(min = 48.dp)
-                                .clickable(onClickLabel = stringResource(R.string.courses_open_day), role = Role.Button) {
+                                .clickable(enabled = ready != null, onClickLabel = stringResource(R.string.courses_open_day), role = Role.Button) {
                                     if (openDay != null) openDay(i + 1) else selectedDay = i + 1
                                 }
                                 .semantics { contentDescription = dateDescription },
@@ -184,15 +188,23 @@ internal fun WeekGrid(term: TermSpec, week: CourseWeek, top: Dp, bottom: Dp, sou
                     }
             }
         }) { insets ->
-            Column(Modifier.fillMaxSize().plannerBackdrop(scrollingPlane).wallpaperBackground(colors.surface)
-                .verticalScroll(rememberScrollState()).padding(top = insets.calculateTopPadding())) {
-                if (week.classes.isEmpty()) Text(stringResource(R.string.courses_no_classes_week), Modifier.padding(start = rail, top = 4.dp, bottom = 4.dp),
-                    style = typography.bodySmall, color = colors.onSurfaceVariant)
-                if (changeover != null) Text(stringResource(R.string.courses_changeover, changeover.format(dateFormat)),
-                    Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = typography.bodySmall, color = colors.onSurfaceVariant)
-                PeriodGrid(term.id, week, railLayout.times, showTimes = changeover == null, dayCount = 7,
-                    highlightedDay = today.toEpochDay() - monday.toEpochDay(), rail, dayWidth, periodHeight, open, railLayout.count)
-                Spacer(Modifier.height(bottom + 4.dp))
+            Box(Modifier.fillMaxSize().plannerBackdrop(scrollingPlane).wallpaperBackground(colors.surface)) {
+                if (ready == null) Box(Modifier.fillMaxSize().padding(insets)) { ReadPanel(state) {} }
+                else {
+                    val railLayout = remember(term, monday, calendars, ready.classes) {
+                        periodRail(term, monday, calendars, ready.classes.maxOfOrNull { it.meeting.lastPeriod } ?: 0)
+                    }
+                    val changeover = railLayout.changeover
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = insets.calculateTopPadding())) {
+                        if (ready.classes.isEmpty()) Text(stringResource(R.string.courses_no_classes_week), Modifier.padding(start = rail, top = 4.dp, bottom = 4.dp),
+                            style = typography.bodySmall, color = colors.onSurfaceVariant)
+                        if (changeover != null) Text(stringResource(R.string.courses_changeover, changeover.format(dateFormat)),
+                            Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = typography.bodySmall, color = colors.onSurfaceVariant)
+                        PeriodGrid(term.id, ready, railLayout.times, showTimes = changeover == null, dayCount = 7,
+                            highlightedDay = today.toEpochDay() - monday.toEpochDay(), rail, dayWidth, periodHeight, open, railLayout.count)
+                        Spacer(Modifier.height(bottom + 4.dp))
+                    }
+                }
             }
         }
     }

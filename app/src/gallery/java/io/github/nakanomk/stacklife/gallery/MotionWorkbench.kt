@@ -32,6 +32,7 @@ import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
 import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.assistant.LocalAssistant
+import io.github.nakanomk.stacklife.courses.CourseSelection
 import io.github.nakanomk.stacklife.courses.CoursesRoute
 import io.github.nakanomk.stacklife.courses.RemoveTermReview
 import io.github.nakanomk.stacklife.notes.LocalOpenNote
@@ -110,8 +111,7 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
     val date = dateEpoch?.let(LocalDate::ofEpochDay) ?: local.date
     var revealIdentity by rememberSaveable { mutableStateOf<String?>(null) }
     val reveal = remember(revealIdentity) { revealIdentity?.let { Json.decodeFromString<OccurrenceKey>(it) } }
-    var term by rememberSaveable { mutableStateOf<String?>(null) }
-    var week by rememberSaveable { mutableStateOf<Int?>(null) }
+    var courseSelection by rememberSaveable { mutableStateOf(CourseSelection()) }
     var courseScope by remember { mutableStateOf<AssistantPage>(AssistantPage.Terms) }
     var importBoundary by rememberSaveable { mutableStateOf(false) }
     val pages = rememberSaveableStateHolder()
@@ -134,11 +134,13 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
                             { navigate(MotionCreateFrame) }, { navigate(MotionAdd) })
                     }
                     Destination.TODAY -> TodayRoute(model, date, local.zone,
-                        onDate = { dateEpoch = it.takeUnless { day -> day == local.date }?.toEpochDay() },
+                        onDate = { day ->
+                            if (day != date) revealIdentity = null
+                            dateEpoch = day.takeUnless { it == local.date }?.toEpochDay()
+                        },
                         onEdit = navigate, onSettings = settings, revealKey = reveal,
                         onRevealed = { revealIdentity = null }, onAdd = { navigate(MotionAdd) })
-                    Destination.COURSES -> CoursesRoute(model, term, week,
-                        onTerm = { if (term != it.id) { term = it.id; week = null } }, onWeek = { week = it },
+                    Destination.COURSES -> CoursesRoute(model, courseSelection, onSelection = { courseSelection = it },
                         onImport = { importBoundary = true }, onRemove = { selected, source -> navigate(MotionRemoveTerm(selected.id, source)) },
                         onSettings = settings, onScope = { courseScope = it })
                     else -> error("Unexpected Gallery tab: $page")

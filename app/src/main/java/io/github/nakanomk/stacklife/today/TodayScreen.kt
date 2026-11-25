@@ -64,12 +64,17 @@ internal fun TodayRoute(
         ReadPanel(terms) { all -> CourseEditorHost(model, editor, all.terms) { _, _ -> } }
     }
     fun pageOf(day: LocalDate) = (day.toEpochDay() - firstDay.toEpochDay()).toInt()
-    val selection = rememberCalendarSelection(pageOf(date), pageOf(lastDay) + 1) { onDate(firstDay.plusDays(it.toLong())) }
+    val page = pageOf(date)
+    val selection = rememberCalendarSelection(page, pageOf(lastDay) + 1) { onDate(firstDay.plusDays(it.toLong())) }
+    LaunchedEffect(revealKey, page, selection) {
+        if (revealKey != null) selection.align(page, force = true)
+    }
     val displayed = firstDay.plusDays(selection.displayPage.value.toLong())
-    val choose: (LocalDate) -> Unit = { selection.select(pageOf(it)) }
+    val choose: (LocalDate) -> Unit = { selection.request(pageOf(it)) }
     if (choosingDate) DateWheelDialog(displayed, { choosingDate = false; choose(it) }, { choosingDate = false })
     RootPane(header = {
-        DayHeader(displayed, { choosingDate = true }, choose, { choose(LocalDate.now(zone)) }, onSettings, eventView, { eventView = it })
+        DayHeader(displayed, { choosingDate = true }, { selection.request(selection.displayPage.value + it) },
+            { choose(LocalDate.now(zone)) }, onSettings, eventView, { eventView = it })
     }) { top, bottom ->
         CalendarPager(selection, Modifier.fillMaxSize()) { index ->
             val query = remember(index, zone) { PlannerQuery.Day(firstDay.plusDays(index.toLong()), zone) }
@@ -95,7 +100,7 @@ internal fun TodayRoute(
                         } }, close = { reading = null })
                     }
                 } else if (reading != null) SideEffect { reading = null }
-                val target = revealKey.takeIf { query.date == date }
+                val target = revealKey?.takeIf { index == page && !selection.pager.isScrollInProgress && selection.pager.currentPage == index }
                 val placement = remember(query, plan.occurrences) { TimeGridPlacement(plan.occurrences, query.startMillis, query.endMillis) }
                 var moreStart by rememberSaveable { mutableStateOf<Long?>(null) }
                 var focused by rememberSaveable { mutableStateOf<String?>(null) }
@@ -182,7 +187,7 @@ private fun DayBody(
 
 @Composable
 private fun DayHeader(
-    date: LocalDate, onPick: () -> Unit, onDate: (LocalDate) -> Unit, onToday: () -> Unit, onSettings: () -> Unit,
+    date: LocalDate, onPick: () -> Unit, step: (Int) -> Unit, onToday: () -> Unit, onSettings: () -> Unit,
     events: Boolean, setEvents: (Boolean) -> Unit,
 ) {
     val short = LocalDensity.current.fontScale >= 1.35f
@@ -219,7 +224,7 @@ private fun DayHeader(
             }
         }
     }) {
-        IconButton(onClick = { onDate(date.minusDays(1)) }, enabled = date > firstDay) {
+        IconButton(onClick = { step(-1) }, enabled = date > firstDay) {
             Icon(painterResource(R.drawable.ic_chevron_left), stringResource(R.string.today_previous_day))
         }
         TextButton(onClick = onPick, contentPadding = PaddingValues(horizontal = 4.dp),
@@ -228,7 +233,7 @@ private fun DayHeader(
             Text(if (short) "${date.monthValue}/${date.dayOfMonth}" else date.format(dateHeading),
                 style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        IconButton(onClick = { onDate(date.plusDays(1)) }, enabled = date < lastDay) {
+        IconButton(onClick = { step(1) }, enabled = date < lastDay) {
             Icon(painterResource(R.drawable.ic_chevron_right), stringResource(R.string.today_next_day))
         }
     }

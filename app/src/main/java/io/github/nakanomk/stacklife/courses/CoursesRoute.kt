@@ -20,27 +20,29 @@ import io.github.nakanomk.stacklife.workspace.*
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
+internal data class CourseSelection(val termId: String? = null, val week: Int? = null) : java.io.Serializable
+
 internal fun TermSpec.weekAt(date: LocalDate): Int =
     (ChronoUnit.WEEKS.between(firstMonday, date) + 1).coerceIn(1L, weeks.toLong()).toInt()
 
 @Composable
-internal fun CoursesRoute(model: WorkspaceViewModel, termId: String?, selectedWeek: Int?, onTerm: (TermSpec) -> Unit,
-    onWeek: (Int) -> Unit, onImport: () -> Unit, onRemove: (TermSpec, String) -> Unit, onSettings: () -> Unit,
+internal fun CoursesRoute(model: WorkspaceViewModel, selection: CourseSelection, onSelection: (CourseSelection) -> Unit,
+    onImport: () -> Unit, onRemove: (TermSpec, String) -> Unit, onSettings: () -> Unit,
     onScope: (AssistantPage) -> Unit) {
     val state by remember(model) { model.terms() }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
+    if (state !is ReadState.Loaded) SideEffect { onScope(AssistantPage.Terms) }
     ReadPanel(state) { all ->
         fun today(id: String): LocalDate = LocalDate.now(calendarFor(all.importedSources[id]?.firstOrNull() ?: MANUAL_SOURCE)?.zone ?: java.time.ZoneId.systemDefault())
-        val term = all.terms.firstOrNull { it.id == termId } ?: all.terms.firstOrNull {
+        val term = all.terms.firstOrNull { it.id == selection.termId } ?: all.terms.firstOrNull {
             val date = today(it.id)
             date >= it.firstMonday && date < it.firstMonday.plusWeeks(it.weeks.toLong())
         } ?: all.terms.firstOrNull()
         val week = term?.let {
-            (selectedWeek?.takeIf { term.id == termId } ?: term.weekAt(today(term.id))).coerceIn(1, term.weeks)
+            (selection.week?.takeIf { term.id == selection.termId } ?: term.weekAt(today(term.id))).coerceIn(1, term.weeks)
         }
         val scope = if (term != null && week != null) AssistantPage.Week(term.id, week) else AssistantPage.Terms
         SideEffect { onScope(scope) }
-        CourseHome(model, all, term, week, onTerm, { selected, n -> onTerm(selected); onWeek(n) },
-            onImport, onRemove, onSettings) { it.weekAt(today(it.id)) }
+        CourseHome(model, all, term, week, selection, onSelection, onImport, onRemove, onSettings) { it.weekAt(today(it.id)) }
     }
 }
 

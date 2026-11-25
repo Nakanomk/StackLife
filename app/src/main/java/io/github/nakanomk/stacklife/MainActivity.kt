@@ -185,8 +185,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
     val revealKey = remember(revealIdentity) { revealIdentity?.let { Json.decodeFromString<OccurrenceKey>(it) } }
     var visitToday by rememberSaveable { mutableLongStateOf(0L) }
     var destination by rememberSaveable { mutableStateOf(preferences.appearance.start) }
-    var selectedTerm by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedWeek by rememberSaveable { mutableStateOf<Int?>(null) }
+    var courseSelection by rememberSaveable { mutableStateOf(CourseSelection()) }
     val origins = remember { RouteOrigins() }
     val hostOwner = LocalLifecycleOwner.current
     val homePlane = remember(hostOwner) { HomePlane(hostOwner) }
@@ -265,7 +264,10 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
             pages.SaveableStateProvider(page.key) {
             when (page) {
                 Destination.TODAY -> TodayRoute(model, date, local.zone,
-                    onDate = { selectedDate = it.takeUnless { d -> d == local.date }?.toEpochDay() },
+                    onDate = { day ->
+                        if (day != date) revealIdentity = null
+                        selectedDate = day.takeUnless { it == local.date }?.toEpochDay()
+                    },
                     onEdit = navigate, onSettings = { navigate(Preferences) }, revealKey = revealKey,
                     onRevealed = { revealIdentity = null }, onAdd = { navigate(AddTask) })
                 Destination.WORKSPACE -> WorkspacePanel(model) { workspace ->
@@ -275,8 +277,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 }
                 Destination.GRAPHS -> GraphsRoute(model, { navigate(GraphEditor(it)) }, { navigate(Preferences) })
                 Destination.COUNTDOWN -> CountdownRoute(model, { navigate(CountDetail(it)) }, { navigate(CountEdit()) }, { navigate(Preferences) })
-                Destination.COURSES -> CoursesRoute(model, selectedTerm, selectedWeek,
-                    onTerm = { selectedTerm = it.id; selectedWeek = null }, onWeek = { selectedWeek = it },
+                Destination.COURSES -> CoursesRoute(model, courseSelection, onSelection = { courseSelection = it },
                     onImport = { navigate(ImportCourses) }, onRemove = { term, source -> navigate(RemoveTerm(term.id, source)) },
                     onSettings = { navigate(Preferences) }, onScope = { courseScope = it })
             }
@@ -325,7 +326,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 entry<AddTask> { TaskEditor(model, back) }
                 entry<NoteEditorKey> { key -> NoteEditorScreen(key, model, back) }
                 entry<ImportCourses> { PrivateScreen(privateScreens) {
-                    CourseImportScreen(model, back) { id -> selectedTerm = id; selectedWeek = 1; back() }
+                    CourseImportScreen(model, back) { id -> courseSelection = CourseSelection(id, 1); back() }
                 } }
                 entry<RemoveTerm> { key -> RemoveTermReview(key.id, key.source, model, back) }
                 entry<GraphEditor> { key -> GraphEditorRoute(model, key.id, back, openSource) { navigate(FrameDetail(it, generated = true)) } }

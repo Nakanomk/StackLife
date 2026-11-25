@@ -15,6 +15,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.LocalPinnableContainer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.createSavedStateHandle
@@ -71,7 +72,7 @@ internal fun CourseMeeting.periodLabel() = if (firstPeriod == lastPeriod) uiText
 private fun RowScope.WeekPicker(term: TermSpec, selection: CalendarSelection) {
     val page by selection.displayPage
     val week = page + 1
-    IconButton(onClick = { selection.select(selection.displayPage.value - 1) }, enabled = week > 1, modifier = Modifier.testTag("course-prev")) {
+    IconButton(onClick = { selection.request(selection.displayPage.value - 1) }, enabled = week > 1, modifier = Modifier.testTag("course-prev")) {
         Icon(painterResource(R.drawable.ic_chevron_left), stringResource(R.string.courses_previous_week))
     }
     var expanded by remember { mutableStateOf(false) }
@@ -87,10 +88,10 @@ private fun RowScope.WeekPicker(term: TermSpec, selection: CalendarSelection) {
             }
         }
         PlannerDropdownMenu(expanded, { expanded = false }) {
-            for (n in 1..term.weeks) DropdownMenuItem(text = { Text(stringResource(R.string.courses_week, n)) }, onClick = { expanded = false; selection.select(n - 1) })
+            for (n in 1..term.weeks) DropdownMenuItem(text = { Text(stringResource(R.string.courses_week, n)) }, onClick = { expanded = false; selection.request(n - 1) })
         }
     }
-    IconButton(onClick = { selection.select(selection.displayPage.value + 1) }, enabled = week < term.weeks, modifier = Modifier.testTag("course-next")) {
+    IconButton(onClick = { selection.request(selection.displayPage.value + 1) }, enabled = week < term.weeks, modifier = Modifier.testTag("course-next")) {
         Icon(painterResource(R.drawable.ic_chevron_right), stringResource(R.string.courses_next_week))
     }
 }
@@ -104,9 +105,10 @@ internal fun courseEditor(owner: String): ManualEditorModel {
 
 @Composable
 internal fun CourseEditorHost(model: WorkspaceViewModel, editor: ManualEditorModel, terms: List<TermSpec>, saved: (TermSpec, Int) -> Unit) {
+    val onSaved by rememberUpdatedState(saved)
     editor.form?.let { form ->
         key(form) { ManualCourseSheet(model, form, terms, close = editor::close, saved = { term, week ->
-            editor.close(); saved(term, week)
+            if (editor.form === form) { editor.close(); onSaved(term, week) }
         }) }
     }
 }
@@ -114,17 +116,31 @@ internal fun CourseEditorHost(model: WorkspaceViewModel, editor: ManualEditorMod
 @Composable
 internal fun CourseHome(
     model: WorkspaceViewModel, catalog: Terms, term: TermSpec?, week: Int?,
-    onTerm: (TermSpec) -> Unit, onWeek: (TermSpec, Int) -> Unit, onImport: () -> Unit,
+    owner: CourseSelection, onSelection: (CourseSelection) -> Unit, onImport: () -> Unit,
     onRemove: (TermSpec, String) -> Unit, onSettings: () -> Unit, currentWeek: (TermSpec) -> Int,
 ) {
     var listMode by rememberSaveable { mutableStateOf(false) }
     val selection = if (term != null && week != null) key(term.id) {
-        rememberCalendarSelection(week - 1, term.weeks) { onWeek(term, it + 1) }
+        rememberCalendarSelection(week - 1, term.weeks) { onSelection(CourseSelection(term.id, it + 1)) }
     } else null
     val editor = courseEditor("timetable")
-    val add = { editor.open(term, week ?: 1) }
+    // An editor can legitimately create a different term. Redirect after its receipt only
+    // if the calendar that launched it still owns the selection (including after rotation).
+    var editorOrigin by rememberSaveable(owner) { mutableStateOf<CourseSelection?>(null) }
+    fun openEditor(selected: TermSpec?, number: Int, pattern: CoursePattern? = null) {
+        editorOrigin = owner
+        editor.open(selected, number, pattern)
+    }
+    val add = { openEditor(term, week ?: 1) }
     val terms = catalog.terms
-    CourseEditorHost(model, editor, terms, onWeek)
+    CourseEditorHost(model, editor, terms) { saved, number ->
+        // This save can change the catalog's fallback term before its receipt arrives.
+        // Only a new explicit shell selection or a different editor invalidates ownership.
+        if (editorOrigin == owner) {
+            onSelection(CourseSelection(saved.id, number))
+        }
+        editorOrigin = null
+    }
     RootPane(contentDrawsTopEdge = term != null && week != null && !listMode, header = {
         RootToolbar(Destination.COURSES, onSettings, leading = {
             if (term != null) {
@@ -138,15 +154,16 @@ internal fun CourseHome(
                         DropdownMenuItem({ Text(if (listMode) stringResource(R.string.courses_week_grid) else stringResource(R.string.courses_list)) },
                             { menu = false; listMode = !listMode }, modifier = Modifier.testTag("course-view-toggle"))
                         DropdownMenuItem({ Text(stringResource(R.string.courses_go_current_week)) },
-                            { menu = false; selection?.select(currentWeek(term) - 1) }, modifier = Modifier.testTag("course-current-week"),
+                            { menu = false; selection?.request(currentWeek(term) - 1) }, modifier = Modifier.testTag("course-current-week"),
                             leadingIcon = { Icon(painterResource(R.drawable.ic_today), null) })
                         val importLaunch = rememberRouteLaunch("course-import")
                         DropdownMenuItem({ Text(stringResource(R.string.courses_import)) }, { importLaunch.open { menu = false; onImport() } },
                             modifier = importLaunch.modifier.testTag("course-import"))
                         if (terms.size > 1) {
                             HorizontalDivider()
-                            for (choice in terms) DropdownMenuItem({ Text(choice.displayLabel(), maxLines = 1, overflow = TextOverflow.Ellipsis) }, { menu = false; onTerm(choice) },
-                                enabled = choice.id != term.id)
+                            for (choice in terms) DropdownMenuItem({ Text(choice.displayLabel(), maxLines = 1, overflow = TextOverflow.Ellipsis) }, {
+                                menu = false; onSelection(CourseSelection(choice.id, currentWeek(choice)))
+                            }, enabled = choice.id != term.id)
                         }
                         if (sources.isNotEmpty()) {
                             HorizontalDivider()
@@ -179,10 +196,8 @@ internal fun CourseHome(
             CalendarPager(selection, Modifier.fillMaxSize()) { index ->
                 val query = remember(term.id, index) { PlannerQuery.Week(term.id, index + 1) }
                 val data by remember(model, query) { model.week(query) }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
-                ReadPanel(data) { result ->
-                    if (result.term != null) CourseWeekPage(model, result.term, result, catalog.importedSources[term.id].orEmpty(), listMode, top, bottom) { selected ->
-                        editor.open(result.term, selected.meeting.week, selected.meeting.pattern())
-                    }
+                CourseWeekPage(model, term, index + 1, data, catalog.importedSources[term.id].orEmpty(), listMode, top, bottom) { selected ->
+                    openEditor(term, selected.meeting.week, selected.meeting.pattern())
                 }
             }
         }
@@ -190,12 +205,23 @@ internal fun CourseHome(
 }
 
 @Composable
-private fun CourseWeekPage(model: WorkspaceViewModel, term: TermSpec, week: CourseWeek, sources: List<String>, listMode: Boolean, top: Dp, bottom: Dp, edit: (ScheduledCourse) -> Unit) {
+private fun CourseWeekPage(model: WorkspaceViewModel, term: TermSpec, number: Int, data: ReadState<CourseWeek>, sources: List<String>,
+    listMode: Boolean, top: Dp, bottom: Dp, edit: (ScheduledCourse) -> Unit) {
+    // Term metadata and the week have independent Room collectors. Don't relabel an old
+    // result with new dates while the matching revision is still on its way.
+    val state = if (data is ReadState.Loaded && (data.value.term != term || data.value.week != number)) ReadState.Loading else data
+    val week = (state as? ReadState.Loaded)?.value
     // Store an occurrence key, not a list position: after reimport never show a different course.
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedDay by rememberSaveable { mutableIntStateOf(0) }
-    val chosen = selected?.let { key -> week.classes.firstOrNull { it.occurrenceKey() == key } }
-    if (chosen != null || selectedDay != 0) {
+    val chosen = selected?.let { key -> week?.classes?.firstOrNull { it.occurrenceKey() == key } }
+    if (week != null && (chosen != null || selectedDay != 0)) {
+        // Keep the actual reader's week/query alive if its page scrolls out during handoff.
+        val page = LocalPinnableContainer.current
+        DisposableEffect(page) {
+            val handle = page?.pin()
+            onDispose { handle?.release() }
+        }
         val day = selectedDay.takeIf { it != 0 }
         val label = day?.let {
             val date = term.firstMonday.plusWeeks(week.week - 1L).plusDays(it - 1L)
@@ -207,9 +233,17 @@ private fun CourseWeekPage(model: WorkspaceViewModel, term: TermSpec, week: Cour
             close = { if (selected != null) selected = null else selectedDay = 0 })
         if (chosen == null && selected != null) SideEffect { selected = null }
     }
-    else if (selected != null) SideEffect { selected = null }
+    else if (week != null && selected != null) SideEffect { selected = null }
     val open: (ScheduledCourse) -> Unit = { selected = it.occurrenceKey() }
-    if (listMode) LazyColumn(Modifier.fillMaxSize().testTag("course-list"),
+    if (!listMode) {
+        WeekGrid(term, number, state, top, bottom, sources, openDay = { selectedDay = it }, open = open)
+        return
+    }
+    if (week == null) {
+        ReadPanel(state) {}
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize().testTag("course-list"),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = top + 8.dp, bottom = bottom + 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (week.classes.isEmpty()) item { Text(stringResource(R.string.courses_no_classes_week)) }
@@ -226,7 +260,7 @@ private fun CourseWeekPage(model: WorkspaceViewModel, term: TermSpec, week: Cour
                 }
             }
         }
-    } else WeekGrid(term, week, top, bottom, sources = sources, openDay = { selectedDay = it }, open = open)
+    }
 }
 
 internal fun ScheduledCourse.occurrenceKey(): String = CourseOccurrenceId.of(termId, source, meeting).stableKey()

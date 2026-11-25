@@ -15,4 +15,10 @@ Copyright 2021 The Android Open Source Project. Apache License, Version 2.0.
 https://github.com/androidx/androidx/tree/841411143e849ef66c3e8d49cc0dd70d62d7a3c0/compose/material3/material3/integration-tests/material3-catalog/src/main/java/androidx/compose/material3/catalog/library
 CatalogApp.kt, model/Components.kt, model/Examples.kt, ui/common/CatalogScaffold.kt: GalleryEntry and Catalog adapt the source-labelled example registry and independent theme sheet. Examples call StackLife components with an isolated in-memory workspace; no AndroidX example screens or artwork are bundled.
 
+AndroidX Compose Foundation PagerState
+Copyright 2023 The Android Open Source Project. Apache License, Version 2.0.
+https://github.com/androidx/androidx/blob/4aa409d104231ea63ba917270cd1b2c3dd747353/compose/foundation/foundation/src/commonMain/kotlin/androidx/compose/foundation/pager/PagerState.kt
+today/CalendarPager.kt uses currentPage/currentPageOffsetFraction for the live day/week header, settledPage only after a real drag, and updateCurrentPage for a non-publishing external alignment. The pager implementation remains the AndroidX dependency.
+At the same revision, foundation/pager/LazyLayoutPager.kt (LazyLayoutPinnableItem) and compose/ui/ui/src/commonMain/kotlin/androidx/compose/ui/layout/PinnableContainer.kt provide the actual page pin used by courses/CourseHome.kt: only an open reader retains its own page and releases it on dismissal.
+
 Full Apache License, Version 2.0: see the license text in Backdrop-Miuix-Apache-2.0.txt in this directory.
