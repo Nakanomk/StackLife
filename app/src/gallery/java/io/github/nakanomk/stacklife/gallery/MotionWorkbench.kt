@@ -125,12 +125,12 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
     }
     CompositionLocalProvider(LocalAppearance provides scopedAppearance, LocalAssistant provides null,
         LocalRouteOrigins provides origins, LocalOpenNote provides { navigate(it) }) {
-        val features: @Composable (Destination, Boolean) -> Unit = { page, front ->
+        val features: @Composable (Destination, Boolean, TrialQueueLinks?) -> Unit = { page, front, links ->
             pages.SaveableStateProvider(page.key) {
                 when (page) {
                     Destination.WORKSPACE -> WorkspaceData(model) { data ->
-                        WorkspaceScreen(data, model, { navigate(MotionTask(it)) }, { navigate(MotionFrame(it)) }, settings,
-                            if (front) shared else noCardBounds, frames, { frames = it },
+                        WorkspaceScreen(data, model, links?.open ?: { navigate(MotionTask(it)) }, { navigate(MotionFrame(it)) }, settings,
+                            if (front) links?.cards ?: shared else noCardBounds, frames, { frames = it },
                             { navigate(MotionCreateFrame) }, { navigate(MotionAdd) })
                     }
                     Destination.TODAY -> TodayRoute(model, date, local.zone,
@@ -149,8 +149,12 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
             entry<MotionHome> {
                 if (calendarNavigation) {
                     RootPages(scopedAppearance.visibleOrder, destination, 0L, { destination = it },
-                        if (destination == Destination.TODAY) AssistantPage.Day(date, local.zone) else courseScope, features)
-                } else Page { features(start, true) }
+                        if (destination == Destination.TODAY) AssistantPage.Day(date, local.zone) else courseScope) { p, f -> features(p, f, null) }
+                } else if (start == Destination.WORKSPACE && !startOnStack) {
+                    TaskCardPilot.Show(model, edit = { id, frame, rev -> navigate(MotionEdit(id, frame, rev)) }) { links ->
+                        Page { features(start, true, links) }
+                    }
+                } else Page { features(start, true, null) }
             }
             entry<MotionTask>(metadata = { key -> origins.sourceSceneMetadata(key.origin()) }) { key ->
                 DetailRoute(key.origin(), animate) {

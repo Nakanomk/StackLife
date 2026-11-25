@@ -1,7 +1,8 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <permission android:name="${applicationId}.permission.SEED_FIXTURE" android:protectionLevel="signature" />
     <queries><package android:name="io.github.nakanomk.stacklife.macrobenchmark" /></queries>
-    <application>
+    <application android:name=".benchmark.BenchmarkApplication" tools:replace="android:name">
         <profileable android:shell="true" />
         <provider android:name=".benchmark.FixtureProvider" android:authorities="${applicationId}.fixture"
             android:exported="true" android:readPermission="android.permission.DUMP"

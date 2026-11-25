@@ -57,6 +57,7 @@ junit = { module = "junit:junit", version.ref = "junit" }
 markdown-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdown" }
 recur = { module = "org.dmfs:lib-recur", version.ref = "recur" }
 miuix-blur = { module = "top.yukonga.miuix.kmp:miuix-blur-android", version.ref = "miuix" }
+miuix-squircle = { module = "top.yukonga.miuix.kmp:miuix-squircle-android", version.ref = "miuix" }
 materialkolor = { module = "com.materialkolor:material-kolor-core", version.ref = "materialkolor" }
 macrobenchmark = { module = "androidx.benchmark:benchmark-macro-junit4", version.ref = "benchmark" }
 uiautomator = { module = "androidx.test.uiautomator:uiautomator", version.ref = "uiautomator" }

@@ -66,6 +66,8 @@ android {
     }
     for (variant in listOf("benchmark", "gallery")) {
         sourceSets.getByName(variant).kotlin.directories.add("src/benchmark/fixtures")
+        sourceSets.getByName(variant).kotlin.directories.add("src/benchmark/motion")
+        sourceSets.getByName(variant).assets.directories.add("src/benchmark/motionAssets")
     }
     buildFeatures { compose = true }
     compileOptions {
@@ -104,6 +106,11 @@ dependencies {
     implementation(libs.materialkolor)
     implementation(libs.miuix.blur) {
         exclude(group = "org.jetbrains.compose.foundation", module = "foundation-android")
+    }
+    for (variant in listOf("benchmark", "gallery")) {
+        addProvider<MinimalExternalModuleDependency, ExternalModuleDependency>("${variant}Implementation", libs.miuix.squircle) {
+            exclude(group = "org.jetbrains.compose.foundation", module = "foundation-android")
+        }
     }
     if (kitAar != null) add("kitLabImplementation", files(kitAar))
     testImplementation(libs.okhttp.tls)

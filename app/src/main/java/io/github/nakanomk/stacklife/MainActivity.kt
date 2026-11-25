@@ -85,8 +85,8 @@ class MainActivity : LocalizedActivity() {
     }
 }
 
-@Serializable @SerialName("io.github.nakanomk.stacklife.Workbench") private data object Home : NavKey
-@Serializable private data class TaskDetail(val id: String) : NavKey
+@Serializable @SerialName("io.github.nakanomk.stacklife.Workbench") internal data object Home : NavKey
+@Serializable internal data class TaskDetail(val id: String) : NavKey
 @Serializable private data class EditTask(val id: String, val frameId: String? = null, val revision: Long? = null) : NavKey
 @Serializable private data class CountDetail(val id: String) : NavKey
 @Serializable private data class CountEdit(val id: String? = null, val seed: CountdownSeed? = null) : NavKey
@@ -129,7 +129,7 @@ private fun NavKey.motionKey(): String = when (this) {
 }
 
 @Composable
-private fun SourcePanel(model: WorkspaceViewModel, link: GraphLink, content: @Composable (SourceView) -> Unit) {
+internal fun SourcePanel(model: WorkspaceViewModel, link: GraphLink, content: @Composable (SourceView) -> Unit) {
     val state by remember(model, link) { model.read<SourceView>(PlannerQuery.Source(link)) }.collectAsStateWithLifecycle(ReadState.Loading)
     ReadPanel(state, content)
 }
@@ -248,7 +248,8 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
         val shared: SharedModifier = { key ->
             if (animate && initialDetail == null) cardBoundsModifier(key) else Modifier
         }
-        val showFeature: @Composable (Destination, Boolean) -> Unit = { page, front ->
+        val trial = LocalContext.current.applicationContext as? TaskCardTrial
+        val showFeature: @Composable (Destination, Boolean, TrialQueueLinks?) -> Unit = { page, front, links ->
             pages.SaveableStateProvider(page.key) {
             when (page) {
                 Destination.TODAY -> TodayRoute(model, date, local.zone,
@@ -256,8 +257,8 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     onEdit = navigate, onSettings = { navigate(Preferences) }, revealKey = revealKey,
                     onRevealed = { revealIdentity = null }, onAdd = { navigate(AddTask) })
                 Destination.WORKSPACE -> WorkspacePanel(model) { workspace ->
-                    WorkspaceScreen(workspace, model, { navigate(TaskDetail(it)) }, { navigate(FrameDetail(it)) },
-                        { navigate(Preferences) }, if (front) shared else noCardBounds, frames, { frames = it },
+                    WorkspaceScreen(workspace, model, links?.open ?: { navigate(TaskDetail(it)) }, { navigate(FrameDetail(it)) },
+                        { navigate(Preferences) }, if (front) links?.cards ?: shared else noCardBounds, frames, { frames = it },
                         { navigate(CreateFrame) }, { navigate(AddTask) })
                 }
                 Destination.GRAPHS -> GraphsRoute(model, { navigate(GraphEditor(it)) }, { navigate(Preferences) })
@@ -273,12 +274,15 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 entry<Home> {
                     val order = preferences.appearance.visibleOrder
                     val active = preferences.appearance.nearestVisible(destination)
-                    RootPages(order, active, visitToday, { destination = it }, featureScope(active), showFeature)
+                    if (trial == null) RootPages(order, active, visitToday, { destination = it }, featureScope(active)) { p, f -> showFeature(p, f, null) }
+                    else trial.Show(model, edit = { id, frame, rev -> navigate(EditTask(id, frame, rev)) }) { links ->
+                        RootPages(order, active, visitToday, { destination = it }, featureScope(active)) { p, f -> showFeature(p, f, links) }
+                    }
                 }
                 entry<Feature> { key ->
                     CompositionLocalProvider(LocalFeatureBack provides back, LocalPlannerGlassAllowed provides true) {
                         Page { DockOverlay(assistantPage = featureScope(key.destination)) { bottom ->
-                            CompositionLocalProvider(LocalRootBottom provides bottom) { showFeature(key.destination, true) }
+                            CompositionLocalProvider(LocalRootBottom provides bottom) { showFeature(key.destination, true, null) }
                         } }
                     }
                 }

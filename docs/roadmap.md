@@ -497,6 +497,8 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 
 **隔离 Gallery（第 29 项）：** `.gallery` 包装配五个组件示例、五个动效示例及一个材质对照，直接使用生产组件。目录、源码入口和主题面板取自 [AndroidX Material3 Catalog `8414111`](https://github.com/androidx/androidx/tree/841411143e849ef66c3e8d49cc0dd70d62d7a3c0/compose/material3/material3/integration-tests/material3-catalog)，Apache-2.0。`.bench` 与 `.gallery` 只共享合成输入；Gallery 无网络权限、更新器、闹钟或正式库。API 37 模拟器（1080×2340、440 dpi、字号 1×）实测任务返回半程反拖取消仍停在原任务、课格打开对应详情、无连接历史仅有合成用户消息、深色及 320 dp 预览冷启动保留。preview／release 合并清单均无 Gallery 和夹具入口；真机预算仍以 `.bench` 单独验收。
 
+**U1 任务卡试验：** 只在 `.gallery` 和 `.bench` 装配 [BiliPai `c7f835b` 的导航 fork](https://github.com/jay3-yy/BiliPai/tree/c7f835b34d8323358be57be298f86f29fecb53c8/miuix-navigation)（独立 Apache-2.0，33 个 Kotlin 文件）及[固定 Scene 适配](https://github.com/jay3-yy/BiliPai/blob/c7f835b34d8323358be57be298f86f29fecb53c8/app/src/main/java/com/android/purebilibili/navigation3/BiliPaiAndroidXNavDisplay.kt)（GPL-3.0）。任务仍通过已有 `PlannerApi` 读取、编辑。窗口与来源消失时不采用上游的整页淡出或位图；无落点走不透明边缘退出。上游所需的 Miuix squircle 0.9.5-beta02 也只进入这两个包。普通版待任务返回真机预算通过后切换。
+
 **后续单元（待实现、验收后单独交付）：** U1 先验任务卡开返再切换全部导航调用者；U2 真实工作台回执、自动清理与冲突安全的撤回；U3 消费回执的卡片转场；U4 日期同步、待排拾取、滚轮默认、事件图标、时间标记与触感；U5 信息说明、外观默认与取色、标题、状态栏和卡片材质；U6 更新专页／渠道；U7 助理开关与文件；U8 严格区分外观包和可分类恢复的完整备份；U9 今日／周表桌面组件；U10 按改动调用者及固定 `.bench` 场景放行。不预占新 schema。启动器实时玻璃后端、WakeUp 版权链和真机预算分别验收。
 
 ### 历史里程碑验收用例（M1–M6）

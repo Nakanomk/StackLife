@@ -29,10 +29,10 @@ private const val currentBiliPai = "BiliPai 5893c2c80739e3759ac64ae5f232cf03a94d
 
 internal val motionExamples: List<GalleryEntry> = listOf(
     GalleryEntry("motion-task", GalleryGroup.MOTION, "任务卡片 · 开启、返回与反拖取消",
-        "transitions/SceneMotion.kt",
-        "workspace/WorkspaceScreen.kt::WorkspaceScreen → transitions/SceneMotion.kt::DetailRoute → workspace/Details.kt::TaskScreen；transitions/{LiveSourceScene,HomePlane,RouteMotion}.kt。现有源：$currentBiliPai / navigation3/SettingsSharedContainerTransition.kt。",
-        "$appLicense；BiliPai GPL-3.0；AndroidX Navigation 3 Apache-2.0",
-        "同一张可见队列卡提供实际坐标；由生产 NavDisplay 场景驱动，不是新版 B1/B2 移植或截图回放。",
+        "workspace/WorkspaceScreen.kt",
+        "workspace/WorkspaceScreen.kt → TaskCardPilot → workspace/Details.kt::TaskScreen。BiliPai c7f835b34d8323358be57be298f86f29fecb53c8：navigation3/{BiliPaiAndroidXNavDisplay,SettingsContainerTransition,SettingsContainerMotionPolicy}.kt、miuix-navigation。",
+        "$appLicense；BiliPai GPL-3.0；miuix-navigation 与 AndroidX Navigation 3 Apache-2.0",
+        "隔离试验和优化后的 .bench 使用同一份实时任务卡和单时钟。正式版尚未切换；下方链接为原队列组件。",
         "点一张完全可见的任务卡。在手势导航设备上从边缘拖至一半再反拖取消：应仍停在同一任务。再用返回按钮回到队列。acceptance/SceneMotionTest#firstTaskPushAndReversiblePredictivePopUseTheScrolledRow。") {
         MotionWorkbench(Destination.WORKSPACE)
     },
