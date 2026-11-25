@@ -473,6 +473,30 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 
 玻璃档通过队列滚动和压栈原因开合（3/11）；实色档未过的是打开设置、消息面板打开和关闭（8/11 通过）。保留静态壁纸与卡底缓存，回退了额外缓存整页的试验：该试验把玻璃档打开设置的 P95 从 +6.1 ms 拉长到 +12.6 ms。另在 API 37 模拟器录制倒数日翻页、反拖取消与返回，119 帧中未出现全黑内容区；录屏不计入真机帧预算。
 
+### 0.11.2 之后：包边界与交付门禁
+
+**U0 静态审查基线：0.11.2（38），Room 13。** 下表的「通过」只指所列边界能在源码中对应，不代表重新运行过该测试。表中许可指所借实现，StackLife 自有适配沿用 GPL-3.0-or-later；[随包许可](../app/src/main/assets/licenses/)保留原文。
+
+|生产包／入口|状态、持久化与外部输入|结论／最近的消费者用例|
+|---|---|---|
+|根包 `MainActivity`、`StackLifeApplication`|前者同时拥有 Nav3 栈、来源、日期、学期周与助理面板；后者装配 Room、文件、连接、提醒和更新。通知 Intent 先按发生键回查。|需修复：导航与日／周所有权分开集成；`SceneMotionTest`、`ReminderNavigationTest`。|
+|`planner` → `storage/RoomPlannerApi`|批内别名和提案留在内存；Room 写事务复核 revision 后才应用。`tasks.frameId` 和帧快照的 `ownedTaskId` 各自有外键；不应通过恢复归档隐式级联删除。|需修复：`Applied` 仅带修订；工作台要用实际写集。`WorkspaceTest`、`PlannerMigrationTest`。|
+|`workspace/WorkspaceScreen`、`Details`|读 `WorkspaceViewModel`；压栈成功 ID 来自预览 refs，设置首页和任务操作共用详情文件。手势／编辑器是输入。|需修复：事务回执、取空清理、撤回；`WorkspaceUiTest`。|
+|`transitions/SceneMotion`、`RouteMotion`|Nav3 进度、可见行 ID 和窗口几何驱动卡片。`SceneMotion` 在返回中计算 `CardWindow`；不能把上一张卡当落点。既有 BiliPai GPL-3.0 适配与拟引入 Apache-2.0 驱动分开记。|需修复：固定 scene 与单一驱动；`SceneMotionTest`；沿用上表失败预算。|
+|`today/TodayScreen`、`CalendarPager`|`CalendarSelection.select()` 同时发布和滚动；外部值回流亦调用 `select()`。`PlannerQuery.Day` 读取库，拖动坐标是瞬态输入。|需修复：对齐不应回发业务选择；`CalendarArrowTest`、`DayTimelineTest`。|
+|`courses/CoursesRoute`、`HubSource`|学期、周和节次来自本地投影；`MainActivity.onTerm` 另清周。文件按字节限额读 UTF-8，脚本只在指定 HTTPS 总课表路径执行；WadwaitaUp MIT。|需修复：切学期和周原子化；`CourseTimelineGestureTest`、`HubProjectionTest`。本人在线登录证据不足。|
+|`graphs/GoalOrdering`、`GraphEditorRoute`|以稳定 ID 构建 JGraphT 有向无环图，取目标前驱及自身；坐标只是画布输入。图模板、链接、边通过 Planner 持久化；KotlinFlow MIT、JGraphT LGPL-2.1。|通过：不从坐标推断生成顺序；`GoalOrderTest`、`GraphTransactionTest`。|
+|`countdown/CountdownSeed`、`CountdownRoute`|发生项只提供标题和当地日期；保存独立记录和私图 ID，返回锚点跟随卡片 ID。TimeTrace MIT。|通过：来源不变成反向外键；`CountdownTransactionTest`、`CountdownUiTest`。|
+|`notes/NoteDraft`、`markdown/PlannerMarkdown` 与 `markdown/kern`|未提交文本由私有草稿文件及原子索引持有；提交归属原任务／模板。读取缓存属页面；输入法的文档投影与显示分开。Kern、JetBrains Markdown Apache-2.0。|通过：草稿和渲染缓存不作备份的权威记录；`NoteDraftTest`、`MarkdownComposerImeTest`、`MarkdownLinkTest`。|
+|`assistant/AssistantModel`、`AttachmentStore`、`ConnectionStore`|对话和变更记录在 Room；图片是私有文件，连接是 Keystore 加密文件；工具结果／模型响应和系统 picker 均是外部输入。OkHttp Apache-2.0；图片准备借 GPTMobile GPL-3.0。|需修复：停用时使请求失效、文件类型和跨存储恢复；`AssistantProposalTest`、`ConversationHistoryTest`、`ConnectionStoreTest`。真实 BYOK 证据不足。|
+|`appearance/WallpaperHost`、`BackgroundStore` 与 `images/StaticPhoto`|壁纸与卡底取背后像素；有界解码、同卷发布后用 ID 引用，回收先读完整引用。BiliPai GPL-3.0、Miuix／Coil Apache-2.0、MaterialKolor core MIT。|通过：保留现有取样、文件所有权和实色降级；`WallpaperReplayTest`、`CardMaterialTest`、`BackgroundStoreTest`。|
+|`about/HelpAboutScreen`、`DiagnosticExportModel`|版本、签名、许可和固定事件码在本机读取；SAF 只写用户选定文件，pending 快照不持久化。已有 BiliPai 关于页参考。|需修复：独立更新入口，保留原诊断／许可行为；`HelpAboutScreenTest`、`DiagnosticDeviceTest`。|
+|`updates/AppUpdates`、`StackLifeReleases`|发布数据和安装会话回执是外部输入。设备偏好保存候选和会话；当前 `enterHome()` 依赖 24 小时，并可能把静默结果显示为弹窗。|需修复：首次前台检查、渠道、专页；保留资产／证书校验。`ReleaseAssetsTest`、`CachedReleaseTest`。|
+|`reminders/AgendaReminders`、`ReminderReceiver`|Room 保存规则／回执，设备偏好记已装闹钟；广播和时间变化触发对账；通知输入回查发生键。|通过：合成 Gallery 不装闹钟，不备份 OS 权限或已投递回执；`ReminderDeliveryTest`、`ReminderNavigationTest`。|
+|`onboarding/OnboardingScreen`、`i18n/AppLocales`|仅确认 `CompleteOnboarding` 携带 `starterDay` 才创建练习；语言使用 LocaleManager／旧系统私有偏好。引导借 Now in Android（Apache-2.0）。|通过：恢复已有日程不重新填示例；`StarterPlanTransactionTest`、`LanguageSettingsTest`。|
+
+**后续单元（待实现、验收后单独交付）：** U1 先验任务卡开返再切换全部导航调用者；U2 真实工作台回执、自动清理与冲突安全的撤回；U3 消费回执的卡片转场；U4 日期同步、待排拾取、滚轮默认、事件图标、时间标记与触感；U5 信息说明、外观默认与取色、标题、状态栏和卡片材质；U6 更新专页／渠道；U7 助理开关与文件；U8 严格区分外观包和可分类恢复的完整备份；U9 今日／周表桌面组件；U10 按改动调用者及固定 `.bench` 场景放行。不预占新 schema。启动器实时玻璃后端、WakeUp 版权链和真机预算分别验收。
+
 ### 历史里程碑验收用例（M1–M6）
 
 |阶段 / 用例|输入 → 可观察结果（校方登录、真实模型、联盟真机和性能有各自的验收条件）|
