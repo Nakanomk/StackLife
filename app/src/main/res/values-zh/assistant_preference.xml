@@ -1,0 +1,4 @@
+<resources>
+    <string name="assistant_enabled_label">启用日程助理</string>
+    <string name="assistant_enabled_help">关闭后会清除未发送的草稿、附件和未确认的提案。已确认的保存会继续完成。模型连接和历史对话会保留。</string>
+</resources>

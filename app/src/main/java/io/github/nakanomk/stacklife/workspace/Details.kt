@@ -92,7 +92,8 @@ internal const val WallpaperSettingsOrigin = "appearance:wallpaper"
 @Composable
 internal fun SettingsScreen(settings: PolicyView, actions: WorkspaceViewModel, onBack: () -> Unit,
     onConnection: () -> Unit, onAppearance: (AppearanceGroup) -> Unit, onWallpaper: () -> Unit,
-    onAbout: () -> Unit, onUpdates: (() -> Unit)?, onFeature: (Destination) -> Unit, onSchedule: (SlotEditorKey) -> Unit) {
+    onAbout: () -> Unit, onUpdates: (() -> Unit)?, assistantPreference: @Composable () -> Unit,
+    onFeature: (Destination) -> Unit, onSchedule: (SlotEditorKey) -> Unit) {
     val action = rememberSubmission(actions)
     EditorPage(stringResource(R.string.ui_settings), onBack, AssistantPage.Settings) { top, bottom ->
             LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -126,6 +127,8 @@ internal fun SettingsScreen(settings: PolicyView, actions: WorkspaceViewModel, o
                     }
                 } }
                 item { SettingsGroup(stringResource(R.string.ui_assistant)) {
+                    assistantPreference()
+                    HorizontalDivider(Modifier.padding(start = 32.dp))
                     PreferenceRow(stringResource(R.string.ui_model_connection), modifier = Modifier.routeOrigin("model"),
                         leadingIcon = R.drawable.ic_chat, onClick = onConnection)
                 } }

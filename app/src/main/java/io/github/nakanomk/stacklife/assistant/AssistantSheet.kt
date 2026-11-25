@@ -71,14 +71,14 @@ private fun ScopedComposer(scope: String, page: AssistantPage?, privateScope: As
     val model = LocalAssistant.current ?: return
     val id = retainedId ?: rememberSaveable(privateScope) { UUID.randomUUID().toString() }
     val activity = LocalActivity.current
-    val draft = remember(id, model) { model.draft(id) }
+    val draft = model.draft(id)
     DisposableEffect(model, id) {
         model.composerReturned(id)
         onDispose { if (retainedId == null && activity?.isChangingConfigurations != true) model.composerLeft(id) }
     }
-    val chatOpen by remember(model) { model.state.map { it.page != null }.distinctUntilChanged() }
-        .collectAsStateWithLifecycle(initialValue = model.state.value.page != null)
-    val active = !chatOpen && !model.browsingHistory
+    val blocked by remember(model) { model.state.map { it.page != null || it.work == AssistantWork.COMMIT }.distinctUntilChanged() }
+        .collectAsStateWithLifecycle(initialValue = model.state.value.let { it.page != null || it.work == AssistantWork.COMMIT })
+    val active = !blocked && !model.browsingHistory
     val currentPage by rememberUpdatedState(page)
     LaunchedEffect(draft, active) {
         if (active) snapshotFlow { draft.field.text.isNotEmpty() || draft.images.isNotEmpty() }.collect { hasContent ->
@@ -102,14 +102,24 @@ internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: Strin
     val keyboard = LocalSoftwareKeyboardController.current
     val haptics = LocalHapticFeedback.current
     var editing by remember { mutableStateOf(false) }
+    DisposableEffect(draft, focus, keyboard) {
+        onDispose {
+            if (editing) {
+                focus.clearFocus(force = true)
+                keyboard?.hide()
+            }
+        }
+    }
     val solidBorder = when {
         active && editing -> BorderStroke(1.5.dp, colors.primary)
         colors.surface.luminance() < .5f -> BorderStroke(1.dp, colors.outline)
         else -> null
     }
     val fieldDescription = stringResource(R.string.assistant_message_field, scope)
-    val picker = rememberLauncherForActivityResult(remember { PickMultipleVisualMedia(MAX_CHAT_IMAGES) }) { uris ->
-        if (active) draft.add(uris.map { ImageSource.Picker(it) })
+    val picker = key(draft) {
+        rememberLauncherForActivityResult(remember { PickMultipleVisualMedia(MAX_CHAT_IMAGES) }) { uris ->
+            draft.receivePicker(uris, active)
+        }
     }
     val submit: () -> Unit = {
         if (active && draft.sendable) {
@@ -142,7 +152,9 @@ internal fun MessageEditor(model: AssistantModel, draft: ChatDraft, scope: Strin
                     val label = if (active) Modifier.testTag("$tagPrefix-input").semantics { contentDescription = fieldDescription } else Modifier
                     MarkdownComposer(draft.field, field.then(label).onFocusChanged { editing = it.isFocused }, submit, placeholder, enabled = active)
                 } else Box(field) { placeholder() }
-                IconButton(onClick = { picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) }, enabled = active,
+                IconButton(onClick = {
+                    if (draft.beginPicker()) picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+                }, enabled = active,
                     modifier = button.testTag("$tagPrefix-attach")) {
                     Icon(painterResource(R.drawable.ic_add), stringResource(R.string.chat_attach), Modifier.size(24.dp))
                 }

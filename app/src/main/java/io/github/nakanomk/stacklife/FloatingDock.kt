@@ -72,11 +72,12 @@ private fun DockScaffold(short: Boolean, wideRow: Boolean, navigationBar: (@Comp
     val appearance = LocalAppearance.current
     val docked = appearance.navStyle == NavStyle.DOCKED
     val composer = assistantPage?.takeIf { LocalAssistant.current != null }
-    var composerFocused by remember { mutableStateOf(false) }
+    val hasComposer = composer != null
+    var composerFocused by remember(hasComposer) { mutableStateOf(false) }
     val density = LocalDensity.current
     val target = WindowInsets.imeAnimationTarget
     val hasNav = navigationBar != null
-    val showNav by remember(hasNav, target, density) { derivedStateOf {
+    val showNav by remember(hasNav, hasComposer, target, density) { derivedStateOf {
         hasNav && (!composerFocused || target.getBottom(density) == 0)
     } }
     // Only the shared input to the 4–10dp dock blurs is sampled at half resolution.

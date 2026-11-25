@@ -1,6 +1,7 @@
 package io.github.nakanomk.stacklife.acceptance
 
 import android.graphics.Bitmap
+import android.content.ContextWrapper
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
@@ -8,6 +9,13 @@ import androidx.compose.ui.platform.ViewRootForTest
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.activity.result.ActivityResultRegistry
+import androidx.activity.result.ActivityResultRegistryOwner
+import androidx.activity.result.contract.ActivityResultContract
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityOptionsCompat
+import androidx.room.withTransaction
+import androidx.test.core.app.ActivityScenario
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,6 +46,10 @@ import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import mockwebserver3.MockResponse
@@ -58,6 +70,12 @@ class AssistantProposalTest {
     private val server = MockWebServer()
     private val inst = InstrumentationRegistry.getInstrumentation()
     private val connection = ConnectionStore(inst.targetContext, "proposal-${UUID.randomUUID()}")
+    private val preferenceName = "test-assistant-pref-${UUID.randomUUID()}"
+    private val preferenceContext = object : ContextWrapper(inst.targetContext) {
+        override fun getSharedPreferences(name: String, mode: Int) = baseContext.getSharedPreferences(preferenceName, mode)
+    }
+    private val preference = AssistantPreference(preferenceContext)
+    private val requestCanceled = CompletableDeferred<Unit>()
     private val imageDirectory = "proposal-images-${UUID.randomUUID()}"
     private val images by lazy { AttachmentStore(inst.targetContext, { store.db.conversationHistory().imageIds().toSet() }, imageDirectory) }
     private lateinit var transport: ChatTransport
@@ -69,7 +87,10 @@ class AssistantProposalTest {
         val trust = HandshakeCertificates.Builder().addTrustedCertificate(local.certificate).build()
         server.useHttps(HandshakeCertificates.Builder().heldCertificate(local).build().sslSocketFactory())
         server.start(InetAddress.getByName("127.0.0.1"), 0)
-        transport = OpenAiTransport(OkHttpClient.Builder().sslSocketFactory(trust.sslSocketFactory(), trust.trustManager).build())
+        transport = OpenAiTransport(OkHttpClient.Builder().sslSocketFactory(trust.sslSocketFactory(), trust.trustManager)
+            .eventListener(object : okhttp3.EventListener() {
+                override fun canceled(call: okhttp3.Call) { requestCanceled.complete(Unit) }
+            }).build())
         connection.save("https://127.0.0.1:${server.port}/acceptance/v1", "本地验收模型", "only-this-fixture")
         store.apply(PlannerCommand.TaskAdd(TaskInput("眼前的工作", notes = "不可外发的测试备注")))
         attach()
@@ -79,16 +100,18 @@ class AssistantProposalTest {
         server.close()
         runBlocking { connection.clear() }
         File(inst.targetContext.noBackupFilesDir, imageDirectory).deleteRecursively()
+        inst.targetContext.deleteSharedPreferences(preferenceName)
     }
-    private fun attach(file: File? = null, photos: (() -> List<android.net.Uri>)? = null) = ui.activityRule.scenario.onActivity { activity ->
+    private fun attach(file: File? = null, photos: (() -> List<android.net.Uri>)? = null,
+        picker: ActivityResultRegistryOwner? = null) = ui.activityRule.scenario.onActivity { activity ->
         // Match MainActivity, not the generic instrumentation activity's default pan window.
         activity.enableEdgeToEdge()
         activity.window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        val owner = photos?.let(::photoPickerReturning) ?: file?.let(::pickerReturning) ?: activity
+        val owner = picker ?: photos?.let(::photoPickerReturning) ?: file?.let(::pickerReturning) ?: activity
         activity.setContent { CompositionLocalProvider(LocalActivityResultRegistryOwner provides owner) {
             val controller = viewModel { AssistantModel(store.api, connection, transport, store.db.conversationHistory(), images) }
             assistant = controller
-            StackLifeApp(viewModel { WorkspaceViewModel(store.api) }, controller)
+            StackLifeApp(viewModel { WorkspaceViewModel(store.api) }, controller, assistantPreference = preference)
         } }
     }
     private fun await(matcher: SemanticsMatcher): SemanticsNodeInteraction {
@@ -216,7 +239,7 @@ class AssistantProposalTest {
             activity.setContent {
                 DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(680.dp, 860.dp))) {
                     Box(Modifier.fillMaxWidth().height(height.value)) {
-                        StackLifeApp(viewModel { WorkspaceViewModel(store.api) }, assistant)
+                        StackLifeApp(viewModel { WorkspaceViewModel(store.api) }, assistant, assistantPreference = preference)
                     }
                 }
             }
@@ -708,6 +731,221 @@ class AssistantProposalTest {
         val request = server.takeRequest(3, TimeUnit.SECONDS)!!.body!!.utf8()
         assertFalse("上一段对话" in request || "先不读取" in request)
         assertTrue("不可外发的测试备注" in server.takeRequest(3, TimeUnit.SECONDS)!!.body!!.utf8())
+    }
+
+    @Test fun disablingFocusedComposerDismissesImeAndRestoresNavigationOnly() {
+        val field = tag("assistant-input")
+        field.performClick().performTextInput("只在本地")
+        field.assertIsFocused()
+        val view = (field.fetchSemanticsNode().root as ViewRootForTest).view
+        fun keyboardVisible() = ui.runOnIdle {
+            ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime()) == true
+        }
+        ui.waitUntil(5_000) { keyboardVisible() }
+        ui.runOnIdle { preference.setEnabled(false) }
+        ui.waitUntil(5_000) { !keyboardVisible() }
+        tag("navigation-capsule").assertIsDisplayed()
+        ui.onNodeWithTag("assistant-input").assertDoesNotExist()
+        ui.runOnIdle { preference.setEnabled(true) }
+        tag("assistant-input").assertIsNotFocused()
+        tag("assistant-send").assertIsNotEnabled()
+        assertEquals(0, server.requestCount)
+    }
+
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
+    @Test fun disablingAHistoryReplyClearsItsCloneButNotTheSavedPhoto() {
+        val history = store.db.conversationHistory()
+        runBlocking { connection.save("https://127.0.0.1:${server.port}/acceptance/v1", "本地验收模型", null, supportsImages = true) }
+        withChatPhoto(inst.targetContext, 180) { uri ->
+            attach(photos = { listOf(uri) })
+            tag("assistant-attach").performClick()
+            reply("图片已收到")
+            await(hasTestTag("assistant-send") and isEnabled()).performClick(); await(hasText("图片已收到"))
+        }
+        val thread = runBlocking { history.observeConversations().first().single().id }
+        val saved = runBlocking { history.observeMessages(thread).first().first().images.single() }
+        await(hasText("关闭")).performClick()
+        tag("assistant-history").performClick(); tag("assistant-history-thread-$thread").performClick()
+        tag("assistant-history-messages").performScrollToNode(hasTestTag("chat-image-${saved.id}"))
+        tag("chat-image-${saved.id}").performClick(); tag("chat-reattach").performClick()
+        await(hasTestTag("history-reply-send") and isEnabled())
+        val clone = (assistant.draft("history:$thread").images.single().status as ImagePreparation.Ready).image
+        tag("history-reply-input").performTextReplacement("不要保存草稿")
+        ui.runOnIdle { preference.setEnabled(false) }
+        ui.waitUntil(5_000) { !images.file(clone.id).exists() }
+        assertTrue(images.file(saved.id).isFile)
+        ui.onNodeWithTag("assistant-history-messages").assertDoesNotExist()
+        ui.runOnIdle { preference.setEnabled(true) }
+        tag("assistant-history").performClick(); tag("assistant-history-thread-$thread").performClick()
+        tag("history-reply-send").assertIsNotEnabled()
+        assertEquals(listOf(saved.id), runBlocking { history.imageIds() })
+        assertEquals(1, server.requestCount)
+        tag("assistant-history-messages").performScrollToNode(hasTestTag("chat-image-${saved.id}"))
+        tag("chat-image-${saved.id}").performClick(); tag("chat-reattach").performClick()
+        reply("已重新发送")
+        await(hasTestTag("history-reply-send") and isEnabled()).performClick(); await(hasText("已重新发送"))
+        ui.runOnIdle { preference.setEnabled(false) }
+        ui.onNodeWithTag("assistant-sheet").assertDoesNotExist()
+        val owned = runBlocking { history.imageIds() }
+        assertEquals(2, owned.distinct().size)
+        assertTrue(owned.all { images.file(it).isFile })
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test fun disablingCancelsTheLiveHttpCallAndReenablesWithoutSending() = runBlocking {
+        val before = store.state()
+        send("取消正在等待的答复")
+        assertNotNull(server.takeRequest(3, TimeUnit.SECONDS))
+        val history = store.db.conversationHistory()
+        val thread = history.observeConversations().first().single().id
+        ui.runOnIdle { preference.setEnabled(false) }
+        ui.waitUntil(5_000) { assistant.state.value.page == null }
+        withTimeout(5_000) { requestCanceled.await() }
+        reply("这个迟到答复不得回到界面")
+        tag("navigation-capsule")
+        ui.onNodeWithTag("assistant-sheet").assertDoesNotExist()
+        ui.runOnIdle { preference.setEnabled(true) }
+        tag("assistant-send").assertIsNotEnabled()
+        assertNull(assistant.state.value.page)
+        assertEquals(listOf(HistoryRole.USER), history.observeMessages(thread).first().map { it.role })
+        assertEquals(before, store.state())
+        assertEquals(1, server.requestCount)
+        reply("新会话")
+        send("重新开始"); await(hasText("新会话"))
+        assertEquals(listOf("重新开始", "新会话"), assistant.state.value.lines.map { it.text })
+    }
+
+    @Test fun disablingRevokesThePendingProposalButKeepsItsDiscardReceipt() = runBlocking {
+        val before = store.state()
+        toolCall("planner_propose", """{"commands":[{"kind":"task_add","title":"未确认任务"}]}""")
+        send("提案"); tag("assistant-apply")
+        val proposal = requireNotNull(assistant.state.value.pending)
+        val history = store.db.conversationHistory()
+        val thread = history.observeConversations().first().single().id
+        ui.runOnIdle { preference.setEnabled(false) }
+        ui.waitUntil(5_000) { assistant.state.value.page == null }
+        withTimeout(5_000) { history.observeMessages(thread).first { lines -> lines.any { it.event?.status == ProposalStatus.DISCARDED } } }
+        assertTrue(store.api.commit(proposal.proposalId) is CommitResult.Rejected)
+        ui.runOnIdle { preference.setEnabled(true); assistant.apply(proposal.proposalId) }
+        tag("assistant-send").assertIsNotEnabled()
+        ui.onNodeWithTag("assistant-apply").assertDoesNotExist()
+        assertEquals(before, store.state())
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test fun disablingAndReenablingDuringConfirmedSaveRecordsExactlyOneRealReceipt() = runBlocking {
+        val before = store.state()
+        toolCall("planner_propose", """{"commands":[{"kind":"task_add","title":"仅保存一次"}]}""")
+        send("保存测试"); val apply = tag("assistant-apply")
+        val proposal = requireNotNull(assistant.state.value.pending)
+        val eventId = requireNotNull(assistant.state.value.eventId)
+        val history = store.db.conversationHistory()
+        val thread = history.observeConversations().first().single().id
+        val locked = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val writer = launch(Dispatchers.IO) { store.db.withTransaction { locked.complete(Unit); release.await() } }
+        try {
+            withTimeout(5_000) { locked.await() }
+            apply.performClick()
+            assertEquals(AssistantWork.COMMIT, assistant.state.value.work)
+            ui.runOnIdle { preference.setEnabled(false) }
+            ui.waitUntil(5_000) { assistant.state.value.page == null }
+            ui.runOnIdle { preference.setEnabled(true) }
+            ui.runOnIdle { assistant.apply(proposal.proposalId) }
+        } finally { release.complete(Unit); writer.join() }
+        val lines = withTimeout(5_000) { history.observeMessages(thread).first { lines -> lines.any { it.event?.status == ProposalStatus.APPLIED } } }
+        val saved = lines.single { it.event != null }
+        assertEquals(eventId, saved.id)
+        assertEquals(proposal.changes, saved.event!!.changes)
+        tag("assistant-send").assertIsNotEnabled()
+        ui.onNodeWithTag("assistant-sheet").assertDoesNotExist()
+        val after = store.state()
+        assertEquals(before.revision + 1, after.revision)
+        assertEquals(1, after.queue.count { it.title == "仅保存一次" })
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test fun resultFromDisabledPickerCannotAttachToTheReenabledComposer() {
+        var pending: (() -> Unit)? = null
+        val picker = object : ActivityResultRegistryOwner {
+            override val activityResultRegistry = object : ActivityResultRegistry() {
+                override fun <I, O> onLaunch(requestCode: Int, contract: ActivityResultContract<I, O>, input: I, options: ActivityOptionsCompat?) {
+                    check(contract is ActivityResultContracts.PickMultipleVisualMedia)
+                    pending = { dispatchResult(requestCode, listOf(android.net.Uri.parse("content://missing.test/late"))); Unit }
+                }
+            }
+        }
+        attach(picker = picker)
+        tag("assistant-input").performTextReplacement("不保留")
+        tag("assistant-attach").performClick()
+        ui.runOnIdle { preference.setEnabled(false) }
+        ui.onNodeWithTag("assistant-composer").assertDoesNotExist()
+        ui.runOnIdle { preference.setEnabled(true) }
+        tag("assistant-send").assertIsNotEnabled()
+        ui.runOnIdle { requireNotNull(pending).invoke() }
+        tag("assistant-input").performTextReplacement("新草稿")
+        tag("assistant-send").assertIsEnabled()
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test fun switchPersistsAcrossFreshActivityWithoutDockGapAndConnectionRemainsEditable() {
+        tag("assistant-input").performTextReplacement("不保留的草稿")
+        await(hasContentDescription("设置") and hasClickAction()).performClick()
+        val control = hasText(ui.activity.getString(io.github.nakanomk.stacklife.R.string.assistant_enabled_label)) and hasClickAction()
+        await(hasScrollToIndexAction()).performScrollToNode(control)
+        await(control).performScrollTo().performClick()
+        ui.onNodeWithTag("assistant-input").assertDoesNotExist()
+        val connectionRow = hasText(ui.activity.getString(io.github.nakanomk.stacklife.R.string.ui_model_connection)) and hasClickAction()
+        await(hasScrollToIndexAction()).performScrollToNode(connectionRow)
+        await(connectionRow).performScrollTo().performClick()
+        tag("provider-model").assertTextContains("本地验收模型")
+        tag("provider-key").assertIsEnabled()
+
+        // A new Activity, ViewModelStore and preferences reader; no saved navigation or composition.
+        val fresh = AssistantPreference(preferenceContext)
+        assertFalse(fresh.enabled)
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity -> activity.setContent {
+                StackLifeApp(viewModel { WorkspaceViewModel(store.api) },
+                    viewModel { AssistantModel(store.api, connection, transport, store.db.conversationHistory(), images) },
+                    assistantPreference = fresh)
+            } }
+            val nav = tag("navigation-capsule").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            ui.onNodeWithTag("assistant-input").assertDoesNotExist()
+            val axis = tag("day-axis").fetchSemanticsNode().boundsInRoot
+            assertTrue("Unexpected empty assistant slot: nav=$nav, axis=$axis",
+                nav.top - axis.bottom in -1f..with(ui.density) { 8.dp.toPx() + 1f })
+            tag("nav:courses").performClick()
+            tag("course-import").performClick(); tag("importMethodFile").performClick()
+            tag("importCourseFile").assertIsDisplayed()
+            ui.onNodeWithTag("assistant-input").assertDoesNotExist()
+        }
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test fun disablingInsideReviewedImportRevokesOnlyAssistantAndManualConfirmationStillSaves() = runBlocking {
+        val file = File.createTempFile("disable-course-", ".json", inst.targetContext.cacheDir)
+        try {
+            file.writeText("""[{"ZC":1,"KS":"2026-09-07","MONDAY":[{"KCMC":"手动保留","JC":"5-6"}]}]""")
+            attach(file)
+            tag("nav:courses").performClick(); tag("course-import").performClick()
+            tag("importMethodFile").performClick(); tag("importCourseFile").performClick()
+            tag("importTerm:new").performClick(); tag("importTermName").performTextReplacement("课表")
+            ui.chooseNumber("termWeeks", 2)
+            tag("reviewCourseRows").performScrollTo().performClick(); tag("previewCourseImportTop").performClick()
+            reply("只核对，未保存"); send("核对"); await(hasText("只核对，未保存"))
+            val id = (assistant.state.value.page as AssistantPage.CourseDraft).draftId
+            ui.runOnIdle { preference.setEnabled(false) }
+            tag("confirmCourseImportTop").assertIsEnabled()
+            ui.onNodeWithTag("assistant-input").assertDoesNotExist()
+            assertTrue(store.api.preview(listOf(PlannerCommand.CourseImport(id))) is PreviewResult.Rejected)
+            tag("confirmCourseImportTop").performClick()
+            tag("course-week")
+            val term = (store.api.observe(PlannerQuery.Terms).first() as Terms).terms.single()
+            val week = store.api.observe(PlannerQuery.Week(term.id, 1)).first() as CourseWeek
+            assertEquals("手动保留", week.classes.single().meeting.title)
+            assertEquals(1, server.requestCount)
+        } finally { file.delete() }
     }
 
     private val localSlot = LocalDate.now().atTime(16, 0).atZone(ZoneId.systemDefault()).toOffsetDateTime()

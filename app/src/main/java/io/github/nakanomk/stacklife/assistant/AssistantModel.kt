@@ -39,6 +39,8 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
     val state = mutable.asStateFlow()
     private var ui: AssistantState get() = mutable.value; set(value) { mutable.value = value }
     private var job: Job? = null
+    private var acceptingInput = true
+    private var committingThread: Long? = null
     private var generation = 0L
     private var tools: PlannerTools? = null
     private var commands: List<PlannerCommand>? = null
@@ -47,11 +49,27 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
     private var sessionConnection: ServiceConnection? = null
     private var conversationId: Long? = null
 
-    private val drafts = mutableMapOf<String, ChatDraft>()
+    // Replacing the editor registry invalidates retained composer slots even if off/on occurs
+    // before Compose gets a frame. Normal typing and individual draft changes stay local.
+    private var drafts by mutableStateOf(mutableMapOf<String, ChatDraft>(), androidx.compose.runtime.referentialEqualityPolicy())
     var browsingHistory by mutableStateOf(false)
+
+    fun setEnabled(value: Boolean) {
+        if (acceptingInput == value) return
+        acceptingInput = value
+        if (value) return
+        clearTurn()
+        drafts.values.forEach { it.dispose() }
+        drafts = mutableMapOf()
+        configurationDraft = null
+        sessionConnection = null
+        browsingHistory = false
+        ui = AssistantState(work = if (committingThread == null) AssistantWork.IDLE else AssistantWork.COMMIT)
+    }
+
     fun draft(id: String): ChatDraft = drafts.getOrPut(id) { ChatDraft(attachments, viewModelScope) }
     fun leaveDraft(id: String) {
-        if ((ui.page == null || id != ui.composerId) && id != configurationDraft) drafts.remove(id)?.clear()
+        if ((ui.page == null || id != ui.composerId) && id != configurationDraft) drafts.remove(id)?.dispose()
     }
     fun composerReturned(id: String) {
         if (configurationDraft == id) configurationDraft = null
@@ -60,8 +78,8 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
     fun composerLeft(id: String) = leaveDraft(id)
 
     fun submitLocal(id: String, target: () -> AssistantPage) {
-        val draft = draft(id)
-        if (ui.page != null || !draft.sendable) return
+        if (!acceptingInput || ui.page != null || ui.work != AssistantWork.IDLE) return
+        val draft = drafts[id]?.takeIf { it.sendable } ?: return
         val page = draft.origin ?: target()
         configurationDraft = null
         clearTurn()
@@ -95,7 +113,8 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
     }
 
     suspend fun deleteConversation(id: Long) = withContext(NonCancellable) {
-        if (conversationId == id && ui.work == AssistantWork.COMMIT) error(uiText("Wait for the save receipt.", "请等待保存回执。"))
+        if (!acceptingInput) throw CancellationException("Assistant disabled")
+        if (committingThread == id) error(uiText("Wait for the save receipt.", "请等待保存回执。"))
         val files = history.delete(id)
         if (conversationId == id) close()
         files.forEach { attachments.remove(it) }
@@ -132,7 +151,7 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
 
     fun continueConversation(id: Long, page: AssistantPage, recipient: ServiceConnection): Boolean {
         val key = "history:$id"
-        if (ui.work != AssistantWork.IDLE || ui.pending != null || ui.reviewAgain || ui.importRequested || !draft(key).sendable) return false
+        if (!acceptingInput || ui.work != AssistantWork.IDLE || ui.pending != null || ui.reviewAgain || ui.importRequested || drafts[key]?.sendable != true) return false
         clearTurn()
         configurationDraft = null
         conversationId = id
@@ -318,8 +337,12 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
         val ready = ui.pending ?: return
         val eventId = ui.eventId ?: return
         if (ui.work != AssistantWork.IDLE || ready.proposalId != id) return
-        ui = ui.copy(work = AssistantWork.COMMIT)
-        job = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) { withContext(NonCancellable) {
+        val serial = generation
+        val importId = commands?.firstNotNullOfOrNull { (it as? PlannerCommand.CourseImport)?.draftId }
+        committingThread = checkNotNull(conversationId)
+        // Confirmation transfers the proposal from the cancellable turn to its own receipt.
+        ui = ui.copy(work = AssistantWork.COMMIT, pending = null)
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) { withContext(NonCancellable) {
             val receipt = try { api.commit(id) } catch (_: Exception) { null } finally { api.discard(id) }
             val event = when (receipt) {
                 is CommitResult.Applied -> ChatEvent(ProposalStatus.APPLIED, ready.changes)
@@ -327,11 +350,17 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
                     ready.changes, receipt.message)
                 null -> ChatEvent(ProposalStatus.FAILED, ready.changes, uiText("No save receipt was received. Check your schedule; the request will not be resubmitted.", "未取得保存回执，请核对日程；不会重新提交。"))
             }
-            val imported = if (receipt is CommitResult.Applied) commands?.firstNotNullOfOrNull { (it as? PlannerCommand.CourseImport)?.draftId } else null
+            val imported = importId.takeIf { receipt is CommitResult.Applied }
             imported?.let(api::discardCourseImport)
             val stale = event.status == ProposalStatus.STALE
-            if (!stale) commands = null
+            // Persist the outcome even if the originating composer/permission no longer exists.
             val saved = saveEvent(eventId, event)
+            committingThread = null
+            if (generation != serial) {
+                ui = AssistantState()
+                return@withContext
+            }
+            if (!stale) commands = null
             replaceEvent(eventId, event)
             ui = ui.copy(work = AssistantWork.IDLE, pending = null, reviewAgain = stale, importedDraft = imported,
                 message = if (saved) null else uiText("Could not update the local history record.", "未能更新本地历史记录。"),
@@ -359,8 +388,8 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
     }
 
     override fun onCleared() {
-        if (ui.work != AssistantWork.COMMIT) clearTurn()
-        drafts.values.forEach { it.clear() }
+        clearTurn()
+        drafts.values.forEach { it.dispose() }
     }
 }
 

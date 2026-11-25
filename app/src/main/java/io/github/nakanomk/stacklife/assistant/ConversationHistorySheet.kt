@@ -101,7 +101,7 @@ internal fun ConversationHistoryPane(model: AssistantModel, fallback: AssistantP
                     }
                 } else {
                     val messages by remember(history, id) { history.observeMessages(id) }.collectAsStateWithLifecycle(initialValue = emptyList())
-                    val draft = remember(model, id) { model.draft("history:$id") }
+                    val draft = model.draft("history:$id")
                     ChatMessages(messages, model.attachments, Modifier.weight(1f), "assistant-history-messages",
                         reattach = if (canReply) ({ draft.add(listOf(ImageSource.Saved(it))) }) else null)
                     val receiver = (recipient as? ReadState.Loaded)?.value

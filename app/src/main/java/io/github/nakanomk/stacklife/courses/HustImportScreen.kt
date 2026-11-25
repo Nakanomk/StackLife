@@ -219,7 +219,7 @@ internal fun HustImportScreen(model: WorkspaceViewModel, entry: ImportEntry, onB
             ImportStep.Hub -> HubWebView(onRows = { rows -> state.page = ImportPage.SOURCE; state.receive(true) { rows } }, onBack = { if (!state.busy) state.page = ImportPage.SOURCE },
                 onFile = { state.reset(); onFileEntry() }, extractOrigin = Modifier.paneOrigin(origins, "hub-calendar"))
             ImportStep.Source -> if (!writing && !busy) {
-                ImportPane(composer = { if (!busy && !hub) AssistantComposer(AssistantPage.Terms) }) { bottom ->
+                ImportPane(showComposer = !busy && !hub, composer = { AssistantComposer(AssistantPage.Terms) }) { bottom ->
                     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, bottom))) {
                         SectionTitle(stringResource(if (entry == ImportEntry.WEB) R.string.courses_hub_source else R.string.courses_import_file))
                         FormGroup {

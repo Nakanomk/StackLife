@@ -30,9 +30,9 @@ import java.time.ZoneId
 internal fun ReviewedImport(model: WorkspaceViewModel, draft: ReviewedTimetable, proposal: PreviewResult.Ready,
     busy: Boolean, top: Dp, inset: Dp, onImported: (String) -> Unit, onEdit: () -> Unit, onCancel: () -> Unit, onConfirm: () -> Unit) {
     val assistant = LocalAssistant.current
-    var staged by remember(proposal.proposalId) { mutableStateOf<String?>(null) }
+    var staged by remember(proposal.proposalId, assistant) { mutableStateOf<String?>(null) }
     if (assistant != null) {
-        DisposableEffect(proposal.proposalId) {
+        DisposableEffect(proposal.proposalId, assistant) {
             onDispose {
                 staged?.let { id ->
                     model.planner.discardCourseImport(id)
@@ -99,7 +99,7 @@ private fun ImportDiff(draft: ReviewedTimetable, proposal: PreviewResult.Ready, 
             MeetingSlot(meeting.pattern(), PeriodTime(clock(meeting.startMillis), clock(meeting.endMillis)))
         }, { it.week }).ordered(draft.term)
     }
-    ImportPane(composer = { if (!busy) AssistantComposer(ask) }) { bottom ->
+    ImportPane(showComposer = !busy, composer = { AssistantComposer(ask) }) { bottom ->
         // The header and composer receive input above this plane. Keep them outside the
         // scroll viewport, so bringing either footer action into view makes it tappable.
         LazyColumn(Modifier.fillMaxSize().padding(top = top, bottom = bottom).testTag("courseImportDiff"),
@@ -125,11 +125,12 @@ private fun ImportDiff(draft: ReviewedTimetable, proposal: PreviewResult.Ready, 
 }
 
 @Composable
-internal fun ImportPane(composer: @Composable () -> Unit, content: @Composable (bottom: Dp) -> Unit) {
+internal fun ImportPane(showComposer: Boolean, composer: @Composable () -> Unit, content: @Composable (bottom: Dp) -> Unit) {
+    val hasComposer = showComposer && LocalAssistant.current != null
     val density = LocalDensity.current
-    var height by remember { mutableIntStateOf(0) }
+    var height by remember(hasComposer) { mutableIntStateOf(0) }
     GlassBacking(Modifier.fillMaxSize(), background = { content(with(density) { height.toDp() }) }) {
-        Box(Modifier.align(Alignment.BottomCenter).onSizeChanged { height = it.height }.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        if (hasComposer) Box(Modifier.align(Alignment.BottomCenter).onSizeChanged { height = it.height }.padding(horizontal = 16.dp, vertical = 4.dp)) {
             composer()
         }
     }

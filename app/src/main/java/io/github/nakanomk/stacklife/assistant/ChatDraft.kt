@@ -27,6 +27,20 @@ internal class ChatDraft(private val store: AttachmentStore, private val scope: 
     var issue by mutableStateOf<String?>(null)
         private set
     private val preparing = mutableMapOf<String, Job>()
+    private var disposed = false
+    private var awaitingPicker = false
+
+    fun beginPicker(): Boolean {
+        if (disposed) return false
+        awaitingPicker = true
+        return true
+    }
+
+    fun receivePicker(uris: List<Uri>, active: Boolean) {
+        val requested = awaitingPicker
+        awaitingPicker = false
+        if (requested && active) add(uris.map { ImageSource.Picker(it) })
+    }
     // Keystrokes, composing ranges and caret moves belong to the native field.
     // Its enclosing dock only needs to observe an actual change of send eligibility.
     val sendable by derivedStateOf(structuralEqualityPolicy()) {
@@ -36,7 +50,7 @@ internal class ChatDraft(private val store: AttachmentStore, private val scope: 
     }
 
     fun add(sources: List<ImageSource>) {
-        if (sources.isEmpty()) return
+        if (disposed || sources.isEmpty()) return
         if (sources.size > MAX_CHAT_IMAGES - images.size) {
             issue = uiText("Select again: at most five images per message. None of this selection was added.", "请重新选择：每条消息最多五张图片，本次选择未添加。")
             return
@@ -89,7 +103,13 @@ internal class ChatDraft(private val store: AttachmentStore, private val scope: 
         } }
     }
 
+    fun dispose() {
+        disposed = true
+        clear()
+    }
+
     fun clear() {
+        awaitingPicker = false
         images.forEach { (it.status as? ImagePreparation.Ready)?.let { ready -> delete(ready.image.id) } }
         preparing.values.toList().forEach { it.cancel() }
         images.clear()

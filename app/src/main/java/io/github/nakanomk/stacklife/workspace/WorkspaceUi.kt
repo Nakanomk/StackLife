@@ -77,7 +77,7 @@ internal fun Page(assistantPage: AssistantPage? = null, content: @Composable Col
             val insetFill = if (docked && LocalWallpaperRecording.current == null) Modifier.background(colors.surface) else Modifier
             Box(page.then(insetFill)) {
                 CompositionLocalProvider(LocalCapsuleBackdrop provides paper) {
-                    if (assistantPage == null || LocalAssistant.current == null) Column(Modifier.fillMaxSize(), content = content)
+                    if (assistantPage == null) Column(Modifier.fillMaxSize(), content = content)
                     else DockOverlay(assistantPage = assistantPage) { clearance ->
                         CompositionLocalProvider(LocalRootBottom provides clearance) { Column(Modifier.fillMaxSize(), content = content) }
                     }

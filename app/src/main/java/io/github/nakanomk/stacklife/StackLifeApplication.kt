@@ -6,6 +6,7 @@ import io.github.nakanomk.stacklife.appearance.BackgroundStore
 import io.github.nakanomk.stacklife.planner.decodeAppearance
 import android.content.res.Configuration
 import io.github.nakanomk.stacklife.assistant.ConnectionStore
+import io.github.nakanomk.stacklife.assistant.AssistantPreference
 import io.github.nakanomk.stacklife.assistant.AttachmentStore
 import io.github.nakanomk.stacklife.i18n.AppLocales
 import io.github.nakanomk.stacklife.assistant.OpenAiTransport
@@ -37,6 +38,7 @@ open class StackLifeApplication : Application() {
     }
 
     internal val updates by lazy { AppUpdates(this) }
+    internal val assistantPreference by lazy { AssistantPreference(this) }
     internal val connections by lazy { ConnectionStore(this) }
     internal val chat by lazy { OpenAiTransport() }
     private val database by lazy { PlannerDatabase.open(this, "stacklife.db") }

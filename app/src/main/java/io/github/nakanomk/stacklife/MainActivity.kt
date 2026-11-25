@@ -148,9 +148,13 @@ internal fun SourcePanel(model: WorkspaceViewModel, link: GraphLink, content: @C
 @Composable
 internal fun StackLifeApp(model: WorkspaceViewModel, assistantModel: AssistantModel? = null,
     initialDetail: DetailTarget? = null, onDetailBack: () -> Unit = {}, reminder: ReminderTarget? = null,
-    firstRunGuide: Boolean = false, updates: AppUpdates? = null, onReminderHandled: () -> Unit = {}) {
+    firstRunGuide: Boolean = false, updates: AppUpdates? = null, assistantPreference: AssistantPreference? = null,
+    onReminderHandled: () -> Unit = {}) {
     val app = LocalContext.current.applicationContext as StackLifeApplication
     val assistant = assistantModel ?: viewModel { AssistantModel(model.planner, app.connections, app.chat, app.history, app.attachments, app.backgrounds::collect) }
+    val assistantSettings = assistantPreference ?: app.assistantPreference
+    val assistantEnabled = assistantSettings.enabled
+    LaunchedEffect(assistant, assistantEnabled) { assistant.setEnabled(assistantEnabled) }
     val settings by model.settings.collectAsStateWithLifecycle()
     ReadPanel(settings) { preferences ->
         StackLifeTheme(preferences.appearance) {
@@ -158,10 +162,10 @@ internal fun StackLifeApp(model: WorkspaceViewModel, assistantModel: AssistantMo
             LaunchedEffect(model) { model.notices.collect { messages.showSnackbar(it) } }
             Surface(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
                 Box {
-                    CompositionLocalProvider(LocalAssistant provides assistant, LocalPlannerGlassAllowed provides true,
+                    CompositionLocalProvider(LocalAssistant provides assistant.takeIf { assistantEnabled }, LocalPlannerGlassAllowed provides true,
                         LocalMarkdownReadCache provides remember { MarkdownReadCache() },
                         LocalGlassLight provides rememberGlassLight()) {
-                        PlannerNavigation(model, assistant, preferences, initialDetail, onDetailBack, reminder, onReminderHandled, messages, firstRunGuide, updates)
+                        PlannerNavigation(model, assistant, assistantSettings, preferences, initialDetail, onDetailBack, reminder, onReminderHandled, messages, firstRunGuide, updates)
                     }
                     SnackbarHost(messages, Modifier.align(Alignment.BottomCenter).safeDrawingPadding().imePadding().padding(12.dp))
                 }
@@ -171,7 +175,7 @@ internal fun StackLifeApp(model: WorkspaceViewModel, assistantModel: AssistantMo
 }
 
 @Composable
-private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantModel, preferences: PolicyView,
+private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantModel, assistantSettings: AssistantPreference, preferences: PolicyView,
     initialDetail: DetailTarget?, onDetailBack: () -> Unit, reminder: ReminderTarget?, onReminderHandled: () -> Unit, messages: SnackbarHostState,
     firstRunGuide: Boolean, updates: AppUpdates?) {
     val start: NavKey = when (initialDetail?.kind) {
@@ -246,10 +250,12 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
     SideEffect { origins.canKeepSource = canKeepSource }
     val privateScreens = remember { mutableIntStateOf(0) }
     var historySource by rememberSaveable { mutableStateOf<String?>(null) }
+    val assistantEnabled = assistantSettings.enabled
+    if (!assistantEnabled && historySource != null) SideEffect { historySource = null }
     val rootDraft = rememberSaveable { java.util.UUID.randomUUID().toString() }
     CompositionLocalProvider(LocalRootDraftId provides rootDraft, LocalRouteOrigins provides origins, LocalOpenNote provides { navigate(it) },
         LocalNewCountdown provides { navigate(CountEdit(seed = it)) },
-        LocalOpenChatHistory provides { historySource = it.historyKey() }) {
+        LocalOpenChatHistory provides { if (assistantSettings.enabled) historySource = it.historyKey() }) {
     PlannerPopupHost(stack.last() != ModelConnection && stack.last() != ImportCourses && privateScreens.intValue == 0) {
     val latestAppearance by rememberUpdatedState(preferences.appearance)
     val home = preferences.appearance.nearestVisible(destination)
@@ -366,6 +372,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     SettingsHelpHost { SettingsScreen(preferences, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) },
                         onWallpaper = { navigate(EditAppearance(AppearanceGroup.MATERIAL.key, startAtWallpaper = true)) },
                         onAbout = { navigate(HelpAbout) }, onUpdates = updates?.let { { navigate(Updates) } },
+                        assistantPreference = { AssistantEnabledPreference(assistantSettings, assistant) },
                         onFeature = { navigate(Feature(it)) }, onSchedule = navigate) }
                 }
                 entry<HelpAbout> { HelpAboutScreen(back) { navigate(Guidance) } }
@@ -409,7 +416,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
         }
     }
     val source = historySource
-    AssistantPanels(assistant, source?.let { remember(it) { historyPage(it) } }, configuring = stack.last() == ModelConnection,
+    if (assistantEnabled) AssistantPanels(assistant, source?.let { remember(it) { historyPage(it) } }, configuring = stack.last() == ModelConnection,
         onCloseHistory = { historySource = null }, onSettings = { navigate(ModelConnection) }, onImport = { navigate(ImportCourses) })
     }
     }

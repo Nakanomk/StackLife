@@ -1,0 +1,4 @@
+<resources>
+    <string name="assistant_enabled_label">Enable scheduling assistant</string>
+    <string name="assistant_enabled_help">Turning this off clears unsent drafts, attachments and unconfirmed proposals. Confirmed saves finish. Your connection and conversation history are kept.</string>
+</resources>
