@@ -1,5 +1,7 @@
 package io.github.nakanomk.stacklife.today
 
+import android.view.MotionEvent
+import androidx.compose.foundation.lazy.LazyListState
 import io.github.nakanomk.stacklife.i18n.uiText
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -15,6 +17,8 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEvent
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
@@ -27,8 +31,9 @@ import kotlin.math.min
 
 internal data class SlotSource(val key: OccurrenceKey.Schedule, val durationMillis: Long, val originalStart: Long? = null)
 internal data class SlotDrop(val interval: ExactInterval, val command: PlannerCommand)
+internal data class TrayPickup(val task: QueueTask, val bounds: Rect, val grabOffset: Offset, val sourceTray: Rect)
 private sealed class Pickup(val source: SlotSource, val revision: Long) {
-    class Move(source: SlotSource, revision: Long, val grabMillis: Long) : Pickup(source, revision)
+    class Move(source: SlotSource, revision: Long, val grabMillis: Long, val tray: TrayPickup?) : Pickup(source, revision)
     class End(source: SlotSource, revision: Long, val grabPixels: Float, val railX: Float) : Pickup(source, revision)
 }
 internal data class CheckedSlot(val slot: SlotDrop, val error: String?)
@@ -54,6 +59,7 @@ internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
     var pointer by mutableStateOf(Offset.Zero)
         private set
     val active get() = pickup != null
+    val trayPickup get() = (pickup as? Pickup.Move)?.tray
     fun isDragging(key: OccurrenceKey) = pickup?.source?.key == key
     val resizeRailX get() = (pickup as? Pickup.End)?.railX
     var checked by mutableStateOf<CheckedSlot?>(null)
@@ -67,18 +73,21 @@ internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
         return viewportCoords.localPositionOf(root, point).y + scroll.value
     }
 
-    private fun accepts(at: Offset) = viewport.contains(at) && !trayBounds.contains(at) && !addBounds.contains(at)
+    private fun accepts(at: Offset) = viewport.contains(at) && !trayBounds.contains(at) &&
+        trayPickup?.sourceTray?.contains(at) != true && !addBounds.contains(at)
 
     private fun Rect.edgeBelow(at: Offset) =
         if (at.x >= left && at.x < right && at.y < top) top else viewport.bottom
     private fun Rect.edgeAbove(at: Offset) =
         if (at.x >= left && at.x < right && at.y >= bottom) bottom else viewport.top
 
-    fun uncoveredBottom(at: Offset) = minOf(viewport.bottom, trayBounds.edgeBelow(at), addBounds.edgeBelow(at))
+    fun uncoveredBottom(at: Offset) = minOf(viewport.bottom, trayBounds.edgeBelow(at),
+        minOf(addBounds.edgeBelow(at), trayPickup?.sourceTray?.edgeBelow(at) ?: viewport.bottom))
 
     fun edgeVelocity(edgePixels: Float, maxSpeed: Float): Float {
         if (!active || !accepts(pointer)) return 0f
-        val top = maxOf(viewport.top, trayBounds.edgeAbove(pointer), addBounds.edgeAbove(pointer))
+        val top = maxOf(viewport.top, trayBounds.edgeAbove(pointer),
+            maxOf(addBounds.edgeAbove(pointer), trayPickup?.sourceTray?.edgeAbove(pointer) ?: viewport.top))
         val bottom = uncoveredBottom(pointer)
         val edge = min(edgePixels, (bottom - top) / 4f)
         return when {
@@ -134,13 +143,13 @@ internal class AxisDrag(val scale: DayAxisScale, val scroll: ScrollState) {
         }
     }
 
-    fun start(source: SlotSource, at: Offset, revision: Long) {
+    fun start(source: SlotSource, at: Offset, revision: Long, tray: TrayPickup? = null) {
         val y = contentY(at)
         if (!y.isFinite()) return
         dropNotice = null
         checked = null
         pointer = at
-        pickup = Pickup.Move(source, revision, source.originalStart?.let { scale.instantAt(y) - it } ?: 0L)
+        pickup = Pickup.Move(source, revision, source.originalStart?.let { scale.instantAt(y) - it } ?: 0L, tray)
     }
 
     fun startEnd(source: SlotSource, at: Offset, railX: Float, revision: Long) {
@@ -196,6 +205,66 @@ internal fun Modifier.slotDrag(
     }
 }
 
+// BiliPai FavoriteDragSelection: acquire on the list, claim moves in Initial after the
+// long press, and retain the original pointer until release even if its row is recycled.
+internal fun Modifier.trayDrag(
+    drag: AxisDrag, plan: DayPlan, enabled: Boolean, state: LazyListState,
+    rows: Map<String, LayoutCoordinates>, send: (PlannerCommand) -> Unit,
+): Modifier = composed {
+    var layout by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val latestPlan by rememberUpdatedState(plan)
+    val latestSend by rememberUpdatedState(send)
+    onPlaced { layout = it }.pointerInput(drag, enabled) {
+        if (!enabled) return@pointerInput
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val list = layout?.takeIf { it.isAttached } ?: return@awaitEachGesture
+            val origin = list.localToRoot(down.position)
+            val id = state.layoutInfo.visibleItemsInfo.firstOrNull { item ->
+                val coords = rows[item.key as? String ?: return@firstOrNull false]
+                coords != null && coords.isAttached && coords.boundsInRoot().contains(origin)
+            }?.key as? String ?: return@awaitEachGesture
+            val row = rows[id] ?: return@awaitEachGesture
+            val revision = latestPlan.revision
+            val held = singleLongPress(down) ?: return@awaitEachGesture
+            if (!list.isAttached || !row.isAttached || row !== rows[id] || latestPlan.revision != revision) return@awaitEachGesture
+            val at = list.localToRoot(held.position)
+            if (!row.boundsInRoot().contains(at)) return@awaitEachGesture
+            val task = latestPlan.tray.firstOrNull { it.id == id } ?: return@awaitEachGesture
+            val bounds = Rect(row.localToRoot(Offset.Zero),
+                row.localToRoot(Offset(row.size.width.toFloat(), row.size.height.toFloat())))
+            drag.start(SlotSource(OccurrenceKey.Schedule(id), task.minutes * MINUTE_MS), at, revision,
+                TrayPickup(task, bounds, at - bounds.topLeft, drag.trayBounds))
+            trackSlot(held.id, list, drag, { latestPlan.revision }) { command ->
+                if (latestPlan.tray.any { it.id == id }) latestSend(command)
+            }
+        }
+    }
+}
+
+// The stock detector permits a second finger to take over a long press. Scheduling is
+// single-pointer only; neither a second contact nor a scrolling list may arm it.
+private suspend fun AwaitPointerEventScope.singleLongPress(down: PointerInputChange): PointerInputChange? {
+    if (currentEvent.multipleContacts()) return null
+    var last = down
+    val rejected = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+        while (true) {
+            val event = awaitPointerEvent()
+            val change = event.changes.singleOrNull()
+            if (event.multipleContacts() || change == null || change.id != down.id || !change.pressed ||
+                change.isConsumed || (change.position - down.position).getDistance() > viewConfiguration.touchSlop) break
+            last = change
+            if (awaitPointerEvent(PointerEventPass.Final).changes.any { it.isConsumed }) break
+        }
+        true
+    }
+    return if (rejected == null) last else null
+}
+
+// Compose filters changes to this hit path; the Android contact count also catches a
+// second finger landing on a sibling such as the dock.
+private fun PointerEvent.multipleContacts() = changes.size != 1 || (motionEvent?.pointerCount ?: 1) != 1
+
 /** Already selected: grab the endpoint on vertical slop, not a second long press.
  * Until then the surrounding day pager, scroll and accessible click remain available. */
 internal fun Modifier.endDrag(
@@ -226,7 +295,13 @@ private suspend fun AwaitPointerEventScope.trackSlot(
 ) {
     try {
         while (true) {
-            val point = awaitPointerEvent(PointerEventPass.Initial).changes.singleOrNull() ?: break
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            if (event.motionEvent?.actionMasked == MotionEvent.ACTION_CANCEL) break
+            if (event.multipleContacts()) {
+                event.changes.forEach { it.consume() }
+                break
+            }
+            val point = event.changes[0]
             if (point.id != id || point.isConsumed || !coords.isAttached) break
             val root = coords.localToRoot(point.position)
             point.consume()

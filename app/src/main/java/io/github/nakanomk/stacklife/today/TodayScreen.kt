@@ -166,7 +166,7 @@ private fun DayBody(
         val noticeSource = rememberPlannerBackdrop(drag.dropNotice != null)
         Box(Modifier.fillMaxSize().plannerBackdrop(noticeSource)) {
             DayWithTray(plan, drag, !submission.busy, editTray, onAdd, top, clearance, trayOpen, toggleTray, hideForEnd = atEnd,
-                pickup = { task -> Modifier.slotDrag(SlotSource(OccurrenceKey.Schedule(task.id), task.minutes * MINUTE_MS), drag, plan.revision, !submission.busy && trayOpen, send) }) { spine, _ ->
+                schedule = send) { spine, _ ->
                 DayAxis(drag, plan.revision, !submission.busy, onEdit, openCourse, send, onMore, focused, Modifier.fillMaxSize(), top, spine, endInGutter = trayOpen)
             }
         }

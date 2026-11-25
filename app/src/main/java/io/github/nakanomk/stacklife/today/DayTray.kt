@@ -1,6 +1,7 @@
 package io.github.nakanomk.stacklife.today
 
 import androidx.compose.ui.res.stringResource
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,12 +18,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.onPlaced
@@ -37,6 +41,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -50,6 +55,7 @@ import io.github.nakanomk.stacklife.TaskAddButton
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.markdown.markdownSummary
 import io.github.nakanomk.stacklife.planner.DayPlan
+import io.github.nakanomk.stacklife.planner.PlannerCommand
 import io.github.nakanomk.stacklife.planner.QueueTask
 import io.github.nakanomk.stacklife.taskFabMargin
 import io.github.nakanomk.stacklife.taskFabSize
@@ -59,7 +65,7 @@ import kotlinx.coroutines.awaitCancellation
 @Composable
 internal fun DayWithTray(
     plan: DayPlan, drag: AxisDrag?, enabled: Boolean, onEdit: (String) -> Unit, onAdd: () -> Unit,
-    top: Dp, clearance: Dp, expanded: Boolean, toggle: () -> Unit, hideForEnd: Boolean, pickup: ((QueueTask) -> Modifier)? = null,
+    top: Dp, clearance: Dp, expanded: Boolean, toggle: () -> Unit, hideForEnd: Boolean, schedule: ((PlannerCommand) -> Unit)? = null,
     content: @Composable (spine: Dp, eventListPadding: Dp) -> Unit,
 ) {
     val appearance = LocalAppearance.current
@@ -90,7 +96,9 @@ internal fun DayWithTray(
             height
         }
     }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val lifted = drag?.trayPickup
+    var host by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    BoxWithConstraints(Modifier.fillMaxSize().onPlaced { host = it }) {
         val spine = daySpine()
         val wide = maxWidth >= 480.dp && maxWidth > maxHeight
         val usable = (maxHeight - top - clearance).coerceAtLeast(0.dp)
@@ -115,7 +123,16 @@ internal fun DayWithTray(
         val openHeight = minOf((if (inlineToggle) 0.dp else header) + body + 8.dp, limit)
             .coerceAtLeast(if (inlineToggle) 48.dp else header)
         val closedHeight = if (oneRow) actionSize else if (floating) taskFabSize else header
-        val height = lerp(closedHeight, openHeight, progress)
+        // Withdraw one real row's depth even when the full list already exceeds its height limit.
+        // Only the floating controls change: the axis and its clearance remain exactly as placed.
+        val targetHeight = if (lifted == null) openHeight else {
+            val minimum = (if (inlineToggle) 0.dp else header) +
+                (if (plan.tray.size > 1 || inlineToggle) 48.dp else 0.dp)
+            (openHeight - with(density) { lifted.bounds.height.toDp() } - spacing).coerceIn(minOf(minimum, openHeight), openHeight)
+        }
+        val shownHeight = if (drag != null && LocalMotionEnabled.current) animateDpAsState(targetHeight,
+            MaterialTheme.motionScheme.defaultSpatialSpec(), label = "queue pickup depth").value else targetHeight
+        val height = lerp(closedHeight, shownHeight, progress)
         // If even the closed controls won't stack, keep + beside the tray for the entire
         // gesture. With more space it first clears the end pane, then moves down beside it.
         val fabEnd = when {
@@ -149,9 +166,23 @@ internal fun DayWithTray(
                     TaskAddButton(onAdd, Modifier.fillMaxSize().onGloballyPositioned { drag?.addBounds = it.boundsInRoot() })
                 }
                 EndOverlay(Modifier.align(Alignment.BottomEnd).padding(end = end, bottom = bottom).size(width, height), exit, end) {
-                    QueueTray(plan.tray, expanded, toggle, enabled, onEdit, pickup, progress, floating, axisSource != null, header, openWidth, inlineToggle,
+                    QueueTray(plan, drag, expanded, toggle, enabled, onEdit, schedule, progress, floating, axisSource != null, header, openWidth, inlineToggle,
                         Modifier.fillMaxSize().onGloballyPositioned { drag?.trayBounds = it.boundsInRoot() }.testTag("day-tray-container"))
                 }
+            }
+            if (lifted != null && drag != null) {
+                val shape = MaterialTheme.shapes.medium
+                TrayTaskRow(lifted.task, draggable = true, modifier = Modifier.align(AbsoluteAlignment.TopLeft)
+                    .absoluteOffset {
+                        val coords = host
+                        if (coords == null || !coords.isAttached) IntOffset.Zero else {
+                            val at = coords.localPositionOf(coords.findRootCoordinates(), drag.pointer) - lifted.grabOffset
+                            IntOffset(at.x.roundToInt(), at.y.roundToInt())
+                        }
+                    }
+                    .size(with(density) { lifted.bounds.width.toDp() }, with(density) { lifted.bounds.height.toDp() })
+                    .shadow(6.dp, shape).background(MaterialTheme.colorScheme.surfaceContainerHigh, shape)
+                    .testTag("day-tray-pickup").clearAndSetSemantics { hideFromAccessibility() })
             }
         }
     }
@@ -176,8 +207,8 @@ private fun EndOverlay(modifier: Modifier, fraction: Float, margin: Dp, content:
 
 @Composable
 private fun QueueTray(
-    tasks: List<QueueTask>, expanded: Boolean, toggle: () -> Unit, enabled: Boolean,
-    onEdit: (String) -> Unit, pickup: ((QueueTask) -> Modifier)?, progress: Float,
+    plan: DayPlan, drag: AxisDrag?, expanded: Boolean, toggle: () -> Unit, enabled: Boolean,
+    onEdit: (String) -> Unit, schedule: ((PlannerCommand) -> Unit)?, progress: Float,
     floating: Boolean, glass: Boolean, header: Dp, openWidth: Dp, inlineToggle: Boolean, modifier: Modifier,
 ) {
     val appearance = LocalAppearance.current
@@ -185,6 +216,11 @@ private fun QueueTray(
     val radius = if (floating) lerp(taskFabSize / 2, 16.dp, progress) else 0.dp
     val shape = remember(radius) { RoundedCornerShape(radius) }
     val listState = rememberLazyListState()
+    val rows = if (drag == null || schedule == null) null else remember { mutableMapOf<String, LayoutCoordinates>() }
+    val tasks = plan.tray
+    val liftedId = drag?.trayPickup?.task?.id
+    val shownTasks = remember(tasks, liftedId) { if (liftedId == null) tasks else tasks.filterNot { it.id == liftedId } }
+    val motion = LocalMotionEnabled.current
     val underHeader by remember(listState) { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 } }
     val interaction = remember { MutableInteractionSource() }
     StackLifeSurface(if (floating) CapsuleScene.TRAY else CapsuleScene.FROST, modifier, solid, shape = shape) {
@@ -201,22 +237,16 @@ private fun QueueTray(
                     if (tasks.isEmpty()) item {
                         Text(stringResource(R.string.today_tray_empty), Modifier.padding(8.dp), style = MaterialTheme.typography.bodyMedium)
                     }
-                    items(tasks, key = { it.id }) { task ->
-                        Row(Modifier.fillMaxWidth().testTag("tray:${task.id}").routeOrigin("slot:${task.id}", MaterialTheme.shapes.medium).clip(MaterialTheme.shapes.medium)
-                            .then(pickup?.invoke(task) ?: Modifier)
-                            .clickable(enabled && expanded, onClickLabel = stringResource(R.string.today_schedule), role = Role.Button) { onEdit(task.id) }
-                            .heightIn(min = 48.dp).padding(horizontal = 8.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(task.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                if (appearance.showNotes && task.notes.isNotBlank()) Text(remember(task.notes) { markdownSummary(task.notes) }, style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                val action = if (pickup == null) stringResource(R.string.today_tap_to_schedule) else stringResource(R.string.today_hold_to_drag)
-                                Text(if (appearance.showDuration) stringResource(R.string.today_tray_duration, task.minutes, action) else action,
-                                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Icon(painterResource(R.drawable.ic_schedule), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    items(shownTasks, key = { it.id }) { task ->
+                        val registration = if (rows == null) Modifier else {
+                            DisposableEffect(task.id) { onDispose { rows.remove(task.id) } }
+                            Modifier.onPlaced { rows[task.id] = it }
                         }
+                        val placement = if (rows != null && motion) Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null) else Modifier
+                        TrayTaskRow(task, draggable = rows != null, modifier = placement.fillMaxWidth()
+                            .then(registration).testTag("tray:${task.id}")
+                            .routeOrigin("slot:${task.id}", MaterialTheme.shapes.medium).clip(MaterialTheme.shapes.medium)
+                            .clickable(enabled && expanded, onClickLabel = stringResource(R.string.today_schedule), role = Role.Button) { onEdit(task.id) })
                     }
                 }
             }
@@ -259,6 +289,7 @@ private fun QueueTray(
     }
 }
 
+/** Same content on the placed row and above the axis; only the placed row owns actions and semantics. */
 @Composable
 private fun TrayChevron(progress: Float, modifier: Modifier) {
     Icon(painterResource(R.drawable.ic_expand_less), null, modifier.graphicsLayer { rotationZ = 180f * progress },

@@ -68,14 +68,19 @@ class FixedCourseDragTest {
         assertEquals("查看固定课程", ui.onNodeWithTag("day-course").fetchSemanticsNode().config[SemanticsActions.OnClick].label)
         drag(time("15:00"))
         await(hasText("15:00–15:30 · 松手安排")).assertIsDisplayed()
+        assertEquals(before, readDay())
         root.performTouchInput { up() }
         val overlaps = readDay { day -> day.occurrences.any { it.key == task.key && it.startMillis == at(15, 0).toInstant().toEpochMilli() } }
+        assertEquals(before.revision + 1, overlaps.revision)
+        assertEquals(Owner.QUEUE, overlaps.occurrences.single { it.key == task.key }.owner)
         assertEquals(before.occurrences.map { it.key }.toSet(), overlaps.occurrences.map { it.key }.toSet())
         assertTrue(overlaps.occurrences.single { it.course != null }.course!!.conflicts.isNotEmpty())
         drag(time("15:30") + (time("15:45") - time("15:30")) / 3f)
         await(hasText("15:35–16:05 · 松手安排")).assertIsDisplayed()
+        assertEquals(overlaps, readDay())
         root.performTouchInput { up() }
         val placed = readDay { day -> day.occurrences.any { it.key == task.key && it.startMillis == at(15, 35).toInstant().toEpochMilli() } }
+        assertEquals(overlaps.revision + 1, placed.revision)
         assertEquals(before.occurrences.single { it.course != null }, placed.occurrences.single { it.course != null })
         assertTrue(placed.occurrences.single { it.key == task.key }.conflicts.isEmpty())
     }

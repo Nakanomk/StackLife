@@ -1,0 +1,13 @@
+StackLife — Today tray pickup and schedule preview
+
+BiliPai 0.10.3 (615), c7f835b34d8323358be57be298f86f29fecb53c8, GPL-3.0
+https://github.com/jay3-yy/BiliPai/blob/c7f835b34d8323358be57be298f86f29fecb53c8/app/src/main/java/com/android/purebilibili/feature/list/FavoriteDragSelection.kt
+Adapted Modifier.favoriteDragSelection in today/DayAxisDrag.kt::trayDrag: list-owned pointer lifetime, hit testing the placed stable-key item, latest data and Initial-pass capture after the long press. This implementation checks the original contact throughout the hold and rejects additional contacts. The range-selection and grid-order operations are not used. Full GPLv3: StackLife-GPL-3.0-or-later.txt in this directory.
+
+Calvin Liang, Reorderable 3.1.0, 66de5751227c440bcdbd63acc94999231ed67487, Apache-2.0
+https://github.com/Calvin-LL/Reorderable/blob/66de5751227c440bcdbd63acc94999231ed67487/reorderable/src/commonMain/kotlin/sh/calvin/reorderable/ReorderableLazyList.kt
+ReorderableItem's stable-key, raised dragged item and animateItem for its neighbors are adapted in today/DayTray.kt. Placement only: one actionless copy of the real row can leave the list; no persistent queue reorder. Full license: reorderable-3.1.0-LICENSE.txt.
+
+The Android Open Source Project, Compose Animation, 94b9394bd96f2c5b261551679c8d3e33dbe2b65a, Apache-2.0
+https://github.com/androidx/androidx/blob/94b9394bd96f2c5b261551679c8d3e33dbe2b65a/compose/animation/animation/src/commonMain/kotlin/androidx/compose/animation/AnimateBoundsModifier.kt
+StackLife's today/DayAxis.kt::DropPreview uses LookaheadScope and Modifier.animateBounds from the app's Compose dependency. The default interruptible bounds spring animates the snapped interval in day-content coordinates; scrolling, civil-time projection, hit regions, domain preview and revision-checked release are StackLife adaptations, not AndroidX scheduling code. Full Apache-2.0 text is bundled in reorderable-3.1.0-LICENSE.txt.

@@ -586,6 +586,113 @@ class DayTimelineTest {
             box("assistant-composer").top - ui.dayMark("time-day-end").fetchSemanticsNode().boundsInRoot.bottom, 1f)
     }
 
+    @OptIn(ExperimentalTestApi::class)
+    private fun showThreeTrayRows(): DayPlan {
+        runBlocking { store.apply(TaskAdd(TaskInput("first")), TaskAdd(TaskInput("middle")), TaskAdd(TaskInput("last"))) }
+        val before = readDay()
+        ui.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(410.dp, 900.dp))) {
+                StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
+            }
+        }
+        await(hasTestTag("day-axis"))
+        ui.dayTick("12:00").performScrollTo()
+        await(hasTestTag("tray:${before.tray.last().id}")).assertIsDisplayed()
+        return before
+    }
+
+    @Test fun middleTrayPickupReflowsAndInterruptedSnapCommitsTheReleaseTimeOnly() {
+        val before = showThreeTrayRows()
+        val middle = before.tray[1]
+        fun box(tag: String) = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        val firstTime = centerTick("15:45").copy(x = box("day-drop-area").left + 12f)
+        val laterTime = firstTime.copy(y = ui.dayTick("16:00").fetchSemanticsNode().boundsInRoot.top)
+        val open = box("day-tray-container")
+        val lastTop = box("tray:${before.tray.last().id}").top - open.top
+        val row = box("tray:${middle.id}")
+        val grab = Offset(row.left + 10f, row.center.y)
+        val viewport = box("day-drop-area")
+        val root = ui.onRoot()
+        ui.mainClock.autoAdvance = false
+        try {
+            root.performTouchInput { down(grab); advanceEventTime(700); moveBy(Offset(0f, 1f)) }
+            ui.mainClock.advanceTimeBy(480)
+            ui.onNodeWithTag("tray:${middle.id}").assertDoesNotExist()
+            ui.onNodeWithText(middle.title).assertDoesNotExist()
+            val copy = ui.onNodeWithTag("day-tray-pickup")
+            copy.assertIsDisplayed().assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnClick))
+            val reduced = box("day-tray-container")
+            assertTrue(reduced.height < open.height)
+            assertTrue(box("tray:${before.tray.last().id}").top - reduced.top < lastTop)
+            assertEquals(viewport, box("day-drop-area"))
+            ui.assertFloatingAxisMeetsDock()
+            assertEquals(before, readDay())
+
+            root.performTouchInput { moveTo(firstTime) }
+            ui.mainClock.advanceTimeBy(480)
+            assertEquals(firstTime.y, box("drop-interval").top, 2f)
+            assertEquals(firstTime.x - 10f, copy.fetchSemanticsNode().positionInRoot.x, 2f)
+            root.performTouchInput { moveTo(laterTime) }
+            ui.mainClock.advanceTimeBy(48)
+            val moving = box("drop-interval").top
+            assertTrue("The bound must cross an intermediate position", firstTime.y < moving && moving < laterTime.y)
+            ui.onNodeWithText("16:00–16:30 · 松手安排").assertIsDisplayed()
+            assertEquals(before, readDay())
+            root.performTouchInput { moveTo(firstTime); up() }
+        } finally { ui.mainClock.autoAdvance = true }
+        val after = readDay { it.revision > before.revision }
+        val scheduled = after.occurrences.single()
+        assertEquals(before.revision + 1, after.revision)
+        assertEquals(middle.id, scheduled.taskId)
+        assertEquals(Owner.QUEUE, scheduled.owner)
+        assertEquals(at(15, 45).toInstant().toEpochMilli(), scheduled.startMillis)
+        assertEquals(at(16, 15).toInstant().toEpochMilli(), scheduled.endMillis)
+        val queue = runBlocking { store.state().queue }
+        assertEquals(before.tray.map { it.id }, queue.map { it.id })
+        assertNotNull(queue.single { it.id == middle.id }.schedule)
+        assertEquals(before.tray.filterNot { it.id == middle.id }, after.tray)
+        ui.onNodeWithTag("day-tray-toggle").assert(hasStateDescription("已展开"))
+        ui.onNodeWithTag("day-tray-pickup").assertDoesNotExist()
+    }
+
+    @Test fun exposedSourceTraySecondFingerAndReassignedPickupCannotCreateAnAppointment() {
+        val before = showThreeTrayRows()
+        val task = before.tray[1]
+        fun bounds(tag: String) = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        val target = centerTick("12:00")
+        val origin = bounds("tray:${task.id}").center
+        val open = bounds("day-tray-container")
+        val root = ui.onRoot()
+        fun restored() {
+            ui.onNodeWithTag("day-tray-pickup").assertDoesNotExist()
+            ui.onNodeWithTag("tray:${task.id}").assertIsDisplayed()
+            assertEquals(before, readDay())
+            assertEquals(before.tray, runBlocking { store.state().queue })
+        }
+        pickup(origin, target)
+        val exposed = Offset(open.left + 4f, open.top + 2f)
+        assertFalse(bounds("day-tray-container").contains(exposed))
+        root.performTouchInput { moveTo(exposed); up() }
+        restored()
+        pickup(origin, target)
+        root.performTouchInput { down(1, target + Offset(8f, 4f)); up(1); up(0) }
+        restored()
+        root.performTouchInput {
+            down(origin); down(1, target); up(1); advanceEventTime(700); moveTo(target); up()
+        }
+        restored()
+        pickup(origin, target)
+        await(hasTestTag("drop-preview")).assertIsDisplayed()
+        runBlocking { store.apply(FramePush("interrupted", listOf(task.id))) }
+        root.performTouchInput { up() }
+        ui.waitForIdle()
+        val current = readDay()
+        assertEquals(before.revision + 1, current.revision)
+        assertTrue(current.occurrences.isEmpty())
+        assertEquals(before.tray.filterNot { it.id == task.id }, current.tray)
+        assertEquals(current.tray, runBlocking { store.state().queue })
+    }
+
     @Test fun dragFromTrayThenMoveSameBlockAndCancelInEditor() {
         runBlocking { store.apply(TaskAdd(TaskInput("报告提纲"))) }
         val task = readDay().tray.single()

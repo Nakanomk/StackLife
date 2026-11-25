@@ -2,6 +2,8 @@ package io.github.nakanomk.stacklife.today
 
 import io.github.nakanomk.stacklife.R
 import androidx.compose.ui.res.stringResource
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.animateBounds
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -15,13 +17,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.LookaheadScope
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -34,6 +36,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.courses.ScheduledCourse
+import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 import io.github.nakanomk.stacklife.planner.*
 import androidx.compose.ui.text.style.TextDecoration
 import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch
@@ -270,6 +273,7 @@ private fun CurrentLine(drag: AxisDrag, spine: Dp) {
         .semantics { contentDescription = now }, color = color, thickness = 2.dp)
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun DropPreview(drag: AxisDrag, gutter: Dp) {
     val slot = drag.candidate ?: return
@@ -279,40 +283,33 @@ private fun DropPreview(drag: AxisDrag, gutter: Dp) {
     val endY = drag.scale.yAt(end)
     val color = if (checked?.error == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
     val railX = drag.resizeRailX
-    if (slot.interval.point) Spacer(Modifier.offset { IntOffset(0, (startY - drag.scroll.value).coerceAtLeast(0)) }.padding(start = gutter)
-        .size(12.dp).background(color, CircleShape))
-    else {
-        val corner = MaterialTheme.shapes.medium.topStart
-        val fill = color.copy(alpha = .29f)
-        Spacer(Modifier.fillMaxSize().padding(start = gutter, end = 4.dp).drawBehind {
-            val scroll = drag.scroll.value
-            val top = (startY - scroll).coerceAtLeast(0).toFloat()
-            val bottom = (endY - scroll).toFloat().coerceAtMost(size.height)
-            if (bottom <= top) return@drawBehind
-            val area = Size(size.width, bottom - top)
-            val radius = corner.toPx(area, this).coerceAtMost(area.minDimension * .5f)
-            drawRoundRect(fill, Offset(0f, top), area, CornerRadius(radius))
-            val thickness = 3.dp.toPx().coerceAtMost(area.height)
-            val edge = if (railX == null) top else bottom - thickness
-            drawRect(color, Offset(0f, edge), Size(size.width, thickness))
-        })
-    }
-    if (railX != null) {
-        val centerColor = MaterialTheme.colorScheme.surface
-        Spacer(Modifier.fillMaxSize().clipToBounds().drawBehind {
-            val scroll = drag.scroll.value
-            val edge = endY - scroll
-            val top = (startY - scroll).coerceAtLeast(0)
-            val bottom = edge.coerceAtMost(size.height.roundToInt())
-            val x = railX - drag.viewport.left
-            if (bottom > top) drawLine(color, Offset(x, top.toFloat()), Offset(x, bottom.toFloat()), 5.dp.toPx())
-            if (edge in 0..size.height.roundToInt()) {
-                drawEndKnob(x, edge.toFloat(), color, centerColor)
+    val density = LocalDensity.current
+    // Scroll follows the real viewport immediately. Only the snapped geometry changes
+    // inside this lookahead space; neither the domain check nor release reads animated bounds.
+    Box(Modifier.fillMaxWidth().layout { measurable, constraints ->
+        val child = measurable.measure(constraints.copy(minHeight = 0))
+        layout(child.width, child.height) { child.place(0, -drag.scroll.value) }
+    }.wrapContentHeight(Alignment.Top, unbounded = true)) {
+        LookaheadScope {
+            val bounds = if (LocalMotionEnabled.current) Modifier.animateBounds(this) else Modifier
+            val height = if (slot.interval.point) 12.dp else with(density) { (endY - startY).toDp() }
+            Box(Modifier.fillMaxWidth().offset(y = with(density) { startY.toDp() })
+                .then(bounds).height(height).testTag("drop-interval")) {
+                if (slot.interval.point) Spacer(Modifier.padding(start = gutter).size(12.dp).background(color, CircleShape))
+                else Spacer(Modifier.fillMaxSize().padding(start = gutter, end = 4.dp)
+                    .background(color.copy(alpha = .29f), MaterialTheme.shapes.medium))
+                if (railX != null) {
+                    val centerColor = MaterialTheme.colorScheme.surface
+                    Spacer(Modifier.fillMaxSize().drawBehind {
+                        val x = railX - drag.viewport.left
+                        drawLine(color, Offset(x, 0f), Offset(x, size.height), 5.dp.toPx())
+                        drawEndKnob(x, size.height, color, centerColor)
+                    })
+                }
             }
-        })
+        }
     }
-    val status = checked?.error ?: when {
-        checked == null -> stringResource(R.string.today_checking)
+    val status = when {
         slot.command is PlannerCommand.SetOccurrenceOverride -> stringResource(R.string.slot_release_this)
         railX != null -> stringResource(R.string.today_release_resize)
         else -> stringResource(R.string.today_release_schedule)
@@ -322,7 +319,9 @@ private fun DropPreview(drag: AxisDrag, gutter: Dp) {
         shape = MaterialTheme.shapes.medium, shadowElevation = 2.dp) {
         val range = if (slot.interval.point) stringResource(R.string.slot_point_at, clockLabel(start, drag.scale.day))
             else "${clockLabel(start, drag.scale.day)}–${clockLabel(end, drag.scale.day)}"
-        Text("$range · $status",
-            Modifier.padding(horizontal = 10.dp, vertical = 4.dp), style = MaterialTheme.typography.labelLarge)
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+            Text("$range · $status", style = MaterialTheme.typography.labelLarge)
+            checked?.error?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
     }
 }
