@@ -358,7 +358,8 @@ class DayTimelineTest {
 
     @OptIn(ExperimentalTestApi::class)
     private fun assertOverlayKeepsDayStable(pinned: Boolean, landscape: Boolean) {
-        runBlocking { store.apply(EditAppearance(AppearancePatch.Replace(Appearance(floatingDayTray = !pinned)))) }
+        // Compare the rail to a uniform donor: neighboring plaid pixels can differ even without a rail.
+        runBlocking { store.apply(EditAppearance(AppearancePatch.Replace(Appearance(floatingDayTray = !pinned, background = WallpaperSpec())))) }
         ui.setContent {
             if (landscape) DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(780.dp, 360.dp))) {
                 StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
@@ -1014,7 +1015,7 @@ class DayTimelineTest {
             TaskAdd(TaskInput("读书", ref = "d")), once("@d", at(2, 30), 45)
         ) }
         val point = readDay().occurrences.first()
-        val flat = Appearance(theme = ThemeMode.LIGHT, palette = PaletteMode.SEED)
+        val flat = Appearance(theme = ThemeMode.LIGHT, palette = PaletteMode.SEED, dayScrollEffect = DayScrollEffect.FLAT)
         val wheel = flat.copy(dayScrollEffect = DayScrollEffect.WHEEL)
         appearance(flat); show()
         ui.onNodeWithTag("day-tray-toggle").performClick()
@@ -1077,7 +1078,7 @@ class DayTimelineTest {
             TaskAdd(TaskInput("出发", minutes = 0, ref = "p")), once("@p", at(0, 30), 0),
             TaskAdd(TaskInput("全天排练", ref = "l")), once("@l", at(2, 0), 1260)
         ) }
-        val flat = Appearance(theme = ThemeMode.LIGHT)
+        val flat = Appearance(theme = ThemeMode.LIGHT, dayScrollEffect = DayScrollEffect.FLAT, background = WallpaperSpec())
         val wheel = flat.copy(dayScrollEffect = DayScrollEffect.WHEEL)
         appearance(flat); show()
         ui.onNodeWithTag("day-tray-toggle").performClick()

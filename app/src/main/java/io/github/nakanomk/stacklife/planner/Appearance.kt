@@ -60,7 +60,7 @@ data class Appearance(
     val background: WallpaperSpec = WallpaperSpec(preset = WallpaperPreset.BLUE),
     val pageBackgrounds: Map<Destination, WallpaperSpec> = emptyMap(),
     val showCourseGrid: Boolean = false,
-    val dayScrollEffect: DayScrollEffect = DayScrollEffect.FLAT,
+    val dayScrollEffect: DayScrollEffect = DayScrollEffect.WHEEL,
 ) {
     init {
         require(seed.length == 7 && seed.first() == '#' && seed.drop(1).all { it in '0'..'9' || it in 'A'..'F' }) { uiText("Use #RRGGBB for the seed color.", "种子色须为 #RRGGBB。") }
