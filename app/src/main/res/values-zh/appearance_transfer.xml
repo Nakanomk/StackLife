@@ -1,0 +1,18 @@
+<resources>
+    <string name="transfer_no_picker">系统文件选择器不可用。</string>
+    <string name="transfer_title">外观分享</string>
+    <string name="transfer_scope">仅包含已保存的外观设置及全局、逐页背景图片，不包含日程、对话、模型连接或设备偏好。每张图片限 32 MiB，合计限 128 MiB。</string>
+    <string name="transfer_finish_draft">请先保存或放弃当前编辑，再分享或导入外观。</string>
+    <string name="transfer_export">导出外观文件</string>
+    <string name="transfer_import">预览外观文件</string>
+    <string name="transfer_review">替换已保存的外观？</string>
+    <string name="transfer_replace">应用这些更改</string>
+    <string name="transfer_photo_count">本次外观所用私图：%1$d 张</string>
+    <string name="transfer_refreshed">预览后本地数据已变更，请重新核对当前差异再应用。</string>
+    <string name="transfer_exported">外观文件已保存。</string>
+    <string name="transfer_export_failed">保存外观文件失败，未完成的文件已删除。</string>
+    <string name="transfer_partial">导出未完成，文件提供方无法删除残留文件，请在所选位置手动删除。</string>
+    <string name="transfer_invalid">无法导入外观文件，请检查格式、大小、图片或存储权限。已保存的外观未变更。</string>
+    <string name="transfer_unchanged">文件与当前外观一致，无需更改。</string>
+    <string name="transfer_busy">正在传输外观…</string>
+</resources>

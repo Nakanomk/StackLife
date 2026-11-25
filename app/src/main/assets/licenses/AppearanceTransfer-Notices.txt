@@ -1,0 +1,17 @@
+StackLife appearance package transfer
+
+BiliPai 0.10.3 (615), jay3-yy/BiliPai and contributors, GPL-3.0.
+https://github.com/jay3-yy/BiliPai/tree/c7f835b34d8323358be57be298f86f29fecb53c8
+Full GNU General Public License, version 3 (29 June 2007), is included verbatim in StackLife-GPL-3.0-or-later.txt in this directory. The BiliPai adaptations here use GPL-3.0; the shared filename does not change the upstream grant.
+
+Source paths under app/src/main/java/com/android/purebilibili/ at that revision:
+  core/plugin/skin/UiSkinPackageReader.kt: scanPackage, normalizeEntryName, validateManifest, validateAssets, sha256Hex (count, normalized unique paths, byte budgets, manifest/asset correspondence and digest).
+  core/plugin/skin/UiSkinInstallStore.kt: installPreview / extractDeclaredAssets (verify the reviewed content and collect only declared assets).
+  feature/settings/webdav/WebDavBackupService.kt: buildBackupArchive / addFileIfExists (ZIP manifest and file streams).
+  feature/search/SearchHistoryTransfer.kt: rememberSearchHistoryTransfer (SAF creation/opening, parse, pending replacement preview, confirm/cancel, report completion after the operation).
+
+StackLife modifications: archive/ArchiveCodec.kt is a bounded streaming envelope with a final completion manifest, versioned typed category contract, per-member size and SHA-256, and local/central directory cross-check. Only canonical ASCII paths, ordinary STORED ZIP files, the typed full appearance record and its exact global/per-page private-photo closure are accepted in an appearance package. Staging uses generated private filenames rather than user-provided paths. archive/AppearanceArchive.kt and appearance/BackgroundStore.kt lease immutable photos against collection, publish verified files atomically, resolve identity collisions and hand a typed replacement to Planner. An independent user decision is required for each new preview after a stale revision. appearance/AppearanceTransfer.kt adapts the two system document launchers and confirmation dialog to these transactions. No skins, executable content, plugins, WebDAV, credentials, clipboard transfer, donor preferences, or direct configuration-file restore are used.
+
+AndroidX Activity 1.13.0, Copyright 2020 The Android Open Source Project. Apache-2.0; complete licence text is included in reorderable-3.1.0-LICENSE.txt in this directory. Published androidx.activity:activity:1.13.0 sources JAR:
+https://dl.google.com/dl/android/maven2/androidx/activity/activity/1.13.0/activity-1.13.0-sources.jar
+SHA-256 c7cf1b2e315e08867b10ef4505945d1993d90281445c65b929e81b9420216ce9, androidx/activity/result/contract/ActivityResultContracts.kt :: OpenDocument, CreateDocument. StackLife uses these contracts through its existing dependency; it does not copy AndroidX code or retain broad storage permissions.

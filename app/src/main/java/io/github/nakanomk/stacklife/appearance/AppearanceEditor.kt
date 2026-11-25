@@ -39,7 +39,7 @@ private val AppearanceGroup.title: String @Composable get() = when (this) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions: WorkspaceActions,
-    startAtWallpaper: Boolean = false, onBack: () -> Unit) {
+    planner: PlannerApi, startAtWallpaper: Boolean = false, onBack: () -> Unit) {
     var baseline by rememberSaveable(stateSaver = appearanceSaver) { mutableStateOf(saved) }
     var draft by rememberSaveable(stateSaver = appearanceSaver) { mutableStateOf(saved) }
     var seedInput by rememberSaveable { mutableStateOf(saved.seed) }
@@ -77,6 +77,8 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
     val preview = remember(group, selected, saved) { AppearanceFields(group, selected).applyTo(saved) }
     var previewPage by rememberSaveable(preview.start, wallpaperTarget) { mutableStateOf(wallpaperTarget ?: preview.start) }
     val reload = { baseline = saved; draft = saved; seedInput = saved.seed; message = "" }
+    val transfer = if (group == AppearanceGroup.MATERIAL) rememberAppearanceTransfer(planner, backgrounds,
+        available = !busy && !applied && !stale && selected == persisted) { applied = true; closing = true } else null
     BackHandler(enabled = busy || leases.isNotEmpty()) { leave() }
     val hasMessage = message.isNotEmpty()
     val leadSections = remember(group, hasMessage) {
@@ -163,6 +165,7 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                             }
                         }
                         item { AccessibilityFields(draft) { draft = it } }
+                        if (transfer != null) item(key = "appearance-transfer") { transfer() }
                     }
                 }
                 item {

@@ -378,7 +378,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 entry<HelpAbout> { HelpAboutScreen(back) { navigate(Guidance) } }
                 if (updates != null) entry<Updates> { UpdateScreen(updates, back) }
                 entry<EditAppearance> { key -> SettingsHelpHost { AppearanceEditor(preferences.appearance,
-                    AppearanceGroup.entries.first { it.key == key.group }, model, startAtWallpaper = key.startAtWallpaper, onBack = back) } }
+                    AppearanceGroup.entries.first { it.key == key.group }, model, planner = model.planner, startAtWallpaper = key.startAtWallpaper, onBack = back) } }
                 entry<ModelConnection> { PrivateScreen(privateScreens) { SettingsHelpHost { ConnectionScreen(assistant.connections, back) } } }
         }
         homePlane.Layout(Modifier.onGloballyPositioned { origins.host = it; origins.size = it.size }) {
