@@ -37,7 +37,8 @@ internal enum class AppearanceGroup(val key: String, val fields: Map<String, () 
         "background" to { uiText("Global background", "全局背景") }, "pageBackgrounds" to { uiText("Page backgrounds", "逐页背景") },
         "showCourseGrid" to { uiText("Timetable grid lines", "课表辅助线") },
         "courseTextOutline" to { uiText("Outline class text", "课程文字描边") },
-        "reduceMotion" to { uiText("Reduce motion", "减弱动效") }, "reduceTransparency" to { uiText("Reduce transparency", "减少透明度") }, "highContrast" to { uiText("High contrast", "增强对比") }, "haptics" to { uiText("System haptics", "随系统触感") }));
+        "reduceMotion" to { uiText("Reduce motion", "减弱动效") }, "reduceTransparency" to { uiText("Reduce transparency", "减少透明度") }, "highContrast" to { uiText("High contrast", "增强对比") }, "haptics" to { uiText("System haptics", "随系统触感") },
+        "navigationHaptics" to { uiText("Navigation feedback", "切换触感") }, "edgeHaptics" to { uiText("Scroll boundary feedback", "滑动边缘触感") }));
 
     fun project(appearance: Appearance) = JsonObject(full(appearance).filterKeys(fields::containsKey))
 }
@@ -62,7 +63,7 @@ internal fun appearanceDifferences(before: Appearance, after: Appearance): List<
     }
 }
 
-internal fun appearanceLabel(value: JsonElement): String = when (value) {
+internal fun appearanceLabel(value: JsonElement, key: String? = null): String = when (value) {
     is JsonObject -> if (value.isEmpty()) uiText("Inherit the global background", "继承全局背景")
         else if ("scale" in value || "imageId" in value) {
             val preset = value["preset"]?.jsonPrimitive?.contentOrNull
@@ -79,7 +80,8 @@ internal fun appearanceLabel(value: JsonElement): String = when (value) {
     is JsonArray -> value.joinToString(" → ") { appearanceLabel(it) }
     else -> when (val s = value.jsonPrimitive.content) {
         "true" -> uiText("On", "开启"); "false" -> uiText("Off", "关闭"); "SYSTEM" -> uiText("System default", "跟随系统")
-        "LIGHT" -> uiText("Light", "浅色"); "DARK" -> uiText("Dark", "深色"); "DYNAMIC" -> uiText("Dynamic color", "动态色")
+        "LIGHT" -> if (key == "navigationHaptics" || key == "edgeHaptics") uiText("Light", "轻") else uiText("Light", "浅色")
+        "STANDARD" -> uiText("Standard", "标准"); "DARK" -> uiText("Dark", "深色"); "DYNAMIC" -> uiText("Dynamic color", "动态色")
         "FLAT" -> uiText("Flat", "平面"); "WHEEL" -> uiText("Wheel", "滚轮")
         "WAVE" -> uiText("Wavy", "曲线"); "STRAIGHT" -> uiText("Straight", "直线"); "OFF" -> uiText("Off", "关闭")
         "SEED" -> uiText("Seed color", "种子色"); "FLOATING" -> uiText("Floating pill", "浮动胶囊"); "DOCKED" -> uiText("Bottom bar", "贴底导航")

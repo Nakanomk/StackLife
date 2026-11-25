@@ -1,0 +1,6 @@
+<resources>
+    <string name="haptic_navigation">Navigation and calendar changes</string>
+    <string name="haptic_edges">Scroll boundaries</string>
+    <string name="haptic_off">Off</string>
+    <string name="haptic_light">Light</string>
+</resources>

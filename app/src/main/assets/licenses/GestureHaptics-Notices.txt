@@ -1,0 +1,18 @@
+StackLife — navigation and scroll boundary feedback
+
+BiliPai 0.10.3 (615), commit c7f835b34d8323358be57be298f86f29fecb53c8. GPL-3.0. https://github.com/jay3-yy/BiliPai/tree/c7f835b34d8323358be57be298f86f29fecb53c8
+Full GPL version 3 text is bundled in StackLife-GPL-3.0-or-later.txt.
+
+Upstream paths (relative to that revision):
+  design-system/src/main/java/com/android/purebilibili/core/ui/components/AppScrollBoundaryHaptics.kt (observeScrollBoundary, ScrollBoundaryFeedback.beforeScroll/afterScroll)
+  design-system/src/main/java/com/android/purebilibili/core/ui/AppHapticSettings.kt (rememberAppHapticFeedback, AppPolicyHapticFeedback)
+  design-system/src/main/java/com/android/purebilibili/core/ui/AppActionHaptics.kt (runWithoutAdditionalFeedback)
+  app/src/main/java/com/android/purebilibili/feature/home/components/LiquidDockHapticPolicy.kt (start/update/finish)
+  app/src/main/java/com/android/purebilibili/feature/settings/HapticScenePreference.kt (HapticScenePreference)
+  app/src/main/java/com/android/purebilibili/navigation/PagerSelectionMotion.kt and feature/home/HomePagerSyncEffects.kt under the same com/android/purebilibili package (click target, touch settle versus programmatic alignment)
+
+The nested scroll observer, direction test, can-move-away check and edge latch in appearance/GestureHaptics.kt are adapted from BiliPai. StackLife's vertical lists admit only user scroll deltas and the kinetic fling from that input. A drag-and-drop auto-scroll or notification alignment has no such session. The observer neither consumes deltas nor replaces AndroidX overscroll. Per-scene settings stay independent of the master switch. Instead of a new scene provider, thread-local action wrapper or pulses at intermediate dock slots, the accepted destination in the dock/queue/stack, a released root swipe, or the day/week selection owner asks StackLifeTheme's existing system-gated Compose delegate for one effect. A cancelled gesture and its return animation never request feedback.
+
+Android Open Source Project, Android 16 r1, 99b01a65cc4c104933788b3143285ab6bae65827, Apache-2.0:
+https://android.googlesource.com/platform/frameworks/base/+/99b01a65cc4c104933788b3143285ab6bae65827/core/java/android/view/HapticFeedbackConstants.java
+Uses the platform SEGMENT_FREQUENT_TICK, SEGMENT_TICK and GESTURE_THRESHOLD_ACTIVATE semantics through Compose. No platform source copied, custom waveform, vibrator permission or change to notification vibration. Strength and availability of system effects are device-dependent. Full Apache-2.0 text: reorderable-3.1.0-LICENSE.txt.

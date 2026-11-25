@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.*
 import io.github.nakanomk.stacklife.R
+import io.github.nakanomk.stacklife.appearance.scrollBoundaryHaptics
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.today.deviceDay
@@ -54,7 +55,7 @@ internal fun CountdownRoute(model: WorkspaceViewModel, onOpen: (String) -> Unit,
         } }) { top, bottom ->
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val grid = rememberLazyGridState()
-                LazyVerticalGrid(GridCells.Fixed(if (maxWidth < 600.dp) 1 else 2), Modifier.fillMaxSize().testTag("countdown-list"), state = grid,
+                LazyVerticalGrid(GridCells.Fixed(if (maxWidth < 600.dp) 1 else 2), Modifier.fillMaxSize().testTag("countdown-list").scrollBoundaryHaptics(grid), state = grid,
                     contentPadding = dockListPadding(top, bottom), verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     error?.let { message -> item(span = { GridItemSpan(maxLineSpan) }) { Text(message, color = MaterialTheme.colorScheme.error) } }

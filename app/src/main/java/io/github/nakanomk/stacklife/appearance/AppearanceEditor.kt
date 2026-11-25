@@ -264,6 +264,21 @@ private fun AccessibilityFields(d: Appearance, update: (Appearance) -> Unit) {
         SwitchRow(stringResource(R.string.ui_reduce_transparency), d.reduceTransparency) { update(d.copy(reduceTransparency = !d.reduceTransparency)) }
         SwitchRow(stringResource(R.string.ui_increase_contrast), d.highContrast) { update(d.copy(highContrast = !d.highContrast)) }
         SwitchRow(stringResource(R.string.ui_system_haptics), d.haptics) { update(d.copy(haptics = !d.haptics)) }
+        if (d.haptics) {
+            val label: @Composable (HapticLevel) -> String = { level ->
+                stringResource(when (level) {
+                    HapticLevel.OFF -> R.string.haptic_off
+                    HapticLevel.LIGHT -> R.string.haptic_light
+                    HapticLevel.STANDARD -> R.string.ui_standard
+                })
+            }
+            Choice(stringResource(R.string.haptic_navigation), HapticLevel.entries, d.navigationHaptics, label) {
+                update(d.copy(navigationHaptics = it))
+            }
+            Choice(stringResource(R.string.haptic_edges), HapticLevel.entries, d.edgeHaptics, label) {
+                update(d.copy(edgeHaptics = it))
+            }
+        }
     }
 }
 

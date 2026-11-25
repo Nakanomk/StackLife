@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.courses.ScheduledCourse
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
+import io.github.nakanomk.stacklife.appearance.scrollBoundaryHaptics
 import io.github.nakanomk.stacklife.planner.*
 import androidx.compose.ui.text.style.TextDecoration
 import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch
@@ -55,7 +56,7 @@ internal fun DayAxis(
     val gutter = spine + railWidth / 2
     var selectedEnd by remember(drag, revision) { mutableStateOf<String?>(null) }
     Box(modifier.fillMaxWidth().clipToBounds()) {
-        Box(Modifier.fillMaxSize().testTag("day-axis").verticalScroll(drag.scroll).padding(top = topInset, bottom = 16.dp)) {
+        Box(Modifier.fillMaxSize().testTag("day-axis").scrollBoundaryHaptics(drag.scroll).verticalScroll(drag.scroll).padding(top = topInset, bottom = 16.dp)) {
             val plane = Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() })
             Box(plane) {
                 for (band in scale.bands) for (tick in band.ticks) {

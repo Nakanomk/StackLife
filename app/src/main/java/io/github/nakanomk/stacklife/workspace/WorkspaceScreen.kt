@@ -49,6 +49,8 @@ import io.github.nakanomk.stacklife.PagerPane
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.RootToolbar
 import io.github.nakanomk.stacklife.appearance.SegmentTrack
+import io.github.nakanomk.stacklife.appearance.rememberNavigationPulse
+import io.github.nakanomk.stacklife.appearance.scrollBoundaryHaptics
 import io.github.nakanomk.stacklife.appearance.CapsuleScene
 import io.github.nakanomk.stacklife.appearance.StackLifeSurface
 import io.github.nakanomk.stacklife.appearance.CardFrostGroup
@@ -209,13 +211,16 @@ private fun WorkspaceSegments(stack: Boolean, change: (Boolean) -> Unit, positio
     val colors = MaterialTheme.colorScheme
     val label = MaterialTheme.typography.labelLarge
     val inset = 4.dp
-    SegmentTrack(position, 2, colors.secondaryContainer, { change(it == 1) },
+    val pulse = rememberNavigationPulse()
+    var accepted = stack
+    val select: (Boolean) -> Unit = { next -> if (next != accepted) { accepted = next; pulse(); change(next) } }
+    SegmentTrack(position, 2, colors.secondaryContainer, { select(it == 1) },
         Modifier.widthIn(max = 168.dp).fillMaxWidth(), indicatorInset = inset) { highlighted ->
         Row(Modifier.fillMaxWidth().selectableGroup()) {
             for (index in 0..1) {
                 val frame = index == 1
                 val selected = stack == frame
-                Box(Modifier.weight(1f).clip(CircleShape).selectable(selected, role = Role.Tab) { change(frame) }
+                Box(Modifier.weight(1f).clip(CircleShape).selectable(selected, role = Role.Tab) { select(frame) }
                     .heightIn(min = 48.dp).padding(vertical = inset), contentAlignment = Alignment.Center) {
                     Text(if (frame) stringResource(R.string.ui_stack) else stringResource(R.string.ui_queue),
                         style = label, color = if (highlighted == index) colors.primary else colors.onSurfaceVariant)
@@ -254,7 +259,7 @@ private fun QueueList(
             }
         }
     }
-    LazyColumn(Modifier.fillMaxSize().then(source?.modifier ?: Modifier).testTag("queue"), state = scroll,
+    LazyColumn(Modifier.fillMaxSize().then(source?.modifier ?: Modifier).scrollBoundaryHaptics(scroll).testTag("queue"), state = scroll,
         contentPadding = dockListPadding(topClearance, bottomClearance), verticalArrangement = listSpacing) {
         item {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {

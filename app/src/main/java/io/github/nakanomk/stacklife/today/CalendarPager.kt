@@ -18,6 +18,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Velocity
 import io.github.nakanomk.stacklife.PagerPane
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
+import io.github.nakanomk.stacklife.appearance.rememberNavigationPulse
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -126,7 +127,9 @@ internal fun rememberCalendarSelection(page: Int, count: Int, onSelect: (Int) ->
     // The shell restores the date, not the fractional offset of an interrupted gesture.
     val pager = remember { PagerState(currentPage = initial) { count } }
     val scope = rememberCoroutineScope()
-    val callback by rememberUpdatedState(onSelect)
+    val pulse = rememberNavigationPulse()
+    // choose() is the single accepting owner for a tap or a completed swipe; align() is silent.
+    val callback by rememberUpdatedState<(Int) -> Unit> { selected -> pulse(); onSelect(selected) }
     val spec by rememberUpdatedState(if (LocalMotionEnabled.current) MaterialTheme.motionScheme.fastSpatialSpec<Float>() else null)
     val owner by rememberUpdatedState(initial)
     val selection = remember(pager) { CalendarSelection(pager, scope, { owner }, { spec }, { callback(it) }) }

@@ -21,6 +21,7 @@ import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 import io.github.nakanomk.stacklife.appearance.CardFrostGroup
 import io.github.nakanomk.stacklife.appearance.FrostedCard
+import io.github.nakanomk.stacklife.appearance.scrollBoundaryHaptics
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.transitions.CardMetadata
 import io.github.nakanomk.stacklife.transitions.CardSummary
@@ -49,7 +50,7 @@ internal fun FrameList(
     clearing?.let { ids -> ConfirmFrameDeletion(ids.size, deletion.busy, { clearing = null }) {
         deletion.send(PlannerCommand.DeleteFrameHistory(ids))
     } }
-    LazyColumn(Modifier.fillMaxSize().then(source?.modifier ?: Modifier).testTag("frames"), state = scroll,
+    LazyColumn(Modifier.fillMaxSize().then(source?.modifier ?: Modifier).scrollBoundaryHaptics(scroll).testTag("frames"), state = scroll,
         contentPadding = dockListPadding(topClearance, bottomClearance), verticalArrangement = listSpacing) {
         item {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {

@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.WorkspaceViewModel
+import io.github.nakanomk.stacklife.appearance.scrollBoundaryHaptics
 import io.github.nakanomk.stacklife.courses.ScheduledCourse
 import io.github.nakanomk.stacklife.planner.AgendaOccurrence
 import io.github.nakanomk.stacklife.planner.OccurrenceKey
@@ -51,7 +52,7 @@ internal fun EventDay(
     var gapEnd by rememberSaveable { mutableLongStateOf(0L) }
     var gapRevision by rememberSaveable { mutableLongStateOf(0L) }
     DayWithTray(plan, null, true, editTray, onAdd, top, bottom, trayOpen, toggleTray, hideForEnd = false) { spine, tail ->
-        LazyColumn(Modifier.fillMaxSize().padding(top = top).testTag("day-events"), state = list,
+        LazyColumn(Modifier.fillMaxSize().padding(top = top).testTag("day-events").scrollBoundaryHaptics(list), state = list,
             contentPadding = PaddingValues(bottom = tail)) {
             items(rows.size, key = { index -> when (val row = rows[index]) {
                 is DayEventRow.Event -> row.entry.stableKey

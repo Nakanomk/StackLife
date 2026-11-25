@@ -17,8 +17,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -147,10 +145,13 @@ internal fun rememberDestinationCapsule(active: String, pagerPosition: State<Flo
     val position = appearance.visibleOrder.indexOfFirst { it.key == active }.coerceAtLeast(0).toFloat()
     val slot = pagerPosition ?: animateFloatAsState(position, if (LocalMotionEnabled.current) tween(200) else snap(), label = "navigation slot")
     return {
-        val haptics = LocalHapticFeedback.current
+        val pulse = rememberNavigationPulse()
+        // A second accessibility action can arrive before a new composition sees the first.
+        var accepted = active
         val select: (String) -> Unit = { key ->
-            if (key != active) {
-                haptics.performHapticFeedback(HapticFeedbackType.VirtualKey)
+            if (key != accepted) {
+                accepted = key
+                pulse()
                 onSelect(key)
             }
         }

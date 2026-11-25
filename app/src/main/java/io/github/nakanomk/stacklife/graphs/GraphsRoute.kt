@@ -6,6 +6,7 @@ import io.github.nakanomk.stacklife.R
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -23,6 +24,7 @@ import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.appearance.PlannerDropdownMenu
 import io.github.nakanomk.stacklife.appearance.CardFrostGroup
 import io.github.nakanomk.stacklife.appearance.FrostedCard
+import io.github.nakanomk.stacklife.appearance.scrollBoundaryHaptics
 import io.github.nakanomk.stacklife.workspace.*
 
 import io.github.nakanomk.stacklife.transitions.CardMetadata
@@ -40,7 +42,8 @@ internal fun GraphsRoute(model: WorkspaceViewModel, onOpenGraph: (String) -> Uni
             TextButton(onClick = { creating = true }) { Text(stringResource(R.string.ui_new_graph)) }
         } }) { top, bottom ->
             CardFrostGroup(enabled = list.graphs.isNotEmpty()) {
-                LazyColumn(Modifier.fillMaxSize(), verticalArrangement = listSpacing,
+                val scroll = rememberLazyListState()
+                LazyColumn(Modifier.fillMaxSize().scrollBoundaryHaptics(scroll), state = scroll, verticalArrangement = listSpacing,
                     contentPadding = dockListPadding(top, bottom)) {
                     if (list.graphs.isEmpty()) item {
                         SectionTitle(stringResource(R.string.ui_no_graphs))

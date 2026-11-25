@@ -16,6 +16,7 @@ import kotlinx.serialization.Serializable
 internal val allDestinations = Destination.entries.toSet()
 @Serializable enum class DayScrollEffect { FLAT, WHEEL }
 @Serializable enum class NowLineStyle { WAVE, STRAIGHT, OFF }
+@Serializable enum class HapticLevel { OFF, LIGHT, STANDARD }
 internal val privatePhotoId = Regex("[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}")
 @Serializable enum class WallpaperPreset(private val en: String, private val zh: String) {
     BROWN("Cocoa plaid", "可可棕格"), PINK("Rose plaid", "玫瑰粉格"),
@@ -65,6 +66,8 @@ data class Appearance(
     val nowLine: NowLineStyle = NowLineStyle.WAVE,
     val nowArrow: Boolean = true,
     val nowTrail: Boolean = true,
+    val navigationHaptics: HapticLevel = HapticLevel.LIGHT,
+    val edgeHaptics: HapticLevel = HapticLevel.LIGHT,
 ) {
     init {
         require(seed.length == 7 && seed.first() == '#' && seed.drop(1).all { it in '0'..'9' || it in 'A'..'F' }) { uiText("Use #RRGGBB for the seed color.", "种子色须为 #RRGGBB。") }

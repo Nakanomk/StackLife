@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -33,6 +34,7 @@ import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.RootToolbar
 import io.github.nakanomk.stacklife.appearance.PlannerModalBottomSheet
 import io.github.nakanomk.stacklife.appearance.LocalPanelBack
+import io.github.nakanomk.stacklife.appearance.scrollBoundaryHaptics
 import androidx.compose.foundation.clickable
 import io.github.nakanomk.stacklife.transitions.PaneMotion
 import io.github.nakanomk.stacklife.transitions.PaneOrigins
@@ -243,7 +245,8 @@ private fun CourseWeekPage(model: WorkspaceViewModel, term: TermSpec, number: In
         ReadPanel(state) {}
         return
     }
-    LazyColumn(Modifier.fillMaxSize().testTag("course-list"),
+    val list = rememberLazyListState()
+    LazyColumn(Modifier.fillMaxSize().testTag("course-list").scrollBoundaryHaptics(list), state = list,
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = top + 8.dp, bottom = bottom + 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (week.classes.isEmpty()) item { Text(stringResource(R.string.courses_no_classes_week)) }

@@ -129,7 +129,7 @@ internal fun ChangePreview(change: PlannerChange, modifier: Modifier = Modifier)
                             else if (difference.key == "seed") Box(Modifier.size(20.dp).background(
                                 Color(android.graphics.Color.parseColor(value.toString().trim('"'))), MaterialTheme.shapes.small))
                         }
-                        Text(appearanceLabel(value), style = MaterialTheme.typography.bodyMedium)
+                        Text(appearanceLabel(value, difference.key), style = MaterialTheme.typography.bodyMedium)
                     }
                 }
                 is RestorePolicySnapshot -> { PreviewTitle(uiText("Restore policy", "恢复策略")); Text(policyName(snapshot.value)) }

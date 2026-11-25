@@ -18,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import io.github.nakanomk.stacklife.appearance.scrollBoundaryHaptics
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -195,7 +196,8 @@ internal fun WeekGrid(term: TermSpec, number: Int, state: ReadState<CourseWeek>,
                         periodRail(term, monday, calendars, ready.classes.maxOfOrNull { it.meeting.lastPeriod } ?: 0)
                     }
                     val changeover = railLayout.changeover
-                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = insets.calculateTopPadding())) {
+                    val scroll = rememberScrollState()
+                    Column(Modifier.fillMaxSize().scrollBoundaryHaptics(scroll).verticalScroll(scroll).padding(top = insets.calculateTopPadding())) {
                         if (ready.classes.isEmpty()) Text(stringResource(R.string.courses_no_classes_week), Modifier.padding(start = rail, top = 4.dp, bottom = 4.dp),
                             style = typography.bodySmall, color = colors.onSurfaceVariant)
                         if (changeover != null) Text(stringResource(R.string.courses_changeover, changeover.format(dateFormat)),
