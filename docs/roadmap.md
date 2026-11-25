@@ -501,7 +501,7 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 
 **U1 任务卡试验：** 只在 `.gallery` 和 `.bench` 装配 [BiliPai `c7f835b` 的导航 fork](https://github.com/jay3-yy/BiliPai/tree/c7f835b34d8323358be57be298f86f29fecb53c8/miuix-navigation)（独立 Apache-2.0，33 个 Kotlin 文件）及[固定 Scene 适配](https://github.com/jay3-yy/BiliPai/blob/c7f835b34d8323358be57be298f86f29fecb53c8/app/src/main/java/com/android/purebilibili/navigation3/BiliPaiAndroidXNavDisplay.kt)（GPL-3.0）。任务仍通过已有 `PlannerApi` 读取、编辑。窗口与来源消失时不采用上游的整页淡出或位图；无落点走不透明边缘退出。上游所需的 Miuix squircle 0.9.5-beta02 也只进入这两个包。普通版待任务返回真机预算通过后切换。
 
-PLR110（Android 16、1272×2800、560 dpi、120 Hz、字号和动效 1×、热状态 0）用 `.bench` 的 30 任务／5 课次，按导航栏实际材质分组，预热后各测五轮。取系统 FrameTimeline；该设备上的 AndroidX runner 在准备阶段无法解析 `.bench.fixture`。门槛为 P95 ≤ 0 ms 且应用错期或丢帧 < 1%。
+PLR110（Android 16、1272×2800、560 dpi、120 Hz、字号和动效 1×、热状态 0）用 `.bench` 的 30 任务／5 课次，按导航栏实际材质分组，预热后各测五轮。下表取系统 FrameTimeline；门槛为 P95 ≤ 0 ms 且应用错期或丢帧 < 1%。
 
 |任务卡返回|玻璃 P95 / 错期或丢帧|实色 P95 / 错期或丢帧|
 |---|---:|---:|
@@ -509,6 +509,10 @@ PLR110（Android 16、1272×2800、560 dpi、120 Hz、字号和动效 1×、热�
 |保留活动父页、按真实容器裁去被遮挡区域|+6.33 ms · 12/332|−3.29 ms · 0/340|
 
 两版玻璃均未达标。第二版五轮的 12 个应用错期帧全部出现在各轮前十个窗口帧。另在同机先后只缓存飞行源卡、改用平台圆角裁切、去掉相同壁纸的重复取样；三次单轮诊断各有 3 个应用错期帧，未进入五轮放行测试，也未并入普通版。隔离 Gallery 验过来源删除后退出、反拖取消和嵌套编辑返回。普通版保留原导航；跨页压栈／恢复转场仍等待 U1。
+
+去掉重复壁纸取样的单轮中，第一个错期帧从 `doFrame` 到 `DrawFrames` 为 10.30 ms，主线程实际运行 8.37 ms；同一轮另一个错期帧在 `postAndWait` 等待 16.38 ms。两帧的耗时位置不同。
+
+基准工具参照 [Android 的 LoginBenchmark](https://github.com/android/performance-samples/blob/05c8130adfd2d7e35d4cd25033cb4f89b1008c1f/MacrobenchmarkSample/macrobenchmark/src/main/kotlin/com/example/macrobenchmark/benchmark/LoginBenchmark.kt#L54-L61) 和 [UI Automator 的可见边界](https://github.com/androidx/androidx/blob/841411143e849ef66c3e8d49cc0dd70d62d7a3c0/test/uiautomator/uiautomator/src/main/java/androidx/test/uiautomator/AccessibilityNodeInfoHelper.java)（均为 Apache-2.0）：在计时外启动被强停的 `.bench`，经原签名校验准备数据，重启读回材质；只从屏内部分点击任务。PLR110 的签名夹具已成功，但该次运行与系统闹钟相邻且未完成，整轮排除。API 37 模拟器以相同分辨率和密度完成实色、玻璃两次任务卡开返，只验基准流程。固定真机数据须在无打断窗口重新采集；不从受干扰的轮次挑帧。
 
 **已验证的独立单元：** 工作台提交回执携带真实移动 ID、策略和新帧；API 37 工作台、图及助理 21 项用例通过。第 13 项将手势预览与业务选择分开，旧学期的迟到回执不抢回当前选择；日周、通知、手动编辑 12 项设备用例通过。第 5、6、16 项使用普通版首次前台检查、独立更新专页及稳定／测试渠道；API 37 状态与关于返回 8 项通过。设置列表中从「帮助与关于」下一行进入更新、返回后仍在该行；未发布任何版本。
 
@@ -519,6 +523,8 @@ PLR110（Android 16、1272×2800、560 dpi、120 Hz、字号和动效 1×、热�
 **归档（Room 17）：** [外观包](../app/src/main/assets/licenses/AppearanceTransfer-Notices.txt)和[分类备份](../app/src/main/assets/licenses/BackupRelations-Notices.txt)使用不同的严格类型。API 37 上，分类关系、目标 Keystore、文件发布、确认界面、迁移和直接调用者共 35 项通过；另验了两个真实会话的迟到回复不能写回、已确认提交先收回执再重新预览。用 Android Downloads 分别往返两种文件：完整合成备份恢复后显示本机修订 24；外观包只列「减少动效：开 → 关」，确认后回到设置。对话保存有序图片和文档，续聊不自动重发文件。协议用例走本机 TLS，未用真实外部账号。
 
 **桌面组件（第 22 项部分交付）：** 今日概览和周课表用系统 `RemoteViews` 读取 `PlannerApi`。API 37 Launcher3 上，安排队列中的任务后，今日组件从空态更新为 09:00–09:30，点击定位到该时段；周组件切换第 1／2 周后显示各自课次。将周组件从四列拉到五列，实际宽度从 828 变为 1034 px，列表切为七日网格。六项设备用例覆盖多实例、不同时区的日期边界及同一次更新在不同尺寸下的显示与点击。
+
+API 37 的实际 Launcher3 桌面上，两种组件重启后均保留，分别删除重加后取得新的系统 ID。两个今日实例可以分别停在第 1／2 页，两个周课表可以分别停在第 1／3 周；点击不同周的同名课打开各自的发生项。今日按设备本地日期在跨午夜或换时区后更新；周课表按上海周一午夜自动进入下一教学周，设备时区从周日切到周一不改校园周。Pixel Launcher 上用 TalkBack 17 单指触摸并双击，今日事件和周课次均读出标题和时间并打开原发生项，「下一周」也可读出并翻页。
 
 [WakeUp 原作者 3.621 源码归档](https://archive.softwareheritage.org/browse/revision/a69fb7555e0917e0ba8a0dadbf3248364666b089/?origin_url=https://github.com/YZune/WakeupSchedule_Kotlin)保留了日／周组件和 [YZune 的 Apache-2.0 许可](https://github.com/xianfei/WakeupSchedule_BUPT/blob/a69fb7555e0917e0ba8a0dadbf3248364666b089/LICENSE)。旧版把应用自己的课目绘为位图，不取样桌面；StackLife 保留可点击的原生文字。[OPPO CardWidget](https://open.oppomobile.com/documentation/page/info?id=11733) 正式接入需要授权，已查公开接口和[官方示例](https://github.com/OPPO-OpenPlatform/cardwidgetsupport_android_demo/tree/47880a3f1d1451ece47d1a2247c55e7b6e59ac9b)没有给出 PLR110 主桌面的实时后景接口；三星 [MIT 示例](https://github.com/thatjoshguy67/blur-widget-demo/tree/c93b1a847e1cf4406afc2804ac2abda1a20ccc55)仅适用于相应启动器。两种组件仍用实色，未接入厂商 SDK。
 
