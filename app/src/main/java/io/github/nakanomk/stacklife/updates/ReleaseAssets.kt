@@ -2,6 +2,8 @@ package io.github.nakanomk.stacklife.updates
 
 import io.github.nakanomk.stacklife.about.InstalledVersion
 import java.io.IOException
+import java.time.Instant
+import java.time.format.DateTimeParseException
 import java.security.MessageDigest
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -22,7 +24,10 @@ private val versionPattern = Regex("(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9]
 internal val sha256Pattern = Regex("[0-9a-f]{64}")
 
 @Serializable
-internal data class ReleaseUpdate(val version: String, val versionCode: Long, val notes: String, val size: Long, val sha256: String)
+internal data class ReleaseUpdate(val version: String, val versionCode: Long, val notes: String, val size: Long,
+    val sha256: String, val publishedAt: String? = null)
+
+internal enum class UpdateChannel { STABLE, BETA }
 
 internal enum class ReleaseProblem { NETWORK, RATE_LIMIT, INVALID, INCOMPATIBLE }
 internal class ReleaseFailure(val problem: ReleaseProblem, message: String, cause: Throwable? = null) : IOException(message, cause)
@@ -80,20 +85,23 @@ private fun JsonArray.asset(version: String, name: String, limit: Long): Release
 }
 
 /**
- * Behavioral reference: BiliPai 5893c2c, feature/settings/update/{AppUpdateChecker,
- * AppUpdateAssetSelectionPolicy,AppUpdateDownloader}. StackLife's release.yml is the wire contract:
- * inspect public prereleases, require the exact preview artifact and GitHub SHA-256 (no fallback).
+ * BiliPai c7f835b34d8323358be57be298f86f29fecb53c8 (GPL-3.0),
+ * app/src/main/java/com/android/purebilibili/feature/settings/update/AppUpdateChecker.kt:
+ * channel eligibility and publication-time selection. StackLife scans all bounded pages first,
+ * then applies ReleaseHttp's fixed-origin limits and release.yml's exact asset/identity contract.
  */
 internal suspend fun findRelease(
     installed: InstalledVersion,
     applicationId: String,
+    channel: UpdateChannel,
     signers: () -> List<String>,
     loadPage: suspend (Int) -> String,
     loadBuildInfo: suspend (ReleaseAsset) -> ByteArray,
 ): ReleaseUpdate? {
     if (applicationId != RELEASE_PACKAGE) incompatible("Not the ordinary StackLife package")
-    var greatest = installedParts(installed)
-    var version: String? = null
+    val local = installedParts(installed)
+    var published: Instant? = null
+    var releaseId = 0L
     var release: JsonObject? = null
     var page = 1
     while (true) {
@@ -104,20 +112,26 @@ internal suspend fun findRelease(
             val item = entry as? JsonObject ?: invalid("Invalid release record")
             val draft = (item["draft"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull ?: invalid("Missing draft status")
             if (draft) continue
-            val tag = item.string("tag_name")
-            if (!tag.startsWith('v')) continue
-            val name = tag.substring(1)
-            val parts = versionParts(name)
-            if (compareParts(parts, greatest) > 0) {
-                greatest = parts
-                version = name
+            val prerelease = (item["prerelease"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull
+                ?: invalid("Missing prerelease status")
+            if (channel == UpdateChannel.STABLE && prerelease) continue
+            val time = try { Instant.parse(item.string("published_at")) }
+                catch (_: DateTimeParseException) { invalid("Invalid release publication time") }
+            val id = item.number("id")
+            if (id <= 0) invalid("Invalid release ID")
+            if (published == null || time > published || time == published && id > releaseId) {
+                published = time
+                releaseId = id
                 release = item
             }
         }
         if (list.size < RELEASE_PAGE_SIZE) break
     }
     val newest = release ?: return null
-    val name = checkNotNull(version)
+    val tag = newest.string("tag_name")
+    if (!tag.startsWith('v')) invalid("Missing version tag")
+    val name = tag.substring(1)
+    val parts = versionParts(name)
     val assets = newest["assets"] as? JsonArray ?: invalid("Missing release assets")
     val apk = assets.asset(name, apkName(name), MAX_APK_BYTES)
     val metadata = assets.asset(name, BUILD_INFO, 64L * 1024)
@@ -135,5 +149,8 @@ internal suspend fun findRelease(
         null, JsonNull -> ""
         else -> newest.string("body")
     }
-    return ReleaseUpdate(name, info.number("versionCode"), notes, apk.size, apk.sha256).also { requireUpgrade(it, installed) }
+    val code = info.number("versionCode")
+    if (code <= 0) invalid("Invalid version code")
+    if (compareParts(parts, local) <= 0 && code <= installed.code) return null
+    return ReleaseUpdate(name, code, notes, apk.size, apk.sha256, published.toString()).also { requireUpgrade(it, installed) }
 }

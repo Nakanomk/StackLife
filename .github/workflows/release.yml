@@ -1,5 +1,5 @@
-name: Android prerelease
-run-name: Preview ${{ inputs.tag }}
+name: Android release
+run-name: ${{ inputs.channel }} release ${{ inputs.tag }}
 
 on:
   workflow_dispatch:
@@ -8,6 +8,14 @@ on:
         description: Annotated version tag reachable from main (vX.Y.Z)
         required: true
         type: string
+      channel:
+        description: Release audience (same signed APK for both channels)
+        type: choice
+        required: true
+        default: beta
+        options:
+          - beta
+          - stable
 
 permissions:
   contents: read
@@ -20,6 +28,7 @@ defaults:
 env:
   APP_ID: io.github.nakanomk.stacklife
   TAG: ${{ inputs.tag }}
+  CHANNEL: ${{ inputs.channel }}
 
 jobs:
   build:
@@ -279,7 +288,7 @@ jobs:
             | . + {sourceTag:$tag, sourceCommit:$src, tagObjectSha:$obj, workflowCommit:$wf, workflowRunUrl:$url, signingCertificateSha256:$cert}
           ' candidate/package.json > release/BUILD-INFO.json
           (cd release && sha256sum "${APK##*/}" BUILD-INFO.json > SHA256SUMS)
-      - name: Verify remote tag and publish prerelease
+      - name: Verify remote tag and publish selected release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -292,5 +301,10 @@ jobs:
           [[ -z "$existing" ]] || { echo "Release already exists: $existing"; exit 1; }
           cp candidate/tag-notes.md "$RUNNER_TEMP/notes.md"
           printf '\n[对应源码](%s/tree/%s) · [构建与离线安装验证](%s/actions/runs/%s)\n\n下载三个资产后运行 `sha256sum -c SHA256SUMS`；`BUILD-INFO.json` 记录源码提交与签名证书指纹。\n' "$repo" "$SOURCE" "$repo" "$GITHUB_RUN_ID" >> "$RUNNER_TEMP/notes.md"
+          case "$CHANNEL" in
+            beta) flags=(--prerelease --latest=false); title="StackLife $VERSION 预发布" ;;
+            stable) flags=(--latest); title="StackLife $VERSION" ;;
+            *) echo 'Unknown release channel'; exit 1 ;;
+          esac
           gh release create "$TAG" "$APK" release/BUILD-INFO.json release/SHA256SUMS --repo "$GITHUB_REPOSITORY" \
-            --verify-tag --target "$SOURCE" --title "StackLife $VERSION 预发布" --prerelease --latest=false --notes-file "$RUNNER_TEMP/notes.md"
+            --verify-tag --target "$SOURCE" --title "$title" "${flags[@]}" --notes-file "$RUNNER_TEMP/notes.md"

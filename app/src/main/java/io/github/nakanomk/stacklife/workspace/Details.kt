@@ -92,7 +92,7 @@ internal const val WallpaperSettingsOrigin = "appearance:wallpaper"
 @Composable
 internal fun SettingsScreen(settings: PolicyView, actions: WorkspaceViewModel, onBack: () -> Unit,
     onConnection: () -> Unit, onAppearance: (AppearanceGroup) -> Unit, onWallpaper: () -> Unit,
-    onAbout: () -> Unit, onFeature: (Destination) -> Unit, onSchedule: (SlotEditorKey) -> Unit) {
+    onAbout: () -> Unit, onUpdates: (() -> Unit)?, onFeature: (Destination) -> Unit, onSchedule: (SlotEditorKey) -> Unit) {
     val action = rememberSubmission(actions)
     EditorPage(stringResource(R.string.ui_settings), onBack, AssistantPage.Settings) { top, bottom ->
             LazyColumn(contentPadding = dockListPadding(top, bottom), verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -119,6 +119,11 @@ internal fun SettingsScreen(settings: PolicyView, actions: WorkspaceViewModel, o
                     HorizontalDivider(Modifier.padding(start = 32.dp))
                     PreferenceRow(stringResource(R.string.about_title), modifier = Modifier.routeOrigin("about").testTag("settings-about"),
                         leadingIcon = R.drawable.ic_info, onClick = onAbout)
+                    if (onUpdates != null) {
+                        HorizontalDivider(Modifier.padding(start = 32.dp))
+                        PreferenceRow(stringResource(R.string.update_title), modifier = Modifier.routeOrigin("updates").testTag("settings-updates"),
+                            leadingIcon = R.drawable.ic_system_update_alt, onClick = onUpdates)
+                    }
                 } }
                 item { SettingsGroup(stringResource(R.string.ui_assistant)) {
                     PreferenceRow(stringResource(R.string.ui_model_connection), modifier = Modifier.routeOrigin("model"),

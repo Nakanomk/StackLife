@@ -25,7 +25,6 @@ import io.github.nakanomk.stacklife.transitions.PaneMotion
 import io.github.nakanomk.stacklife.transitions.PaneOrigins
 import io.github.nakanomk.stacklife.transitions.paneOrigin
 import io.github.nakanomk.stacklife.updates.STACKLIFE_REPOSITORY
-import io.github.nakanomk.stacklife.updates.UpdateSettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -176,7 +175,6 @@ private fun BuildDetails(padding: PaddingValues, version: Load<InstalledVersion>
                 }
             }
         }
-        item { UpdateSettings() }
         item {
             AboutCard {
                 AboutHeading(stringResource(R.string.about_project))

@@ -24,6 +24,8 @@ class ReleaseAssetsTest {
     private val apkHash = "a938c0a1c4c0f7d75cb8a1b056e675844d5ed9e1eb47ebe2ebdd13e105cf0c40"
     private val name = "0.10.17"
     private val old = InstalledVersion("0.10.9", 24)
+    private val time = "2026-08-12T10:30:00Z"
+    private val earlier = "2026-08-12T10:29:59Z"
     private fun ByteArray.sha() = MessageDigest.getInstance("SHA-256").digest(this).toHexString()
     private fun JsonObject.set(key: String, value: String) = JsonObject(this + (key to JsonPrimitive(value)))
     private fun info(version: String = name, code: Long = 32L) = buildJsonObject {
@@ -36,26 +38,28 @@ class ReleaseAssetsTest {
     }
     private fun apk() = asset("StackLife-$name-preview.apk", 18_393_648L, apkHash, name)
     private fun build(bytes: ByteArray) = asset("BUILD-INFO.json", bytes.size.toLong(), bytes.sha(), name)
-    private fun release(vararg assets: JsonObject, version: String = name, draft: Boolean = false) = buildJsonObject {
-        put("draft", draft); put("prerelease", true); put("tag_name", "v$version"); put("body", "Release notes")
+    private fun release(vararg assets: JsonObject, version: String = name, draft: Boolean = false,
+        beta: Boolean = true, published: String = time, id: Long = 10L) = buildJsonObject {
+        put("draft", draft); put("prerelease", beta); put("tag_name", "v$version"); put("body", "Release notes")
+        put("published_at", published); put("id", id)
         put("assets", JsonArray(assets.toList()))
     }
     private fun one(release: JsonObject, bytes: ByteArray, installed: InstalledVersion = old) = runBlocking {
-        findRelease(installed, RELEASE_PACKAGE, { listOf(cert) }, { JsonArray(listOf(release)).toString() }, { bytes })
+        findRelease(installed, RELEASE_PACKAGE, UpdateChannel.BETA, { listOf(cert) }, { JsonArray(listOf(release)).toString() }, { bytes })
     }
     private fun problem(expected: ReleaseProblem, action: () -> Unit) {
         val result = assertThrows(ReleaseFailure::class.java) { action() }
         assertEquals(expected, result.problem)
     }
 
-    @Test fun selectsNumericallyLatestPublicPreviewAcrossPagesAndChecksOnlyItsBuildInfo() = runBlocking {
+    @Test fun latestPublicationAcrossPagesWinsOverHighestTagAndTiesUseReleaseId() = runBlocking {
         val bytes = info().toString().encodeToByteArray()
-        val first = List(RELEASE_PAGE_SIZE - 2) { release(version = "0.10.2") } +
-            listOf(release(version = "0.10.10"), release(version = "9.9.9", draft = true))
-        val second = listOf(release(asset("StackLife-bench.apk", 9, apkHash, name), build(bytes), apk()))
+        val first = List(RELEASE_PAGE_SIZE - 2) { release(version = "8.10.2", published = earlier, id = it + 100L) } +
+            listOf(release(version = "8.10.10", id = 9), release(version = "9.9.9", draft = true))
+        val second = listOf(release(asset("StackLife-bench.apk", 9, apkHash, name), build(bytes), apk(), beta = false))
         val pages = mutableListOf<Int>()
         var infoRequests = 0
-        val found = findRelease(old, RELEASE_PACKAGE, { listOf(cert) }, { page ->
+        val found = findRelease(old, RELEASE_PACKAGE, UpdateChannel.BETA, { listOf(cert) }, { page ->
             pages += page
             JsonArray(if (page == 1) first else second).toString()
         }, { asset ->
@@ -65,14 +69,23 @@ class ReleaseAssetsTest {
         })
         assertEquals(listOf(1, 2), pages)
         assertEquals(1, infoRequests)
-        assertEquals(ReleaseUpdate(name, 32, "Release notes", 18_393_648, apkHash), found)
+        assertEquals(ReleaseUpdate(name, 32, "Release notes", 18_393_648, apkHash, time), found)
     }
 
-    @Test fun sameOrAheadDoesNotRequestSignersBuildInfoOrApk() = runBlocking {
+    @Test fun stableIgnoresAnEvenLaterPrereleaseWhileBetaRejectsItsInvalidTag() = runBlocking {
+        val bytes = info().toString().encodeToByteArray()
+        val page = JsonArray(listOf(release(apk(), build(bytes), published = earlier, beta = false), release(version = "broken"))).toString()
+        assertEquals(name, findRelease(old, RELEASE_PACKAGE, UpdateChannel.STABLE, { listOf(cert) }, { page }, { bytes })?.version)
+        problem(ReleaseProblem.INVALID) { runBlocking {
+            findRelease(old, RELEASE_PACKAGE, UpdateChannel.BETA, { listOf(cert) }, { page }, { bytes })
+        } }
+    }
+
+    @Test fun sameOrAheadValidatesLatestPublicationButNeverOffersADowngrade() {
+        val bytes = info().toString().encodeToByteArray()
+        val newest = release(apk(), build(bytes))
         for (installed in listOf(InstalledVersion(name, 32), InstalledVersion("0.10.20", 35), InstalledVersion("1.0.0", 40))) {
-            assertNull(findRelease(installed, RELEASE_PACKAGE, { error("Read signers without an update") }, {
-                JsonArray(listOf(release(), release(version = "2.0.0", draft = true))).toString()
-            }, { error("Fetched build information with no newer tag") }))
+            assertNull(one(newest, bytes, installed))
         }
     }
 
@@ -89,8 +102,8 @@ class ReleaseAssetsTest {
             release(metadata, JsonObject(apk + ("size" to JsonPrimitive(MAX_APK_BYTES + 1)))),
         )
         for (broken in wrong) problem(ReleaseProblem.INVALID) {
-            runBlocking { findRelease(old, RELEASE_PACKAGE, { listOf(cert) }, {
-                JsonArray(listOf(broken, release(version = "0.10.10"))).toString()
+            runBlocking { findRelease(old, RELEASE_PACKAGE, UpdateChannel.BETA, { listOf(cert) }, {
+                JsonArray(listOf(broken, release(version = "0.10.10", published = earlier))).toString()
             }, { error("Requested an invalid asset") }) }
         }
     }
@@ -114,8 +127,9 @@ class ReleaseAssetsTest {
     }
 
     @Test fun malformedResponsesAndFailuresAreNeverNoUpdate() {
-        for (broken in listOf("{}", "[", "[{}]", "[{\"tag_name\":\"v1.0.0\"}]", JsonArray(listOf(release(version = "1.00.0"))).toString())) {
-            problem(ReleaseProblem.INVALID) { runBlocking { findRelease(old, RELEASE_PACKAGE, { listOf(cert) }, { broken }, { error("Build info") }) } }
+        for (broken in listOf("{}", "[", "[{}]", "[{\"tag_name\":\"v1.0.0\"}]",
+            JsonArray(listOf(release(version = "1.00.0"))).toString(), JsonArray(listOf(release(published = "not an instant"))).toString())) {
+            problem(ReleaseProblem.INVALID) { runBlocking { findRelease(old, RELEASE_PACKAGE, UpdateChannel.BETA, { listOf(cert) }, { broken }, { error("Build info") }) } }
         }
         fun failHttp(status: Int, expected: ReleaseProblem, body: String = "", exhausted: Boolean = false) {
             val response = Response.Builder().request(Request.Builder().url(STACKLIFE_REPOSITORY).build())
@@ -123,7 +137,7 @@ class ReleaseAssetsTest {
                 .apply { if (exhausted) addHeader("X-RateLimit-Remaining", "0") }.build()
             response.use {
                 problem(expected) { runBlocking {
-                    findRelease(old, RELEASE_PACKAGE, { listOf(cert) }, { throw httpFailure(response) }, { error("Build info") })
+                    findRelease(old, RELEASE_PACKAGE, UpdateChannel.BETA, { listOf(cert) }, { throw httpFailure(response) }, { error("Build info") })
                 } }
             }
         }

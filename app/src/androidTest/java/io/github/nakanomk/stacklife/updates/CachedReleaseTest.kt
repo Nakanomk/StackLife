@@ -49,4 +49,17 @@ class CachedReleaseTest {
         assertFalse(partial.exists())
         assertFalse(100 in progress)
     }
+
+    @Test fun cachedCandidateCannotBypassStrictlyIncreasingCode() = withCache { context, dir ->
+        val installed = installedVersion(context)
+        val next = "${requireNotNull(installed.name).substringBefore('.').toInt() + 1}.0.0"
+        val bytes = byteArrayOf(0, 1, 2, 3)
+        File(dir, apkName(next)).writeBytes(bytes)
+        val update = ReleaseUpdate(next, installed.code, "", bytes.size.toLong(),
+            MessageDigest.getInstance("SHA-256").digest(bytes).toHexString(), "2026-11-24T21:10:00Z")
+        val failure = assertThrows(ReleaseFailure::class.java) {
+            runBlocking { StackLifeReleases(context).prepare(update) { fail("A non-upgrade began preparation") } }
+        }
+        assertEquals(ReleaseProblem.INCOMPATIBLE, failure.problem)
+    }
 }

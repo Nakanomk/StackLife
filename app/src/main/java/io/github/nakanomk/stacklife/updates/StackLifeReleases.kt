@@ -26,8 +26,8 @@ private val preparing = Mutex()
 internal class StackLifeReleases(context: Context) {
     private val app = context.applicationContext
 
-    suspend fun check(): ReleaseUpdate? = withContext(Dispatchers.IO) {
-        findRelease(installedVersion(app), app.packageName, { signingDigests(app) }, ::releasePage, ::releaseBuildInfo)
+    suspend fun check(channel: UpdateChannel): ReleaseUpdate? = withContext(Dispatchers.IO) {
+        findRelease(installedVersion(app), app.packageName, channel, { signingDigests(app) }, ::releasePage, ::releaseBuildInfo)
     }
 
     /** Also call on the install action: neither a remembered result nor a private cache hit is verification. */
@@ -42,6 +42,10 @@ internal class StackLifeReleases(context: Context) {
             onProgress(0)
             try {
                 Files.createDirectories(dir.toPath())
+                // Only the current candidate is installable. Committed sessions already own their bytes.
+                Files.newDirectoryStream(dir.toPath(), "StackLife-*-preview.apk").use { entries ->
+                    for (path in entries) if (path.fileName.toString() != verified.name) Files.deleteIfExists(path)
+                }
                 // A process killed during a download leaves only this unpublished staging file.
                 Files.deleteIfExists(pending.toPath())
                 if (verified.exists()) {

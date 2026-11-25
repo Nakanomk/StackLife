@@ -31,7 +31,9 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import io.github.nakanomk.stacklife.about.AppDiagnostics
 import io.github.nakanomk.stacklife.about.HelpAboutScreen
-import io.github.nakanomk.stacklife.updates.UpdateHost
+import io.github.nakanomk.stacklife.updates.AppUpdates
+import io.github.nakanomk.stacklife.updates.RELEASE_PACKAGE
+import io.github.nakanomk.stacklife.updates.UpdateScreen
 import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.countdown.*
 import io.github.nakanomk.stacklife.assistant.*
@@ -67,6 +69,13 @@ import kotlinx.serialization.Serializable
 
 class MainActivity : LocalizedActivity() {
     private var reminder by mutableStateOf<ReminderTarget?>(null)
+    private val appUpdates: AppUpdates? by lazy(LazyThreadSafetyMode.NONE) {
+        if (packageName == RELEASE_PACKAGE) (application as StackLifeApplication).updates else null
+    }
+    override fun onResume() {
+        super.onResume()
+        appUpdates?.enterForeground()
+    }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -78,7 +87,7 @@ class MainActivity : LocalizedActivity() {
         AppDiagnostics.bind(this)
         val planner = (application as StackLifeApplication).planner
         reminder = intent.reminderTarget()
-        setContent { StackLifeApp(viewModel { WorkspaceViewModel(planner) }, firstRunGuide = true, reminder = reminder, onReminderHandled = {
+        setContent { StackLifeApp(viewModel { WorkspaceViewModel(planner) }, firstRunGuide = true, updates = appUpdates, reminder = reminder, onReminderHandled = {
             reminder = null
             setIntent(Intent(intent).setData(null))
         }) }
@@ -96,6 +105,7 @@ class MainActivity : LocalizedActivity() {
 @Serializable private data object Guidance : NavKey
 @Serializable private data object Preferences : NavKey
 @Serializable private data object HelpAbout : NavKey
+@Serializable private data object Updates : NavKey
 @Serializable private data class EditAppearance(val group: String, val startAtWallpaper: Boolean = false) : NavKey
 @Serializable private data object ModelConnection : NavKey
 @Serializable private data object AddTask : NavKey
@@ -121,6 +131,7 @@ private fun NavKey.motionKey(): String = when (this) {
     Guidance -> "guidance"
     Preferences -> "settings"
     HelpAbout -> "about"
+    Updates -> "updates"
     ModelConnection -> "model"
     AddTask -> "add-task"
     CreateFrame -> "create-frame"
@@ -137,7 +148,7 @@ internal fun SourcePanel(model: WorkspaceViewModel, link: GraphLink, content: @C
 @Composable
 internal fun StackLifeApp(model: WorkspaceViewModel, assistantModel: AssistantModel? = null,
     initialDetail: DetailTarget? = null, onDetailBack: () -> Unit = {}, reminder: ReminderTarget? = null,
-    firstRunGuide: Boolean = false, onReminderHandled: () -> Unit = {}) {
+    firstRunGuide: Boolean = false, updates: AppUpdates? = null, onReminderHandled: () -> Unit = {}) {
     val app = LocalContext.current.applicationContext as StackLifeApplication
     val assistant = assistantModel ?: viewModel { AssistantModel(model.planner, app.connections, app.chat, app.history, app.attachments, app.backgrounds::collect) }
     val settings by model.settings.collectAsStateWithLifecycle()
@@ -150,7 +161,7 @@ internal fun StackLifeApp(model: WorkspaceViewModel, assistantModel: AssistantMo
                     CompositionLocalProvider(LocalAssistant provides assistant, LocalPlannerGlassAllowed provides true,
                         LocalMarkdownReadCache provides remember { MarkdownReadCache() },
                         LocalGlassLight provides rememberGlassLight()) {
-                        PlannerNavigation(model, assistant, preferences, initialDetail, onDetailBack, reminder, onReminderHandled, messages, firstRunGuide)
+                        PlannerNavigation(model, assistant, preferences, initialDetail, onDetailBack, reminder, onReminderHandled, messages, firstRunGuide, updates)
                     }
                     SnackbarHost(messages, Modifier.align(Alignment.BottomCenter).safeDrawingPadding().imePadding().padding(12.dp))
                 }
@@ -161,7 +172,8 @@ internal fun StackLifeApp(model: WorkspaceViewModel, assistantModel: AssistantMo
 
 @Composable
 private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantModel, preferences: PolicyView,
-    initialDetail: DetailTarget?, onDetailBack: () -> Unit, reminder: ReminderTarget?, onReminderHandled: () -> Unit, messages: SnackbarHostState, firstRunGuide: Boolean) {
+    initialDetail: DetailTarget?, onDetailBack: () -> Unit, reminder: ReminderTarget?, onReminderHandled: () -> Unit, messages: SnackbarHostState,
+    firstRunGuide: Boolean, updates: AppUpdates?) {
     val start: NavKey = when (initialDetail?.kind) {
         "task" -> TaskDetail(initialDetail.id)
         "frame" -> FrameDetail(initialDetail.id)
@@ -352,9 +364,11 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 entry<Preferences>(metadata = { key -> origins.sourceSceneMetadata(key.motionKey()) }) {
                     SettingsHelpHost { SettingsScreen(preferences, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) },
                         onWallpaper = { navigate(EditAppearance(AppearanceGroup.MATERIAL.key, startAtWallpaper = true)) },
-                        onAbout = { navigate(HelpAbout) }, onFeature = { navigate(Feature(it)) }, onSchedule = navigate) }
+                        onAbout = { navigate(HelpAbout) }, onUpdates = updates?.let { { navigate(Updates) } },
+                        onFeature = { navigate(Feature(it)) }, onSchedule = navigate) }
                 }
                 entry<HelpAbout> { HelpAboutScreen(back) { navigate(Guidance) } }
+                if (updates != null) entry<Updates> { UpdateScreen(updates, back) }
                 entry<EditAppearance> { key -> SettingsHelpHost { AppearanceEditor(preferences.appearance,
                     AppearanceGroup.entries.first { it.key == key.group }, model, startAtWallpaper = key.startAtWallpaper, onBack = back) } }
                 entry<ModelConnection> { PrivateScreen(privateScreens) { SettingsHelpHost { ConnectionScreen(assistant.connections, back) } } }
@@ -375,7 +389,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                         val appearance = latestAppearance
                         val owner = when (key) {
                             Home -> appearance.nearestVisible(destination)
-                            Preferences, HelpAbout, ModelConnection, Guidance, is EditAppearance -> null
+                            Preferences, HelpAbout, Updates, ModelConnection, Guidance, is EditAppearance -> null
                             is Feature -> key.destination
                             else -> remember(key) {
                                 (depth - 1 downTo 0).firstNotNullOfOrNull { (stack.getOrNull(it) as? Feature)?.destination }
@@ -394,8 +408,6 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
         }
     }
     val source = historySource
-    if (firstRunGuide) UpdateHost(atHome = stack.last() == Home && !offerGuide && reminder == null,
-        inAbout = stack.last() == HelpAbout, allowPresentation = source == null && privateScreens.intValue == 0)
     AssistantPanels(assistant, source?.let { remember(it) { historyPage(it) } }, configuring = stack.last() == ModelConnection,
         onCloseHistory = { historySource = null }, onSettings = { navigate(ModelConnection) }, onImport = { navigate(ImportCourses) })
     }

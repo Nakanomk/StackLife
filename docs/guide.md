@@ -10,9 +10,9 @@
 
 ## 应用内更新
 
-「设置 → 帮助与关于 → 版本与项目」可以立即检查更新，也可以关闭检查。默认在打开应用时每 24 小时最多检查一次本仓库的 GitHub Releases，包含预发布，不发送日程、对话或 API Key。
+「设置 → 检查更新」在「帮助与关于」下方。普通版每次冷启动到前台时，若开启自动检查，会静默检查一次本仓库的 GitHub Releases；打开更新页或切换渠道不联网。新安装默认「稳定版」，只接收正式发布；已有更新偏好的安装迁到「测试版」，继续接收正式和预发布。各渠道按发布时间选最新条目，不发送日程、对话或 API Key。
 
-自动更新默认关闭。开启后，应用会核对构建号、文件摘要、包名和已安装版本的签名，再调用 Android 安装程序更新自身。系统可能要求允许从该来源安装或确认更新。
+专页显示上次检查、候选版本及发布时间。自动安装默认关闭；开启后仍核对构建号、文件摘要、包名和已安装版本的签名。需要 Android 安装来源授权或系统确认时，回到专页点击对应动作。检查失败会显示原因。
 
 ## 验证范围
 
@@ -38,7 +38,7 @@ sdkmanager 'platform-tools' 'platforms;android-37.2' 'build-tools;37.0.0'
 
 ## 签名与发布
 
-版本标签采用 `vX.Y.Z`，须为带注释的标签，指向已推送到 `main` 的源码提交。`X.Y.Z` 对应 `versionName`；标签注释会用作 Release 说明。推送标签后，从 `main` 手动运行 [Android prerelease](https://github.com/Nakanomk/StackLife/actions/workflows/release.yml)。工作流按标签构建，在独立任务中签名和测试；已存在的同名 Release 不会被覆盖。
+版本标签采用 `vX.Y.Z`，须为带注释的标签，指向已推送到 `main` 的源码提交。`X.Y.Z` 对应 `versionName`；标签注释会用作 Release 说明。从 `main` 手动运行[发布工作流](https://github.com/Nakanomk/StackLife/actions/workflows/release.yml)，明确选择 `stable` 或 `beta`。两者使用同一包名、构建变体和签名；渠道只控制发布标记。工作流按标签构建，在独立任务中签名和测试；已存在的同名 Release 不会被覆盖。
 
 本地 `preview` 用本机 debug 签名，CI 的 APK 用 runner 临时签名。可覆盖更新的公开预览包从 [Releases](https://github.com/Nakanomk/StackLife/releases) 下载。`SHA256SUMS` 校验 APK 和 `BUILD-INFO.json` 的文件内容；`BUILD-INFO.json` 记录源码提交、标签和 Actions 运行链接。
 

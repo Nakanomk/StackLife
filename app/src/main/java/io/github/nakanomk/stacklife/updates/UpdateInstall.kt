@@ -9,7 +9,7 @@ import android.os.Build
 import io.github.nakanomk.stacklife.StackLifeApplication
 import io.github.nakanomk.stacklife.about.installedVersion
 import java.io.File
-import java.io.IOException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -18,7 +18,7 @@ private const val INSTALL_RESULT = "io.github.nakanomk.stacklife.UPDATE_RESULT"
 
 /** Android alone authorizes and replaces the installed package. The receipt can outlive this process. */
 internal suspend fun installUpdate(context: Context, apk: File, release: ReleaseUpdate, unattended: Boolean,
-    recordSession: (Int) -> Boolean) = withContext(Dispatchers.IO) {
+    recordSession: suspend (Int) -> Unit) = withContext(Dispatchers.IO) {
     val installer = context.packageManager.packageInstaller
     check(installedVersion(context).code < release.versionCode && apk.length() == release.size)
     val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
@@ -32,7 +32,8 @@ internal suspend fun installUpdate(context: Context, apk: File, release: Release
     try {
         installer.openSession(id).use { session ->
             session.openWrite("base.apk", 0, release.size).use { dst ->
-                apk.inputStream().use { src -> if (src.copyTo(dst, 64 * 1024) != release.size) throw IOException("Incomplete APK") }
+                val job = currentCoroutineContext()
+                apk.inputStream().use { src -> verifyBytes(src, dst, release, job) {} }
                 session.fsync(dst)
             }
             ensureActive()
@@ -40,7 +41,7 @@ internal suspend fun installUpdate(context: Context, apk: File, release: Release
             val target = Intent(context, UpdateInstallReceiver::class.java).setAction(INSTALL_RESULT)
             val mutable = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
             val receipt = PendingIntent.getBroadcast(context, id, target, PendingIntent.FLAG_UPDATE_CURRENT or mutable)
-            if (!recordSession(id)) throw IOException("Cannot persist install session")
+            recordSession(id)
             session.commit(receipt.intentSender)
         }
     } catch (e: Exception) {
