@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
@@ -90,12 +91,18 @@ internal fun BiliStackDisplay(
             // No settling presentation or departed input surface when motion is disabled.
             sceneEntries.last().Content()
         } else {
-            val pageContent = remember(routes, sceneEntries) {
-                val byRoute = buildMap<Any, @Composable (Any) -> Unit>(routes.size) {
-                    sceneEntries.forEachIndexed { index, entry -> put(routes[index]) { entry.Content() } }
-                }
-                val lookup: (Any) -> (@Composable (Any) -> Unit) = { byRoute.getValue(it) }
-                lookup
+            // adoptFrom compares the content function by identity. Rebuilding every wrapper when
+            // a task leaves would invalidate the already composed Home in the first return frame.
+            val byRoute = remember(routes, sceneEntries) { HashMap<Any, @Composable (Any) -> Unit>(routes.size) }
+            sceneEntries.forEachIndexed { index, entry ->
+                val route = routes[index]
+                byRoute[route] = key(route) { remember(entry) {
+                    val render: @Composable (Any) -> Unit = { entry.Content() }
+                    render
+                } }
+            }
+            val pageContent: (Any) -> (@Composable (Any) -> Unit) = remember(routes, sceneEntries) {
+                { route: Any -> byRoute.getValue(route) }
             }
             // Each retained page owns its lifecycle ceiling and back scope. The fixed scene's
             // transient lifecycle must not stall them when the logical stack changes.

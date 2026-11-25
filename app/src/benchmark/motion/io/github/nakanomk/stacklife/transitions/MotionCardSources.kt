@@ -51,6 +51,9 @@ import top.yukonga.miuix.kmp.nav.transition.NavSettleSpec
 import top.yukonga.miuix.kmp.nav.transition.NavTransition
 import top.yukonga.miuix.kmp.nav.transition.NavTransitionScope
 import kotlin.math.roundToInt
+import io.github.nakanomk.stacklife.appearance.LocalAppearance
+import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
+import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
 
 internal class MotionCardSources {
     var host: LayoutCoordinates? = null
@@ -151,7 +154,25 @@ internal class MotionCardSources {
             val covered by remember(scope) { derivedStateOf(structuralEqualityPolicy()) {
                 scope.role == NavRole.Covered || scope.relativeDepth > 0f
             } }
-            if (covered || !LocalMotionEnabled.current) return@composed Modifier.graphicsLayer()
+            if (covered || !LocalMotionEnabled.current) {
+                val appearance = LocalAppearance.current
+                if (!covered || !LocalPlannerGlassAllowed.current || !appearance.glass || glassUnavailableReason(appearance) != null)
+                    return@composed Modifier.graphicsLayer()
+                // Cull only pixels known to be covered by the opaque task page. Otherwise HWUI
+                // runs both pages' glass passes during the near-full-screen part of the flight.
+                // Keep the curved corners and a physical pixel along every edge live.
+                return@composed remember(this@CardFlight) { Modifier.graphicsLayer().drawWithContent {
+                    val top = foreground?.value
+                    if (top == null || top.relativeDepth == -1f) { drawContent(); return@drawWithContent }
+                    val w = sample(top)
+                    val inset = w.corner + 1f
+                    if (w.width <= 2f * inset || w.height <= 2f) { drawContent(); return@drawWithContent }
+                    val canvas = drawContext.canvas.nativeCanvas
+                    val restore = canvas.save()
+                    try { if (canvas.clipOutRect(w.left + inset, w.top + 1f, w.left + w.width - inset, w.top + w.height - 1f)) drawContent() }
+                    finally { canvas.restoreToCount(restore) }
+                } }
+            }
             val current = rememberUpdatedState(scope)
             DisposableEffect(this@CardFlight) {
                 foreground = current
