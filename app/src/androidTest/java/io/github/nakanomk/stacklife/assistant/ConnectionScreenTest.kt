@@ -29,8 +29,7 @@ class ConnectionScreenTest {
     private fun field(tag: String) = ui.onNodeWithTag("provider-$tag")
     private fun option(name: String) = ui.onNode(hasText(name) and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
 
-    private fun show(frame: Modifier = Modifier) {
-        val connectionStore = store
+    private fun show(frame: Modifier = Modifier, connectionStore: ConnectionStore = store) {
         ui.setContent { Box(frame, propagateMinConstraints = true) { ConnectionScreen(connectionStore) { closed.set(true) } } }
         ui.waitUntil(timeoutMillis = 5_000) {
             ui.onAllNodes(hasText("自定义") and isEnabled() and hasClickAction()).fetchSemanticsNodes().isNotEmpty()
@@ -49,6 +48,33 @@ class ConnectionScreenTest {
     }
 
     @After fun clear() = runBlocking { store.clear() }
+
+    @Test fun oldEditorCannotReuseOrDeleteAReplacedSameOriginCredential() {
+        val name = "editor-${UUID.randomUUID()}"
+        val context = ui.activity.applicationContext
+        val db = io.github.nakanomk.stacklife.storage.PlannerDatabase.open(context, "$name.db")
+        val live = ConnectionStore(context, name, db.backupDeviceDao())
+        try {
+            val base = "https://same-origin.invalid/v1"
+            runBlocking { live.save(base, "original", "first-key") }
+            show(connectionStore = live)
+            field("model").performTextReplacement("stale form")
+            runBlocking { live.save(base, "replacement", "new-key") }
+            field("save").performScrollTo().performClick()
+            val stale = io.github.nakanomk.stacklife.i18n.uiText(
+                "The service settings have changed. Reopen this page before making another change.", "连接配置已变更，请重新打开此页再修改。")
+            ui.waitUntil { ui.onAllNodesWithText(stale).fetchSemanticsNodes().isNotEmpty() }
+            val remove = ui.activity.getString(R.string.assistant_remove_service)
+            ui.onNodeWithText(remove).performScrollTo().performClick()
+            ui.onNodeWithText(ui.activity.getString(R.string.assistant_remove)).performClick()
+            ui.waitUntil { ui.onAllNodesWithText(stale).fetchSemanticsNodes().isNotEmpty() }
+            assertFalse(closed.get())
+            runBlocking { assertEquals("replacement", live.profile()?.model); assertTrue(live.load()?.key == "new-key") }
+        } finally {
+            runBlocking { live.clear() }; db.close(); context.deleteDatabase("$name.db")
+            java.io.File(context.noBackupFilesDir, "$name.generations").delete()
+        }
+    }
 
     @Test fun privateFieldsScrollInASeparateViewportBelowTheSecureHeader() {
         runBlocking { store.save("https://sample.invalid/v1", "sample-model", UUID.randomUUID().toString()) }

@@ -16,9 +16,15 @@ internal class AssistantPreference(context: Context) {
     private val current = mutableStateOf(store.getBoolean("enabled", true))
     val enabled: Boolean by current
 
-    fun setEnabled(value: Boolean) {
-        if (enabled == value) return
-        store.edit().putBoolean("enabled", value).apply()
+    fun setEnabled(value: Boolean) = io.github.nakanomk.stacklife.archive.DevicePreferenceGate.change {
+        if (enabled != value) {
+            store.edit().putBoolean("enabled", value).apply()
+            current.value = value
+        }
+    }
+
+    internal fun restore(value: Boolean) {
+        check(store.edit().putBoolean("enabled", value).commit())
         current.value = value
     }
 }

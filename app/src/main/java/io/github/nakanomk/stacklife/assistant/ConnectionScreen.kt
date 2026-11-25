@@ -42,6 +42,7 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
     var model by remember { mutableStateOf(preset.model) }
     var key by remember { mutableStateOf("") }
     var stored by remember { mutableStateOf<ServiceProfile?>(null) }
+    var epoch by remember(store) { mutableStateOf<Long?>(null) }
     var editModel by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(true) }
@@ -70,7 +71,8 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
     }
     LaunchedEffect(store) {
         run {
-            stored = store.profile()
+            epoch = store.editEpoch()
+            stored = store.profile(epoch)
             preset = ServicePreset.forProfile(stored)
             base = stored?.baseUrl ?: preset.baseUrl
             model = stored?.model ?: preset.model
@@ -143,15 +145,15 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
                 label = if (preset == ServicePreset.Claude) null else { { Text(keyLabel) } },
                 visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            ActionPill(stringResource(R.string.assistant_save_service), enabled = !busy && profile != null && (key.isNotBlank() || keepKey), prominent = true, onClick = {
-                run { store.save(base, model, key.takeIf { it.isNotBlank() }, supportsImages); key = ""; back() }
+            ActionPill(stringResource(R.string.assistant_save_service), enabled = !busy && epoch != null && profile != null && (key.isNotBlank() || keepKey), prominent = true, onClick = {
+                run { store.save(base, model, key.takeIf { it.isNotBlank() }, supportsImages, requireNotNull(epoch)); key = ""; back() }
             }, modifier = Modifier.testTag("provider-save"))
             if (stored != null || error != null) {
-                Secondary(stringResource(R.string.assistant_remove_service), enabled = !busy) { clear = true }
+                Secondary(stringResource(R.string.assistant_remove_service), enabled = !busy && epoch != null) { clear = true }
             }
         }
     }
     if (clear) PlannerAlertDialog(onDismissRequest = { clear = false }, title = { Text(stringResource(R.string.assistant_remove_service_title)) }, text = { Text(stringResource(R.string.assistant_remove_service_body)) },
-        confirmButton = { TextButton(onClick = { clear = false; run { store.clear(); key = ""; back() } }) { Text(stringResource(R.string.assistant_remove)) } },
+        confirmButton = { TextButton(onClick = { clear = false; run { store.clear(requireNotNull(epoch)); key = ""; back() } }) { Text(stringResource(R.string.assistant_remove)) } },
         dismissButton = { TextButton(onClick = { clear = false }) { Text(stringResource(R.string.assistant_cancel)) } })
 }

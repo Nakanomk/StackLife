@@ -39,13 +39,26 @@ internal object AppLocales {
         if (Build.VERSION.SDK_INT < 33) activity.recreate()
     }
 
-    fun store(context: Context, choice: LanguageChoice) {
+    fun store(context: Context, choice: LanguageChoice) = io.github.nakanomk.stacklife.archive.DevicePreferenceGate.change {
+        persist(context, choice, durable = false)
+    }
+
+    internal fun restore(context: Context, choice: LanguageChoice) {
+        persist(context, choice, durable = true)
+        sync(context)
+    }
+
+    private fun persist(context: Context, choice: LanguageChoice, durable: Boolean) {
         if (Build.VERSION.SDK_INT >= 33) {
-            checkNotNull(context.getSystemService(LocaleManager::class.java)).applicationLocales = LocaleList.forLanguageTags(choice.tag)
+            val manager = checkNotNull(context.getSystemService(LocaleManager::class.java))
+            val locales = LocaleList.forLanguageTags(choice.tag)
+            if (manager.applicationLocales != locales) manager.applicationLocales = locales
+            if (durable) check(context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).edit().remove(TAG).commit())
         } else {
-            context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).edit().apply {
+            val edit = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).edit().apply {
                 if (choice == LanguageChoice.SYSTEM) remove(TAG) else putString(TAG, choice.tag)
-            }.apply()
+            }
+            if (durable) check(edit.commit()) else edit.apply()
         }
     }
 

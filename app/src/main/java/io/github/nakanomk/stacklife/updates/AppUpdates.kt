@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import androidx.compose.runtime.getValue
+import io.github.nakanomk.stacklife.archive.DevicePreferenceGate
+import io.github.nakanomk.stacklife.archive.UpdatePreferences
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.github.nakanomk.stacklife.R
@@ -120,8 +122,31 @@ internal class AppUpdates(private val app: Context,
         automatic = false
     }
 
-    fun selectChannel(value: UpdateChannel) {
-        if (channel == value) return
+    internal fun logicalPreferences() = UpdatePreferences(channel, autoCheck, autoInstall && autoCheck)
+
+    /** Caller holds the preference gate. A committed PackageInstaller hand-off is local to this
+     * device; only uncommitted checks, cached offers and ungranted permission callbacks are invalidated. */
+    internal fun restorePreferences(value: UpdatePreferences) {
+        invalidate()
+        entered = true // Recovery/locale recreation must not trigger a restore-time network request.
+        check(prefs.edit().putString(CHANNEL, value.channel.name).putBoolean("migratedChannel", false)
+            .putBoolean("automaticCheck", value.automaticCheck).putBoolean("automaticInstall", value.automaticInstall)
+            .remove(OFFER).remove(PROBLEM).remove(CHECKED_AT).remove("noNewer").remove("lastAttempt").commit())
+        loadLogicalPreferences()
+        state.value = UpdateStatus(null)
+    }
+
+    private fun loadLogicalPreferences() {
+        channel = initialChannel()
+        migrated = prefs.getBoolean("migratedChannel", false)
+        autoCheck = prefs.getBoolean("automaticCheck", true)
+        autoInstall = prefs.getBoolean("automaticInstall", false) && autoCheck
+    }
+
+    fun refreshAfterRestore() = DevicePreferenceGate.access { loadLogicalPreferences() }
+
+    fun selectChannel(value: UpdateChannel) = DevicePreferenceGate.change {
+        if (channel == value) return@change
         invalidate()
         channel = value
         migrated = false
@@ -130,11 +155,11 @@ internal class AppUpdates(private val app: Context,
         state.value = UpdateStatus(null)
     }
 
-    fun setChecking(enabled: Boolean) {
+    fun setChecking(enabled: Boolean) = DevicePreferenceGate.change {
         autoCheck = enabled
         prefs.edit().putBoolean("automaticCheck", enabled).apply()
         if (!enabled) {
-            setInstalling(false)
+            installing(false)
             if (automatic && !manualCheck && state.value.checking) {
                 invalidate()
                 state.value = UpdateStatus(state.value.last)
@@ -142,7 +167,9 @@ internal class AppUpdates(private val app: Context,
         }
     }
 
-    fun setInstalling(enabled: Boolean) {
+    fun setInstalling(enabled: Boolean) = DevicePreferenceGate.change { installing(enabled) }
+
+    private fun installing(enabled: Boolean) {
         autoInstall = enabled && autoCheck
         prefs.edit().putBoolean("automaticInstall", autoInstall).apply()
         if (!autoInstall && automatic && state.value.preparation != Preparation.IDLE) {
@@ -151,15 +178,15 @@ internal class AppUpdates(private val app: Context,
         }
     }
 
-    fun enterForeground() {
-        if (entered) return
+    fun enterForeground() = DevicePreferenceGate.access {
+        if (entered) return@access
         entered = true
-        if (autoCheck && app.packageName == RELEASE_PACKAGE) check(automatically = true)
+        if (autoCheck && app.packageName == RELEASE_PACKAGE) startCheck(automatically = true)
     }
 
-    fun checkRelease() = check(automatically = false)
+    fun checkRelease() = DevicePreferenceGate.access { startCheck(automatically = false) }
 
-    private fun check(automatically: Boolean) {
+    private fun startCheck(automatically: Boolean) {
         val old = state.value
         if (old.checking) {
             // Keep both interests: a manual join survives disabling auto-check; it also doesn't
@@ -181,17 +208,21 @@ internal class AppUpdates(private val app: Context,
             catch (e: Exception) {
                 CheckedRelease(System.currentTimeMillis(), null, (e as? ReleaseFailure)?.problem ?: ReleaseProblem.NETWORK, cached = false)
             }
-            if (token != generation) return@launch
-            prefs.edit().putLong(CHECKED_AT, result.time).putString(PROBLEM, result.problem?.name)
-                .putString(OFFER, result.offer?.let { Json.encodeToString(it) })
-                .putBoolean("noNewer", result.problem == null && result.offer == null).apply()
-            state.value = UpdateStatus(result)
-            if (automatic && autoInstall && result.offer != null) begin(automatically = true)
+            DevicePreferenceGate.access {
+                if (token != generation) return@access
+                prefs.edit().putLong(CHECKED_AT, result.time).putString(PROBLEM, result.problem?.name)
+                    .putString(OFFER, result.offer?.let { Json.encodeToString(it) })
+                    .putBoolean("noNewer", result.problem == null && result.offer == null).apply()
+                state.value = UpdateStatus(result)
+                if (automatic && autoInstall && result.offer != null) beginLocked(automatically = true)
+            }
         }
     }
 
     /** Permission and confirmation activities are launched only by explicit actions in UpdateScreen. */
-    fun begin(automatically: Boolean = false) {
+    fun begin(automatically: Boolean = false) = DevicePreferenceGate.access { beginLocked(automatically) }
+
+    private fun beginLocked(automatically: Boolean) {
         val s = state.value
         val update = s.last?.offer ?: return
         if (s.checking || installation?.sessionId != null || s.preparation == Preparation.DOWNLOADING || s.preparation == Preparation.SUBMITTING) return
@@ -212,11 +243,13 @@ internal class AppUpdates(private val app: Context,
                 state.value = state.value.copy(preparation = Preparation.SUBMITTING)
                 installUpdate(app, apk, update, automatically && autoInstall) { id ->
                     kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
-                        if (generation != token) throw CancellationException("Update selection changed")
-                        recorded = id
-                        work = null // The committed hand-off is independent of subsequent channel or preference changes.
-                        installation = Installation(update, InstallStage.WAITING, id)
-                        state.value = state.value.copy(preparation = Preparation.IDLE)
+                        DevicePreferenceGate.access {
+                            if (generation != token) throw CancellationException("Update selection changed")
+                            recorded = id
+                            work = null // This session hand-off is independent of later preferences.
+                            installation = Installation(update, InstallStage.WAITING, id)
+                            state.value = state.value.copy(preparation = Preparation.IDLE)
+                        }
                     }
                     // Persist off main before PackageInstaller is allowed to commit. A process death
                     // before this point cannot leave an untracked committed session.
@@ -233,8 +266,8 @@ internal class AppUpdates(private val app: Context,
         }
     }
 
-    fun returnedFromPermission(expected: Long) {
-        if (expected == generation && state.value.preparation == Preparation.PERMISSION && app.packageManager.canRequestPackageInstalls()) begin()
+    fun returnedFromPermission(expected: Long) = DevicePreferenceGate.access {
+        if (expected == generation && state.value.preparation == Preparation.PERMISSION && app.packageManager.canRequestPackageInstalls()) beginLocked(false)
     }
 
     fun takeConfirmation(): Intent? {

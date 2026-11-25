@@ -2,6 +2,7 @@ package io.github.nakanomk.stacklife.storage
 
 import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.about.AppDiagnostics
+import io.github.nakanomk.stacklife.archive.*
 import androidx.room.withTransaction
 import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.graphs.goalOrder
@@ -34,6 +35,37 @@ class RoomPlannerApi(private val db: PlannerDatabase, private val importCalendar
     private val writeGate = Mutex()
     private var activeReceipt: WorkspaceReceipt? = null
     private var keptHistory = false
+
+    // Local, user-confirmed data transfer. This capability is not exposed to PlannerTools.
+    private val backupTables by lazy { BackupTables(db) }
+    internal suspend fun exportBackupTables(parts: Set<BackupPart>, directory: java.io.File) =
+        db.withTransaction { backupTables.export(parts, directory) }
+    internal fun readBackupTables(parts: Set<BackupPart>, directory: java.io.File) = backupTables.read(parts, directory)
+    internal suspend fun planBackupTables(incoming: IncomingTables, photos: Map<String, String>, files: Map<String, String>) =
+        db.withTransaction { backupTables.plan(incoming, photos, files) }
+    internal suspend fun replaceBackupTables(incoming: IncomingTables, photos: Map<String, String>, files: Map<String, String>,
+        expected: String, activation: DeviceActivation): Long = writeGate.withLock {
+        val revision = db.withTransaction {
+            val plan = backupTables.plan(incoming, photos, files)
+            if (plan.stamp != expected) throw BackupRevisionChanged()
+            require(plan.conflicts.isEmpty())
+            val next = Math.addExact(dao.settings()?.revision ?: 0L, 1L)
+            plan.apply(next)
+            activation.commit()
+            val settings = dao.settings() ?: SettingsRow()
+            dao.saveSettings(settings.copy(revision = next))
+            next
+        }
+        pending.clear(); reviewed.clear(); activeReceipt = null; keptHistory = false
+        revision
+    }
+
+    internal suspend fun afterBackup(activationWarning: Boolean) = buildList {
+        if (activationWarning) add(uiText("Device preferences or credential cleanup will be retried on startup.", "设备偏好或连接文件清理将在重启后重试。"))
+        try { onPlannerChanged() } catch (_: Exception) { add(uiText("The launcher refresh is pending.", "桌面组件待刷新。")) }
+        try { afterCommit() } catch (_: Exception) { add(uiText("Reminder reconciliation is pending.", "本机提醒待重建。")) }
+        try { collectBackgrounds?.invoke() } catch (_: Exception) { add(uiText("Background cleanup is pending.", "背景文件待清理。")) }
+    }
 
     // Every successful commit touches the singleton, including commits that only move slots.
     override fun observe(query: PlannerQuery): Flow<QueryResult> =

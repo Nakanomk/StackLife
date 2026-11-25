@@ -38,7 +38,10 @@ class WeekWidgetProvider : ScheduleWidgetProvider()
 
 abstract class ScheduleWidgetProvider : AppWidgetProvider() {
     private fun update(context: Context) = WorkspaceWidgets.schedule(context.applicationContext, goAsync())
-    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) = update(context)
+    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
+        io.github.nakanomk.stacklife.archive.BackupWidgetTemplates.applyToNew(context, manager, ids, this is WeekWidgetProvider)
+        update(context)
+    }
     override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) = update(context)
     override fun onDeleted(context: Context, ids: IntArray) = update(context)
     override fun onDisabled(context: Context) = update(context)
@@ -82,7 +85,7 @@ class WidgetRefreshReceiver : BroadcastReceiver() {
             else -> return
         }
         // Options belong to this host instance; removing it drops its navigation without leaving a local id behind.
-        manager.updateAppWidgetOptions(id, patch)
+        io.github.nakanomk.stacklife.archive.DevicePreferenceGate.change { manager.updateAppWidgetOptions(id, patch) }
     }
 }
 

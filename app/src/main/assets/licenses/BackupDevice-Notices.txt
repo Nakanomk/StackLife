@@ -1,0 +1,13 @@
+StackLife full backup: credentials, device preferences and private chat attachments
+
+BiliPai 0.10.3 (615), jay3-yy/BiliPai and contributors, GPL-3.0.
+https://github.com/jay3-yy/BiliPai/tree/c7f835b34d8323358be57be298f86f29fecb53c8
+  app/src/main/java/com/android/purebilibili/feature/settings/webdav/WebDavBackupService.kt: buildBackupArchive / addFileIfExists (manifest and file streams).
+  app/src/main/java/com/android/purebilibili/core/plugin/skin/UiSkinInstallStore.kt: installPreview / extractDeclaredAssets (verify reviewed bytes before publishing, only extract the declared closure).
+StackLife applies these boundaries to a local SAF stream and immutable, size-checked managed files. No WebDAV, plugin execution, network credentials, package installation or overwrite of live configuration files is imported. AttachmentStore acquires scoped pins under the same gate as ownership reads/GC and verifies normalized pixels or the declared document type before durable publication. The upstream general-public licensing notice and complete license are included in BiliPai-GPL-3.0.txt / StackLife-GPL-3.0-or-later.txt.
+
+Tasks.org, Tasks contributors, GPL-3.0.
+https://github.com/tasks/tasks/tree/e23c3c993415b77bfb8e27cdec150570c02fd500
+  app/src/main/java/org/tasks/backup/TasksJsonExporter.kt: doSettingsExport / writePreferences.
+  app/src/main/java/org/tasks/backup/TasksJsonImporter.kt: importTasks (prepare referenced identities before consuming records).
+StackLife exports a closed set of typed logical preference fields instead of arbitrary SharedPreferences. BackupDevice and BackupDeviceDao stage a target-Keystore encrypted generation, bind its active pointer and a replayable non-secret preference journal to the local Room commit, and retain same-origin credentials only when that was actually reviewed. Widget templates omit launcher identities; package install receipts and Android permission grants are not transferred. The crash recovery protocol and identity rules are StackLife-specific, not provided by either upstream backup implementation. Complete licensing information: Tasks-org-GPL-3.0.txt.

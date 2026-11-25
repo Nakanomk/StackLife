@@ -408,11 +408,14 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
 
     private fun reopen(row: TaskRow) {
         val prior = row.completedFromFrame
-        if (prior != null && deletedFrames?.contains(prior) != true && (frames.any { it.id == prior } || dao.frame(prior) != null)) {
+        val owningItems = if (prior == null || deletedFrames?.contains(prior) == true) emptyList()
+            else if (frames.any { it.id == prior }) items.filter { it.frameId == prior && !it.referenceOnly }.mapNotNull { it.ownedTaskId }
+            else dao.originalTaskIds(prior)
+        if (prior != null && row.id in owningItems) {
             val original = members[prior] ?: dao.restorableIds(prior)
             if (row.id !in original) {
                 val include = original.toHashSet().also { it.add(row.id) }
-                members[prior] = dao.originalTaskIds(prior).filter { it in include }
+                members[prior] = owningItems.filter { it in include }
             }
             edited[row.id] = row.copy(owner = Owner.FRAME, frameId = prior, completedFromFrame = null, completedFromPosition = null)
         } else {

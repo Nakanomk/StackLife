@@ -58,7 +58,7 @@ internal fun rememberAppearanceTransfer(planner: PlannerApi, store: BackgroundSt
                 archive.export { context.contentResolver.openOutputStream(uri, "wt") ?: throw IOException() }
                 message = context.getString(R.string.transfer_exported)
             } catch (error: Exception) {
-                val removed = removePartial(context, uri)
+                val removed = removePartialArchive(context, uri)
                 if (error is CancellationException) {
                     if (!removed) message = context.getString(R.string.transfer_partial)
                     throw error
@@ -120,7 +120,7 @@ internal fun rememberAppearanceTransfer(planner: PlannerApi, store: BackgroundSt
     }
 }
 
-private suspend fun removePartial(context: Context, uri: Uri) = withContext(NonCancellable + Dispatchers.IO) {
+internal suspend fun removePartialArchive(context: Context, uri: Uri) = withContext(NonCancellable + Dispatchers.IO) {
     val resolver = context.contentResolver
     val removed = try { DocumentsContract.deleteDocument(resolver, uri) } catch (_: Exception) { false }
     removed || try { resolver.delete(uri, null, null) > 0 } catch (_: Exception) { false }

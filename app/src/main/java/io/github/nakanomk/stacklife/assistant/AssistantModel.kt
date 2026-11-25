@@ -10,6 +10,8 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -34,12 +36,16 @@ internal data class AssistantState(
 internal const val chatContextLimit = 12
 
 internal class AssistantModel(private val api: PlannerApi, val connections: ConnectionStore, private val transport: ChatTransport,
-    val history: ConversationHistory, val attachments: AttachmentStore, private val collectBackgrounds: (suspend () -> Unit)? = null) : ViewModel() {
+    val history: ConversationHistory, val attachments: AttachmentStore, private val collectBackgrounds: (suspend () -> Unit)? = null,
+    sessions: AssistantSessions? = null) : ViewModel() {
     private val mutable = MutableStateFlow(AssistantState())
     val state = mutable.asStateFlow()
     private var ui: AssistantState get() = mutable.value; set(value) { mutable.value = value }
     private var job: Job? = null
     private var acceptingInput = true
+    private var deviceEnabled = true
+    private var backupPaused = false
+    private val deleting = Mutex()
     private var committingThread: Long? = null
     private var generation = 0L
     private var tools: PlannerTools? = null
@@ -53,11 +59,24 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
     // before Compose gets a frame. Normal typing and individual draft changes stay local.
     private var drafts by mutableStateOf(mutableMapOf<String, ChatDraft>(), androidx.compose.runtime.referentialEqualityPolicy())
     var browsingHistory by mutableStateOf(false)
+    init { sessions?.register(this) }
 
     fun setEnabled(value: Boolean) {
-        if (acceptingInput == value) return
-        acceptingInput = value
-        if (value) return
+        deviceEnabled = value
+        updateAvailability()
+    }
+
+    internal fun pauseForBackup(value: Boolean) { backupPaused = value; updateAvailability() }
+    internal suspend fun drainHistory() {
+        viewModelScope.coroutineContext.job.children.toList().joinAll()
+        deleting.withLock { }
+    }
+
+    private fun updateAvailability() {
+        val enabled = deviceEnabled && !backupPaused
+        if (acceptingInput == enabled) return
+        acceptingInput = enabled
+        if (enabled) return
         clearTurn()
         drafts.values.forEach { it.dispose() }
         drafts = mutableMapOf()
@@ -112,14 +131,14 @@ internal class AssistantModel(private val api: PlannerApi, val connections: Conn
             message = uiText("Your next message will use the new data scope.", "下一条消息使用新的数据范围。"))
     }
 
-    suspend fun deleteConversation(id: Long) = withContext(NonCancellable) {
-        if (!acceptingInput) throw CancellationException("Assistant disabled")
+    suspend fun deleteConversation(id: Long) = deleting.withLock { withContext(NonCancellable) {
+        if (!acceptingInput) throw CancellationException("Assistant inactive")
         if (committingThread == id) error(uiText("Wait for the save receipt.", "请等待保存回执。"))
         val files = history.delete(id)
         if (conversationId == id) close()
         files.forEach { attachments.remove(it) }
         collectBackgrounds?.invoke()
-    }
+    } }
 
     fun cancel() {
         if (ui.work == AssistantWork.COMMIT || ui.work == AssistantWork.LOADING) return

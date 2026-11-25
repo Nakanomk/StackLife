@@ -40,6 +40,15 @@ internal class BackgroundStore(context: Context, private val retained: suspend (
     fun exists(id: String): Boolean = privatePhotoId.matches(id) &&
         Files.isRegularFile(File(root, id).toPath(), LinkOption.NOFOLLOW_LINKS)
 
+    internal fun validateArchiveFile(id: String, source: File) {
+        require(privatePhotoId.matches(id) && source.length() in 1..MAX_PHOTO_BYTES)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(source.path, bounds)
+        val info = PhotoInfo(bounds.outMimeType ?: storageFailure(), bounds.outWidth, bounds.outHeight, source.length())
+        if (!info.matchesFile(source)) storageFailure()
+        decodePrivatePhoto(source, 128, info).recycle()
+    }
+
     private fun storageFailure(): Nothing = throw PhotoProblem(uiText(
         "Could not read or store the background. Check the selection and available storage.", "无法读取或保存背景，请检查所选图片和存储空间。"))
 
@@ -154,12 +163,7 @@ internal class BackgroundStore(context: Context, private val retained: suspend (
         /** Verify existing prepared-image semantics, publish complete bytes on the same volume,
          * and return the actual identity. Never overwrite another owner's file, even on ID collision. */
         suspend fun publish(id: String, source: File, sha256: String): String = io {
-            require(privatePhotoId.matches(id) && source.length() in 1..MAX_PHOTO_BYTES)
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(source.path, bounds)
-            val info = PhotoInfo(bounds.outMimeType ?: storageFailure(), bounds.outWidth, bounds.outHeight, source.length())
-            if (!info.matchesFile(source)) storageFailure()
-            decodePrivatePhoto(source, 128, info).recycle()
+            validateArchiveFile(id, source)
             mutex.withLock {
                 if (!recovered) sweepLocked()
                 val existing = File(root, id)

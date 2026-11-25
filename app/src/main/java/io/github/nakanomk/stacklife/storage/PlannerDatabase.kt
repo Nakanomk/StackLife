@@ -39,13 +39,13 @@ import io.github.nakanomk.stacklife.planner.TaskIcon
         TermRow::class, CourseRow::class, GraphRow::class, GraphNodeRow::class, GraphEdgeRow::class,
         ConversationRow::class, ConversationMessageRow::class, ConversationImageRow::class, ConversationDocumentRow::class, ScheduleRow::class,
         SegmentRow::class, ExceptionRow::class, CompletionRow::class, ReminderSettingRow::class, ReminderRuleRow::class,
-        ReminderReceiptRow::class, CountdownRow::class],
-    version = 16,
+        ReminderReceiptRow::class, CountdownRow::class, BackupDeviceRow::class],
+    version = 17,
     autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7),
         AutoMigration(from = 7, to = 8), AutoMigration(from = 8, to = 9, spec = ExistingInstall::class), AutoMigration(from = 11, to = 12),
         AutoMigration(from = 12, to = 13, spec = ExistingInstall::class), AutoMigration(from = 13, to = 14),
-        AutoMigration(from = 14, to = 15), AutoMigration(from = 15, to = 16)],
+        AutoMigration(from = 14, to = 15), AutoMigration(from = 15, to = 16), AutoMigration(from = 16, to = 17)],
     exportSchema = true,
 )
 abstract class PlannerDatabase : RoomDatabase() {
@@ -56,6 +56,8 @@ abstract class PlannerDatabase : RoomDatabase() {
     internal abstract fun graphDao(): GraphDao
     internal abstract fun countdownDao(): CountdownDao
     internal abstract fun conversationHistory(): ConversationHistory
+    internal abstract fun backupTablesDao(): BackupTablesDao
+    internal abstract fun backupDeviceDao(): BackupDeviceDao
     companion object {
         internal fun open(context: Context, name: String): PlannerDatabase =
             Room.databaseBuilder(context.applicationContext, PlannerDatabase::class.java, name)

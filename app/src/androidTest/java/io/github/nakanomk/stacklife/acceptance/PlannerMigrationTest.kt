@@ -6,6 +6,8 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.storage.*
 import io.github.nakanomk.stacklife.reminders.importReceipts
 import io.github.nakanomk.stacklife.planner.*
+import io.github.nakanomk.stacklife.assistant.ChatDocument
+import io.github.nakanomk.stacklife.assistant.ChatImage
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.util.UUID
@@ -61,6 +63,31 @@ class PlannerMigrationTest {
                 val node = (api.observe(PlannerQuery.Graph("g")).first() as GraphDetail).nodes.single()
                 assertEquals("n", node.id); assertEquals(TaskIcon.AUTO, node.icon)
             } } }
+        } finally { context.deleteDatabase(name) }
+    }
+
+    @Test fun version15PhotosRetainOrderAlongsideNewDocumentMessagesAfterReopen() {
+        val name = "typed-history-${UUID.randomUUID()}.db"
+        val images = listOf(ChatImage("one", "image/jpeg", 8, 7, 36), ChatImage("two", "image/jpeg", 5, 6, 32))
+        val document = ChatDocument("three", "text/plain", "fixture.txt", 4)
+        try {
+            oldDatabase(name, 15) { old ->
+                old.execSQL("INSERT INTO conversations(id,scope,title,updatedAtMillis,lastMessageId,scopeKey) VALUES (7,'Queue','Photos',1000,19,'queue')")
+                old.execSQL("INSERT INTO conversation_messages(id,conversationId,role,text) VALUES (19,7,'USER','before')")
+                images.forEachIndexed { ordinal, i -> old.execSQL(
+                    "INSERT INTO conversation_images(id,messageId,ordinal,mime,width,height,bytes) VALUES (?,19,?,?,?,?,?)",
+                    arrayOf<Any>(i.id, ordinal, i.mime, i.width, i.height, i.bytes)) }
+            }
+            database(name) { db -> runBlocking {
+                val history = db.conversationHistory()
+                assertEquals(images, history.observeMessages(7).first().single().attachments)
+                history.sendUser(7, "Queue", "after", "queue", listOf(document))
+            } }
+            database(name) { db -> runBlocking {
+                val messages = db.conversationHistory().observeMessages(7).first()
+                assertEquals(listOf("before", "after"), messages.map { it.text })
+                assertEquals(listOf(images, listOf(document)), messages.map { it.attachments })
+            } }
         } finally { context.deleteDatabase(name) }
     }
 

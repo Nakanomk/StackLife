@@ -1,0 +1,15 @@
+Full backup: portable relational records and identity-aware replacement
+
+Tasks.org — Tasks.org contributors, GNU General Public License v3.
+Repository and license: https://github.com/tasks/tasks/tree/e23c3c993415b77bfb8e27cdec150570c02fd500 ; https://github.com/tasks/tasks/blob/e23c3c993415b77bfb8e27cdec150570c02fd500/LICENSE
+Sources: app/src/main/java/org/tasks/backup/TasksJsonExporter.kt (doTasksExport, JsonWriter) and TasksJsonImporter.kt (importMetadata, importTasks).
+StackLife's BackupTables.export/read and BackupRecord catalog adapt per-record JSON export and establishing identities before dependent records. Local differences: bounded category-specific JSONL, validated stable IDs (including occurrence original dates), independent category *replacement*, a single caller-owned Room transaction, and target-keystore activation. No Tasks.org SQL schema, preference-map restore, synchronization, analytics or legacy migration code is included.
+
+BiliPai — BiliPai contributors, GNU General Public License v3.
+https://github.com/jay3-yy/BiliPai/blob/c7f835b34d8323358be57be298f86f29fecb53c8/app/src/main/java/com/android/purebilibili/core/plugin/skin/UiSkinPackageReader.kt
+UiSkinPackageReader.scanPackage/validateAssets: closed membership, resource ceilings, duplicate rejection and declared/actual identity checks. StackLife checks typed rows, nested JSON keys, uniqueness, relation endpoints and file reference closure; archives and ZIP membership are handled by the transfer coordinator, not by Room. There is no plugin or remote restoration.
+The complete GNU GPL version 3 text is included as StackLife-GPL-3.0-or-later.txt in this directory.
+
+SQLite session extension — public domain (https://www.sqlite.org/copyright.html).
+https://github.com/sqlite/sqlite/blob/52acf77f59baecccb079a2fa432a7c2d51870ea8/ext/session/sqlite3session.c
+sessionApplyOneOp and SQLITE_CHANGESET_ABORT: conflict abort rather than replacement of conflicting identities. Semantic reference only; no SQLite C/JNI code is bundled. BackupTables.plan binds approval to a deterministic local state digest; BackupReplacement and BackupReplaceWrites implement StackLife-specific task ownership, archived snapshots, graph link protection, category counts, and selected-only Room writes. No upstream project is represented as providing a ready-made StackLife restore engine.

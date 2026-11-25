@@ -58,26 +58,132 @@ internal fun serviceProfile(baseUrl: String, model: String, supportsImages: Bool
 
 private fun validKey(key: String): Boolean = key.length in 1..8192 && key.all { it in '!'..'~' }
 
-internal class ConnectionStore(context: Context, storageName: String = "assistant-provider") {
+/** A configured store publishes immutable encrypted generations. The legacy path is read until the
+ * first successful activation, so upgrading does not require unlocking or rewriting a secret. */
+internal class ConnectionStore(context: Context, storageName: String = "assistant-provider",
+    private val deviceDao: io.github.nakanomk.stacklife.storage.BackupDeviceDao? = null) {
     private val app = context.applicationContext
     private val name = storageName.also { require(it.matches(Regex("[a-zA-Z0-9_-]{1,96}"))) }
     private val alias = "io.github.nakanomk.stacklife.$name"
     private val file get() = AtomicFile(File(app.noBackupFilesDir, name))
+    internal val recoveryMarker = File(app.noBackupFilesDir, "$name.restore-pending")
+    private val generations = File(app.noBackupFilesDir, "$name.generations")
 
-    suspend fun profile(): ServiceProfile? = load()?.profile
+    internal suspend fun <T> exclusive(action: suspend () -> T): T =
+        withContext(Dispatchers.IO) { lock.withLock { action() } }
 
-    suspend fun load(): ServiceConnection? = access { readConnection(file) }
+    internal fun beginPublication() {
+        recoveryMarker.outputStream().use { it.fd.sync() }
+        syncDirectory(app.noBackupFilesDir)
+    }
 
-    suspend fun save(baseUrl: String, model: String, newKey: String?, supportsImages: Boolean? = null): ServiceProfile = access {
+    private fun endPublication(generation: String, pendingPreferences: String?) {
+        collect(generation)
+        if (pendingPreferences == null && java.nio.file.Files.deleteIfExists(recoveryMarker.toPath()))
+            syncDirectory(app.noBackupFilesDir)
+    }
+
+    internal fun hasActiveFile(generation: String?): Boolean = when (generation) {
+        null -> file.baseFile.exists() || File(app.noBackupFilesDir, "$name.bak").exists()
+        "" -> false
+        else -> true // A missing active ciphertext is damaged, not an unconfigured device.
+    }
+
+    private fun encryptedSettingsUnavailable() = IllegalStateException(uiText("Could not access the encrypted service settings. The device key may no longer be valid. Remove the settings and enter them again.", "无法访问加密连接配置：设备密钥可能已失效。请清除连接配置后重新填写。"))
+    private inline fun <T> protectedFile(action: () -> T): T = try { action() } catch (_: Exception) { throw encryptedSettingsUnavailable() }
+
+    internal fun current(generation: String?): ServiceConnection? = protectedFile {
+        when (generation) {
+            null -> readConnection(file)
+            "" -> null
+            else -> checkNotNull(readConnection(generationFile(generation)))
+        }
+    }
+
+    private fun generationFile(id: String): AtomicFile {
+        require(io.github.nakanomk.stacklife.planner.privatePhotoId.matches(id))
+        return AtomicFile(File(generations, id))
+    }
+
+    internal fun stage(value: ServiceConnection?): String {
+        if (value == null) return ""
+        return protectedFile {
+            check(generations.isDirectory || generations.mkdir())
+            val id = java.util.UUID.randomUUID().toString()
+            writeConnection(generationFile(id), value.profile, value.key)
+            syncDirectory(generations)
+            syncDirectory(app.noBackupFilesDir)
+            id
+        }
+    }
+
+    /** Caller holds exclusive(), and read the active row successfully. Never GC from a guessed pointer. */
+    internal fun collect(generation: String?) {
+        var authenticated = false
+        fun unlink(entry: File): Boolean {
+            if (!entry.exists()) return false
+            if (!authenticated && !generation.isNullOrEmpty()) {
+                current(generation) // If the active bytes cannot be reopened, preserve the other files.
+                authenticated = true
+            }
+            return java.nio.file.Files.deleteIfExists(entry.toPath())
+        }
+        if (generation != null) {
+            var removed = unlink(file.baseFile)
+            if (unlink(File(app.noBackupFilesDir, "$name.bak"))) removed = true
+            if (unlink(File(app.noBackupFilesDir, "$name.new"))) removed = true
+            if (removed) syncDirectory(app.noBackupFilesDir)
+        }
+        if (generations.exists()) {
+            var removed = false
+            for (entry in checkNotNull(generations.listFiles())) {
+                val id = entry.name.removeSuffix(".new").removeSuffix(".bak")
+                if (io.github.nakanomk.stacklife.planner.privatePhotoId.matches(id) && id != generation && unlink(entry)) removed = true
+            }
+            if (removed) syncDirectory(generations)
+        }
+        if (generation == "") keyStore().let { if (it.containsAlias(alias)) it.deleteEntry(alias) }
+    }
+
+    suspend fun editEpoch(): Long = access { deviceDao?.active()?.connectionEpoch ?: 0 }
+
+    private fun checkEpoch(expected: Long?, actual: Long) {
+        if (expected != null && actual != expected) throw ConfigurationProblem(uiText(
+            "The service settings have changed. Reopen this page before making another change.",
+            "连接配置已变更，请重新打开此页再修改。"))
+    }
+
+    suspend fun profile(expectedEpoch: Long? = null): ServiceProfile? = access {
+        val row = deviceDao?.active()
+        checkEpoch(expectedEpoch, row?.connectionEpoch ?: 0)
+        current(row?.connectionGeneration)?.profile
+    }
+
+    suspend fun load(): ServiceConnection? = access { current(deviceDao?.active()?.connectionGeneration) }
+
+    suspend fun save(baseUrl: String, model: String, newKey: String?, supportsImages: Boolean? = null,
+        expectedEpoch: Long? = null): ServiceProfile = access {
         val profile = serviceProfile(baseUrl, model, supportsImages)
-        val target = file
-        val previous = readConnection(target)
+        val row = deviceDao?.active() ?: io.github.nakanomk.stacklife.storage.BackupDeviceRow()
+        checkEpoch(expectedEpoch, row.connectionEpoch)
+        val previous = current(row.connectionGeneration)
         val key = if (newKey.isNullOrBlank()) {
             previous?.takeIf { it.profile.origin == profile.origin }?.key
                 ?: throw ConfigurationProblem(uiText("Enter a key when connecting for the first time or changing the service origin, including its port.", "首次连接或更换服务域（含端口）必须重新填写密钥。"))
         } else newKey
         if (!validKey(key)) throw ConfigurationProblem(uiText("The key must not contain spaces, line breaks, or invalid characters.", "密钥不能包含空格、换行或无效字符。"))
 
+        if (deviceDao == null) writeConnection(file, profile, key)
+        else {
+            beginPublication()
+            val generation = stage(ServiceConnection(profile, key))
+            deviceDao.write(row.copy(connectionGeneration = generation, connectionEpoch = Math.addExact(row.connectionEpoch, 1L)))
+            endPublication(generation, row.pendingPreferences)
+        }
+        profile
+    }
+
+    private fun writeConnection(target: AtomicFile, profile: ServiceProfile, key: String) {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, encryptionKey(create = true)) // Keystore supplies a fresh IV.
         val plain = buildJsonObject {
@@ -91,24 +197,33 @@ internal class ConnectionStore(context: Context, storageName: String = "assistan
         try {
             stream.write(iv)
             stream.write(encrypted)
+            stream.fd.sync()
             target.finishWrite(stream)
         } catch (failure: Exception) {
             target.failWrite(stream)
             throw failure
         }
-        // AtomicFile.finishWrite logs rename failures rather than throwing on some platforms.
-        target.openRead().use { check(it.readNBytesCompat(IV_SIZE).contentEquals(iv)) }
-        profile
+        // finishWrite can log rather than throw. Authenticate and compare all fields before publishing a pointer.
+        val reopened = checkNotNull(readConnection(target, iv))
+        check(reopened.profile == profile && reopened.key == key)
     }
 
-    suspend fun clear(): Unit = access {
-        val target = file
-        target.delete()
-        keyStore().deleteEntry(alias)
-        check(!target.baseFile.exists())
+    suspend fun clear(expectedEpoch: Long? = null): Unit = access {
+        if (deviceDao == null) {
+            checkEpoch(expectedEpoch, 0)
+            file.delete()
+            keyStore().deleteEntry(alias)
+            check(!file.baseFile.exists())
+        } else {
+            val row = deviceDao.active() ?: io.github.nakanomk.stacklife.storage.BackupDeviceRow()
+            checkEpoch(expectedEpoch, row.connectionEpoch)
+            beginPublication()
+            deviceDao.write(row.copy(connectionGeneration = "", connectionEpoch = Math.addExact(row.connectionEpoch, 1L)))
+            endPublication("", row.pendingPreferences)
+        }
     }
 
-    private fun readConnection(target: AtomicFile): ServiceConnection? {
+    private fun readConnection(target: AtomicFile, expectedIv: ByteArray? = null): ServiceConnection? {
         val stream = try { target.openRead() } catch (failure: FileNotFoundException) {
             if (target.baseFile.exists()) throw failure
             return null
@@ -116,6 +231,7 @@ internal class ConnectionStore(context: Context, storageName: String = "assistan
         return stream.use {
             check(it.channel.size() in (IV_SIZE + 16L)..65536L)
             val iv = it.readNBytesCompat(IV_SIZE)
+            check(expectedIv == null || iv.contentEquals(expectedIv))
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, encryptionKey(create = false), GCMParameterSpec(128, iv))
             val plain = cipher.doFinal(it.readBytes())
@@ -142,15 +258,11 @@ internal class ConnectionStore(context: Context, storageName: String = "assistan
         return generator.generateKey()
     }
 
-    private suspend fun <T> access(operation: () -> T): T = withContext(Dispatchers.IO) {
-        lock.withLock {
-            try { operation() }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (invalid: ConfigurationProblem) { throw invalid }
-            catch (_: Exception) {
-                throw IllegalStateException(uiText("Could not access the encrypted service settings. The device key may no longer be valid. Remove the settings and enter them again.", "无法访问加密连接配置：设备密钥可能已失效。请清除连接配置后重新填写。"))
-            }
-        }
+    private suspend fun <T> access(operation: suspend () -> T): T = exclusive {
+        try { operation() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (invalid: ConfigurationProblem) { throw invalid }
+        catch (_: Exception) { throw encryptedSettingsUnavailable() }
     }
 
     private companion object {
@@ -162,3 +274,8 @@ internal class ConnectionStore(context: Context, storageName: String = "assistan
 
 private fun java.io.InputStream.readNBytesCompat(size: Int): ByteArray =
     ByteArray(size).also { java.io.DataInputStream(this).readFully(it) }
+
+internal fun syncDirectory(directory: File) {
+    val fd = android.system.Os.open(directory.path, android.system.OsConstants.O_RDONLY, 0)
+    try { android.system.Os.fsync(fd) } finally { android.system.Os.close(fd) }
+}

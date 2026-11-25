@@ -115,6 +115,11 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
         private set
     fun editReason(frameId: String) { if (pushReason == null) pushReason = PushReason(frameId) }
     fun closeReason(frameId: String) { if (pushReason?.frameId == frameId) pushReason = null }
+    suspend fun forgetRestoredWorkspace() {
+        val previous = latest
+        previous?.error?.await()
+        if (previous === latest) { latest = null; feedbackState.value = null; pushReason = null }
+    }
     fun dismissFeedback(request: String) {
         feedbackState.value?.takeIf { it.receipt.requestId == request }?.let { feedbackState.compareAndSet(it, null) }
     }
