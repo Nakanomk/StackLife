@@ -1038,8 +1038,6 @@ private fun NavEntryHost(
     }
 
     val contentVisible = (depthBuckets and DEPTH_BUCKET_CONTENT_VISIBLE) != 0
-    // 保留组合与布局供返回复用；完全遮挡后不再提交子树绘制与背景录制指令。
-    // 曝光只在边界变化时更新，弹层下仍露出的页沿用其 opaqueDepth。
     val contentDrawModifier = if (contentVisible) Modifier else Modifier.drawWithContent { }
     Box(modifier = entryModifier.then(clipModifier).then(contentDrawModifier).then(blockInputModifier).then(opaqueInputModifier)) {
         ProvideNavEntryBackScope(entryDispatcherOwner) {

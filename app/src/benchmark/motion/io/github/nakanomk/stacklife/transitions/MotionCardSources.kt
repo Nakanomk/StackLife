@@ -132,6 +132,10 @@ internal class MotionCardSources {
         override val handlesOwnClipping = true
         override val preparesEnterFrame = true
         override val retainsSpringOvershoot = true
+
+        // BiliPai's modal depth keeps exactly the parent STARTED and drawable, but not
+        // interactive. Its current rows must be ready before a back gesture reveals them.
+        override val opaqueDepth get() = 2f
         override val motion get() = if (opened) ReturnMotion else EnterMotion
         override fun scrimFraction(scope: NavTransitionScope) = 0f
 
