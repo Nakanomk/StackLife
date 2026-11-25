@@ -1,12 +1,22 @@
 package io.github.nakanomk.stacklife.widget
 
+import android.app.PendingIntent
+import android.appwidget.AppWidgetHostView
 import android.appwidget.AppWidgetManager
+import android.content.ContextWrapper
+import android.content.Intent
+import android.content.IntentSender
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.Parcel
+import android.util.SizeF
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.RemoteViews
+import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.MainActivity
 import io.github.nakanomk.stacklife.R
@@ -26,6 +36,7 @@ import io.github.nakanomk.stacklife.reminders.reminderTarget
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -123,5 +134,109 @@ class WidgetProjectionTest {
             assertEquals(0, rows.childCount)
             assertEquals(View.VISIBLE, content.findViewById<View>(R.id.widget_message).visibility)
         }
+    }
+
+    @Test @SdkSuppress(minSdkVersion = 31)
+    fun oneWeeklyUpdateResizesBetweenPagesAndGridWithTheirOwnOccurrenceClicks() = runBlocking {
+        val meetings = (1..5).map { day -> term.meeting(1, day, "Lab", "R$day", 1, 2) }
+        store.apply(CourseImport(store.api.stageCourseImport(term, meetings)))
+        val start = Instant.ofEpochMilli(meetings.first().startMillis)
+        val week = store.api.widgetWeek(store.api.observe(PlannerQuery.Terms).first() as Terms, monday, start, campusZone)
+        val scaled = context.createConfigurationContext(Configuration().apply { fontScale = 1f })
+        val small = SizeF(240f, 180f)
+        val tall = SizeF(270f, 271f)
+        val wide = SizeF(560f, 305f)
+        inst.runOnMainSync {
+            var clicked: IntentSender? = null
+            // Observe the IntentSender actually dispatched by Android's row/cell click listener
+            // without starting MainActivity against a different database than this fixture.
+            val launcher = object : ContextWrapper(scaled) {
+                override fun startIntentSender(intent: IntentSender, fillInIntent: Intent?, flagsMask: Int,
+                    flagsValues: Int, extraFlags: Int, options: Bundle?) { clicked = intent }
+            }
+            fun click(view: View, day: Int) {
+                val expected = eventIntent(context, week.events.single { it.weekday == day }.target)
+                val pending = requireNotNull(PendingIntent.getActivity(context, 0, expected,
+                    PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE))
+                clicked = null
+                assertTrue(view.performClick())
+                assertEquals("Wrong occurrence for day $day", pending.intentSender, clicked)
+            }
+            // Exercise exact host sizes and a many-size host whose equivalent capacities must coalesce.
+            for (sizes in listOf(listOf(small, tall, wide), listOf(small, tall, wide) + (1..20).map { SizeF(tall.width + it, tall.height) })) {
+                val options = Bundle().apply {
+                    putParcelableArrayList(AppWidgetManager.OPTION_APPWIDGET_SIZES, ArrayList(sizes))
+                    putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 240)
+                    putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 180)
+                    putLong(PAGE_DATE, monday.toEpochDay())
+                    putInt(PAGE_START, 2)
+                }
+                val host = AppWidgetHostView(launcher)
+                val parcel = Parcel.obtain()
+                try {
+                    widgetViews(scaled, 123, options, week, start.toEpochMilli()).writeToParcel(parcel, 0)
+                    parcel.setDataPosition(0)
+                    host.updateAppWidget(RemoteViews.CREATOR.createFromParcel(parcel))
+                } finally { parcel.recycle() }
+                // One delivery above. Only real host measure/layout below: no new provider update on resize.
+                fun resize(size: SizeF): LinearLayout {
+                    val density = host.resources.displayMetrics.density
+                    val w = (size.width * density).roundToInt()
+                    val h = (size.height * density).roundToInt()
+                    host.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
+                    host.layout(0, 0, w, h)
+                    val rows = host.findViewById<LinearLayout>(R.id.widget_rows)
+                    for (i in 0 until rows.childCount) {
+                        val row = rows.getChildAt(i)
+                        assertTrue("Clipped row $i at $size", row.visibility == View.VISIBLE && row.width > 0 &&
+                            row.height > 0 && row.top >= 0 && row.bottom <= rows.height)
+                    }
+                    return rows
+                }
+                fun titles(rows: LinearLayout) = (0 until rows.childCount).map {
+                    rows.getChildAt(it).findViewById<TextView>(R.id.widget_event_title).text.toString()
+                }
+                val shortPage = resize(small)
+                assertEquals(listOf("Lab · R3"), titles(shortPage))
+                click(shortPage.getChildAt(0), 3)
+                val tallPage = resize(tall)
+                assertEquals(listOf("Lab · R1", "Lab · R2", "Lab · R3"), titles(tallPage))
+                click(tallPage.getChildAt(1), 2)
+                val grid = resize(wide)
+                assertEquals(2, grid.childCount) // weekday names + one occupied band
+                val thursday = (grid.getChildAt(1) as LinearLayout).getChildAt(3) as TextView
+                assertTrue(thursday.text.contains("Lab · R4"))
+                assertTrue(thursday.contentDescription.contains("Lab · R4"))
+                assertEquals(View.GONE, host.findViewById<View>(R.id.widget_page).visibility)
+                click(thursday, 4)
+                assertEquals(listOf("Lab · R3"), titles(resize(small)))
+            }
+        }
+    }
+
+    @Test @SdkSuppress(minSdkVersion = 31)
+    fun manyDistinctPageCapacitiesStayWithinTwoFullGridsOnTheWire() = runBlocking {
+        // Full-length provider fields and every cell occupied; empty cells understate Binder cost.
+        val meetings = (1..7).flatMap { day -> (1..8).map { period ->
+            term.meeting(1, day, "$day-$period".padEnd(256, 'T'), "Room".padEnd(256, 'R'), period, period)
+        } }
+        store.apply(CourseImport(store.api.stageCourseImport(term, meetings)))
+        val start = Instant.ofEpochMilli(meetings.first().startMillis)
+        val week = store.api.widgetWeek(store.api.observe(PlannerQuery.Terms).first() as Terms, monday, start, campusZone)
+        assertEquals(56, week.events.size)
+        val scaled = context.createConfigurationContext(Configuration().apply { fontScale = 1f })
+        fun bytes(sizes: List<SizeF>): Int {
+            val options = Bundle().apply { putParcelableArrayList(AppWidgetManager.OPTION_APPWIDGET_SIZES, ArrayList(sizes)) }
+            val parcel = Parcel.obtain()
+            return try {
+                widgetViews(scaled, 123, options, week, start.toEpochMilli()).writeToParcel(parcel, 0)
+                parcel.dataSize()
+            } finally { parcel.recycle() }
+        }
+        val previousBudget = bytes(listOf(SizeF(560f, 700f), SizeF(700f, 700f)))
+        val many = bytes((1..20).map { SizeF(270f, 108f + 48 * it) } +
+            (1..8).map { SizeF(560f, 164f + 57 * it) })
+        assertTrue("Many-size update: $many bytes; two dense grids: $previousBudget", many <= previousBudget)
     }
 }

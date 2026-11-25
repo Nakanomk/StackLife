@@ -54,30 +54,96 @@ private fun control(context: Context, id: Int, verb: String, value: Long, date: 
         PendingIntent.FLAG_IMMUTABLE)
 }
 
-/** For S+ the host itself selects its real size. No guessing the orientation from the largest stretchable option. */
-internal fun widgetViews(context: Context, id: Int, options: Bundle, snapshot: WidgetSnapshot, now: Long): RemoteViews {
-    fun render(size: WidgetSize) = renderSize(context, id, options, snapshot, now, size)
-    if (Build.VERSION.SDK_INT >= 31) {
-        @Suppress("DEPRECATION")
-        val sizes = options.getParcelableArrayList<SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES)?.distinct()
-            ?.filter { it.width > 0 && it.height > 0 }
-        // Some hosts advertise many fold/resize choices. Do not parcel a full grid for every candidate.
-        if (sizes != null && sizes.size > 2) {
-            val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
-            val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
-            val nearest = sizes.minBy { kotlin.math.abs(it.width - width) + kotlin.math.abs(it.height - height) }
-            return render(WidgetSize(nearest.width.toInt(), nearest.height.toInt()))
-        }
-        if (!sizes.isNullOrEmpty()) return RemoteViews(sizes.associateWith {
-            render(WidgetSize(it.width.toInt(), it.height.toInt()))
-        })
-    }
-    // Legacy launchers provide only cell bounds. Use their conservative minimum rather than maximum resize size.
-    return render(WidgetSize(options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH).takeIf { it > 0 } ?: 230,
-        options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT).takeIf { it > 0 } ?: if (snapshot.week == null) 160 else 240))
+private data class WidgetFit(val grid: Boolean, val capacity: Int) {
+    // A list row sends a separate time and icon in addition to the text/description/click of a
+    // grid cell. Charge it two slots; a grid band contains its container and seven cells.
+    val viewCount get() = 1 + if (grid) (capacity + 1) * 8 else capacity * 2
 }
 
-private fun renderSize(context: Context, id: Int, options: Bundle, snapshot: WidgetSnapshot, now: Long, size: WidgetSize): RemoteViews {
+private const val MAX_LAYOUTS = 16 // AOSP RemoteViews.MAX_INIT_VIEW_COUNT
+private const val MAX_VIEWS = 2 * (1 + 9 * 8) // No larger a tree than the old two full eight-band grids.
+
+private class SizeTier(val height: Float) {
+    var list: WidgetFit? = null
+    var grid: WidgetFit? = null
+    var gridHeight = Float.POSITIVE_INFINITY
+    val layoutCount: Int get() = (if (list == null) 0 else 1) + (if (grid == null) 0 else 1)
+    val viewCount: Int get() = (list?.viewCount ?: 0) + (grid?.viewCount ?: 0)
+
+    fun include(fit: WidgetFit, atHeight: Float) {
+        if (fit.grid) {
+            if (grid == null || fit.capacity < grid!!.capacity) grid = fit
+            gridHeight = minOf(gridHeight, atHeight)
+        } else if (list == null || fit.capacity < list!!.capacity) list = fit
+    }
+
+    fun absorb(next: SizeTier) {
+        next.list?.let { include(it, next.height) }
+        next.grid?.let { include(it, next.gridHeight) }
+    }
+
+    // Capacities are nondecreasing with height within each mode. Missing modes cost no rows.
+    fun lostRows(next: SizeTier): Int =
+        (if (list != null && next.list != null) next.list!!.capacity - list!!.capacity else 0) +
+        (if (grid != null && next.grid != null) (next.grid!!.capacity - grid!!.capacity) * 7 else 0)
+}
+
+private fun boundedLayouts(sizes: Map<SizeF, WidgetFit>): Map<SizeF, WidgetFit> {
+    if (sizes.size <= MAX_LAYOUTS && sizes.values.sumOf { it.viewCount } <= MAX_VIEWS) return sizes
+
+    val byHeight = sortedMapOf<Float, SizeTier>()
+    var minWidth = Float.POSITIVE_INFINITY
+    var gridWidth = Float.POSITIVE_INFINITY
+    for ((size, fit) in sizes) {
+        byHeight.getOrPut(size.height) { SizeTier(size.height) }.include(fit, size.height)
+        minWidth = minOf(minWidth, size.width)
+        if (fit.grid) gridWidth = minOf(gridWidth, size.width)
+    }
+    val tiers = mutableListOf<SizeTier>()
+    for (tier in byHeight.values) {
+        val last = tiers.lastOrNull()
+        if (last != null && last.lostRows(tier) == 0) last.absorb(tier) else tiers.add(tier)
+    }
+    while (tiers.sumOf { it.layoutCount } > MAX_LAYOUTS || tiers.sumOf { it.viewCount } > MAX_VIEWS) {
+        // Merge down, preferentially keeping the tallest layout and losing the fewest rows/cells.
+        val i = (1..max(1, tiers.lastIndex - 1)).minBy { tiers[it - 1].lostRows(tiers[it]) }
+        tiers[i - 1].absorb(tiers.removeAt(i))
+    }
+    return buildMap {
+        for (tier in tiers) {
+            // The grid key must be at least as close on BOTH axes as this tier's list key;
+            // otherwise Android may choose a nearby narrow list even for a wide grid host.
+            tier.list?.let { put(SizeF(minWidth, tier.height), it) }
+            tier.grid?.let { put(SizeF(gridWidth, tier.gridHeight), it) }
+        }
+    }
+}
+
+/** For S+ the host itself selects its real size. No guessing the orientation from the largest stretchable option. */
+internal fun widgetViews(context: Context, id: Int, options: Bundle, snapshot: WidgetSnapshot, now: Long): RemoteViews {
+    val scale = context.resources.configuration.fontScale
+    val week = snapshot.week != null
+    val bands by lazy(LazyThreadSafetyMode.NONE) { weeklyBands(snapshot.events) }
+    fun fit(size: WidgetSize): WidgetFit {
+        val grid = week && snapshot.events.isNotEmpty() && size.grid(scale)
+        val count = if (grid) bands.size else snapshot.events.size
+        return WidgetFit(grid, minOf(size.capacity(scale, week, grid), count.coerceAtLeast(1)))
+    }
+    fun render(fit: WidgetFit) = renderSize(context, id, options, snapshot, now, fit, if (fit.grid) bands else emptyList())
+    if (Build.VERSION.SDK_INT >= 31) {
+        @Suppress("DEPRECATION")
+        val sizes = options.getParcelableArrayList<SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES)
+            ?.asSequence()?.filter { it.width > 0 && it.height > 0 }
+            ?.associateWith { fit(WidgetSize(it.width.toInt(), it.height.toInt())) }
+        if (!sizes.isNullOrEmpty()) return RemoteViews(boundedLayouts(sizes).mapValues { render(it.value) })
+    }
+    // Legacy launchers provide only cell bounds. Use their conservative minimum rather than maximum resize size.
+    return render(fit(WidgetSize(options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH).takeIf { it > 0 } ?: 230,
+        options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT).takeIf { it > 0 } ?: if (week) 240 else 160)))
+}
+
+private fun renderSize(context: Context, id: Int, options: Bundle, snapshot: WidgetSnapshot, now: Long,
+    fit: WidgetFit, bands: List<List<WidgetEvent?>>): RemoteViews {
     fun views(layout: Int) = RemoteViews(context.packageName, layout)
     val root = views(R.layout.widget_schedule)
     // Hosts may reapply a full update to their old hierarchy, including when the last item is removed.
@@ -86,9 +152,7 @@ private fun renderSize(context: Context, id: Int, options: Bundle, snapshot: Wid
     val week = snapshot.week
     val rows = snapshot.events
     val locale = AppLanguage.locale
-    val scale = context.resources.configuration.fontScale
-    val grid = week != null && rows.isNotEmpty() && size.grid(scale)
-    val bands = if (grid) weeklyBands(rows) else emptyList()
+    val grid = fit.grid
     val clock = DateTimeFormatter.ofPattern(if (DateFormat.is24HourFormat(context)) "HH:mm" else "h:mm a", locale).withZone(snapshot.zone)
     val date = DateTimeFormatter.ofPattern(DateFormat.getBestDateTimePattern(locale, "MMMd"), locale)
     val day = DateTimeFormatter.ofPattern(DateFormat.getBestDateTimePattern(locale, "EEEMd"), locale)
@@ -123,7 +187,7 @@ private fun renderSize(context: Context, id: Int, options: Bundle, snapshot: Wid
         root.setTextViewText(R.id.widget_message, context.getString(message))
         return root
     }
-    val capacity = size.capacity(scale, week != null, grid)
+    val capacity = fit.capacity
     val manual = options.getInt(PAGE_START, -1).takeIf { it >= 0 && options.getLong(PAGE_DATE, FOLLOW) == snapshot.date.toEpochDay() }
     val anchor = manual ?: if (week == null) rows.indexOfFirst { !it.done && (it.end > now || it.target.startMillis > now) }
         .takeIf { it >= 0 } ?: rows.lastIndex else 0
