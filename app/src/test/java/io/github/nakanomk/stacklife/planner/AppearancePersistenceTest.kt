@@ -8,6 +8,26 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppearancePersistenceTest {
+    @Test fun wheelDefaultsOnlyFillAbsentFieldsAndLayoutReset() {
+        assertEquals(DayScrollEffect.WHEEL, decodeAppearance("{}").dayScrollEffect)
+        val flat = decodeAppearance("""{"dayScrollEffect":"FLAT","glass":false}""")
+        assertEquals(DayScrollEffect.FLAT, flat.dayScrollEffect)
+        assertEquals(flat, decodeAppearance(encodeAppearance(flat)))
+        val reset = AppearanceFields(AppearanceGroup.LAYOUT, null).applyTo(flat)
+        assertEquals(flat.copy(dayScrollEffect = DayScrollEffect.WHEEL), reset)
+    }
+
+    @Test fun markerLayoutRoundTripsExplicitOffAndResetsWithoutChangingMaterial() {
+        val legacy = decodeAppearance("""{"glass":false}""")
+        assertEquals(NowLineStyle.WAVE, legacy.nowLine)
+        assertTrue(legacy.nowArrow); assertTrue(legacy.nowTrail)
+        val off = decodeAppearance("""{"glass":false,"nowLine":"OFF","nowArrow":false,"nowTrail":false}""")
+        assertEquals(legacy.copy(nowLine = NowLineStyle.OFF, nowArrow = false, nowTrail = false), off)
+        assertEquals(off, decodeAppearance(encodeAppearance(off)))
+        assertEquals(off, AppearanceFields(AppearanceGroup.LAYOUT, AppearanceGroup.LAYOUT.project(off)).applyTo(legacy))
+        assertEquals(legacy, AppearanceFields(AppearanceGroup.LAYOUT, null).applyTo(off))
+    }
+
     @Test fun fourTabSettingsAndStoredChatSnapshotsDecodeBeforeStrictConstruction() {
         val old = """{"order":["GRAPHS","TODAY","COURSES","WORKSPACE"],"start":"COURSES","unknownPreference":3}"""
         val order = listOf(Destination.GRAPHS, Destination.TODAY, Destination.COURSES, Destination.WORKSPACE, Destination.COUNTDOWN)

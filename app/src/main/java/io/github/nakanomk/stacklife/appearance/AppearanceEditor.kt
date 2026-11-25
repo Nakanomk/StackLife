@@ -124,6 +124,19 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                     AppearanceGroup.LAYOUT -> {
                         item { LayoutFields(draft) { draft = it } }
                         item { DayWheelPreview() }
+                        item {
+                            FormGroup(frosted = true) {
+                                Choice(stringResource(R.string.now_marker_line), NowLineStyle.entries, draft.nowLine, {
+                                    stringResource(when (it) {
+                                        NowLineStyle.WAVE -> R.string.now_marker_wave
+                                        NowLineStyle.STRAIGHT -> R.string.now_marker_straight
+                                        NowLineStyle.OFF -> R.string.now_marker_off
+                                    })
+                                }) { draft = draft.copy(nowLine = it) }
+                                SwitchRow(stringResource(R.string.now_marker_arrow), draft.nowArrow) { draft = draft.copy(nowArrow = !draft.nowArrow) }
+                                SwitchRow(stringResource(R.string.now_marker_trail), draft.nowTrail) { draft = draft.copy(nowTrail = !draft.nowTrail) }
+                            }
+                        }
                         item { SectionTitle(stringResource(R.string.ui_nav_order)) }
                         // Only these five rows reorder. Measure their intervals in this section,
                         // not in the lazy viewport that also contains previews and preferences.

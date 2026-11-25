@@ -1,0 +1,8 @@
+<resources>
+    <string name="now_marker_line">当前时间线</string>
+    <string name="now_marker_wave">曲线</string>
+    <string name="now_marker_straight">直线</string>
+    <string name="now_marker_off">关闭</string>
+    <string name="now_marker_arrow">当前时间箭头</string>
+    <string name="now_marker_trail">箭头拖尾</string>
+</resources>

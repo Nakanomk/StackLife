@@ -33,7 +33,6 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.courses.ScheduledCourse
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
@@ -265,14 +264,7 @@ private fun CurrentLine(drag: AxisDrag, spine: Dp) {
             delay(MINUTE_MS - Math.floorMod(value, MINUTE_MS))
         }
     }
-    if (millis !in drag.scale.day.startMillis until drag.scale.day.endMillis) return
-    val y = remember(drag.scale, millis) { drag.scale.yAt(millis) }
-    val aboveViewport by remember(drag, y) { derivedStateOf { y < drag.scroll.value } }
-    if (aboveViewport) return
-    val color = MaterialTheme.colorScheme.primary
-    val now = stringResource(R.string.today_now_at, clockLabel(millis, drag.scale.day))
-    HorizontalDivider(Modifier.offset { IntOffset(0, y - drag.scroll.value) }.padding(start = spine).testTag("now-line")
-        .semantics { contentDescription = now }, color = color, thickness = 2.dp)
+    CurrentTimeMarker(drag, spine, millis)
 }
 
 @OptIn(ExperimentalSharedTransitionApi::class)

@@ -198,6 +198,33 @@ class AppearanceEditorInteractionTest {
         } finally { folder.deleteRecursively() }
     }
 
+    @Test fun currentTimeControlsStayDraftUntilSavedAndReopenTogether() {
+        val original = saved()
+        val before = revision()
+        fun text(id: Int) = ui.activity.getString(id)
+        val layout = text(R.string.ui_layout)
+        val line = text(R.string.now_marker_line)
+        val arrow = hasText(text(R.string.now_marker_arrow)) and isToggleable()
+        val trail = hasText(text(R.string.now_marker_trail)) and isToggleable()
+        fun edit() {
+            choice(line, text(R.string.now_marker_straight))
+            field(arrow).assertIsOn().performClick()
+            field(trail).assertIsOn().performClick()
+        }
+        attach(); openSettings(); openGroup(layout); edit()
+        await(row(text(R.string.ui_cancel))).performClick()
+        await(row(layout))
+        assertEquals(original, saved()); assertEquals(before, revision())
+        openGroup(layout); edit()
+        await(row(text(R.string.ui_save_appearance)) and isEnabled()).performClick()
+        await(row(layout))
+        assertEquals(original.copy(nowLine = NowLineStyle.STRAIGHT, nowArrow = false, nowTrail = false), saved())
+        assertEquals(before + 1, revision())
+        openGroup(layout)
+        field(row(line)).assertTextContains(text(R.string.now_marker_straight))
+        field(arrow).assertIsOff(); field(trail).assertIsOff()
+    }
+
     @OptIn(ExperimentalTestApi::class)
     @Test fun largeTextPreviewKeepsTheFullNoteAboveBothDockStyles() {
         ui.setContent {

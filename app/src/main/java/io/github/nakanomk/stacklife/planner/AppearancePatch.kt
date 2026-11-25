@@ -30,6 +30,8 @@ internal enum class AppearanceGroup(val key: String, val fields: Map<String, () 
     COLOR("color", mapOf("theme" to { uiText("Theme", "明暗") }, "palette" to { uiText("Color source", "色彩来源") }, "seed" to { uiText("Seed color", "种子色") })),
     LAYOUT("layout", mapOf("compact" to { uiText("Compact spacing", "紧凑留白") }, "navStyle" to { uiText("Navigation style", "导航样式") }, "order" to { uiText("Navigation order", "导航次序") }, "start" to { uiText("Start page", "启动页") },
         "visible" to { uiText("Shown destinations", "显示的功能") }, "dayScrollEffect" to { uiText("Day scroll effect", "日程滚动效果") },
+        "nowLine" to { uiText("Current time line", "当前时间线") }, "nowArrow" to { uiText("Current time arrow", "当前时间箭头") },
+        "nowTrail" to { uiText("Arrow trail", "箭头拖尾") },
         "floatingDayTray" to { uiText("Floating queue tray", "悬浮待排队列") }, "showDuration" to { uiText("Show duration", "显示时长") }, "showNotes" to { uiText("Show notes", "显示笔记") })),
     MATERIAL("material", mapOf("glass" to { uiText("Liquid glass", "液态玻璃") }, "navGlass" to { uiText("Navigation glass", "导航玻璃") }, "assistantGlass" to { uiText("Assistant glass", "助理玻璃") },
         "background" to { uiText("Global background", "全局背景") }, "pageBackgrounds" to { uiText("Page backgrounds", "逐页背景") },
@@ -79,6 +81,7 @@ internal fun appearanceLabel(value: JsonElement): String = when (value) {
         "true" -> uiText("On", "开启"); "false" -> uiText("Off", "关闭"); "SYSTEM" -> uiText("System default", "跟随系统")
         "LIGHT" -> uiText("Light", "浅色"); "DARK" -> uiText("Dark", "深色"); "DYNAMIC" -> uiText("Dynamic color", "动态色")
         "FLAT" -> uiText("Flat", "平面"); "WHEEL" -> uiText("Wheel", "滚轮")
+        "WAVE" -> uiText("Wavy", "曲线"); "STRAIGHT" -> uiText("Straight", "直线"); "OFF" -> uiText("Off", "关闭")
         "SEED" -> uiText("Seed color", "种子色"); "FLOATING" -> uiText("Floating pill", "浮动胶囊"); "DOCKED" -> uiText("Bottom bar", "贴底导航")
         else -> Destination.entries.find { it.name == s }?.label ?: s
     }

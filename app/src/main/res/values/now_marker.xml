@@ -1,0 +1,8 @@
+<resources>
+    <string name="now_marker_line">Current time line</string>
+    <string name="now_marker_wave">Wave</string>
+    <string name="now_marker_straight">Straight</string>
+    <string name="now_marker_off">Off</string>
+    <string name="now_marker_arrow">Current time arrow</string>
+    <string name="now_marker_trail">Arrow trail</string>
+</resources>
