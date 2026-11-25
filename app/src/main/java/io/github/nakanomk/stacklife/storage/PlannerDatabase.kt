@@ -38,11 +38,11 @@ import io.github.nakanomk.stacklife.planner.RestorePolicy
         ConversationRow::class, ConversationMessageRow::class, ConversationImageRow::class, ScheduleRow::class,
         SegmentRow::class, ExceptionRow::class, CompletionRow::class, ReminderSettingRow::class, ReminderRuleRow::class,
         ReminderReceiptRow::class, CountdownRow::class],
-    version = 13,
+    version = 14,
     autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7),
         AutoMigration(from = 7, to = 8), AutoMigration(from = 8, to = 9, spec = ExistingInstall::class), AutoMigration(from = 11, to = 12),
-        AutoMigration(from = 12, to = 13, spec = ExistingInstall::class)],
+        AutoMigration(from = 12, to = 13, spec = ExistingInstall::class), AutoMigration(from = 13, to = 14)],
     exportSchema = true,
 )
 abstract class PlannerDatabase : RoomDatabase() {
@@ -127,6 +127,7 @@ internal data class SettingsRow(
     @ColumnInfo(defaultValue = "'{}'") val appearance: String = "{}",
     @ColumnInfo(defaultValue = "0") val receiptsImported: Boolean = false,
     @ColumnInfo(defaultValue = "0") val onboardingVersion: Int = 0,
+    @ColumnInfo(defaultValue = "0") val keepRestoredFrames: Boolean = false,
 )
 
 internal data class TaskFields(val id: String, val title: String, val notes: String, val minutes: Int) {
@@ -167,12 +168,19 @@ internal interface PlannerDao {
     @Query("SELECT * FROM frames WHERE id=:id") fun frame(id: String): FrameRow?
     @Query(FRAME_ITEMS + "WHERE i.frameId=:id ORDER BY i.originalPosition")
     fun frameEntries(id: String): List<ItemState>
+    @Query("SELECT * FROM frame_items WHERE frameId=:id ORDER BY originalPosition") fun savedItems(id: String): List<FrameItemRow>
+    @Query("SELECT rowid FROM frames WHERE id=:id") fun savedRowId(id: String): Long?
+    @Query("INSERT INTO frames(rowid,id,reason,savedAtMillis,source) VALUES(:rowId,:id,:reason,:savedAt,:source)")
+    fun reinsertFrame(rowId: Long, id: String, reason: String, savedAt: Long, source: FrameSource)
+    @Query("SELECT EXISTS(SELECT 1 FROM frames WHERE rowid=:ordinal)") fun hasFrameOrdinal(ordinal: Long): Boolean
+    @Query("UPDATE frames SET rowid=:replacement WHERE rowid=:ordinal") fun moveFrameOrdinal(ordinal: Long, replacement: Long)
 
     @Query(FRAME_ITEMS + "ORDER BY i.frameId, i.originalPosition")
     fun itemStates(): List<ItemState>
 
     @Query("SELECT id,queuePosition,title FROM tasks WHERE owner = 'QUEUE' ORDER BY queuePosition")
     fun queuePositions(): List<QueuePositionLabel>
+    @Query("SELECT id FROM tasks WHERE owner='QUEUE' ORDER BY queuePosition") fun queueIds(): List<String>
 
     @Query("SELECT * FROM tasks WHERE id IN (:ids)")
     fun tasks(ids: List<String>): List<TaskRow>

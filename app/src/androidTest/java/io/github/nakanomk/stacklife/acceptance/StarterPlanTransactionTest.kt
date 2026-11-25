@@ -70,7 +70,7 @@ class StarterPlanTransactionTest {
         assertEquals(listOf(countdown), countdowns())
         store.apply(FrameRestore(frame.id, RestoreMode.ALL))
         assertEquals(held + seeded.queue, store.state().queue)
-        assertEquals(0, store.state().frames.single().remaining)
+        assertTrue(store.state().frames.isEmpty())
     }
 
     @Test fun bothPrerequisitesGenerateFreshQueueAndFrameTasksInStableOrder() = runBlocking {

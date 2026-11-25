@@ -127,6 +127,7 @@ class GraphTransactionTest {
         assertEquals(0, refsOnly.remaining); assertEquals(GraphLink.Task(q), refsOnly.items.single().link)
         assertTrue(store.api.preview(listOf(FrameRestore(refsOnly.id, RestoreMode.ALL))) is PreviewResult.Rejected)
         assertTrue(store.api.preview(listOf(FrameRestore(mixed.id, RestoreMode.SELECTED, listOf(held)))) is PreviewResult.Rejected)
+        store.apply(KeepRestoredFrames(true))
         store.apply(FrameRestore(mixed.id, RestoreMode.ALL),
             GraphPatch(g, listOf(EditNode(r.getValue("a"), notes = "共享笔记"), SetLinkedCompletion(r.getValue("b"), true))))
         val restored = store.state()

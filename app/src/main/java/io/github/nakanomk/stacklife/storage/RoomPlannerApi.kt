@@ -11,9 +11,13 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import android.os.SystemClock
 
 class RoomPlannerApi(private val db: PlannerDatabase, private val importCalendars: Map<String, CourseCalendar> = SchoolImports.calendars,
     private val imageExists: (String) -> Boolean = { false }, private val collectBackgrounds: (suspend () -> Unit)? = null,
+    private val receiptTimeoutMillis: () -> Long = { 10_000L }, private val elapsed: () -> Long = SystemClock::elapsedRealtime,
     private val afterCommit: suspend () -> Unit = {}) : PlannerApi {
     private val dao = db.plannerDao()
     private val agenda = db.scheduleDao()
@@ -24,6 +28,11 @@ class RoomPlannerApi(private val db: PlannerDatabase, private val importCalendar
     private val graphLinks = GraphLinkReader(db)
     private val countdowns = db.countdownDao()
     private val reviewed = ConcurrentHashMap<String, ReviewedCourses>()
+    // Publish the changeset only after the Room transaction has committed. Readers share this gate
+    // with normal commits so a late coroutine cannot replace a newer receipt or consume it twice.
+    private val writeGate = Mutex()
+    private var activeReceipt: WorkspaceReceipt? = null
+    private var keptHistory = false
 
     // Every successful commit touches the singleton, including commits that only move slots.
     override fun observe(query: PlannerQuery): Flow<QueryResult> =
@@ -38,7 +47,7 @@ class RoomPlannerApi(private val db: PlannerDatabase, private val importCalendar
                     is PlannerQuery.Frame -> FrameDetailResult(dao.frame(query.frameId)?.let { f ->
                         FrameView(f.id, f.reason, f.savedAtMillis, f.source, frameEntries(dao.frameEntries(f.id)))
                     })
-                    PlannerQuery.Settings -> PolicyView(settings.restorePolicy, decodeAppearance(settings.appearance), settings.onboardingVersion)
+                    PlannerQuery.Settings -> PolicyView(settings.restorePolicy, decodeAppearance(settings.appearance), settings.onboardingVersion, settings.keepRestoredFrames)
                     is PlannerQuery.Schedule -> ScheduleView(settings.revision, reader.load(query.id)?.summary())
                     is PlannerQuery.Occurrence -> OccurrenceView(settings.revision, db.readOccurrence(query.key, query.zone))
                     is PlannerQuery.Reminders -> {
@@ -168,14 +177,21 @@ class RoomPlannerApi(private val db: PlannerDatabase, private val importCalendar
             ?: return CommitResult.Rejected(CommitFailure.UNKNOWN_PROPOSAL, uiText("This preview expired or was already used. Preview again.", "预览已失效或已使用，请重新预览。"))
                 .also(AppDiagnostics::recordCommit)
         return try {
-            db.withTransaction {
-                val revision = dao.settings()?.revision ?: 0L
-                if (revision != proposal.baseRevision) {
-                    CommitResult.Rejected(CommitFailure.STALE_PREVIEW, uiText("The workspace has changed. Preview again.", "工作台已有变更，请重新预览。"))
-                } else {
-                    proposal.applyTo(dao, courses, graphs, agenda, countdowns, imageExists)
-                    CommitResult.Applied(proposal.settings.revision, proposalId, proposal.effects, proposal.refs)
+            writeGate.withLock {
+                var captured: WorkspaceReceipt? = null
+                val result = db.withTransaction {
+                    if ((dao.settings()?.revision ?: 0L) != proposal.baseRevision)
+                        return@withTransaction CommitResult.Rejected(CommitFailure.STALE_PREVIEW, uiText("The workspace has changed. Preview again.", "工作台已有变更，请重新预览。"))
+                    fun apply() = proposal.applyTo(dao, courses, graphs, agenda, countdowns, imageExists)
+                    if (proposal.reversible) {
+                        val now = elapsed()
+                        val deadline = now + receiptTimeoutMillis().coerceIn(0L, Long.MAX_VALUE - now)
+                        captured = WorkspaceReceipt.capture(db, proposalId, deadline, proposal.effects.single(), ::apply)
+                    } else apply()
+                    CommitResult.Applied(proposal.settings.revision, proposalId, proposal.effects, proposal.refs, captured?.deadline)
                 }
+                if (result is CommitResult.Applied && proposal.effects.isNotEmpty()) { activeReceipt = captured; keptHistory = false }
+                result
             }
         } catch (e: CancellationException) {
             throw e
@@ -191,6 +207,35 @@ class RoomPlannerApi(private val db: PlannerDatabase, private val importCalendar
                 }
             }
         }
+    }
+
+    override suspend fun applyWorkspaceReceipt(requestId: String, action: WorkspaceReceiptAction): CommitResult {
+        var refresh = false
+        val result = try {
+            writeGate.withLock {
+                val token = activeReceipt
+                if (token == null || token.id != requestId || elapsed() >= token.deadline) {
+                    if (token != null && elapsed() >= token.deadline) activeReceipt = null
+                    return@withLock CommitResult.Rejected(CommitFailure.UNKNOWN_PROPOSAL, uiText("This action has expired or was already used.", "操作已超时或已使用。"))
+                }
+                val keep = action == WorkspaceReceiptAction.KEEP_HISTORY
+                val applied = db.withTransaction {
+                    val settings = requireNotNull(dao.settings())
+                    val revision = settings.revision + 1
+                    val overlap = token.reverse(db, keep, keptHistory, revision)
+                    dao.saveSettings(settings.copy(revision = revision))
+                    CommitResult.Applied(revision, UUID.randomUUID().toString(), overlappingSchedule = overlap)
+                }
+                if (keep) keptHistory = true else { refresh = token.restoresSchedule; activeReceipt = null }
+                applied
+            }
+        } catch (e: InvalidCommand) {
+            CommitResult.Rejected(CommitFailure.STALE_PREVIEW, requireNotNull(e.message))
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { CommitResult.Rejected(CommitFailure.STORAGE, uiText("Could not save the undo. No changes were applied.", "未能保存撤回，本次更改没有应用。")) }
+        AppDiagnostics.recordCommit(result)
+        if (refresh) try { afterCommit() } catch (e: Exception) { android.util.Log.w("StackLife", "Undo saved; reminder reconciliation failed", e) }
+        return result
     }
 }
 
@@ -226,6 +271,7 @@ internal class Proposal(
     val refs: Map<String, String>,
     val effects: List<WorkspaceEffect>,
     private val deletedFrames: Set<String>,
+    val reversible: Boolean,
     val agendaChanged: Boolean,
     val backgroundsChanged: Boolean,
 ) {

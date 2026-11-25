@@ -23,6 +23,9 @@ internal interface ScheduleDao {
     @Query("SELECT EXISTS(SELECT 1 FROM agenda_completions WHERE occurrenceKey=:key)") fun completed(key: String): Boolean
     @Query("SELECT * FROM reminder_settings WHERE subject=:subject") fun setting(subject: String): ReminderSettingRow?
     @Query("SELECT * FROM reminder_rules WHERE subject=:subject ORDER BY rowid") fun rules(subject: String): List<ReminderRuleRow>
+    @Query("SELECT * FROM reminder_settings WHERE rootId=:id ORDER BY subject") fun scheduleSettings(id: String): List<ReminderSettingRow>
+    @Query("SELECT r.* FROM reminder_rules r JOIN reminder_settings s ON s.subject=r.subject WHERE s.rootId=:id ORDER BY r.subject,r.rowid")
+    fun scheduleRules(id: String): List<ReminderRuleRow>
     @Upsert fun write(root: ScheduleRow)
     @Upsert fun writeSegments(rows: List<SegmentRow>)
     @Upsert fun write(exception: ExceptionRow)

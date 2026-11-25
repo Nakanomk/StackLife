@@ -64,6 +64,7 @@ class DaySlotTest {
     }
 
     @Test fun pushSwapAndRestoreKeepActualSlotAndTheSnapshotAtThatMoment() = runBlocking {
+        store.apply(KeepRestoredFrames(true))
         store.apply(TaskAdd(TaskInput("A", ref = "a")), exact("@a", at(15, 45), 30), FramePush("开会", listOf("@a")),
             TaskAdd(TaskInput("X", ref = "x")), exact("@x", at(17, 0), 30), SetRestorePolicy(RestorePolicy.SWAP))
         val snapshot = store.state().frames.single()

@@ -10,6 +10,8 @@ interface PlannerApi {
     fun observe(query: PlannerQuery): Flow<QueryResult>
     suspend fun preview(commands: List<PlannerCommand>): PreviewResult
     suspend fun commit(proposalId: String): CommitResult
+    /** Local user action only: a live, one-use receipt; never offered as a model tool. */
+    suspend fun applyWorkspaceReceipt(requestId: String, action: WorkspaceReceiptAction): CommitResult
     fun discard(proposalId: String)
     /** Register local user-reviewed input, never raw web/file contents or a model-supplied draft. */
     fun stageCourseImport(term: TermSpec, meetings: List<CourseMeeting>, source: String = SchoolImports.default.id): String
@@ -133,6 +135,7 @@ sealed interface PlannerCommand {
     data class FrameRestore(val frameId: String, val mode: RestoreMode, val taskIds: List<String> = emptyList()) : PlannerCommand
     data class DeleteFrameHistory(val frameIds: List<String>) : PlannerCommand
     data class SetRestorePolicy(val policy: RestorePolicy) : PlannerCommand
+    data class KeepRestoredFrames(val keep: Boolean) : PlannerCommand
     /** A non-null local day requests the practice plan on first completion only. */
     data class CompleteOnboarding(val visible: Set<Destination>? = null, val baseline: Appearance? = null,
         val starterDay: LocalDate? = null) : PlannerCommand
@@ -167,6 +170,7 @@ sealed interface PreviewResult {
 }
 
 enum class CommitFailure { STALE_PREVIEW, UNKNOWN_PROPOSAL, STORAGE }
+enum class WorkspaceReceiptAction { KEEP_HISTORY, UNDO }
 
 /** In command order, with resolved IDs only. Moved tasks retain their order in the source. */
 sealed interface WorkspaceEffect {
@@ -179,6 +183,7 @@ sealed interface WorkspaceEffect {
 
 sealed interface CommitResult {
     data class Applied(val revision: Long, val requestId: String, val effects: List<WorkspaceEffect> = emptyList(),
-        val refs: Map<String, String> = emptyMap()) : CommitResult
+        val refs: Map<String, String> = emptyMap(), val expiresAtElapsed: Long? = null,
+        val overlappingSchedule: Boolean = false) : CommitResult
     data class Rejected(val code: CommitFailure, val message: String) : CommitResult
 }

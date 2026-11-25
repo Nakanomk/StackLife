@@ -58,6 +58,7 @@ data class GoalGenerationSnapshot(val frame: Boolean, val order: List<GraphNode>
 @Serializable sealed interface PreferenceSnapshot : ChangeSnapshot
 @Serializable @SerialName("appearance") data class AppearanceSnapshot(@Serializable(with = StoredAppearance::class) val value: Appearance) : PreferenceSnapshot
 @Serializable @SerialName("restorePolicy") data class RestorePolicySnapshot(val value: RestorePolicy) : PreferenceSnapshot
+@Serializable @SerialName("keepRestoredFrames") data class KeepRestoredFramesSnapshot(val keep: Boolean) : PreferenceSnapshot
 @Serializable @SerialName("routineTime") data class RoutineTimeSnapshot(val kind: RoutineKind, val minute: Int?) : PreferenceSnapshot
 @Serializable @SerialName("courseCompletion") data class CourseCompletionSnapshot(val occurrence: CourseOccurrenceId,
     val completed: Boolean) : ChangeSnapshot

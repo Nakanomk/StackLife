@@ -6,4 +6,5 @@ data class FrameSummary(val id: String, val reason: String, val savedAtMillis: L
     val originalCount: Int, val remaining: Int)
 data class FrameIndex(val frames: List<FrameSummary>) : QueryResult
 data class FrameDetailResult(val frame: FrameView?) : QueryResult
-data class PolicyView(val policy: RestorePolicy, val appearance: Appearance = Appearance(), val onboardingVersion: Int = 0) : QueryResult
+data class PolicyView(val policy: RestorePolicy, val appearance: Appearance = Appearance(), val onboardingVersion: Int = 0,
+    val keepRestoredFrames: Boolean = false) : QueryResult

@@ -24,6 +24,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     private val changes = ArrayList<PlannerChange>()
     private var effects: MutableList<WorkspaceEffect>? = null
     private var policy = base.restorePolicy
+    private var keepRestoredFrames = base.keepRestoredFrames
     private var onboardingVersion = base.onboardingVersion
     private val originalAppearance by lazy(LazyThreadSafetyMode.NONE) { decodeAppearance(base.appearance) }
     private var appearance: Appearance? = null
@@ -38,7 +39,9 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     fun plan(commands: List<PlannerCommand>): Proposal {
         if (commands.isEmpty()) invalid(uiText("Select at least one change.", "请至少选择一项更改。"))
         applyCommands(commands)
-        return finish()
+        val single = commands.singleOrNull()
+        return finish(single is PlannerCommand.TaskRemove || single is PlannerCommand.DeleteFrameHistory ||
+            single is PlannerCommand.FramePush || single is PlannerCommand.FrameRestore)
     }
 
     private fun applyCommands(commands: List<PlannerCommand>) {
@@ -113,6 +116,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
                 onboardingVersion = maxOf(onboardingVersion, 1)
             }
             is PlannerCommand.SetRestorePolicy -> policy = cmd.policy
+            is PlannerCommand.KeepRestoredFrames -> keepRestoredFrames = cmd.keep
             is PlannerCommand.EditAppearance -> {
                 val expected = cmd.expected
                 if (expected != null && (if (cmd.patch is AppearanceFields) !cmd.patch.matchesBaseline(expected, originalAppearance)
@@ -497,10 +501,14 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         }
         val ordered = Collections.unmodifiableList(restoring)
         restores.getOrPut(frameId) { ArrayList() }.add(FrameRestoreAction(cmd.mode, policy, ordered, saved?.frameId))
-        record(WorkspaceEffect.Restored(frameId, ordered, cmd.mode, effective, saved, sourceDeleted = false))
+        val emptied = !keepRestoredFrames && source.none { id ->
+            edited[id]?.let { it.owner == Owner.FRAME && it.frameId == frameId } ?: true
+        }
+        if (emptied) deleteHistory(frameId)
+        record(WorkspaceEffect.Restored(frameId, ordered, cmd.mode, effective, saved, sourceDeleted = emptied))
     }
 
-    private fun finish(): Proposal {
+    private fun finish(reversible: Boolean): Proposal {
         val positions = ArrayList<PositionUpdate>()
         order?.forEachIndexed { position, id ->
             val row = edited[id]
@@ -533,6 +541,8 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         snapshotFrames()
         if (base.restorePolicy != policy)
             changes.add(PlannerChange("restorePolicy", RestorePolicySnapshot(base.restorePolicy), RestorePolicySnapshot(policy)))
+        if (base.keepRestoredFrames != keepRestoredFrames)
+            changes.add(PlannerChange("keepRestoredFrames", KeepRestoredFramesSnapshot(base.keepRestoredFrames), KeepRestoredFramesSnapshot(keepRestoredFrames)))
         val settingsJson = appearance?.let { next ->
             for (id in next.backgroundIds() - originalAppearance.backgroundIds()) if (!imageExists(id))
                 invalid(uiText("The selected background is no longer available.", "所选背景已不可用。"))
@@ -550,10 +560,11 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             val old = originals.getValue(row.id)
             (row.owner == Owner.DONE) != (old.owner == Owner.DONE) && agenda.current(row.id) != null
         }
-        return Proposal(base.revision, base.copy(revision = base.revision + 1, restorePolicy = policy, appearance = settingsJson, onboardingVersion = onboardingVersion),
+        return Proposal(base.revision, base.copy(revision = base.revision + 1, restorePolicy = policy, appearance = settingsJson,
+            onboardingVersion = onboardingVersion, keepRestoredFrames = keepRestoredFrames),
             Collections.unmodifiableList(changes), frames, amendedFrames.orEmpty(), inserts, updates, positions, items,
             agendaWrites, courseWrites, graphWrites, countdownWrites, refs, effects?.let(Collections::unmodifiableList).orEmpty(),
-            deletedFrames.orEmpty(), agendaChanged,
+            deletedFrames.orEmpty(), reversible, agendaChanged,
             countdownWrites?.imagesChanged == true || appearance?.let { it.backgroundIds() != originalAppearance.backgroundIds() } == true)
     }
 
@@ -581,7 +592,9 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             val created = newFrames[id]
             val original = if (created != null) null else dao.frame(id)
             val oldItems = if (original == null) emptyList() else dao.frameEntries(id).map { it.item.entry(it.current != null) }
-            val before = original?.let { FrameSnapshot(it.reason, it.savedAtMillis, it.source, oldItems) }
+            // For a deletion the retained before-side is the only frame shown in the review.
+            val before = original?.let { FrameSnapshot(it.reason, it.savedAtMillis, it.source, oldItems,
+                if (id in deletedFrames.orEmpty()) restores[id].orEmpty() else emptyList()) }
             val row = created ?: amended[id] ?: original
             val after = if (row == null || id in deletedFrames.orEmpty()) null else {
                 val finalItems = if (created != null) newItems[id].orEmpty().map { it.entry(edited[it.taskId]?.frameId == id) }

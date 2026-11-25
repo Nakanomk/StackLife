@@ -141,6 +141,7 @@ class PlannerMigrationTest {
                     val api = RoomPlannerApi(db)
                     val settings = api.observe(PlannerQuery.Settings).first() as PolicyView
                     assertEquals(1, settings.onboardingVersion)
+                    assertFalse(settings.keepRestoredFrames)
                     assertEquals(if (unfinished) RestorePolicy.APPEND else RestorePolicy.PREPEND, settings.policy)
                     val offer = PlannerCommand.CompleteOnboarding(starterDay = java.time.LocalDate.of(2028, 2, 28))
                     val replay = api.preview(listOf(offer)) as PreviewResult.Ready

@@ -56,6 +56,7 @@ class WorkspaceTest {
     @get:Rule val store = WorkspaceFixture()
 
     @Test fun interruptionPreservesIdentityOrderAndHistoricalTextAcrossReopen() = runBlocking {
+        store.apply(KeepRestoredFrames(true))
         store.apply(TaskAdd(TaskInput("A")), TaskAdd(TaskInput("B", "原备注", 45)), TaskAdd(TaskInput("C", ref = "c")), TaskFinish("@c"))
         val (a, b) = store.state().queue
         store.apply(FramePush("去开会", listOf(a.id, b.id)), TaskAdd(TaskInput("X")))
@@ -143,15 +144,15 @@ class WorkspaceTest {
         assertEquals(frame.items.map { it.taskId }, moved.taskIds)
         assertEquals(policy, moved.policy)
         assertEquals(restored.revision, applied.revision)
-        assertEquals(restored.frames.none { it.id == frame.id }, moved.sourceDeleted)
-        assertEquals(0, restored.frames.single { it.id == frame.id }.remaining)
+        assertTrue(moved.sourceDeleted)
+        assertFalse(restored.frames.any { it.id == frame.id })
         if (policy == RestorePolicy.SWAP) {
             val saved = restored.frames.single { it.source == FrameSource.SWAP }
             assertEquals(WorkspaceEffect.Pushed(saved.id, before.queue.map { it.id }), moved.swapped)
             assertEquals("切换栈帧前自动保存", saved.reason)
             assertEquals(before.queue.single().id, saved.items.single().taskId)
             assertTrue(saved.items.single().restorable)
-        } else assertEquals(listOf(frame.id), restored.frames.map { it.id })
+        } else assertTrue(restored.frames.isEmpty())
         // A fresh tap on an already-empty frame must not save the current queue, even in SWAP.
         val empty = store.api.preview(listOf(command))
         if (empty is PreviewResult.Ready) store.api.commit(empty.proposalId)
@@ -159,6 +160,7 @@ class WorkspaceTest {
         assertEquals(restored.queue, store.state().queue)
         store.reopen()
         assertEquals(policy, store.state().restorePolicy)
+        assertEquals(restored, store.state())
     }
 
     @Test fun partialSwapUsesSourceOrderAndDoesNotResurrectRemovedItems() = runBlocking {

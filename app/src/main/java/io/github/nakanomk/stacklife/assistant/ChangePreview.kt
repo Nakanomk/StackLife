@@ -133,6 +133,10 @@ internal fun ChangePreview(change: PlannerChange, modifier: Modifier = Modifier)
                     }
                 }
                 is RestorePolicySnapshot -> { PreviewTitle(uiText("Restore policy", "恢复策略")); Text(policyName(snapshot.value)) }
+                is KeepRestoredFramesSnapshot -> {
+                    PreviewTitle(uiText("Keep restored frames", "恢复后保留栈帧"))
+                    Text(if (snapshot.keep) uiText("On", "开启") else uiText("Off", "关闭"))
+                }
                 is RoutineTimeSnapshot -> { PreviewTitle(snapshot.kind.label()); Text(snapshot.minute?.let {
                     LocalTime.ofSecondOfDay(it * 60L).toString() } ?: uiText("Off", "关闭")) }
                 is CourseCompletionSnapshot -> {

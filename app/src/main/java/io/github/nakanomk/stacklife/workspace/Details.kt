@@ -155,7 +155,14 @@ internal fun SettingsScreen(settings: PolicyView, actions: WorkspaceViewModel, o
                             }))
                         }
                     }
-                } } }
+                }
+                    HorizontalDivider()
+                    io.github.nakanomk.stacklife.appearance.SwitchRow(io.github.nakanomk.stacklife.i18n.uiText("Keep restored frames", "恢复后保留栈帧"),
+                        settings.keepRestoredFrames, enabled = !action.busy,
+                        help = io.github.nakanomk.stacklife.i18n.uiText("Keep the historical snapshot after the last restorable task leaves.", "取出最后一个可恢复任务后，保留原帧快照。")) {
+                        action.send(PlannerCommand.KeepRestoredFrames(!settings.keepRestoredFrames))
+                    }
+                } }
             }
     }
 }

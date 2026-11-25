@@ -28,6 +28,7 @@ class PlannerToolTest {
         override fun observe(query: PlannerQuery): Flow<QueryResult> = flowOf(queries.getValue(query))
         override suspend fun preview(commands: List<PlannerCommand>): PreviewResult = error("tool preview")
         override suspend fun commit(proposalId: String): CommitResult = error("tool commit")
+        override suspend fun applyWorkspaceReceipt(requestId: String, action: WorkspaceReceiptAction): CommitResult = error("tool has no receipt action")
         override fun discard(proposalId: String): Unit = error("tool discard")
         override fun stageCourseImport(term: TermSpec, meetings: List<CourseMeeting>, source: String): String = error("tool import")
         override fun discardCourseImport(draftId: String): Unit = error("tool import discard")
