@@ -94,7 +94,10 @@ class WorkspaceTest {
         val frameSnapshot = preview.changes.single { it.entityId == id }.after as FrameSnapshot
         assertEquals("", frameSnapshot.reason); assertEquals(FrameSource.PUSH, frameSnapshot.source)
         assertEquals(listOf(a.id, c.id), frameSnapshot.items.filter { it.restorable }.map { it.taskId })
-        assertTrue(store.api.commit(preview.proposalId) is CommitResult.Applied)
+        val applied = store.api.commit(preview.proposalId) as CommitResult.Applied
+        assertEquals(preview.proposalId, applied.requestId)
+        assertEquals(listOf(WorkspaceEffect.Pushed(id, listOf(a.id, c.id))), applied.effects)
+        assertEquals(id, applied.refs.getValue("held"))
         assertTrue(store.api.commit(preview.proposalId) is CommitResult.Rejected)
         assertTrue(store.api.preview(listOf(push)) is PreviewResult.Rejected)
         val first = store.state().frames.single()
@@ -131,13 +134,20 @@ class WorkspaceTest {
         val preview = store.proposal(command)
         assertEquals(before, store.state())
         assertEquals(before.revision, preview.baseRevision)
-        assertTrue(store.api.commit(preview.proposalId) is CommitResult.Applied)
+        val applied = store.api.commit(preview.proposalId) as CommitResult.Applied
         assertTrue(store.api.commit(preview.proposalId) is CommitResult.Rejected)
         val restored = store.state()
         assertEquals(order, restored.queue.map { it.title })
+        val moved = applied.effects.single() as WorkspaceEffect.Restored
+        assertEquals(frame.id, moved.frameId)
+        assertEquals(frame.items.map { it.taskId }, moved.taskIds)
+        assertEquals(policy, moved.policy)
+        assertEquals(restored.revision, applied.revision)
+        assertEquals(restored.frames.none { it.id == frame.id }, moved.sourceDeleted)
         assertEquals(0, restored.frames.single { it.id == frame.id }.remaining)
         if (policy == RestorePolicy.SWAP) {
             val saved = restored.frames.single { it.source == FrameSource.SWAP }
+            assertEquals(WorkspaceEffect.Pushed(saved.id, before.queue.map { it.id }), moved.swapped)
             assertEquals("切换栈帧前自动保存", saved.reason)
             assertEquals(before.queue.single().id, saved.items.single().taskId)
             assertTrue(saved.items.single().restorable)
@@ -155,7 +165,11 @@ class WorkspaceTest {
         store.apply(SetRestorePolicy(RestorePolicy.SWAP), FrameCreate("计划", listOf(TaskInput("A"), TaskInput("B"), TaskInput("C"))), TaskAdd(TaskInput("X")))
         val frame = store.state().frames.single()
         val (a, b, c) = frame.items.map { it.taskId }
-        store.apply(FrameRestore(frame.id, RestoreMode.SELECTED, listOf(c, a)))
+        val partial = store.proposal(FrameRestore(frame.id, RestoreMode.SELECTED, listOf(c, a)))
+        val movement = (store.api.commit(partial.proposalId) as CommitResult.Applied).effects.single() as WorkspaceEffect.Restored
+        assertEquals(RestorePolicy.PREPEND, movement.policy)
+        assertNull(movement.swapped)
+        assertEquals(listOf(a, c), movement.taskIds)
         assertEquals(listOf("A", "C", "X"), store.state().queue.map { it.title })
         assertEquals(listOf(b), store.state().frames.single().items.filter { it.restorable }.map { it.taskId })
         store.apply(TaskFinish(c), TaskRemove(a), FrameRestore(frame.id, RestoreMode.ALL))
@@ -199,6 +213,26 @@ class WorkspaceTest {
         assertEquals(a.id, history.items.first().taskId)
         assertEquals("原题", history.items.first().title)
         assertEquals(listOf(false, true), history.items.map { it.restorable })
+    }
+
+    @Test fun removedEntitiesComeFromTheCommittedBatchInCommandOrder() = runBlocking {
+        store.apply(TaskAdd(TaskInput("保留")), TaskAdd(TaskInput("移出")),
+            FrameCreate("旧一", listOf(TaskInput("结束", ref = "a"))), TaskFinish("@a"),
+            FrameCreate("旧二", listOf(TaskInput("结束", ref = "b"))), TaskFinish("@b"))
+        val before = store.state()
+        val removing = before.queue.last().id
+        val history = before.frames.map { it.id }.reversed().toMutableList()
+        val expected = history.toList()
+        val ready = store.proposal(TaskRemove(removing), DeleteFrameHistory(history))
+        history.clear()
+        val receipt = store.api.commit(ready.proposalId) as CommitResult.Applied
+        assertEquals(listOf(WorkspaceEffect.Removed(removing), WorkspaceEffect.DeletedHistory(expected)), receipt.effects)
+        assertTrue(store.api.commit(ready.proposalId) is CommitResult.Rejected)
+        store.reopen()
+        val after = store.state()
+        assertEquals(before.queue.take(1), after.queue)
+        assertTrue(after.frames.isEmpty())
+        assertEquals(after.revision, receipt.revision)
     }
 
     @Test fun proposalsAreLocalConsumableAndRejectOtherRevision() = runBlocking {

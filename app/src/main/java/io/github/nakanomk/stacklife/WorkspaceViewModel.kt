@@ -74,11 +74,11 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
             is PreviewResult.Ready -> if (preview.baseRevision != expectedRevision) {
                 planner.discard(preview.proposalId)
                 uiText("Your schedule changed. Review the new order before generating it again.", "日程已变更，请核对最新顺序后再生成。")
-            } else commit(preview.proposalId).also { error -> if (error == null) refs = preview.refs }
+            } else commit(preview.proposalId)
         }
     }
 
-    fun reviewedRef(requestId: String, ref: String): String? = latest?.takeIf { it.id == requestId }?.refs?.get(ref)
+    fun reviewedRef(requestId: String, ref: String): String? = latest?.takeIf { it.id == requestId }?.receipt?.refs?.get(ref)
 
     /** A hover or editor check never leaves a committable proposal behind. */
     suspend fun checkSchedule(command: PlannerCommand): String? = try {
@@ -94,7 +94,7 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
     val notices = errors.receiveAsFlow()
     private class Ticket(val id: String) {
         lateinit var error: Deferred<String?>
-        var refs: Map<String, String> = emptyMap()
+        var receipt: CommitResult.Applied? = null
     }
     private var latest: Ticket? = null
 
@@ -107,21 +107,21 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
     fun pushQueue(taskIds: List<String>): String? {
         // A previous success must not be mistaken for the outcome of this attempt.
         pushed.value = null
-        return submit(PlannerCommand.FramePush(taskIds = taskIds, ref = "pushed")) { pushed.value = it.refs.getValue("pushed") }
+        return submit(PlannerCommand.FramePush(taskIds = taskIds)) { pushed.value = (it.effects.single() as WorkspaceEffect.Pushed).frameId }
     }
 
     override fun start(command: PlannerCommand): String? = submit(command)
 
-    private fun submit(command: PlannerCommand, applied: ((PreviewResult.Ready) -> Unit)? = null): String? = startWrite(notifyOnFailure = true) {
+    private fun submit(command: PlannerCommand, applied: ((CommitResult.Applied) -> Unit)? = null): String? = startWrite(notifyOnFailure = true) {
         when (val preview = planner.preview(listOf(command))) {
             is PreviewResult.Rejected -> preview.message
-            is PreviewResult.Ready -> commit(preview.proposalId).also { error -> if (error == null) applied?.invoke(preview) }
+            is PreviewResult.Ready -> commit(preview.proposalId, applied)
         }
     }
 
-    private suspend fun commit(id: String): String? = try {
+    private suspend fun Ticket.commit(id: String, applied: ((CommitResult.Applied) -> Unit)? = null): String? = try {
         when (val result = planner.commit(id)) {
-            is CommitResult.Applied -> null
+            is CommitResult.Applied -> { receipt = result; applied?.invoke(result); null }
             is CommitResult.Rejected -> result.message
         }
     } finally {

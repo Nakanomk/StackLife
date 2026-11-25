@@ -22,6 +22,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     private val items = ArrayList<FrameItemRow>()
     private val members = HashMap<String, List<String>>()
     private val changes = ArrayList<PlannerChange>()
+    private var effects: MutableList<WorkspaceEffect>? = null
     private var policy = base.restorePolicy
     private var onboardingVersion = base.onboardingVersion
     private val originalAppearance by lazy(LazyThreadSafetyMode.NONE) { decodeAppearance(base.appearance) }
@@ -91,13 +92,14 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             is PlannerCommand.FramePush -> {
                 val ids = taskIds(cmd.taskIds)
                 if (ids.isEmpty()) invalid(uiText("Select the tasks to save in a frame.", "请选择需要压栈的任务。"))
-                saveQueue(newFrame(cmd.reason, FrameSource.PUSH, cmd.ref), ids)
+                val frame = newFrame(cmd.reason, FrameSource.PUSH, cmd.ref)
+                record(WorkspaceEffect.Pushed(frame.id, saveQueue(frame, ids)))
             }
             is PlannerCommand.FrameAddReason -> addReason(cmd)
             is PlannerCommand.FrameRestore -> restore(cmd)
             is PlannerCommand.DeleteFrameHistory -> {
                 if (cmd.frameIds.isEmpty()) invalid(uiText("Select a historical frame.", "请选择要删除的历史栈帧。"))
-                cmd.frameIds.forEach(::deleteHistory)
+                record(WorkspaceEffect.DeletedHistory(Collections.unmodifiableList(cmd.frameIds.map(::deleteHistory))))
             }
             is PlannerCommand.CompleteOnboarding -> {
                 cmd.visible?.let { chosen ->
@@ -142,6 +144,10 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
             is PlannerCommand.GraphFrame -> generateFrame(cmd)
             is PlannerCommand.GraphQueue -> generateQueue(cmd)
         }
+    }
+
+    private fun record(effect: WorkspaceEffect) {
+        (effects ?: ArrayList<WorkspaceEffect>().also { effects = it }).add(effect)
     }
 
     private fun invalid(message: String): Nothing = throw InvalidCommand(message)
@@ -388,7 +394,10 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     private fun retire(raw: String, owner: Owner) {
         val row = activeTask(raw)
         val position = if (row.owner == Owner.QUEUE) queue().indexOf(row.id).also { queue().removeAt(it) } else null
-        if (owner == Owner.REMOVED) agenda.clear(row.id)
+        if (owner == Owner.REMOVED) {
+            agenda.clear(row.id)
+            record(WorkspaceEffect.Removed(row.id))
+        }
         edited[row.id] = row.copy(owner = owner, frameId = null, queuePosition = null,
             completedFromFrame = row.frameId.takeIf { owner == Owner.DONE }, completedFromPosition = position.takeIf { owner == Owner.DONE })
     }
@@ -410,7 +419,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         }
     }
 
-    private fun deleteHistory(raw: String) {
+    private fun deleteHistory(raw: String): String {
         val id = resolve(raw, Kind.FRAME)
         val deleted = deletedFrames ?: LinkedHashSet<String>().also { deletedFrames = it }
         val frame = frames.find { it.id == id } ?: dao.frame(id)
@@ -419,6 +428,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         if (ids.any { edited[it]?.let { row -> row.owner == Owner.FRAME && row.frameId == id } ?: true })
             invalid(uiText("Restore or finish the remaining tasks before deleting this history.", "请先恢复或完成帧内剩余任务，再删除这条历史。"))
         deleted.add(id)
+        return id
     }
 
     private fun reorder(raw: List<String>) {
@@ -430,7 +440,7 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
     }
 
     /** null selects the entire current queue (only the automatic SWAP snapshot uses this). */
-    private fun saveQueue(frame: FrameRow, selection: Set<String>?) {
+    private fun saveQueue(frame: FrameRow, selection: Set<String>?): List<String> {
         val queue = queue()
         val expected = selection?.size ?: queue.size
         loadTasks(selection ?: queue)
@@ -450,7 +460,9 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         }
         if (saved.size != expected) invalid(uiText("Some selected tasks are no longer in the queue.", "部分所选任务已不在队列中。"))
         queue.subList(kept, queue.size).clear()
-        members[frame.id] = saved
+        val ordered = Collections.unmodifiableList(saved)
+        members[frame.id] = ordered
+        return ordered
     }
 
     private fun restore(cmd: PlannerCommand.FrameRestore) {
@@ -473,14 +485,19 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         if (restoring.isEmpty()) invalid(uiText("This frame does not exist or has no tasks left to restore.", "此栈帧不存在或已无可恢复的任务。"))
         loadTasks(restoring)
 
-        val saved = if (policy == RestorePolicy.SWAP && cmd.mode == RestoreMode.ALL && queue().isNotEmpty())
-            newFrame(swapReason(), FrameSource.SWAP, null).also { saveQueue(it, null) } else null
+        val effective = if (policy == RestorePolicy.SWAP && cmd.mode == RestoreMode.SELECTED) RestorePolicy.PREPEND else policy
+        val saved = if (effective == RestorePolicy.SWAP && queue().isNotEmpty()) {
+            val frame = newFrame(swapReason(), FrameSource.SWAP, null)
+            WorkspaceEffect.Pushed(frame.id, saveQueue(frame, null))
+        } else null
         if (policy != RestorePolicy.APPEND) queue().addAll(0, restoring)
         for ((index, id) in restoring.withIndex()) {
             val pos = if (policy == RestorePolicy.APPEND) append(id) else index
             edited[id] = task(id).copy(owner = Owner.QUEUE, frameId = null, queuePosition = pos)
         }
-        restores.getOrPut(frameId) { ArrayList() }.add(FrameRestoreAction(cmd.mode, policy, restoring, saved?.id))
+        val ordered = Collections.unmodifiableList(restoring)
+        restores.getOrPut(frameId) { ArrayList() }.add(FrameRestoreAction(cmd.mode, policy, ordered, saved?.frameId))
+        record(WorkspaceEffect.Restored(frameId, ordered, cmd.mode, effective, saved, sourceDeleted = false))
     }
 
     private fun finish(): Proposal {
@@ -535,7 +552,8 @@ internal class BatchDraft(private val dao: PlannerDao, courseDao: CourseDao, pri
         }
         return Proposal(base.revision, base.copy(revision = base.revision + 1, restorePolicy = policy, appearance = settingsJson, onboardingVersion = onboardingVersion),
             Collections.unmodifiableList(changes), frames, amendedFrames.orEmpty(), inserts, updates, positions, items,
-            agendaWrites, courseWrites, graphWrites, countdownWrites, refs, deletedFrames.orEmpty(), agendaChanged,
+            agendaWrites, courseWrites, graphWrites, countdownWrites, refs, effects?.let(Collections::unmodifiableList).orEmpty(),
+            deletedFrames.orEmpty(), agendaChanged,
             countdownWrites?.imagesChanged == true || appearance?.let { it.backgroundIds() != originalAppearance.backgroundIds() } == true)
     }
 

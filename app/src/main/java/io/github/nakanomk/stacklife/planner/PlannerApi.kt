@@ -168,7 +168,17 @@ sealed interface PreviewResult {
 
 enum class CommitFailure { STALE_PREVIEW, UNKNOWN_PROPOSAL, STORAGE }
 
+/** In command order, with resolved IDs only. Moved tasks retain their order in the source. */
+sealed interface WorkspaceEffect {
+    data class Pushed(val frameId: String, val taskIds: List<String>) : WorkspaceEffect
+    data class Restored(val frameId: String, val taskIds: List<String>, val mode: RestoreMode,
+        val policy: RestorePolicy, val swapped: Pushed?, val sourceDeleted: Boolean) : WorkspaceEffect
+    data class Removed(val taskId: String) : WorkspaceEffect
+    data class DeletedHistory(val frameIds: List<String>) : WorkspaceEffect
+}
+
 sealed interface CommitResult {
-    data class Applied(val revision: Long) : CommitResult
+    data class Applied(val revision: Long, val requestId: String, val effects: List<WorkspaceEffect> = emptyList(),
+        val refs: Map<String, String> = emptyMap()) : CommitResult
     data class Rejected(val code: CommitFailure, val message: String) : CommitResult
 }

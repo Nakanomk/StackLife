@@ -10,12 +10,13 @@ class DiagnosticReportTest {
         val journal = DiagnosticJournal()
         val sensitive = "private title; Bearer secret; https://private.invalid/notes?id=23456"
         for (reason in CommitFailure.entries) journal.record(CommitResult.Rejected(reason, sensitive).diagnosticEvent())
-        journal.record(CommitResult.Applied(87654321).diagnosticEvent())
+        journal.record(CommitResult.Applied(87654321, sensitive).diagnosticEvent())
         val rows = journal.snapshot().lines().drop(3).filter(String::isNotEmpty)
         assertEquals(listOf("COMMIT_STALE_PREVIEW", "COMMIT_UNKNOWN_PROPOSAL", "COMMIT_STORAGE_FAILURE", "COMMIT_APPLIED"),
             rows.map { it.substringAfterLast(',') })
         rows.forEach { assertTrue(it.matches(Regex("[0-9]+,[0-9]+,[A-Z_]+"))) }
         assertFalse(journal.snapshot().contains("87654321"))
+        assertFalse(journal.snapshot().contains(sensitive))
     }
 
     @Test fun journalRetainsOnlyTheLatestEventsInSequenceOrder() {

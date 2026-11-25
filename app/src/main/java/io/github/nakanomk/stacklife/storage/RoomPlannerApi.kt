@@ -174,7 +174,7 @@ class RoomPlannerApi(private val db: PlannerDatabase, private val importCalendar
                     CommitResult.Rejected(CommitFailure.STALE_PREVIEW, uiText("The workspace has changed. Preview again.", "工作台已有变更，请重新预览。"))
                 } else {
                     proposal.applyTo(dao, courses, graphs, agenda, countdowns, imageExists)
-                    CommitResult.Applied(proposal.settings.revision)
+                    CommitResult.Applied(proposal.settings.revision, proposalId, proposal.effects, proposal.refs)
                 }
             }
         } catch (e: CancellationException) {
@@ -224,6 +224,7 @@ internal class Proposal(
     private val graphs: List<GraphWrites>,
     private val countdowns: CountdownWrites?,
     val refs: Map<String, String>,
+    val effects: List<WorkspaceEffect>,
     private val deletedFrames: Set<String>,
     val agendaChanged: Boolean,
     val backgroundsChanged: Boolean,
