@@ -41,6 +41,14 @@ StackLife 是为 Android 手机设计的离线日程工具。用队列决定先�
 
 课表默认不画日期和节次辅助线；可在「设置 → 外观 → 材质与动态」打开。初始壁纸是「雾蓝格」。在「设置 → 外观 → 背景图片」可选内置格纹、私图或纯色；全局与单页可分别调节图片的罩色和模糊程度。壁纸不模糊文字，卡片的玻璃效果可单独关闭。
 
+## 源码版：备份与工作台
+
+以下功能在 0.11.2 之后的源码中，未包含在上方的 0.11.2 APK：
+
+- 「设置 → 备份与恢复」可导出全部数据，或单选今天、队列、栈等分类。恢复会先列出每类的增删改；没选的分类保留。**完整备份默认包含已配置的 API Key，ZIP 不加密。** 分享外观请使用外观设置中的专用导出，它只包含外观和引用的壁纸。
+- 移出任务、删除空帧、压栈和恢复后可以撤回。恢复取空的栈帧默认删除；点「保留历史」只取回快照，不把任务移回栈里。
+- 日程助理的「＋」可选择图片或手机文件；发送前会显示当前服务支持的类型。设置中可关闭助理，保留已存对话和连接，清除未发草稿。
+
 ## 从源码构建
 
 安装 JDK 21 和 [Android SDK](docs/guide.md#构建环境)，在仓库根目录运行：
@@ -53,7 +61,7 @@ APK：`app/build/outputs/apk/preview/app-preview.apk`。
 
 ## 发布与校验
 
-维护者推送带注释的版本标签后，打开 [Android prerelease](https://github.com/Nakanomk/StackLife/actions/workflows/release.yml)，点 **Run workflow**，分支选 `main`，填入标签。
+维护者推送带注释的版本标签后，打开 [Android release](https://github.com/Nakanomk/StackLife/actions/workflows/release.yml)，点 **Run workflow**，分支选 `main`，填入标签并选择 `stable`（正式发布）或 `beta`（预发布）。
 
 下载同一版的 APK、`BUILD-INFO.json` 和 `SHA256SUMS`，在下载目录运行：
 

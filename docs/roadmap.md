@@ -495,11 +495,36 @@ Google Play API 37 AVD 上，360dp 宽、字体 200%、TalkBack 17.0 实际聚�
 |`reminders/AgendaReminders`、`ReminderReceiver`|Room 保存规则／回执，设备偏好记已装闹钟；广播和时间变化触发对账；通知输入回查发生键。|通过：合成 Gallery 不装闹钟，不备份 OS 权限或已投递回执；`ReminderDeliveryTest`、`ReminderNavigationTest`。|
 |`onboarding/OnboardingScreen`、`i18n/AppLocales`|仅确认 `CompleteOnboarding` 携带 `starterDay` 才创建练习；语言使用 LocaleManager／旧系统私有偏好。引导借 Now in Android（Apache-2.0）。|通过：恢复已有日程不重新填示例；`StarterPlanTransactionTest`、`LanguageSettingsTest`。|
 
+设置首页现位于 [`settings/SettingsScreen.kt`](../app/src/main/java/io/github/nakanomk/stacklife/settings/SettingsScreen.kt)。主导航和首次引导继续调用同一份作息设置；`workspace/Details.kt` 只负责工作台详情。移动后 `:app:compileDebugKotlin` 通过。
+
 **隔离 Gallery（第 29 项）：** `.gallery` 包装配五个组件示例、五个动效示例及一个材质对照，直接使用生产组件。目录、源码入口和主题面板取自 [AndroidX Material3 Catalog `8414111`](https://github.com/androidx/androidx/tree/841411143e849ef66c3e8d49cc0dd70d62d7a3c0/compose/material3/material3/integration-tests/material3-catalog)，Apache-2.0。`.bench` 与 `.gallery` 只共享合成输入；Gallery 无网络权限、更新器、闹钟或正式库。API 37 模拟器（1080×2340、440 dpi、字号 1×）实测任务返回半程反拖取消仍停在原任务、课格打开对应详情、无连接历史仅有合成用户消息、深色及 320 dp 预览冷启动保留。preview／release 合并清单均无 Gallery 和夹具入口；真机预算仍以 `.bench` 单独验收。
 
 **U1 任务卡试验：** 只在 `.gallery` 和 `.bench` 装配 [BiliPai `c7f835b` 的导航 fork](https://github.com/jay3-yy/BiliPai/tree/c7f835b34d8323358be57be298f86f29fecb53c8/miuix-navigation)（独立 Apache-2.0，33 个 Kotlin 文件）及[固定 Scene 适配](https://github.com/jay3-yy/BiliPai/blob/c7f835b34d8323358be57be298f86f29fecb53c8/app/src/main/java/com/android/purebilibili/navigation3/BiliPaiAndroidXNavDisplay.kt)（GPL-3.0）。任务仍通过已有 `PlannerApi` 读取、编辑。窗口与来源消失时不采用上游的整页淡出或位图；无落点走不透明边缘退出。上游所需的 Miuix squircle 0.9.5-beta02 也只进入这两个包。普通版待任务返回真机预算通过后切换。
 
-**后续单元（待实现、验收后单独交付）：** U1 先验任务卡开返再切换全部导航调用者；U2 真实工作台回执、自动清理与冲突安全的撤回；U3 消费回执的卡片转场；U4 日期同步、待排拾取、滚轮默认、事件图标、时间标记与触感；U5 信息说明、外观默认与取色、标题、状态栏和卡片材质；U6 更新专页／渠道；U7 助理开关与文件；U8 严格区分外观包和可分类恢复的完整备份；U9 今日／周表桌面组件；U10 按改动调用者及固定 `.bench` 场景放行。不预占新 schema。启动器实时玻璃后端、WakeUp 版权链和真机预算分别验收。
+PLR110（Android 16、1272×2800、560 dpi、120 Hz、字号和动效 1×、热状态 0）用 `.bench` 的 30 任务／5 课次，按导航栏实际材质分组，预热后各测五轮。取系统 FrameTimeline；该设备上的 AndroidX runner 在准备阶段无法解析 `.bench.fixture`。门槛为 P95 ≤ 0 ms 且应用错期或丢帧 < 1%。
+
+|任务卡返回|玻璃 P95 / 错期或丢帧|实色 P95 / 错期或丢帧|
+|---|---:|---:|
+|第一版隔离候选|+4.57 ms · 14/331|−3.38 ms · 0/340|
+|保留活动父页、按真实容器裁去被遮挡区域|+6.33 ms · 12/332|−3.29 ms · 0/340|
+
+两版玻璃均未达标。没有切换普通版导航；实色通过不能替代玻璃结果。隔离 Gallery 验过真实来源删除后退出、反拖取消和嵌套编辑返回。堆栈回执已可用，跨页压栈／恢复转场仍等待 U1。
+
+**已验证的独立单元：** 工作台提交回执携带真实移动 ID、策略和新帧；API 37 工作台、图及助理 21 项用例通过。第 13 项将手势预览与业务选择分开，旧学期的迟到回执不抢回当前选择；日周、通知、手动编辑 12 项设备用例通过。第 5、6、16 项使用普通版首次前台检查、独立更新专页及稳定／测试渠道；API 37 状态与关于返回 8 项通过。设置列表中从「帮助与关于」下一行进入更新、返回后仍在该行；未发布任何版本。
+
+第 12 项：设置可关闭日程助理。关闭时卸下输入栏并清除未发草稿，取消未确认请求；已确认事务仍按实际回执记录。重开保留连接和历史，不恢复旧提案。API 37 模拟器上，真实本机 TLS 取消、未确认提案、已确认保存、附件晚到、历史副本、手动课表导入及设置冷启等 12 项通过；关闭后实屏只保留底部导航。
+
+取空帧、移出队列、压栈和删除空历史均消费实际事务回执。撤回复核写集，冲突不覆盖后来操作；「保留历史」只复原被自动清理的快照。今天的待排浮窗让原列表补位，释放才提交排程；新偏好默认滚轮，旧的显式平面选择保留。任务图标写入任务、历史快照和图模板。当前时间线的波形、向下箭头和动态拖尾可分别调节。
+
+**归档（Room 17）：** [外观包](../app/src/main/assets/licenses/AppearanceTransfer-Notices.txt)和[分类备份](../app/src/main/assets/licenses/BackupRelations-Notices.txt)使用不同的严格类型。API 37 上，分类关系、目标 Keystore、文件发布、确认界面、迁移和直接调用者共 35 项通过；另验了两个真实会话的迟到回复不能写回、已确认提交先收回执再重新预览。用 Android Downloads 分别往返两种文件：完整合成备份恢复后显示本机修订 24；外观包只列「减少动效：开 → 关」，确认后回到设置。对话保存有序图片和文档，续聊不自动重发文件。协议用例走本机 TLS，未用真实外部账号。
+
+**桌面组件（第 22 项部分交付）：** 今日概览和周课表用系统 `RemoteViews` 读取 `PlannerApi`。API 37 Launcher3 上，安排队列中的任务后，今日组件从空态更新为 09:00–09:30，点击定位到该时段；周组件切换第 1／2 周后显示各自课次。将周组件从四列拉到五列，实际宽度从 828 变为 1034 px，列表切为七日网格。六项设备用例覆盖多实例、不同时区的日期边界及同一次更新在不同尺寸下的显示与点击。[Android 组件布局](https://developer.android.com/develop/ui/views/appwidgets#CreatingLayout)不支持任意自定义 View；三星 [MIT 示例](https://github.com/thatjoshguy67/blur-widget-demo/tree/c93b1a847e1cf4406afc2804ac2abda1a20ccc55)依赖指定启动器。两种组件使用实色；PLR110 实时桌面折射、WakeUp 旧实现的版权链仍无可验依据。
+
+**触感（第 28 项）：** PLR110 报原细纹理刻度 `ignored_unsupported`。改用[系统触感](../app/src/main/assets/licenses/GestureHaptics-Notices.txt)后，开着系统反馈时，轻档导航／撞边的 TICK、标准档两种场景的 CONFIRM 均得到 `finished`；再次点当前页无新增记录。五项输入、边界和开关用例通过，轻重的主观差别请在手机上比较。
+
+**仅在隔离分支：** `pilot/source-settings-lzv5t409`（`7c401f04eb`）保留第 7、11、17–19、23–27 项。包括标题旁的动态说明、蓝格默认模糊 15%、从私图取色、课程提醒标题右移与图标淡出、渐进顶栏、关于／服务商磨砂、三个独立任务胶囊。API 37 共 23 个定向界面用例通过；API 26 验了实色顶栏和 200% 字号 RTL 标题，8 个偏好持久化用例通过。此分支以 `.settingslab` 安装，不包含后续普通版的完整备份实现。
+
+**尚未放行：** U1 全导航切换、U3 压栈／恢复转场、U5 并入普通版、U9 启动器折射及 U10 全场景固定预算。普通版保留原导航，版本仍为 0.11.2（38），未建新标签。
 
 ### 历史里程碑验收用例（M1–M6）
 
