@@ -43,8 +43,12 @@ import io.github.nakanomk.stacklife.storage.RoomPlannerApi
 import java.io.File
 import java.nio.file.Files
 import kotlin.math.abs
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -196,6 +200,104 @@ class AppearanceEditorInteractionTest {
                 ui.waitUntil(5_000) { ui.onAllNodes(header).fetchSemanticsNodes().isEmpty() }
             }
         } finally { folder.deleteRecursively() }
+    }
+
+    @SdkSuppress(minSdkVersion = 29)
+    @Test fun privatePhotoSeedUsesTheSelectedPageAndCommitsOnlyOnSave() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val folder = Files.createTempDirectory(context.cacheDir.toPath(), "seed-photos-").toFile()
+        val photos = BackgroundStore(object : ContextWrapper(context) { override fun getNoBackupFilesDir() = folder }) { emptySet() }
+        val api = RoomPlannerApi(fixture.db, imageExists = photos::exists)
+        fun importPhoto(bytes: ByteArray) = withSelectedPhoto(context, bytes, "image/png") { uri -> runBlocking { photos.importImage(uri) } }
+        fun text(id: Int) = ui.activity.getString(id)
+        val colors = text(R.string.ui_colors)
+        val pick = row(text(R.string.wallpaper_seed_pick))
+        val target = text(R.string.wallpaper_seed_source)
+        val seed = hasTestTag("seed-color")
+        try {
+            val red = importPhoto(redPixels(Bitmap.CompressFormat.PNG))
+            val missing = importPhoto(redPixels(Bitmap.CompressFormat.PNG))
+            val bitmap = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+            val gray = try {
+                bitmap.eraseColor(android.graphics.Color.GRAY)
+                java.io.ByteArrayOutputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)); importPhoto(it.toByteArray()) }
+            } finally { bitmap.recycle() }
+            val expected = runBlocking { photos.bitmap(red, 1) }.let {
+                try { "#%06X".format(java.util.Locale.ROOT, it.getPixel(0, 0) and 0xffffff) } finally { it.recycle() }
+            }
+            val initial = Appearance(palette = PaletteMode.SEED, background = WallpaperSpec(red), highContrast = true,
+                pageBackgrounds = mapOf(COURSES to WallpaperSpec(gray), GRAPHS to WallpaperSpec(missing), COUNTDOWN to WallpaperSpec()))
+            runBlocking {
+                val proposal = api.preview(listOf(PlannerCommand.EditAppearance(AppearancePatch.Replace(initial)))) as PreviewResult.Ready
+                assertTrue(api.commit(proposal.proposalId) is CommitResult.Applied)
+            }
+            val before = revision()
+            assertTrue(File(File(folder, "background-images"), missing).delete())
+            attach(api, photos); openSettings(); openGroup(colors)
+            choice(target, COURSES.label); field(pick).performClick()
+            await(hasText(text(R.string.wallpaper_seed_no_color))).performScrollTo().assertIsDisplayed()
+            field(seed).assertTextContains(initial.seed)
+            choice(target, GRAPHS.label); field(pick).performClick()
+            await(hasText(text(R.string.wallpaper_seed_unavailable))).performScrollTo().assertIsDisplayed()
+            choice(target, COUNTDOWN.label); field(pick).assertIsNotEnabled()
+            field(hasText(text(R.string.wallpaper_seed_no_photo))).assertIsDisplayed()
+            choice(target, WORKSPACE.label); field(pick).performClick() // inherits the global private file
+            await(seed and hasText(expected)); assertEquals(initial, saved())
+            await(row(text(R.string.ui_cancel))).performClick(); await(row(colors))
+            assertEquals(initial, saved()); assertEquals(before, revision())
+            // Restore the deliberately missing file before asking Planner to validate the save.
+            File(File(folder, "background-images"), red).copyTo(File(File(folder, "background-images"), missing))
+            openGroup(colors); field(seed).assertTextContains(initial.seed)
+            field(pick).performClick(); await(seed and hasText(expected))
+            await(row(text(R.string.ui_save_appearance)) and isEnabled()).performClick(); await(row(colors))
+            assertEquals(initial.copy(seed = expected), saved()); assertEquals(before + 1, revision())
+            openGroup(colors); field(seed).assertTextContains(expected)
+        } finally { folder.deleteRecursively() }
+    }
+
+    @SdkSuppress(minSdkVersion = 29)
+    @Test fun anOldPhotoReadCannotReplaceANewEditOfTheSameImage() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val folder = Files.createTempDirectory(context.cacheDir.toPath(), "seed-generation-").toFile()
+        val holding = java.util.concurrent.atomic.AtomicBoolean(false)
+        val entered = CompletableDeferred<Unit>(); val resume = CompletableDeferred<Unit>()
+        val photos = BackgroundStore(object : ContextWrapper(context) { override fun getNoBackupFilesDir() = folder }) {
+            if (holding.get()) { entered.complete(Unit); resume.await() }
+            emptySet()
+        }
+        val api = RoomPlannerApi(fixture.db, imageExists = photos::exists)
+        fun text(id: Int) = ui.activity.getString(id)
+        val colors = text(R.string.ui_colors); val target = text(R.string.wallpaper_seed_source)
+        val pick = row(text(R.string.wallpaper_seed_pick)); val reading = hasText(text(R.string.wallpaper_seed_reading))
+        val seed = hasTestTag("seed-color")
+        try {
+            val id = withSelectedPhoto(context, redPixels(Bitmap.CompressFormat.PNG), "image/png") { photos.importImage(it) }
+            val initial = Appearance(palette = PaletteMode.SEED, background = WallpaperSpec(id))
+            val ready = api.preview(listOf(PlannerCommand.EditAppearance(AppearancePatch.Replace(initial)))) as PreviewResult.Ready
+            assertTrue(api.commit(ready.proposalId) is CommitResult.Applied)
+            attach(api, photos); openSettings(); openGroup(colors)
+            // Delay the actual file read on the store's collection mutex.
+            holding.set(true)
+            val collection = launch(Dispatchers.IO) { photos.collect() }
+            withTimeout(5_000) { entered.await() }
+            fun startRead() { field(pick).performClick(); field(reading) }
+            suspend fun setWallpaper(a: Appearance) {
+                val change = PlannerCommand.EditAppearance(AppearanceFields(AppearanceGroup.MATERIAL, AppearanceGroup.MATERIAL.project(a)))
+                val p = api.preview(listOf(change)) as PreviewResult.Ready
+                assertTrue(api.commit(p.proposalId) is CommitResult.Applied)
+            }
+            startRead(); setWallpaper(initial.copy(background = WallpaperSpec()))
+            await(hasText(text(R.string.wallpaper_seed_no_photo)))
+            setWallpaper(initial); await(pick and isEnabled())
+            startRead(); choice(target, WORKSPACE.label) // different target, same inherited image
+            startRead(); field(row(text(R.string.ui_restore_defaults))).performClick()
+            choice(text(R.string.ui_palette), text(R.string.ui_custom_seed))
+            startRead(); await(row(text(R.string.ui_cancel))).performClick(); await(row(colors))
+            openGroup(colors); startRead(); field(seed).performTextReplacement("#13579B")
+            resume.complete(Unit); collection.join()
+            await(row(text(R.string.ui_save_appearance)) and isEnabled()).performClick(); await(row(colors))
+            assertEquals(initial.copy(seed = "#13579B"), saved())
+        } finally { resume.complete(Unit); folder.deleteRecursively() }
     }
 
     @Test fun currentTimeControlsStayDraftUntilSavedAndReopenTogether() {

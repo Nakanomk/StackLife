@@ -6,6 +6,10 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.system.Os
 import android.system.OsConstants
+import androidx.compose.ui.graphics.asImageBitmap
+import com.materialkolor.ktx.samplePixels
+import com.materialkolor.quantize.QuantizerCelebi
+import com.materialkolor.score.Score
 import io.github.nakanomk.stacklife.archive.archiveHex
 import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.images.*
@@ -205,5 +209,21 @@ internal class BackgroundStore(context: Context, private val retained: suspend (
     internal suspend fun bitmap(id: String, edge: Int): Bitmap = io {
         if (!exists(id)) storageFailure()
         decodePrivatePhoto(File(root, id), edge)
+    }
+
+    /** Read a bounded private thumbnail before file collection; score it outside the store lock. */
+    suspend fun photoSeed(id: String): Int? {
+        val pixels = io {
+            mutex.withLock {
+                if (!exists(id)) storageFailure()
+                val thumbnail = decodePrivatePhoto(File(root, id), 128)
+                try { thumbnail.asImageBitmap().samplePixels().pixels }
+                finally { thumbnail.recycle() }
+            }
+        }
+        return withContext(Dispatchers.Default) {
+            val colors = QuantizerCelebi.quantize(pixels, 128)
+            Score.score(colorsToPopulation = colors, desired = 1, fallbackColorArgb = null, filter = true).firstOrNull()
+        }
     }
 }

@@ -41,6 +41,7 @@ private enum class WallpaperSource(@StringRes val label: Int) {
 }
 
 private val globalWallpaperSources = WallpaperSource.entries.filterNot { it == WallpaperSource.INHERIT }
+internal val wallpaperTargets: List<Destination?> = listOf(null) + Destination.entries
 
 internal fun Appearance.replacingWallpaper(page: Destination?, spec: WallpaperSpec?) = if (page == null)
     copy(background = requireNotNull(spec))
@@ -102,7 +103,7 @@ internal fun WallpaperControls(value: Appearance, change: (Appearance) -> Unit, 
     }
     FormGroup(Modifier.testTag("wallpaper-card"), frosted = true) {
         SectionTitle(stringResource(R.string.wallpaper_title))
-        Choice(stringResource(R.string.wallpaper_target), listOf(null) + Destination.entries, target,
+        Choice(stringResource(R.string.wallpaper_target), wallpaperTargets, target,
             { it?.label ?: stringResource(R.string.wallpaper_global) }, change = chooseTarget)
         if (picker.preparing) Hint(stringResource(R.string.wallpaper_preparing)) else {
             Choice(stringResource(R.string.wallpaper_source), if (target == null) globalWallpaperSources else WallpaperSource.entries,

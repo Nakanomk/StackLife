@@ -31,6 +31,7 @@ import sh.calvin.reorderable.ReorderableColumn
 
 private val appearanceSaver = Saver<Appearance, String>(save = { encodeAppearance(it) }, restore = ::decodeAppearance)
 private val validSeed = Regex("#[0-9A-F]{6}")
+private class PhotoSeedRequest(val imageId: String)
 private enum class EditorLeadSection { MESSAGE, PREVIEW, MATERIAL, WALLPAPER }
 private val AppearanceGroup.title: String @Composable get() = when (this) {
     AppearanceGroup.COLOR -> stringResource(R.string.ui_colors); AppearanceGroup.LAYOUT -> stringResource(R.string.ui_layout); AppearanceGroup.MATERIAL -> stringResource(R.string.ui_material_motion)
@@ -49,6 +50,12 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
     var closing by rememberSaveable { mutableStateOf(false) }
     var applied by rememberSaveable { mutableStateOf(false) }
     val backgrounds = LocalBackgroundStore.current
+    // COLOR owns the seed, not the wallpaper: resolve the current saved private file.
+    val seedForm = group == AppearanceGroup.COLOR && draft.palette == PaletteMode.SEED
+    val imageId = if (seedForm) saved.wallpaper(wallpaperTarget).imageId else null
+    var sample by remember(imageId, wallpaperTarget) { mutableStateOf<PhotoSeedRequest?>(null) }
+    var sampleError by remember(imageId, wallpaperTarget) { mutableStateOf<Int?>(null) }
+    fun discardSample() { sample = null; sampleError = null }
     val latestBack by rememberUpdatedState(onBack)
     val cleanupFailure = stringResource(R.string.appearance_image_cleanup_failed)
     val receipt = rememberSubmission(actions, onError = { message = it }) {
@@ -69,17 +76,33 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
         draft = draft.replacingWallpaper(page, WallpaperSpec(imageId = id))
     } else null
     val busy = receipt.busy || closing || picker?.preparing == true
-    val leave: () -> Unit = { if (!receipt.busy) closing = true }
+    val leave: () -> Unit = { if (!receipt.busy) { discardSample(); closing = true } }
     val seedOK = group != AppearanceGroup.COLOR || draft.palette != PaletteMode.SEED || validSeed.matches(seedInput)
     val selected = remember(group, draft) { group.project(draft) }
     val persisted = remember(group, saved) { group.project(saved) }
     val stale = remember(group, baseline, persisted) { group.project(baseline) != persisted }
+    val request = sample
+    if (request != null && !stale && !busy && !applied) LaunchedEffect(request) {
+        try {
+            val argb = backgrounds.photoSeed(request.imageId)
+            if (sample === request) {
+                if (argb == null) sampleError = R.string.wallpaper_seed_no_color
+                else {
+                    val seed = "#%06X".format(java.util.Locale.ROOT, argb and 0xffffff)
+                    seedInput = seed
+                    draft = draft.copy(seed = seed)
+                }
+            }
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (_: Exception) { if (sample === request) sampleError = R.string.wallpaper_seed_unavailable }
+        finally { if (sample === request) sample = null }
+    }
     val preview = remember(group, selected, saved) { AppearanceFields(group, selected).applyTo(saved) }
     var previewPage by rememberSaveable(preview.start, wallpaperTarget) { mutableStateOf(wallpaperTarget ?: preview.start) }
-    val reload = { baseline = saved; draft = saved; seedInput = saved.seed; message = "" }
+    val reload = { discardSample(); baseline = saved; draft = saved; seedInput = saved.seed; message = "" }
     val transfer = if (group == AppearanceGroup.MATERIAL) rememberAppearanceTransfer(planner, backgrounds,
         available = !busy && !applied && !stale && selected == persisted) { applied = true; closing = true } else null
-    BackHandler(enabled = busy || leases.isNotEmpty()) { leave() }
+    BackHandler(enabled = busy || leases.isNotEmpty() || request != null) { leave() }
     val hasMessage = message.isNotEmpty()
     val leadSections = remember(group, hasMessage) {
         buildList {
@@ -101,7 +124,7 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent, scrolledContainerColor = Color.Transparent),
                 navigationIcon = { TextButton(onClick = leave, enabled = !receipt.busy && !closing) { Text(stringResource(R.string.ui_cancel)) } },
                 actions = {
-                    TextButton(enabled = !busy && !applied && seedOK && !stale && selected != persisted,
+                    TextButton(enabled = !busy && request == null && !applied && seedOK && !stale && selected != persisted,
                         onClick = { receipt.send(PlannerCommand.EditAppearance(AppearanceFields(group, selected), expected = baseline)) }) {
                         Text(stringResource(R.string.ui_save_appearance))
                     }
@@ -113,7 +136,10 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                         EditorLeadSection.MESSAGE -> Text(message, color = MaterialTheme.colorScheme.error)
                         EditorLeadSection.PREVIEW -> {
                             val page = previewPage.takeIf { it in preview.visible || it == wallpaperTarget } ?: preview.start
-                            AppearancePreview(preview, page) { previewPage = it }
+                            AppearancePreview(preview, page, preview.wallpaper(if (seedForm) wallpaperTarget else page)) {
+                                if (seedForm) { discardSample(); wallpaperTarget = it }
+                                previewPage = it
+                            }
                         }
                         EditorLeadSection.MATERIAL -> MaterialFields(draft) { draft = it }
                         EditorLeadSection.WALLPAPER -> if (picker != null) {
@@ -122,7 +148,19 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                     }
                 }
                 when (group) {
-                    AppearanceGroup.COLOR -> item { ColorFields(draft, seedInput, { seedInput = it }, { draft = it }) }
+                    AppearanceGroup.COLOR -> item {
+                        ColorFields(draft, seedInput, { discardSample(); seedInput = it }, { discardSample(); draft = it }) {
+                            Choice(stringResource(R.string.wallpaper_seed_source), wallpaperTargets, wallpaperTarget,
+                                { it?.label ?: stringResource(R.string.wallpaper_global) }) { discardSample(); wallpaperTarget = it }
+                            Secondary(stringResource(R.string.wallpaper_seed_pick),
+                                enabled = !busy && !applied && !stale && imageId != null && request == null) {
+                                if (imageId != null) { sampleError = null; sample = PhotoSeedRequest(imageId) }
+                            }
+                            if (request != null) Hint(stringResource(R.string.wallpaper_seed_reading))
+                            else if (imageId == null) Hint(stringResource(R.string.wallpaper_seed_no_photo))
+                            sampleError?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
+                        }
+                    }
                     AppearanceGroup.LAYOUT -> {
                         item { LayoutFields(draft) { draft = it } }
                         item { DayWheelPreview() }
@@ -172,7 +210,7 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                     Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         HorizontalDivider()
                         Spacer(Modifier.height(12.dp))
-                        TextButton(onClick = { draft = AppearanceFields(group, null).applyTo(draft); seedInput = draft.seed; message = "" },
+                        TextButton(onClick = { discardSample(); draft = AppearanceFields(group, null).applyTo(draft); seedInput = draft.seed; message = "" },
                             enabled = !busy && !applied, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
                             Text(stringResource(R.string.ui_restore_defaults))
                         }
@@ -185,14 +223,14 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
 }
 
 @Composable
-private fun AppearancePreview(value: Appearance, selected: Destination, choose: (Destination) -> Unit) {
+private fun AppearancePreview(value: Appearance, selected: Destination, wallpaper: WallpaperSpec, choose: (Destination) -> Unit) {
     val nav = if (selected in value.visible) rememberDestinationCapsule(selected.key) { key ->
         choose(value.visibleOrder.first { it.key == key })
     } else null
     Surface(Modifier.fillMaxWidth().testTag("appearance-page-preview"), shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerLow) {
         CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
-            WallpaperHost(value.wallpaper(selected)) {
+            WallpaperHost(wallpaper) {
                 // Unlike the full-screen overlay, this preview wraps its content. Measure the
                 // actual note and dock in sequence, including wrapped text and docked labels.
                 GlassBacking(Modifier.fillMaxWidth(), background = {
@@ -217,7 +255,8 @@ private fun AppearancePreview(value: Appearance, selected: Destination, choose: 
 }
 
 @Composable
-private fun ColorFields(d: Appearance, seed: String, editSeed: (String) -> Unit, update: (Appearance) -> Unit) {
+private fun ColorFields(d: Appearance, seed: String, editSeed: (String) -> Unit, update: (Appearance) -> Unit,
+    photoSource: @Composable () -> Unit) {
     FormGroup(frosted = true) {
         Choice(stringResource(R.string.ui_color_theme), ThemeMode.entries, d.theme, { when (it) { ThemeMode.SYSTEM -> stringResource(R.string.ui_follow_system); ThemeMode.LIGHT -> stringResource(R.string.ui_light); ThemeMode.DARK -> stringResource(R.string.ui_dark) } }) { update(d.copy(theme = it)) }
         Choice(stringResource(R.string.ui_palette), PaletteMode.entries, d.palette, { if (it == PaletteMode.DYNAMIC) stringResource(R.string.ui_dynamic_color) else stringResource(R.string.ui_custom_seed) },
@@ -226,6 +265,7 @@ private fun ColorFields(d: Appearance, seed: String, editSeed: (String) -> Unit,
             val normalized = text.uppercase(); editSeed(normalized)
             if (validSeed.matches(normalized)) update(d.copy(seed = normalized))
         }, label = { Text(stringResource(R.string.ui_seed_hex)) }, singleLine = true, isError = !validSeed.matches(seed), modifier = Modifier.fillMaxWidth().testTag("seed-color"))
+        if (d.palette == PaletteMode.SEED) photoSource()
     }
 }
 
