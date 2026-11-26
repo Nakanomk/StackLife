@@ -2,13 +2,13 @@
 
 ## 数据与权限
 
-日程、备注、图片和对话历史保存在设备上。系统云备份与设备迁移已在 [Manifest](../app/src/main/AndroidManifest.xml) 和[数据提取规则](../app/src/main/res/xml/data_extraction_rules.xml) 中关闭。0.11.2 下载包没有完整导出；卸载前请核对自己使用的版本。
+日程、备注、图片和对话历史保存在设备上。系统云备份与设备迁移已在 [Manifest](../app/src/main/AndroidManifest.xml) 和[数据提取规则](../app/src/main/res/xml/data_extraction_rules.xml) 中关闭。0.11.7 可在「设置 → 备份与恢复」手动导出；卸载前请先保存需要保留的数据。
 
 手动规划不需要网络。HUB 在线登录会访问校方网站；向外部模型发送消息前可查看接收服务，跨页数据、备注和课程详情需另行选取。模型只能查询或提出更改，确认差异后才由手机写入。API Key 由 Android Keystore 中的密钥加密保存。
 
 通知权限用于显示日程提醒。未获精确闹钟权限时，提醒可能延迟。开机广播用于重排提醒；处理提醒时，唤醒锁短暂保持 CPU 运行。
 
-### 源码版的手动备份
+### 手动备份
 
 「设置 → 备份与恢复」通过 Android 文件选择器读写 ZIP。可选外观、今天、队列、栈、流程图、课表、倒数日、对话及附件、应用偏好、模型连接。**完整备份默认写入可读取的 API Key。** 仅存到可信位置；可取消「包含已配置的 API Key」，或取消整个连接分类。恢复后用目标设备的 Android Keystore 重新加密。未带密钥的连接只能保留目标设备上同一 HTTPS 来源的密钥。
 
@@ -38,7 +38,7 @@
 sdkmanager 'platform-tools' 'platforms;android-37.2' 'build-tools;37.0.0'
 ```
 
-使用仓库的 Gradle wrapper，无需另装 Gradle。0.11.0 使用 Gradle 9.6.0、AGP 9.5.0，Java target 为 17；编译和应用版本见 [`app/build.gradle.kts`](../app/build.gradle.kts)。复现公开包时先检出对应标签，普通版不需要联盟 SDK。运行与 [Android CI](../.github/workflows/android-ci.yml) 相同的检查：
+使用仓库的 Gradle wrapper，无需另装 Gradle。0.11.7 使用 Gradle 9.6.0、AGP 9.5.0，Java target 为 17；编译和应用版本见 [`app/build.gradle.kts`](../app/build.gradle.kts)。复现公开包时先检出对应标签，普通版不需要联盟 SDK。运行与 [Android CI](../.github/workflows/android-ci.yml) 相同的检查：
 
 ```sh
 ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest :app:assemblePreview
@@ -55,7 +55,7 @@ sdkmanager 'platform-tools' 'platforms;android-37.2' 'build-tools;37.0.0'
 用 Android build-tools 检查 APK 的签名，例如：
 
 ```sh
-apksigner verify --verbose --print-certs StackLife-0.11.0-preview.apk
+apksigner verify --verbose --print-certs StackLife-0.11.7-preview.apk
 ```
 
 签名者应只有一个，证书 SHA-256 为 `6a51915f4e57205dfd4e5f1bee5bac6c14434e7bdaa2050c165975a512b758d9`。这是证书指纹，APK 文件的摘要随版本变化。
