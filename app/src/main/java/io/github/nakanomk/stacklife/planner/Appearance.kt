@@ -59,7 +59,7 @@ data class Appearance(
     val courseTextOutline: Boolean = false,
     val floatingDayTray: Boolean = true,
     val visible: Set<Destination> = allDestinations,
-    val background: WallpaperSpec = WallpaperSpec(preset = WallpaperPreset.BLUE),
+    val background: WallpaperSpec = WallpaperSpec(preset = WallpaperPreset.BLUE, blur = .15f),
     val pageBackgrounds: Map<Destination, WallpaperSpec> = emptyMap(),
     val showCourseGrid: Boolean = false,
     val dayScrollEffect: DayScrollEffect = DayScrollEffect.WHEEL,

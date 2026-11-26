@@ -61,6 +61,11 @@ class AppearancePersistenceTest {
     @Test fun newWallpaperDefaultsOnlyFillMissingPreferencesAndNeverBecomePrivateFileReferences() {
         val first = decodeAppearance("""{"compact":true}""")
         assertEquals(WallpaperPreset.BLUE, first.wallpaper(Destination.COURSES).preset)
+        assertEquals(.15f, Appearance().background.blur, 0f)
+        assertEquals(.15f, first.wallpaper(Destination.COURSES).blur, 0f)
+        val explicitZero = decodeAppearance("""{"background":{"preset":"BLUE","blur":0}}""")
+        assertEquals(0f, decodeAppearance(encodeAppearance(explicitZero)).wallpaper(Destination.COURSES).blur, 0f)
+        assertEquals(0f, decodeAppearance("""{"background":{"preset":"BLUE"}}""").background.blur, 0f)
         assertFalse(first.showCourseGrid)
         val id = "dd957e19-e907-4e7c-a513-707fb834162b"
         val old = decodeAppearance("""{"background":{"imageId":"$id","scale":2.0},"pageBackgrounds":{"COURSES":{}},"showCourseGrid":true,"compact":true}""")
