@@ -156,6 +156,7 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
             entry<MotionFrame> { key ->
                 DetailRoute(key.origin(), animate) {
                     WorkspaceData(model) { data ->
+                        DetailSourceAvailable(model.transfers.current?.fromFrame == key.id || data.frames.any { it.id == key.id })
                         FrameScreen(key.id, data, model, back, shared, onSource = { link ->
                             navigate(when (link) {
                                 is GraphLink.Task -> MotionTask(link.taskId)

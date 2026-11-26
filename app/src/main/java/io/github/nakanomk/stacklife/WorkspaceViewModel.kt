@@ -14,6 +14,8 @@ import io.github.nakanomk.stacklife.courses.TermSpec
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.SaveOutcome
 import io.github.nakanomk.stacklife.workspace.WorkspaceActions
+import io.github.nakanomk.stacklife.workspace.WorkspaceTransfer
+import io.github.nakanomk.stacklife.workspace.WorkspaceTransfers
 import java.util.UUID
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -33,6 +35,7 @@ internal sealed interface ReadState<out T> {
 }
 
 internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), WorkspaceActions {
+    val transfers = WorkspaceTransfers()
     internal inline fun <reified T : QueryResult> read(query: PlannerQuery) = planner.observe(query)
         .map<QueryResult, ReadState<T>> { ReadState.Loaded(it as T) }
         .catch { cause ->
@@ -118,7 +121,7 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
     suspend fun forgetRestoredWorkspace() {
         val previous = latest
         previous?.error?.await()
-        if (previous === latest) { latest = null; feedbackState.value = null; pushReason = null }
+        if (previous === latest) { latest = null; feedbackState.value = null; pushReason = null; transfers.reset() }
     }
     fun dismissFeedback(request: String) {
         feedbackState.value?.takeIf { it.receipt.requestId == request }?.let { feedbackState.compareAndSet(it, null) }
@@ -128,6 +131,7 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
         when (val result = planner.applyWorkspaceReceipt(request, action)) {
             is CommitResult.Rejected -> { dismissFeedback(request); result.message }
             is CommitResult.Applied -> {
+                transfers.current?.takeIf { it.receipt?.requestId == request }?.let(transfers::end)
                 receipt = result
                 if (shown != null && action == WorkspaceReceiptAction.KEEP_HISTORY) feedbackState.compareAndSet(shown, shown.copy(kept = true))
                 else dismissFeedback(request)
@@ -137,10 +141,23 @@ internal class WorkspaceViewModel(val planner: PlannerApi) : ViewModel(), Worksp
         }
     }
 
-    override fun start(command: PlannerCommand): String? = startWrite(notifyOnFailure = true) {
-        when (val preview = planner.preview(listOf(command))) {
-            is PreviewResult.Rejected -> preview.message
-            is PreviewResult.Ready -> commit(preview.proposalId)
+    override fun start(command: PlannerCommand): String? = start(command, null)
+
+    fun start(command: PlannerCommand, transfer: WorkspaceTransfer?): String? = startWrite(notifyOnFailure = true) {
+        if (transfer != null) transfers.begin(transfer, id)
+        try {
+            when (val preview = planner.preview(listOf(command))) {
+                is PreviewResult.Rejected -> preview.message
+                is PreviewResult.Ready -> if (transfer != null && preview.baseRevision != transfer.before.revision) {
+                    planner.discard(preview.proposalId)
+                    uiText("The workspace changed. Review the queue and stack before trying again.", "工作台已变更，请核对队列和栈后重试。")
+                } else commit(preview.proposalId).also {
+                    if (it == null && transfer != null && transfers.current === transfer)
+                        receipt?.let(transfer::applied)
+                }
+            }
+        } finally {
+            if (transfer != null && transfer.receipt == null) transfers.end(transfer)
         }
     }
 

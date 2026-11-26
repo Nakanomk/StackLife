@@ -12,7 +12,6 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -25,7 +24,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -45,7 +44,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.WorkspaceViewModel
-import io.github.nakanomk.stacklife.PagerPane
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.RootToolbar
 import io.github.nakanomk.stacklife.appearance.SegmentTrack
@@ -101,25 +99,36 @@ internal fun WorkspaceScreen(
     val mode = if (stack) 1 else 0
     val pager = rememberPagerState(initialPage = mode) { 2 }
     val motion = LocalMotionEnabled.current
-    LaunchedEffect(mode, motion) {
-        if (pager.currentPage != mode || pager.currentPageOffsetFraction != 0f) {
-            if (motion) pager.animateScrollToPage(mode, animationSpec = tween(320)) else pager.scrollToPage(mode)
-        }
-    }
+    val owner = rememberSaveable { java.util.UUID.randomUUID().toString() }
+    val queueSelection = rememberSaveable { mutableStateOf<ArrayList<String>?>(null) }
     val position = remember(pager) { derivedStateOf { pager.currentPage + pager.currentPageOffsetFraction } }
-    RootPane(header = { RootToolbar(Destination.WORKSPACE, onSettings) { WorkspaceSegments(stack, setStack, position) } },
+    val hasQueue = state.queue.isNotEmpty()
+    val hasFrames = state.frames.isNotEmpty()
+    val cardsVisible by remember(position, actions, owner, hasQueue, hasFrames) { derivedStateOf {
+        actions.transfers.current?.owner == owner || (hasQueue && position.value < 1f) || (hasFrames && position.value > 0f)
+    } }
+    RootPane(header = { RootToolbar(Destination.WORKSPACE, onSettings) {
+        WorkspaceSegments(stack, { transfersTo -> actions.transfers.cancel(owner); setStack(transfersTo) }, position)
+    } },
         overlay = { _, bottom ->
             if (!stack) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = bottom)) { AddTaskFab(onAdd) }
         }) { top, bottom ->
-        HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = false) { index ->
-            val selected = index == mode
-            val inViewport by remember(pager, index) { derivedStateOf { kotlin.math.abs(position.value - index) < 1f } }
-            PagerPane(selected, selected || inViewport) {
+        val density = LocalDensity.current
+        val gutter = with(density) { dockListPadding(top, bottom).calculateLeftPadding(androidx.compose.ui.unit.LayoutDirection.Ltr).roundToPx() }
+        // The lists and the lifted card bodies sample the same stationary wallpaper donor.
+        CardFrostGroup(enabled = cardsVisible) {
+            WorkspaceTransferPager(state, actions.transfers, owner, stack, setStack, motion, pager, position, queueScroll, stackScroll, gutter, queueSelection) {
+                    index, shown, selected, flight, selection ->
                 val cardBounds = if (selected) shared else noCardBounds
-                CardFrostGroup(enabled = inViewport && if (index == 0) state.queue.isNotEmpty() else state.frames.isNotEmpty()) {
-                    CompositionLocalProvider(LocalCardList provides if (index == 0) queueScroll else stackScroll) {
-                        if (index == 1) FrameList(state.frames, stackScroll, onFrame, onCreateFrame, cardBounds, top, bottom, state.revision, actions)
-                        else QueueList(state.queue, queueScroll, actions, onTask, cardBounds, top, bottom + taskFabClearance, state.revision)
+                CompositionLocalProvider(LocalCardList provides if (index == 0) queueScroll else stackScroll) {
+                    if (index == 1) FrameList(shown.frames, stackScroll, { id ->
+                        actions.transfers.openFrame(owner, id, stackScroll.visibleCards(gutter))
+                        onFrame(id)
+                    }, onCreateFrame, cardBounds, top, bottom, shown.revision, actions, flight)
+                    else QueueList(shown.queue, queueScroll, actions, onTask, cardBounds, top, bottom + taskFabClearance, shown.revision,
+                        flight, queueSelection, selection) { ids, checked ->
+                        actions.start(PlannerCommand.FramePush(taskIds = ids),
+                            WorkspaceTransfer(owner, shown, null, queueScroll.visibleCards(gutter), checked))
                     }
                 }
             }
@@ -234,13 +243,13 @@ private fun WorkspaceSegments(stack: Boolean, change: (Boolean) -> Unit, positio
 private fun QueueList(
     tasks: List<QueueTask>, scroll: LazyListState, actions: WorkspaceActions, onTask: (String) -> Unit,
     shared: SharedModifier, topClearance: Dp, bottomClearance: Dp, revision: Long,
+    flight: WorkspaceFlight?, selectionState: MutableState<ArrayList<String>?>, departingSelection: List<String>?, push: (List<String>, List<String>?) -> String?,
 ) {
-    val compact = LocalAppearance.current.compact
     val source = detailListSource(scroll, topClearance, bottomClearance, revision)
     var order by remember(tasks) { mutableStateOf(tasks) }
     val settledSource = if (source != null && order != tasks) null else source
     // null means ordinary browsing: the primary action saves the entire visible queue.
-    var selection by rememberSaveable { mutableStateOf<ArrayList<String>?>(null) }
+    var selection by selectionState
     val action = rememberSubmission(actions) {
         if (it == SaveOutcome.APPLIED) selection = null else order = tasks
     }
@@ -263,7 +272,7 @@ private fun QueueList(
         contentPadding = dockListPadding(topClearance, bottomClearance), verticalArrangement = listSpacing) {
         item {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                val selected = selection
+                val selected = departingSelection ?: selection
                 Box(Modifier.weight(1f)) { CardMetadata {
                     if (selected == null) {
                         Text(stringResource(R.string.queue_unfinished_count, tasks.size))
@@ -277,7 +286,7 @@ private fun QueueList(
                 if (tasks.isNotEmpty()) ActionPill(if (selected == null) stringResource(R.string.ui_push) else stringResource(R.string.ui_push_selected),
                     modifier = Modifier.testTag("queue-push"),
                     enabled = !action.busy && (selected == null || selected.isNotEmpty()),
-                    onClick = { action.send(PlannerCommand.FramePush(taskIds = selected ?: tasks.map { it.id })) })
+                    onClick = { action.submit { push(selected ?: tasks.map { it.id }, selected) } })
             }
         }
         if (order.isEmpty()) item {
@@ -289,19 +298,15 @@ private fun QueueList(
             }
         }
         itemsIndexed(order, key = { _, task -> task.id }) { index, task ->
-            val selected = selection
-            val verticalInset = if (compact) 4.dp else 8.dp
-            val row = Modifier.fillMaxWidth().heightIn(min = if (compact) 52.dp else 64.dp)
-                .padding(start = 16.dp, end = 8.dp, top = verticalInset, bottom = verticalInset)
+            val selected = departingSelection ?: selection
+            if (flight?.Reserve(false, task.id) == true) return@itemsIndexed
             if (selected != null) {
                 val checked = task.id in selected
                 FrostedCard {
-                    Row(Modifier.toggleable(checked, enabled = !action.busy, role = Role.Checkbox) {
-                        selection = ArrayList(selected.toggle(task.id))
-                    }.then(row), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Checkbox(checked, onCheckedChange = null, enabled = !action.busy)
-                        QueueTaskInfo(task, index, Modifier.weight(1f))
-                    }
+                    QueueCardBody(task, index, checked = checked, checkEnabled = !action.busy,
+                        modifier = Modifier.toggleable(checked, enabled = !action.busy, role = Role.Checkbox) {
+                            selection = ArrayList(selected.toggle(task.id))
+                        })
                 }
                 return@itemsIndexed
             }
@@ -312,8 +317,7 @@ private fun QueueList(
                     shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow,
                     shadowElevation = if (dragging) 6.dp else 0.dp,
                 ) {
-                    Row(row, verticalAlignment = Alignment.CenterVertically) {
-                        QueueTaskInfo(task, index, Modifier.weight(1f), shared.title("task:${task.id}"))
+                    QueueCardBody(task, index, titleModifier = shared.title("task:${task.id}")) {
                         if (order.size > 1) MoveMenu(
                             modifier = Modifier.draggableHandle(enabled = !action.busy, interactionSource = drags),
                             title = task.title, index = index, lastIndex = order.lastIndex, enabled = !action.busy,
@@ -323,6 +327,28 @@ private fun QueueList(
                 }
             }
         }
+    }
+}
+
+/** Shared by the grounded row and the receipt overlay; only the grounded row adds controls. */
+@Composable
+internal fun QueueCardBody(task: QueueTask, index: Int, checked: Boolean? = null, checkEnabled: Boolean = true,
+    titleModifier: Modifier = Modifier, modifier: Modifier = Modifier, handle: @Composable () -> Unit = {}) {
+    val compact = LocalAppearance.current.compact
+    val inset = if (compact) 4.dp else 8.dp
+    Row(modifier.fillMaxWidth().heightIn(min = if (compact) 52.dp else 64.dp)
+        .padding(start = 16.dp, end = 8.dp, top = inset, bottom = inset), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = if (checked != null) Arrangement.spacedBy(12.dp) else Arrangement.Start) {
+        if (checked != null) Checkbox(checked = checked, onCheckedChange = null, enabled = checkEnabled)
+        QueueTaskInfo(task, index, Modifier.weight(1f), titleModifier)
+        if (checked == null) handle()
+    }
+}
+
+@Composable
+internal fun QueueHandleGlyph() {
+    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        Icon(painterResource(R.drawable.ic_drag_handle), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -350,7 +376,7 @@ private fun MoveMenu(modifier: Modifier, title: String, index: Int, lastIndex: I
     Box {
         IconButton(onClick = { expanded = true }, enabled = enabled,
             modifier = modifier.size(48.dp).semantics { contentDescription = description }) {
-            Icon(painterResource(R.drawable.ic_drag_handle), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            QueueHandleGlyph()
         }
         PlannerDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             for ((label, target) in listOf(stringResource(R.string.ui_move_to_front) to 0, stringResource(R.string.ui_move_up_one) to index - 1, stringResource(R.string.ui_move_down_one) to index + 1, stringResource(R.string.ui_move_to_end) to lastIndex)) {

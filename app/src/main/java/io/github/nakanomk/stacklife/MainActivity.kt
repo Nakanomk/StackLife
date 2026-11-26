@@ -377,7 +377,12 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 } }
                 entry<FrameDetail> { key ->
                     DetailRoute("frame:${key.id}", animate && initialDetail == null && !key.generated) {
-                        WorkspacePanel(model) { FrameScreen(key.id, it, model, back, shared, openSource) { task -> navigate(EditTask(task, key.id, it.revision)) } }
+                        WorkspacePanel(model) { workspace ->
+                            DetailSourceAvailable(model.transfers.current?.fromFrame == key.id || workspace.frames.any { it.id == key.id })
+                            FrameScreen(key.id, workspace, model, back, shared, openSource) { task ->
+                                navigate(EditTask(task, key.id, workspace.revision))
+                            }
+                        }
                     }
                 }
                 entry<Preferences> {

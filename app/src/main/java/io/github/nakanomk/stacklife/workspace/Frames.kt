@@ -42,6 +42,7 @@ import io.github.nakanomk.stacklife.markdown.PlannerMarkdown
 internal fun FrameList(
     frames: List<FrameView>, scroll: LazyListState, onFrame: (String) -> Unit, onCreate: () -> Unit,
     shared: SharedModifier, topClearance: Dp, bottomClearance: Dp, revision: Long, actions: WorkspaceActions,
+    flight: WorkspaceFlight?,
 ) {
     val source = detailListSource(scroll, topClearance, bottomClearance, revision)
     val available = remember(frames) {
@@ -72,7 +73,7 @@ internal fun FrameList(
             }
         }
         if (available > 0) item { SectionTitle(stringResource(R.string.ui_recent_frames)) }
-        items(available, key = { frames[it].id }) { FrameCard(frames[it], onFrame, shared, source) }
+        items(available, key = { frames[it].id }) { FrameCard(frames[it], onFrame, shared, source, flight) }
         if (available < frames.size) item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { SectionTitle(stringResource(R.string.ui_emptied_frames)) }
@@ -81,19 +82,26 @@ internal fun FrameList(
             }
         }
         items(frames.size - available, key = { frames[available + it].id }) {
-            FrameCard(frames[available + it], onFrame, shared, source)
+            FrameCard(frames[available + it], onFrame, shared, source, flight)
         }
     }
 }
 
 @Composable
-private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: SharedModifier, source: DetailListSource?) {
-    val appearance = LocalAppearance.current
+private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: SharedModifier, source: DetailListSource?, flight: WorkspaceFlight?) {
+    if (flight?.Reserve(true, frame.id) == true) return
     DetailCard(source, "frame", frame.id, onFrame, modifier = shared("frame:${frame.id}").fillMaxWidth().testTag("frame:${frame.id}"),
         shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        FrameCardBody(frame, shared.title("frame:${frame.id}"))
+    }
+}
+
+@Composable
+internal fun FrameCardBody(frame: FrameView, titleModifier: Modifier = Modifier) {
+    val appearance = LocalAppearance.current
         Column(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = if (appearance.compact) 6.dp else 10.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            CardTitle(frameLabel(frame.reason, frame.source), shared.title("frame:${frame.id}"))
+            CardTitle(frameLabel(frame.reason, frame.source), titleModifier)
             CardMetadata {
                 Text(stringResource(R.string.card_frame_saved_at, savedTime(frame.savedAtMillis)))
                 Text(stringResource(R.string.card_frame_original_count, frame.items.size))
@@ -107,13 +115,27 @@ private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: Share
                 CardSummary(titles)
             }
         }
-    }
 }
 
 @Composable
 internal fun FrameScreen(id: String, state: Workspace, actions: io.github.nakanomk.stacklife.WorkspaceViewModel, onBack: () -> Unit, shared: SharedModifier,
     onSource: (GraphLink) -> Unit, onEdit: (String) -> Unit) = SettingsHelpHost {
-    val frame = state.frames.find { it.id == id }
+    // Deep links, graph-generated frames and assistant actions have no workspace departure.
+    val owner by rememberSaveable(id) { mutableStateOf(actions.transfers.claimFrame(id)) }
+    val activity = androidx.activity.compose.LocalActivity.current
+    DisposableEffect(id, owner, actions, activity) {
+        onDispose {
+            actions.transfers.current?.takeIf { it.fromFrame == id && it.owner == owner }?.let { transfer ->
+                // Navigation retains this entry through its actual pop. Only release the list
+                // anchor to the pager once that entry is gone, not while the detail is landing.
+                if (transfer.closingFrame) transfer.returningToPager = true
+                else if (activity?.isChangingConfigurations != true) actions.transfers.end(transfer)
+            }
+        }
+    }
+    val departure = actions.transfers.current?.takeIf { it.fromFrame == id && it.owner == owner }
+    val frame = state.frames.find { it.id == id } ?: departure?.before?.frames?.find { it.id == id }
+    val front = io.github.nakanomk.stacklife.transitions.LocalFrontEntry.current
     var deleting by rememberSaveable(id) { mutableStateOf(false) }
     val deletion = rememberSubmission(actions) { result ->
         deleting = false
@@ -129,12 +151,23 @@ internal fun FrameScreen(id: String, state: Workspace, actions: io.github.nakano
     val entries = frame?.items.orEmpty()
     val leaveSelection = { choosing = false; selected = arrayListOf() }
     val action = rememberSubmission(actions) { outcome ->
-        val effect = restoreTicket?.let(actions::receipt)?.effects?.singleOrNull() as? WorkspaceEffect.Restored
+        val ticket = restoreTicket
+        val own = actions.transfers.current?.takeIf { it.submission == ticket && it.owner == owner && it.fromFrame == id }
+        val effect = (own?.receipt ?: ticket?.let(actions::receipt))?.effects?.singleOrNull() as? WorkspaceEffect.Restored
         restoreTicket = null
         if (outcome != SaveOutcome.REJECTED) leaveSelection()
-        if (outcome == SaveOutcome.APPLIED && effect?.frameId == id && effect.sourceDeleted) onBack()
+        if (front && outcome == SaveOutcome.APPLIED && effect?.frameId == id && (own != null || owner == null && effect.sourceDeleted)) {
+            own?.closingFrame = true
+            onBack()
+        } else own?.let(actions.transfers::end)
     }
-    fun restore(cmd: PlannerCommand.FrameRestore) = action.submit { actions.start(cmd)?.also { restoreTicket = it } }
+    fun restore(cmd: PlannerCommand.FrameRestore) = action.submit {
+        val origin = actions.transfers.frameOrigin?.takeIf { it.frameId == id && it.owner == owner }
+        // After process death the saveable launch owner can still receive a *new* explicit
+        // restore, but no geometry from the previous window can participate in its flight.
+        actions.start(cmd, owner?.let { WorkspaceTransfer(it, state, id,
+            origin?.rows ?: VisibleCards(androidx.compose.ui.unit.IntSize.Zero, emptyMap())) })?.also { restoreTicket = it }
+    }
     if (frame == null) {
         MissingDetail(stringResource(R.string.ui_frame_details), stringResource(R.string.ui_frame_missing), onBack)
         return@SettingsHelpHost

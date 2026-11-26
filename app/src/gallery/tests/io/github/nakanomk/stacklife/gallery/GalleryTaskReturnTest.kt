@@ -196,11 +196,18 @@ class GalleryTaskReturnTest {
         ui.onNodeWithTag("frames").performScrollToKey(frame.id)
         ui.onNodeWithTag(frameTag).performClick()
         ui.onNodeWithText(ui.activity.getString(io.github.nakanomk.stacklife.R.string.ui_restore_all)).performScrollTo().performClick()
-        ui.waitUntil(10_000) { ui.onAllNodesWithTag("frames").fetchSemanticsNodes().isNotEmpty() &&
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("queue").fetchSemanticsNodes().isNotEmpty() &&
             ui.onAllNodesWithTag("receipt-undo").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithTag(frameTag).assertDoesNotExist()
+        val moved = frame.items.first { it.restorable }.taskId
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("task:$moved").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithTag("task:$moved").assertIsDisplayed()
+        assertTrue(workspace().frames.none { it.id == frame.id })
         ui.onNodeWithTag("receipt-keep").assertIsDisplayed()
         ui.onNodeWithTag("receipt-undo").performClick()
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("receipt-undo").fetchSemanticsNodes().isEmpty() }
+        ui.onNodeWithTag("queue").assertIsDisplayed()
+        ui.onNode(hasText(ui.activity.getString(io.github.nakanomk.stacklife.R.string.ui_stack)) and isSelectable()).performClick()
         ui.waitUntil(10_000) { ui.onAllNodesWithTag(frameTag).fetchSemanticsNodes().isNotEmpty() }
         val restored = workspace()
         assertEquals(frame, restored.frames.single { it.id == frame.id })
