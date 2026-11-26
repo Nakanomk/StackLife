@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// BiliPai c7f835b34d8323358be57be298f86f29fecb53c8, navigation3/SettingsContainerMotionPolicy.kt:
-// resolveSettingsContainerFrame, resolveSettingsContainerContentAlpha. The driver already applied
-// its easing. If the source vanishes, carry the last painted frame to the actual host edge.
+// BiliPai 3f719310d674d474b904a4389f8cc99ea76fd2aa, navigation3/SettingsSharedContainerTransition.kt:
+// resolveDeterministicSharedContainerGeometry/Alpha and the directional content handoff.
+// On source loss StackLife carries the last painted window to the host edge instead of fading out.
 package io.github.nakanomk.stacklife.transitions
 
 import androidx.compose.ui.geometry.Rect
@@ -48,8 +48,7 @@ internal class MotionCardWindow {
         lastReturning = returning
         val pageW = size.width.toFloat()
         val pageH = size.height.toFloat()
-        val raw = 1f + depth
-        val open = raw.coerceIn(0f, 1f)
+        val open = (1f + depth).coerceIn(0f, 1f)
         edgeX = 0f; retained = 0f
         if (open == 1f) {
             // A cancelled gesture has returned to the intact page. The next gesture may use
@@ -58,13 +57,10 @@ internal class MotionCardWindow {
             heldOpen = 1f
             left = 0f; top = 0f; width = pageW; height = pageH; corner = 0f; ink = 1f
         } else if (source != null && !detached) {
-            val landingScale = if (returning && raw < 0f) (1f + raw).coerceAtLeast(.97f) else 1f
-            val w = lerp(source.width, pageW, open)
-            val h = lerp(source.height, pageH, open)
-            width = w * landingScale
-            height = h * landingScale
-            left = (1f - open) * source.left + (w - width) / 2f
-            top = (1f - open) * source.top + (h - height) / 2f
+            width = lerp(source.width, pageW, open)
+            height = lerp(source.height, pageH, open)
+            left = (1f - open) * source.left
+            top = (1f - open) * source.top
             corner = radius * (1f - open)
             val u = if (returning) ((open - .45f) / .30f).coerceIn(0f, 1f)
                 else ((open - .22f) / .28f).coerceIn(0f, 1f)

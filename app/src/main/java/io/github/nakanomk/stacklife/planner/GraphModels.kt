@@ -45,7 +45,7 @@ data class GoalOrder(val revision: Long, val nodes: List<GraphNode>, val error: 
 sealed interface GraphEdit {
     data class Rename(val title: String) : GraphEdit
     data class AddNode(val title: String, val notes: String = "", val minutes: Int = 30,
-        val x: Float = 0f, val y: Float = 0f, val ref: String? = null, val icon: TaskIcon = TaskIcon.AUTO) : GraphEdit
+        val x: Float = 0f, val y: Float = 0f, val ref: String? = null, val icon: TaskIcon = TaskIcon.TASK) : GraphEdit
     data class LinkExisting(val link: GraphLink, val x: Float = 0f, val y: Float = 0f, val ref: String? = null) : GraphEdit
     data class SetLinkedCompletion(val nodeId: String, val completed: Boolean) : GraphEdit
     data class EditNode(val nodeId: String, val title: String? = null, val notes: String? = null, val minutes: Int? = null,

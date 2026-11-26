@@ -18,6 +18,7 @@ import io.github.nakanomk.stacklife.appearance.PlannerModalBottomSheet
 import io.github.nakanomk.stacklife.courses.ScheduledCourse
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.rememberSubmission
+import kotlinx.coroutines.flow.first
 
 @Composable
 internal fun MoreEventsButton(group: TimeGridPlacement.Overflow, open: (TimeGridPlacement.Overflow) -> Unit, modifier: Modifier) {
@@ -28,11 +29,20 @@ internal fun MoreEventsButton(group: TimeGridPlacement.Overflow, open: (TimeGrid
 
 @Composable
 internal fun OverlapSheet(placement: TimeGridPlacement, group: TimeGridPlacement.Overflow, plan: DayPlan, model: WorkspaceViewModel,
-    edit: (AgendaOccurrence) -> Unit, openCourse: (ScheduledCourse) -> Unit, close: () -> Unit, focusKey: String?) {
+    edit: (AgendaOccurrence) -> Unit, openCourse: (ScheduledCourse) -> Unit, close: () -> Unit,
+    target: OccurrenceKey?, onRevealed: (OccurrenceKey) -> Unit) {
     val members = remember(placement, group) { placement.members(group) }
     val submission = rememberSubmission(model)
     PlannerModalBottomSheet(close, canDismiss = !submission.busy) {
-        val list = rememberLazyListState(initialFirstVisibleItemIndex = members.indexOfFirst { it.stableKey == focusKey }.coerceAtLeast(0))
+        val list = key(group.start) { rememberLazyListState() }
+        LaunchedEffect(list, group, target) {
+            if (target == null || group.hidden.none { it.key == target }) return@LaunchedEffect
+            val index = members.indexOfFirst { it.key == target }
+            list.scrollToItem(index)
+            val key = members[index].stableKey
+            snapshotFlow { list.layoutInfo.visibleItemsInfo.any { it.key == key } }.first { it }
+            onRevealed(target)
+        }
         Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
             Text(stringResource(R.string.slot_overlapping, members.size), style = MaterialTheme.typography.titleLarge)
             Text(if (group.start == group.end) clockLabel(group.start, plan.day) else
@@ -41,7 +51,7 @@ internal fun OverlapSheet(placement: TimeGridPlacement, group: TimeGridPlacement
                 contentPadding = PaddingValues(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(members, key = { it.stableKey }) { item ->
                     AgendaEventCard(item, plan.day, plan.revision, !submission.busy, edit, openCourse, { submission.send(it) },
-                        Modifier.fillMaxWidth().testTag("overlap-item:${item.stableKey}"), wrap = true, focused = item.stableKey == focusKey)
+                        Modifier.fillMaxWidth().testTag("overlap-item:${item.stableKey}"), wrap = true)
                 }
             }
         }

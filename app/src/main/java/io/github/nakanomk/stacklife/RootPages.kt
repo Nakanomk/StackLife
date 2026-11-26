@@ -26,7 +26,7 @@ import kotlinx.coroutines.flow.first
  * not a scroll through everything between them. Both use the same keyed AndroidX pager. */
 @Composable
 internal fun RootPages(order: List<Destination>, active: Destination, reveal: Long, onSelect: (Destination) -> Unit,
-    assistantPage: AssistantPage, content: @Composable (Destination, Boolean) -> Unit) {
+    assistantPage: AssistantPage, onReselectToday: () -> Unit = {}, content: @Composable (Destination, Boolean) -> Unit) {
     // The saved Destination, never a temporary slot index, restores the root after recreation.
     val pager = remember(order, reveal) { PagerState(order.indexOf(active)) { order.size } }
     var slots by remember(pager) { mutableStateOf(order) }
@@ -110,7 +110,9 @@ internal fun RootPages(order: List<Destination>, active: Destination, reveal: Lo
             start + (order.indexOf(slots[neighbor]) - start) * abs(offset)
         }
     } }
-    val bar = rememberDestinationCapsule(active.key, position) { key ->
+    val bar = rememberDestinationCapsule(active.key, position, onReselect = {
+        if (it == Destination.TODAY.key) onReselectToday()
+    }) { key ->
         val end = slots.indexOfFirst { it.key == key }
         if (end >= 0) {
             swipe = null

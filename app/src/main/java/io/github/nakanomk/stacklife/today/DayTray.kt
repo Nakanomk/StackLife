@@ -34,7 +34,6 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -149,13 +148,6 @@ internal fun DayWithTray(
         val axisSource = rememberPlannerBackdrop()
         Box(Modifier.fillMaxSize().plannerBackdrop(axisSource)) {
             Box(Modifier.fillMaxSize().padding(bottom = clearance)) {
-                val rail = if (drag == null) Modifier.fillMaxHeight() else Modifier.layout { measurable, bounds ->
-                    val visible = (drag.scale.height - drag.scroll.value).coerceIn(0, bounds.maxHeight)
-                    val line = measurable.measure(bounds.copy(minHeight = visible, maxHeight = visible))
-                    layout(line.width, line.height) { line.placeRelative(0, 0) }
-                }
-                Spacer(Modifier.padding(start = spine - 1.dp, top = top).width(2.dp).then(rail)
-                    .testTag("day-rail").background(MaterialTheme.colorScheme.outlineVariant))
                 val eventListPadding = if (drag == null) bottom - clearance + maxOf(closedHeight, openHeight) + taskFabSize + taskFabMargin else 0.dp
                 content(spine, eventListPadding)
             }

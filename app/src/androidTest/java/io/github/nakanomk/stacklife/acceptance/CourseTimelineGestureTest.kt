@@ -144,7 +144,7 @@ class CourseTimelineGestureTest {
         assertTrue("The solid fallback must completely cover the period rule (ΔL=$solid)", solid < .008f)
     }
 
-    @Test fun realPeriodRulesCurveInsideTallLensesAndRespondToPressAndScroll() {
+    @Test fun tallAndNarrowCoursePanesKeepRealPeriodRulesLevelThroughPressAndScroll() {
         val term = TermSpec("Studio-7", LocalDate.of(2026, 9, 7), 1, BellSchedule.SUMMER)
         fun tile(day: Int, name: String, first: Int, last: Int) =
             ScheduledCourse(term.id, HUST_SOURCE, term.meeting(1, day, name, "", first, last))
@@ -198,14 +198,11 @@ class CourseTimelineGestureTest {
         fun profile(image: Bitmap, tile: Rect, y: Int): List<Int> =
             listOf(tile.left + tile.width() / 8, tile.centerX(), tile.right - tile.width() / 8 - 1)
                 .map { x -> lineAt(image, x, y) }
-        fun assertArc(image: Bitmap, tile: Rect, y: Int, upper: Boolean) {
+        fun assertFlatPane(image: Bitmap, tile: Rect, y: Int) {
             val source = lineAt(image, gridX, y)
-            val (left, center, right) = profile(image, tile, y)
-            assertTrue("The curve must continue the real grid: center=$center, empty day=$source",
-                abs(center - source) <= 2 * dp)
-            val sign = if (upper) 1 else -1
-            assertTrue("Both sides of the period line should curve toward the nearest cap: $left, $center, $right",
-                sign * (center - left) > dp && sign * (center - right) > dp)
+            val throughGlass = profile(image, tile, y)
+            assertTrue("Period bows toward the center: line outside=$source, inside=$throughGlass",
+                throughGlass.all { abs(it - source) <= 2 * dp })
         }
         try {
             course(3).performTouchInput { down(percentOffset(.5f, .625f)); advanceEventTime(350) }
@@ -239,10 +236,10 @@ class CourseTimelineGestureTest {
                 }
                 try {
                     assertEquals("A tap opens once; dragging another course does not", listOf(classes[3]), opened)
-                    assertArc(rest, long, (long.top - gap + 3 * row).roundToInt(), upper = true)
-                    assertArc(rest, lane, (lane.top - gap + 2 * row).roundToInt(), upper = true)
-                    assertArc(rest, four, upperRule, upper = true)
-                    assertArc(scrolled, lower, (lower.bottom + gap - row).roundToInt(), upper = false)
+                    assertFlatPane(rest, long, (long.top - gap + 3 * row).roundToInt())
+                    assertFlatPane(rest, lane, (lane.top - gap + 2 * row).roundToInt())
+                    assertFlatPane(rest, four, upperRule)
+                    assertFlatPane(scrolled, lower, (lower.bottom + gap - row).roundToInt())
                     val atRest = profile(rest, four, upperRule)
                     val held = profile(pressed, four, upperRule)
                     assertTrue("Press must move the transmitted rule, not merely tint it: $atRest → $held",
@@ -288,7 +285,7 @@ class CourseTimelineGestureTest {
         else assertEquals("$label must have plain white strokes", 0, edges)
     }
 
-    @Test fun materialEditorPreviewsCourseInkWithoutChangingTheTimetableAndCanCancelSaveOrReset() {
+    @Test fun materialEditorAppliesCourseInkImmediatelyAndCanDiscardOrReset() {
         // Solid mode isolates the ink change from GPU availability and the system palette.
         val saved = Appearance(theme = ThemeMode.LIGHT, glass = false)
         runBlocking { store.apply(PlannerCommand.EditAppearance(AppearancePatch.Replace(saved))) }
@@ -310,19 +307,24 @@ class CourseTimelineGestureTest {
         assertCourseInk("大学物理", edged = false)
         ui.onNode(outline).performClick()
         assertCourseInk("大学物理", edged = true)
-        assertEquals(revision, runBlocking { store.state().revision })
-        ui.onNodeWithText("取消").performClick()
+        ui.waitUntil(7_000) { appearance() == saved.copy(courseTextOutline = true) }
+        assertEquals(revision + 1, runBlocking { store.state().revision })
+        ui.onNodeWithText("放弃修改").performClick()
         material()
         field(outline).assertIsOff().performClick()
-        ui.onNodeWithText("保存外观").performClick()
+        ui.onNodeWithContentDescription("返回").performClick()
         material()
         field(outline).assertIsOn()
         assertEquals(saved.copy(courseTextOutline = true), appearance())
         field(hasText("恢复默认设置") and hasClickAction()).performClick()
         field(outline).assertIsOff()
-        assertEquals(saved.copy(courseTextOutline = true), appearance())
-        ui.onNodeWithText("保存外观").performClick()
-        await(hasText("模型服务配置") and hasClickAction())
+        ui.waitUntil(7_000) { appearance() == Appearance(theme = ThemeMode.LIGHT) }
+        ui.onNodeWithContentDescription("返回").performClick()
+        val settings = hasAnyAncestor(hasTestTag("route:settings"))
+        val model = hasText("模型服务配置") and hasClickAction() and settings
+        await(hasScrollToIndexAction() and settings).performScrollToNode(model)
+        await(model).assertIsDisplayed()
+        ui.onNodeWithTag("appearance-scroll").assertDoesNotExist()
         assertEquals(Appearance(theme = ThemeMode.LIGHT), appearance())
     }
 

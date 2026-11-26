@@ -1,22 +1,5 @@
 StackLife — today's current-time marker
 
-BiliPai 0.10.3 (615), jay3-yy and BiliPai contributors, GPL-3.0
-https://github.com/jay3-yy/BiliPai/blob/c7f835b34d8323358be57be298f86f29fecb53c8/app/src/main/java/com/android/purebilibili/feature/audio/screen/MusicWavySlider.kt
-https://github.com/jay3-yy/BiliPai/blob/c7f835b34d8323358be57be298f86f29fecb53c8/app/src/main/java/com/android/purebilibili/feature/audio/screen/MusicWavyProgressPolicy.kt
-https://github.com/jay3-yy/BiliPai/blob/c7f835b34d8323358be57be298f86f29fecb53c8/design-system/src/main/java/com/android/purebilibili/core/ui/DecorativeAnimationGate.kt
-today/CurrentTimeMarker.kt::timeLine adapts MusicWavySlider's sin(x/wavelength * 2π + phase), max(wavelength/12, 2px) sampling and 1400ms linear phase, with MUSIC_WAVY_AMPLITUDE_DP (6), MUSIC_WAVY_WAVELENGTH_DP (22), MUSIC_WAVY_STROKE_DP (3). Cache one extra period and translate a clipped path rather than rebuilding it during draws. CurrentTimeMarker adapts DecorativeAnimationGate/rememberDecorativeAnimationGate's viewport, RESUMED, focused-window and allowed-motion conjunction; StackLife also checks both day-axis edges, civil day, front entry and its own motion preference. No slider, playback state, seek semantics or haptics. Full GPL-3.0 text: StackLife-GPL-3.0-or-later.txt in this directory.
-
-AndroidX Compose Material 3, Apache-2.0, f7b1e7ea7bf500b26751482bfcfbf618ca3b48a2
-Copyright 2022, 2024, 2025 The Android Open Source Project.
-https://github.com/androidx/androidx/blob/f7b1e7ea7bf500b26751482bfcfbf618ca3b48a2/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/WavyProgressIndicator.kt#L168-L231
-https://github.com/androidx/androidx/blob/f7b1e7ea7bf500b26751482bfcfbf618ca3b48a2/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/ProgressIndicator.kt#L980-L1002
-https://github.com/androidx/androidx/blob/f7b1e7ea7bf500b26751482bfcfbf618ca3b48a2/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/ProgressIndicator.kt#L1044-L1060
-https://github.com/androidx/androidx/blob/f7b1e7ea7bf500b26751482bfcfbf618ca3b48a2/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens/MotionTokens.kt
-https://github.com/androidx/androidx/blob/f7b1e7ea7bf500b26751482bfcfbf618ca3b48a2/compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/internal/LinearWavyProgressModifiers.kt#L1026-L1081
-CurrentTimeMarker's headTiming/tailTiming adapt LinearWavyProgressIndicator's first-line head/tail on one InfiniteTransition, linearIndeterminateFirstLineHeadAnimationSpec and linearIndeterminateFirstLineTailAnimationSpec: 1750ms cycle, 1000ms per edge, tail delayed 250ms, MotionTokens.EasingEmphasizedAccelerateCubicBezier (0.3,0,0.8,0.15). timeTrail adapts the modifier's cap-aware PathMeasure.getSegment into a reused destination, along a vertical path approaching the stationary arrow. No second loading segment or progress semantics. Full Apache-2.0 text: Material-Design-Icons-Apache-2.0.txt in this directory.
-
 Google Material Symbols, Apache-2.0, 10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7
 https://github.com/google/material-design-icons/blob/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/navigation/materialsymbolsrounded/navigation_fill1_24px.svg
-ic_now_navigation.xml uses the filled Rounded navigation silhouette unchanged. The vector crops transparent margins and reflects it vertically so that its bottom-centre tip sits on the current instant. The cursor and its trail share the timetable rail's centre in LTR and RTL; neither has a circular backing. Full Apache-2.0 text: Material-Design-Icons-Apache-2.0.txt.
-
-The current time, readable label, DayAxisScale position, independent user controls and their combination into a calendar indicator are StackLife-specific; none of these upstream projects supplies this combined marker.
+ic_now_navigation.xml retains the filled Rounded navigation path. StackLife reflects it downward and centres its filled-area centroid in the viewport so the time and rail meet at the centroid, in either layout direction. Full Apache-2.0 text: Material-Design-Icons-Apache-2.0.txt in this directory.

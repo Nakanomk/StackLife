@@ -4,18 +4,18 @@ import io.github.nakanomk.stacklife.i18n.uiText
 import kotlinx.serialization.Serializable
 
 @Serializable enum class ThemeMode { SYSTEM, LIGHT, DARK }
-@Serializable enum class PaletteMode { DYNAMIC, SEED }
+@Serializable enum class PaletteMode { DYNAMIC, SEED, WALLPAPER }
 @Serializable enum class NavStyle { FLOATING, DOCKED }
-@Serializable enum class Destination(val key: String, private val en: String, private val zh: String) {
-    TODAY("today", "Today", "今天"), WORKSPACE("workspace", "Workspace", "工作台"), GRAPHS("graphs", "Graphs", "流程图"),
-    COURSES("courses", "Timetable", "课表"), COUNTDOWN("countdown", "Countdown", "倒数日");
+@Serializable enum class Destination(val key: String, private val en: String, private val zh: String, private val dockEn: String = en) {
+    TODAY("today", "Today", "今天"), WORKSPACE("workspace", "Workspace", "工作台", "Space"), GRAPHS("graphs", "Graphs", "流程图"),
+    COURSES("courses", "Timetable", "课表"), COUNTDOWN("countdown", "Countdown", "倒数日", "CntDown");
 
     val label: String get() = uiText(en, zh)
+    val dockLabel: String get() = uiText(dockEn, zh)
 }
 
 internal val allDestinations = Destination.entries.toSet()
 @Serializable enum class DayScrollEffect { FLAT, WHEEL }
-@Serializable enum class NowLineStyle { WAVE, STRAIGHT, OFF }
 @Serializable enum class HapticLevel { OFF, LIGHT, STANDARD }
 internal val privatePhotoId = Regex("[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}")
 @Serializable enum class WallpaperPreset(private val en: String, private val zh: String) {
@@ -43,6 +43,7 @@ data class Appearance(
     val theme: ThemeMode = ThemeMode.SYSTEM,
     val palette: PaletteMode = PaletteMode.DYNAMIC,
     val seed: String = "#435D92",
+    val palettePage: Destination? = null,
     val compact: Boolean = false,
     val navStyle: NavStyle = NavStyle.FLOATING,
     val order: List<Destination> = Destination.entries,
@@ -63,11 +64,12 @@ data class Appearance(
     val pageBackgrounds: Map<Destination, WallpaperSpec> = emptyMap(),
     val showCourseGrid: Boolean = false,
     val dayScrollEffect: DayScrollEffect = DayScrollEffect.WHEEL,
-    val nowLine: NowLineStyle = NowLineStyle.WAVE,
+    val showNowLine: Boolean = true,
     val nowArrow: Boolean = true,
-    val nowTrail: Boolean = true,
     val navigationHaptics: HapticLevel = HapticLevel.LIGHT,
     val edgeHaptics: HapticLevel = HapticLevel.LIGHT,
+    val showNavLabels: Boolean = true,
+    val frostedGlass: Boolean = false,
 ) {
     init {
         require(seed.length == 7 && seed.first() == '#' && seed.drop(1).all { it in '0'..'9' || it in 'A'..'F' }) { uiText("Use #RRGGBB for the seed color.", "种子色须为 #RRGGBB。") }

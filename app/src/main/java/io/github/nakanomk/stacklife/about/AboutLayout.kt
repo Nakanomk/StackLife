@@ -30,8 +30,8 @@ internal fun AboutList(padding: PaddingValues, modifier: Modifier = Modifier, co
 
 @Composable
 internal fun AboutCard(padding: PaddingValues = PaddingValues(16.dp), spacing: Arrangement.Vertical = Arrangement.spacedBy(8.dp),
-    content: @Composable ColumnScope.() -> Unit) {
-    FrostedCard(Modifier.fillMaxWidth()) {
+    provideContainerUnderlay: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    FrostedCard(Modifier.fillMaxWidth(), provideContainerUnderlay = provideContainerUnderlay) {
         Column(Modifier.padding(padding), verticalArrangement = spacing, content = content)
     }
 }

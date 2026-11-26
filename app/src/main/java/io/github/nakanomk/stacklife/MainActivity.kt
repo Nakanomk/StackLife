@@ -90,11 +90,16 @@ class MainActivity : LocalizedActivity() {
         AppDiagnostics.bind(this)
         val planner = (application as StackLifeApplication).planner
         reminder = intent.reminderTarget()
-        setContent { StackLifeApp(viewModel { WorkspaceViewModel(planner) }, firstRunGuide = true, updates = appUpdates,
-            backup = (application as StackLifeApplication).backup, reminder = reminder, onReminderHandled = {
-            reminder = null
-            setIntent(Intent(intent).setData(null))
-        }) }
+        setContent {
+            val delivered = reminder
+            StackLifeApp(viewModel { WorkspaceViewModel(planner) }, firstRunGuide = true, updates = appUpdates,
+                backup = (application as StackLifeApplication).backup, reminder = delivered, onReminderHandled = {
+                    if (reminder === delivered) {
+                        reminder = null
+                        setIntent(Intent(intent).setData(null))
+                    }
+                })
+        }
     }
 }
 
@@ -213,7 +218,9 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
     var selectedDate by rememberSaveable { mutableStateOf<Long?>(null) }
     var revealIdentity by rememberSaveable { mutableStateOf<String?>(null) }
     val revealKey = remember(revealIdentity) { revealIdentity?.let { Json.decodeFromString<OccurrenceKey>(it) } }
-    var visitToday by rememberSaveable { mutableLongStateOf(0L) }
+    var occurrenceVisit by rememberSaveable { mutableLongStateOf(0L) }
+    var todayVisit by rememberSaveable { mutableIntStateOf(0) }
+    val returnToNow = { selectedDate = null; revealIdentity = null; todayVisit++; Unit }
     var destination by rememberSaveable { mutableStateOf(preferences.appearance.start) }
     var courseSelection by rememberSaveable { mutableStateOf(CourseSelection()) }
     val origins = remember { RouteOrigins() }
@@ -255,8 +262,10 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
             if (hidden) navigate(Feature(Destination.TODAY)) else if (stack.last() != Home) navigate(Home)
             selectedDate = java.time.Instant.ofEpochMilli(occurrence.startMillis).atZone(zone).toLocalDate().toEpochDay()
             revealIdentity = occurrence.key.storageKey()
-            if (!hidden) destination = Destination.TODAY
-            visitToday++
+            if (!hidden && destination != Destination.TODAY) {
+                destination = Destination.TODAY
+                occurrenceVisit++ // Only switch the root pager when the target is on another tab.
+            }
         }
         onReminderHandled()
         if (occurrence == null) notifications.launch { messages.showSnackbar(if (state == ReadState.ReadFailed)
@@ -280,6 +289,11 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
         val shared: SharedModifier = { key ->
             if (animate && initialDetail == null) cardBoundsModifier(key) else Modifier
         }
+        val dayCanLand = when (val top = stack.last()) {
+            Home -> true
+            is Feature -> top.destination == Destination.TODAY
+            else -> false
+        }
         val showFeature: @Composable (Destination, Boolean) -> Unit = { page, front ->
             pages.SaveableStateProvider(if (LocalFeatureBack.current == null) page.key else "feature:${page.key}") {
             when (page) {
@@ -289,7 +303,8 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                         selectedDate = day.takeUnless { it == local.date }?.toEpochDay()
                     },
                     onEdit = navigate, onSettings = { navigate(Preferences) }, revealKey = revealKey,
-                    onRevealed = { revealIdentity = null }, onAdd = { navigate(AddTask) })
+                    onRevealed = { located -> if (revealIdentity == located.storageKey()) revealIdentity = null }, onAdd = { navigate(AddTask) },
+                    todayVisit = todayVisit.takeIf { front && dayCanLand }, currentDate = local.date)
                 Destination.WORKSPACE -> WorkspacePanel(model) { workspace ->
                     WorkspaceScreen(workspace, model, { navigate(TaskDetail(it)) }, { navigate(FrameDetail(it)) },
                         { navigate(Preferences) }, if (front) shared else noCardBounds, frames, { frames = it },
@@ -307,7 +322,10 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 entry<Home> {
                     val order = preferences.appearance.visibleOrder
                     val active = preferences.appearance.nearestVisible(destination)
-                    RootPages(order, active, visitToday, { destination = it }, featureScope(active), showFeature)
+                    RootPages(order, active, occurrenceVisit, { target ->
+                        if (target == Destination.TODAY && destination != target) returnToNow()
+                        destination = target
+                    }, featureScope(active), onReselectToday = returnToNow, content = showFeature)
                 }
                 entry<Feature> { key ->
                     CompositionLocalProvider(LocalFeatureBack provides back, LocalPlannerGlassAllowed provides true) {
@@ -391,7 +409,10 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                         onAbout = { navigate(HelpAbout) }, onUpdates = updates?.let { { navigate(Updates) } },
                         onBackup = backup?.let { { navigate(Backups) } },
                         assistantPreference = { AssistantEnabledPreference(assistantSettings, assistant) },
-                        onFeature = { navigate(Feature(it)) }, onSchedule = navigate) }
+                        onFeature = { page ->
+                            if (page == Destination.TODAY) returnToNow()
+                            navigate(Feature(page))
+                        }, onSchedule = navigate) }
                 }
                 entry<HelpAbout> { HelpAboutScreen(back) { navigate(Guidance) } }
                 if (updates != null) entry<Updates> { UpdateScreen(updates, back) }

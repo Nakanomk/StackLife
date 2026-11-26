@@ -45,6 +45,29 @@ class BackgroundStoreTest {
         try { block(app, File(isolated, "background-images")) } finally { isolated.deleteRecursively() }
     }
 
+    @Test fun entryPhotoPinsSurviveFailedCleanupAndAnotherEditorLeaving() = runBlocking { fixture { app, dir ->
+        val original = UUID.randomUUID().toString()
+        var durable = setOf(original)
+        var unreadable = false
+        val store = BackgroundStore(app) {
+            if (unreadable) throw java.io.IOException("reference read failed")
+            durable
+        }
+        store.recover()
+        File(dir, original).writeBytes(redPixels(Bitmap.CompressFormat.PNG))
+        for (editor in listOf("first", "second")) store.pinEditorOriginals(editor, setOf(original))
+        durable = emptySet()
+        store.collect()
+        assertTrue(store.exists(original))
+        unreadable = true
+        assertTrue(runCatching { store.finishEditor("first", emptyList()) }.exceptionOrNull() is PhotoProblem)
+        unreadable = false
+        store.finishEditor("second", emptyList()); store.collect()
+        assertTrue(store.exists(original))
+        store.finishEditor("first", emptyList())
+        assertFalse(store.exists(original))
+    } }
+
     @RequiresApi(29)
     private suspend fun selected(bytes: ByteArray, mime: String = "image/jpeg", block: suspend (Uri) -> Unit) =
         withSelectedPhoto(context, bytes, mime) { block(it) }

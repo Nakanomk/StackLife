@@ -27,19 +27,20 @@ import kotlinx.coroutines.launch
 
 /** The shell owns the business selection. Only the current input session may publish to it. */
 internal class CalendarSelection(
-    val pager: PagerState, private val scope: CoroutineScope, private val owner: () -> Int,
+    val pager: PagerState, private val scope: CoroutineScope, private val owner: State<Int>,
     private val animation: () -> AnimationSpec<Float>?, private val publish: (Int) -> Unit,
 ) {
-    val committed get() = owner()
+    val committed get() = owner.value
     private var requested by mutableStateOf<Int?>(null)
     private var drag by mutableStateOf<DragInteraction.Start?>(null)
     private var origin = 0
     private var echo: Int? = null
     private var generation = 0L
     private var scroll: Job? = null
+    private var alignedOwner = pager.currentPage
 
-    val displayPage = derivedStateOf {
-        requested ?: if (drag == null) committed else {
+    val previewPage = derivedStateOf {
+        requested ?: if (drag == null) null else {
             // Even the first fraction beyond the snap position exposes the adjacent date.
             // Keep the integer page separate: a fraction can disappear on far-away dates.
             val page = pager.currentPage
@@ -51,6 +52,7 @@ internal class CalendarSelection(
             }.coerceIn(0, pager.pageCount - 1)
         }
     }
+    val displayPage = derivedStateOf { previewPage.value ?: committed }
 
     private fun interrupt() {
         generation++
@@ -84,15 +86,25 @@ internal class CalendarSelection(
         }
     }
 
+    /** A notification's acknowledgement removes its key; that is not another page change. */
+    fun synchronize(page: Int, externalLanding: Boolean) {
+        if (page == alignedOwner && !externalLanding) return
+        alignedOwner = page
+        align(page, force = externalLanding)
+    }
+
     /** Restores, notifications, and parent changes never masquerade as user requests. */
-    fun align(page: Int, force: Boolean = false) {
+    private fun align(page: Int, force: Boolean) {
         val acknowledged = echo == page
         echo = null
         if (acknowledged && !force) return
         interrupt()
-        if (pager.currentPage == page && pager.currentPageOffsetFraction == 0f && !pager.isScrollInProgress) return
+        if (!force && pager.currentPage == page && pager.currentPageOffsetFraction == 0f && !pager.isScrollInProgress) return
         scroll = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            pager.scroll(MutatePriority.PreventUserInput) { with(pager) { updateCurrentPage(page) } }
+            // Cancel the user's mutation first; scrollToPage snaps and remeasures before
+            // returning, rather than leaving a retained lazy key or old fling to land later.
+            if (pager.isScrollInProgress) pager.stopScroll(MutatePriority.PreventUserInput)
+            pager.scrollToPage(page)
         }
     }
 
@@ -122,7 +134,8 @@ internal class CalendarSelection(
 }
 
 @Composable
-internal fun rememberCalendarSelection(page: Int, count: Int, onSelect: (Int) -> Unit): CalendarSelection = key(count) {
+internal fun rememberCalendarSelection(page: Int, count: Int, externalTarget: Any? = null,
+    onSelect: (Int) -> Unit): CalendarSelection = key(count) {
     val initial = page.coerceIn(0, count - 1)
     // The shell restores the date, not the fractional offset of an interrupted gesture.
     val pager = remember { PagerState(currentPage = initial) { count } }
@@ -131,9 +144,9 @@ internal fun rememberCalendarSelection(page: Int, count: Int, onSelect: (Int) ->
     // choose() is the single accepting owner for a tap or a completed swipe; align() is silent.
     val callback by rememberUpdatedState<(Int) -> Unit> { selected -> pulse(); onSelect(selected) }
     val spec by rememberUpdatedState(if (LocalMotionEnabled.current) MaterialTheme.motionScheme.fastSpatialSpec<Float>() else null)
-    val owner by rememberUpdatedState(initial)
-    val selection = remember(pager) { CalendarSelection(pager, scope, { owner }, { spec }, { callback(it) }) }
-    LaunchedEffect(selection, initial) { selection.align(initial) }
+    val owner = rememberUpdatedState(initial)
+    val selection = remember(pager) { CalendarSelection(pager, scope, owner, { spec }, { callback(it) }) }
+    LaunchedEffect(selection, initial, externalTarget) { selection.synchronize(initial, externalTarget != null) }
     LaunchedEffect(selection) { selection.observeDrags() }
     selection
 }

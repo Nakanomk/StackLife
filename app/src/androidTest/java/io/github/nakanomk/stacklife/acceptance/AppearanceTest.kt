@@ -37,20 +37,48 @@ class AppearanceTest {
         return ui.onNode(node).performScrollTo().assertIsDisplayed()
     }
 
-    @Test fun previewCanBeCancelledAndReducedTransparencyAlwaysWins() {
+    @Test fun discardRestoresImmediateMaterialEditsAndReducedTransparencyAlwaysWins() {
         runBlocking { store.apply(PlannerCommand.SetRestorePolicy(RestorePolicy.SWAP)) }
         show(); editor("材质与动态")
         ui.onNodeWithText("设置分组").assertDoesNotExist()
         ui.onNodeWithText("色彩来源").assertDoesNotExist()
-        field("启用液态玻璃").assertIsOn().performClick(); field("减少透明度").performClick()
-        assertTrue(runBlocking { preferences().appearance.glass })
-        ui.onNodeWithText("取消").performClick(); visible(hasText("材质与动态") and hasClickAction()).performClick()
-        field("启用液态玻璃").assertIsOn(); field("减少透明度").assertIsOff().performClick()
-        ui.onNodeWithText("保存外观").performClick(); visible(hasText("材质与动态") and hasClickAction())
+        field("磨砂玻璃").assertIsOff().performClick()
+        ui.waitUntil(7_000) { runBlocking { preferences().appearance.frostedGlass } }
+        field("启用玻璃效果").assertIsOn().performClick(); field("减少透明度").performClick()
+        field("磨砂玻璃").assertIsNotEnabled().assertIsOn()
+        ui.waitUntil(7_000) { runBlocking { preferences().appearance.let { !it.glass && it.reduceTransparency } } }
+        ui.onNodeWithText("放弃修改").performClick(); visible(hasText("材质与动态") and hasClickAction()).performClick()
+        field("磨砂玻璃").assertIsOff()
+        field("启用玻璃效果").assertIsOn(); field("减少透明度").assertIsOff().performClick()
+        ui.onNodeWithContentDescription("返回").performClick(); visible(hasText("材质与动态") and hasClickAction())
         val saved = runBlocking { preferences() }
         assertTrue(saved.appearance.glass && saved.appearance.reduceTransparency); assertEquals(RestorePolicy.SWAP, saved.policy)
         ui.onNodeWithContentDescription("返回").performClick()
         visible(hasTestTag("navigation-capsule")).assert(hasStateDescription("实色胶囊"))
+    }
+
+    @Test fun hidingNavigationLabelsKeepsAccessibleNamesAndTargetsInBothBars() {
+        show(); editor("布局")
+        field("显示导航文字").assertIsOn().performClick()
+        ui.onNodeWithContentDescription("返回").performClick()
+        visible(hasText("布局") and hasClickAction())
+        ui.onNodeWithContentDescription("返回").performClick()
+        visible(hasTestTag("navigation-capsule"))
+        val hidden = runBlocking { preferences().appearance }
+        assertFalse(hidden.showNavLabels)
+        for (style in NavStyle.entries) {
+            if (style != hidden.navStyle) runBlocking {
+                store.apply(PlannerCommand.EditAppearance(AppearancePatch.Replace(hidden.copy(navStyle = style))))
+            }
+            if (style == NavStyle.DOCKED) visible(hasStateDescription(ui.activity.getString(io.github.nakanomk.stacklife.R.string.ui_bottom_nav)))
+            for (dest in Destination.entries) {
+                val tag = hasTestTag("nav:${dest.key}")
+                visible(tag).assertContentDescriptionEquals(dest.label).assertHeightIsAtLeast(48.dp).assertWidthIsAtLeast(48.dp)
+                ui.onNode(hasText(dest.dockLabel) and hasAnyAncestor(tag), useUnmergedTree = true).assertDoesNotExist()
+            }
+            val target = if (style == NavStyle.FLOATING) "workspace" else "countdown"
+            ui.onNodeWithTag("nav:$target").performClick().assertIsSelected()
+        }
     }
 
     @Test fun startupOrderAndDockUsePersistedSettingsNotTheDefaultFirstFrame() {
@@ -62,7 +90,7 @@ class AppearanceTest {
         ui.onNodeWithText("23 分钟").assertDoesNotExist()
         assertTrue(ui.onNodeWithTag("nav:courses").fetchSemanticsNode().boundsInRoot.left < ui.onNodeWithTag("nav:today").fetchSemanticsNode().boundsInRoot.left)
         task.performClick(); visible(hasText("任务详情")).assertIsDisplayed(); ui.onNodeWithContentDescription("返回").performClick(); visible(hasText("持久队列"))
-        editor("色彩"); field("恢复默认设置").performClick(); ui.onNodeWithText("保存外观").performClick(); visible(hasText("色彩") and hasClickAction())
+        editor("色彩"); field("恢复默认设置").performClick(); ui.onNodeWithContentDescription("返回").performClick(); visible(hasText("色彩") and hasClickAction())
         assertEquals(layout.copy(theme = ThemeMode.SYSTEM, palette = PaletteMode.DYNAMIC, seed = Appearance().seed), runBlocking { preferences().appearance })
     }
 

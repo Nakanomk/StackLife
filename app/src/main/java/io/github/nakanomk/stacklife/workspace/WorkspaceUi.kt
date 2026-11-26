@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
@@ -50,6 +51,8 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+
+import io.github.nakanomk.stacklife.transitions.LocalContainerUnderlay
 
 typealias SharedModifier = @Composable (String) -> Modifier
 
@@ -156,31 +159,48 @@ internal fun EditorPage(title: String, back: () -> Unit, assistantPage: Assistan
 }
 
 @Composable
-internal fun FormGroup(modifier: Modifier = Modifier, frosted: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+internal fun FormGroup(modifier: Modifier = Modifier, frosted: Boolean = false, provideContainerUnderlay: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit) {
     val fields: @Composable () -> Unit = {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp), content = content)
     }
     val fill = MaterialTheme.colorScheme.surfaceContainerLow
     if (frosted) {
-        StackLifeSurface(CapsuleScene.FROST, modifier.fillMaxWidth(), solid = fill, shape = RoundedCornerShape(16.dp), content = fields)
+        StackLifeSurface(CapsuleScene.FROST, modifier.fillMaxWidth(), solid = fill, shape = RoundedCornerShape(16.dp),
+            provideContainerUnderlay = provideContainerUnderlay, content = fields)
     } else {
-        Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = fill, content = fields)
+        Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = fill) {
+            if (provideContainerUnderlay) CompositionLocalProvider(LocalContainerUnderlay provides remember(fill) { UniformPagePaper(fill) }, content = fields)
+            else fields()
+        }
     }
 }
 
 @Composable
 internal fun PageTitle(title: String, back: () -> Unit, backEnabled: Boolean = true, help: String? = null, action: (@Composable () -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Layout(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), content = {
         GlassIcon(R.drawable.ic_arrow_back, stringResource(R.string.ui_back), back, enabled = backEnabled)
-        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, Modifier.weight(1f, fill = false).semantics { heading() }, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge)
-                if (help != null) SettingInfo(help, title = title)
-            }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, Modifier.weight(1f, fill = false).semantics { heading() }, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge)
+            if (help != null) SettingInfo(help, title = title)
         }
-        if (action == null) Spacer(Modifier.width(48.dp)) else action()
+        if (action != null) Box { action() }
+    }) { children, constraints ->
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val width = constraints.maxWidth
+        val backIcon = children[0].measure(loose)
+        val gap = 8.dp.roundToPx()
+        val label = children[1].measure(loose.copy(maxWidth = (width - 2 * (backIcon.width + gap)).coerceAtLeast(0)))
+        val trailing = children.getOrNull(2)?.measure(loose)
+        val titleLeft = (width - label.width) / 2
+        val secondRow = trailing != null && trailing.width + gap > titleLeft
+        val rowHeight = maxOf(backIcon.height, label.height, if (secondRow) 0 else trailing?.height ?: 0)
+        layout(width, rowHeight + if (secondRow) trailing!!.height else 0) {
+            backIcon.placeRelative(0, (rowHeight - backIcon.height) / 2)
+            label.placeRelative(titleLeft, (rowHeight - label.height) / 2)
+            trailing?.placeRelative(width - trailing.width, if (secondRow) rowHeight else (rowHeight - trailing.height) / 2)
+        }
     }
 }
 

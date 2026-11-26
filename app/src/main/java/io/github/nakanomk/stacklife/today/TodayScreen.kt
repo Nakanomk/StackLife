@@ -52,12 +52,18 @@ private val lastDay = LocalDate.of(9999, 12, 31)
 @Composable
 internal fun TodayRoute(
     model: WorkspaceViewModel, date: LocalDate, zone: ZoneId, onDate: (LocalDate) -> Unit,
-    onEdit: (SlotEditorKey) -> Unit, onSettings: () -> Unit, revealKey: OccurrenceKey?, onRevealed: () -> Unit, onAdd: () -> Unit,
+    onEdit: (SlotEditorKey) -> Unit, onSettings: () -> Unit, revealKey: OccurrenceKey?, onRevealed: (OccurrenceKey) -> Unit, onAdd: () -> Unit,
+    todayVisit: Int? = 0,
+    currentDate: LocalDate = LocalDate.now(zone),
 ) {
     var choosingDate by rememberSaveable { mutableStateOf(false) }
     val floatingTray = LocalAppearance.current.floatingDayTray
     var trayOpen by rememberSaveable(floatingTray) { mutableStateOf(true) }
     var eventView by rememberSaveable { mutableStateOf(false) }
+    // Save the consumed visit, not the clock: rotation, plan updates and minute ticks are not visits.
+    var positionedVisit by rememberSaveable(date, zone.id) { mutableStateOf<Int?>(null) }
+    val currentVisit by rememberUpdatedState(todayVisit)
+    if (todayVisit == null) SideEffect { positionedVisit = null }
     val editor = courseEditor("today")
     if (editor.form != null) {
         val terms by remember(model) { model.terms() }.collectAsStateWithLifecycle(initialValue = ReadState.Loading)
@@ -65,15 +71,17 @@ internal fun TodayRoute(
     }
     fun pageOf(day: LocalDate) = (day.toEpochDay() - firstDay.toEpochDay()).toInt()
     val page = pageOf(date)
-    val selection = rememberCalendarSelection(page, pageOf(lastDay) + 1) { onDate(firstDay.plusDays(it.toLong())) }
-    LaunchedEffect(revealKey, page, selection) {
-        if (revealKey != null) selection.align(page, force = true)
+    val selection = rememberCalendarSelection(page, pageOf(lastDay) + 1, externalTarget = revealKey) { onDate(firstDay.plusDays(it.toLong())) }
+    val choose: (LocalDate) -> Unit = {
+        if (it == LocalDate.now(zone)) positionedVisit = null
+        selection.request(pageOf(it))
     }
-    val displayed = firstDay.plusDays(selection.displayPage.value.toLong())
-    val choose: (LocalDate) -> Unit = { selection.request(pageOf(it)) }
-    if (choosingDate) DateWheelDialog(displayed, { choosingDate = false; choose(it) }, { choosingDate = false })
+    // At rest both the caption and its accessibility label come from the shell's actual date.
+    // Only a live calendar gesture/request supplies a temporary heading.
+    val shown = selection.previewPage.value?.let { firstDay.plusDays(it.toLong()) } ?: date
+    if (choosingDate) DateWheelDialog(shown, { choosingDate = false; choose(it) }, { choosingDate = false })
     RootPane(header = {
-        DayHeader(displayed, { choosingDate = true }, { selection.request(selection.displayPage.value + it) },
+        DayHeader(shown, { choosingDate = true }, { selection.request(selection.displayPage.value + it) },
             { choose(LocalDate.now(zone)) }, onSettings, eventView, { eventView = it })
     }) { top, bottom ->
         CalendarPager(selection, Modifier.fillMaxSize()) { index ->
@@ -100,25 +108,28 @@ internal fun TodayRoute(
                         } }, close = { reading = null })
                     }
                 } else if (reading != null) SideEffect { reading = null }
-                val target = revealKey?.takeIf { index == page && !selection.pager.isScrollInProgress && selection.pager.currentPage == index }
+                val settled = todayVisit != null && index == page && !selection.pager.isScrollInProgress && selection.pager.currentPage == index
+                val target = revealKey?.takeIf { settled }
+                val positionNow = settled && revealKey == null && positionedVisit != todayVisit
                 val placement = remember(query, plan.occurrences) { TimeGridPlacement(plan.occurrences, query.startMillis, query.endMillis) }
                 var moreStart by rememberSaveable { mutableStateOf<Long?>(null) }
-                var focused by rememberSaveable { mutableStateOf<String?>(null) }
                 val group = moreStart?.let { start -> placement.more.firstOrNull { it.start == start } }
-                LaunchedEffect(target, placement) {
+                val positioned: () -> Unit = {
+                    positionedVisit = currentVisit
                     if (target != null) {
-                        focused = target.storageKey()
-                        placement.more.firstOrNull { g -> g.hidden.any { it.key == target } }?.let { moreStart = it.start }
+                        val hidden = placement.more.firstOrNull { g -> g.hidden.any { it.key == target } }
+                        moreStart = hidden?.start
+                        if (hidden == null) onRevealed(target)
                     }
                 }
                 if (group != null) OverlapSheet(placement, group, plan, model, { moreStart = null; editEvent(it) },
-                    { moreStart = null; openCourse(it) }, { moreStart = null }, focused)
-                val more: (TimeGridPlacement.Overflow) -> Unit = { focused = null; moreStart = it.start }
+                    { moreStart = null; openCourse(it) }, { moreStart = null }, target, onRevealed)
+                val more: (TimeGridPlacement.Overflow) -> Unit = { moreStart = it.start }
                 rememberSaveableStateHolder().SaveableStateProvider(eventView) {
-                    if (eventView) EventDay(plan, placement, model, editTray, editEvent, openCourse, more, onAdd, focused, target, onRevealed,
-                        top, bottom, trayOpen, { trayOpen = !trayOpen })
+                    if (eventView) EventDay(plan, placement, model, editTray, editEvent, openCourse, more, onAdd, positionNow, target, positioned,
+                        top, bottom, trayOpen, { trayOpen = !trayOpen }, pastDay = query.date < currentDate)
                     else DayBody(plan, placement, model, model::checkSchedule, editTray, editEvent, openCourse, more, onAdd,
-                        focused, target, onRevealed, top, bottom, trayOpen, { trayOpen = !trayOpen })
+                        positionNow, target, positioned, top, bottom, trayOpen, { trayOpen = !trayOpen })
                 }
             }
         }
@@ -128,7 +139,7 @@ internal fun TodayRoute(
 @Composable
 private fun DayBody(
     plan: DayPlan, placement: TimeGridPlacement, actions: WorkspaceActions, checkSlot: suspend (PlannerCommand) -> String?,
-    editTray: (String) -> Unit, onEdit: (AgendaOccurrence) -> Unit, openCourse: (ScheduledCourse) -> Unit, onMore: (TimeGridPlacement.Overflow) -> Unit, onAdd: () -> Unit, focused: String?, revealKey: OccurrenceKey?, onRevealed: () -> Unit,
+    editTray: (String) -> Unit, onEdit: (AgendaOccurrence) -> Unit, openCourse: (ScheduledCourse) -> Unit, onMore: (TimeGridPlacement.Overflow) -> Unit, onAdd: () -> Unit, positionNow: Boolean, revealKey: OccurrenceKey?, onPositioned: () -> Unit,
     top: Dp, clearance: Dp, trayOpen: Boolean, toggleTray: () -> Unit,
 ) {
     val submission = rememberSubmission(actions)
@@ -153,13 +164,21 @@ private fun DayBody(
     }
     val scroll = rememberScrollState(initial)
     val atEnd by remember(scroll) { derivedStateOf { scroll.maxValue in 1 until Int.MAX_VALUE && !scroll.canScrollForward } }
-    LaunchedEffect(revealKey, scale) {
-        val item = revealKey?.let { key -> plan.occurrences.firstOrNull { it.key == key } } ?: return@LaunchedEffect
-        snapshotFlow { scroll.maxValue }.first { it != Int.MAX_VALUE }
-        scroll.scrollTo((scale.yAt(item.startMillis) - with(density) { 24.dp.roundToPx() }).coerceAtLeast(0))
-        onRevealed()
-    }
     val drag = remember(scale, scroll) { AxisDrag(scale, scroll) }
+    LaunchedEffect(revealKey, positionNow, drag) {
+        if (revealKey != null) {
+            val item = plan.occurrences.firstOrNull { it.key == revealKey } ?: return@LaunchedEffect
+            snapshotFlow { scroll.maxValue }.first { it != Int.MAX_VALUE }
+            scroll.scrollTo((scale.yAt(item.startMillis) - with(density) { 24.dp.roundToPx() }).coerceAtLeast(0))
+        } else if (positionNow) {
+            val now = System.currentTimeMillis()
+            if (now in plan.day.startMillis until plan.day.endMillis) {
+                snapshotFlow { drag.viewportHeight > 0 && scroll.maxValue != Int.MAX_VALUE }.first { it }
+                scroll.scrollTo((scale.yAt(now) - (drag.viewportHeight / 3).toInt()).coerceAtLeast(0))
+            }
+        } else return@LaunchedEffect
+        onPositioned()
+    }
     val send: (PlannerCommand) -> Unit = { submission.send(it) }
     DragEffects(drag, checkSlot)
     Box(Modifier.fillMaxSize()) {
@@ -167,7 +186,7 @@ private fun DayBody(
         Box(Modifier.fillMaxSize().plannerBackdrop(noticeSource)) {
             DayWithTray(plan, drag, !submission.busy, editTray, onAdd, top, clearance, trayOpen, toggleTray, hideForEnd = atEnd,
                 schedule = send) { spine, _ ->
-                DayAxis(drag, plan.revision, !submission.busy, onEdit, openCourse, send, onMore, focused, Modifier.fillMaxSize(), top, spine, endInGutter = trayOpen)
+                DayAxis(drag, plan.revision, !submission.busy, onEdit, openCourse, send, onMore, Modifier.fillMaxSize(), top, spine, endInGutter = trayOpen)
             }
         }
         drag.dropNotice?.let { message ->

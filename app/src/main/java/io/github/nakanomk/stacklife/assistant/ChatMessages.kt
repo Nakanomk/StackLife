@@ -28,10 +28,9 @@ internal fun ChatMessages(lines: List<ChatLine>, store: AttachmentStore, modifie
     emptyText: String? = null, live: Boolean = false, requestedLine: Long? = null, reattach: ((ChatImage) -> Unit)? = null,
     eventActions: @Composable (ChatLine) -> Unit = {}) {
     if (lines.isEmpty()) {
-        // A real empty transcript has no rows to subcompose, follow, or parse.
-        // Keep the same bottom margin and allow a tall localized hint to scroll.
-        Column(modifier.fillMaxSize().testTag(tag).verticalScroll(rememberScrollState(), reverseScrolling = true)
-            .padding(vertical = 6.dp), verticalArrangement = Arrangement.Bottom) {
+        // Keep the same leading inset as a nonempty transcript, including at large font sizes.
+        Column(modifier.fillMaxSize().testTag(tag).verticalScroll(rememberScrollState())
+            .padding(vertical = 6.dp)) {
             if (emptyText != null) Text(emptyText, style = MaterialTheme.typography.bodyMedium)
         }
         return
@@ -80,7 +79,7 @@ internal fun ChatMessages(lines: List<ChatLine>, store: AttachmentStore, modifie
     CompositionLocalProvider(LocalMarkdownReadCache provides remember { MarkdownReadCache() }) {
         Box(modifier.fillMaxWidth()) {
             LazyColumn(Modifier.fillMaxSize().testTag(tag), state = list, reverseLayout = true,
-                contentPadding = PaddingValues(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom)) {
+                contentPadding = PaddingValues(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Top)) {
                 items(lines.asReversed(), key = ChatLine::id) { line ->
                     val event = line.event
                     when {

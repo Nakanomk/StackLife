@@ -8,10 +8,24 @@ private val appearanceFormat = Json { encodeDefaults = true; ignoreUnknownKeys =
 internal fun encodeAppearance(value: Appearance): String = appearanceFormat.encodeToString(value)
 internal fun decodeAppearance(text: String): Appearance = appearanceFormat.decodeFromJsonElement(StoredAppearance, appearanceFormat.parseToJsonElement(text))
 
+/** Only the retired marker fields are translated on the wire. Unknown archive fields stay errors. */
+internal object PortableAppearance : JsonTransformingSerializer<Appearance>(Appearance.serializer()) {
+    fun currentFields(fields: JsonObject): JsonObject {
+        if ("nowLine" !in fields && "nowTrail" !in fields) return fields
+        require("showNowLine" !in fields && "palettePage" !in fields && fields["palette"] != JsonPrimitive("WALLPAPER"))
+        val style = fields["nowLine"]?.jsonPrimitive
+        require(style == null || style.isString && style.content in setOf("STRAIGHT", "WAVE", "OFF"))
+        fields["nowTrail"]?.jsonPrimitive?.let { require(!it.isString && it.booleanOrNull != null) }
+        return JsonObject(fields - "nowLine" - "nowTrail" + mapOf(
+            "showNowLine" to JsonPrimitive(style?.content != "OFF"), "palettePage" to JsonNull))
+    }
+    override fun transformDeserialize(element: JsonElement): JsonElement = currentFields(element.jsonObject)
+}
+
 /** Decode persisted navigation before constructing the strict current model (also for historical snapshots). */
 internal object StoredAppearance : JsonTransformingSerializer<Appearance>(Appearance.serializer()) {
     override fun transformDeserialize(element: JsonElement): JsonElement {
-        val fields = element.jsonObject
+        val fields = PortableAppearance.currentFields(element.jsonObject)
         val names = allDestinations.map { it.name }
         fun known(key: String) = (fields[key] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content?.takeIf(names::contains) }?.distinct()
         val savedOrder = known("order").orEmpty()
@@ -27,13 +41,15 @@ internal object StoredAppearance : JsonTransformingSerializer<Appearance>(Appear
 }
 
 internal enum class AppearanceGroup(val key: String, val fields: Map<String, () -> String>) {
-    COLOR("color", mapOf("theme" to { uiText("Theme", "明暗") }, "palette" to { uiText("Color source", "色彩来源") }, "seed" to { uiText("Seed color", "种子色") })),
+    COLOR("color", mapOf("theme" to { uiText("Theme", "明暗") }, "palette" to { uiText("Color source", "色彩来源") },
+        "seed" to { uiText("Seed color", "种子色") }, "palettePage" to { uiText("Wallpaper to sample", "取色背景") })),
     LAYOUT("layout", mapOf("compact" to { uiText("Compact spacing", "紧凑留白") }, "navStyle" to { uiText("Navigation style", "导航样式") }, "order" to { uiText("Navigation order", "导航次序") }, "start" to { uiText("Start page", "启动页") },
+        "showNavLabels" to { uiText("Show navigation labels", "显示导航文字") },
         "visible" to { uiText("Shown destinations", "显示的功能") }, "dayScrollEffect" to { uiText("Day scroll effect", "日程滚动效果") },
-        "nowLine" to { uiText("Current time line", "当前时间线") }, "nowArrow" to { uiText("Current time arrow", "当前时间箭头") },
-        "nowTrail" to { uiText("Arrow trail", "箭头拖尾") },
+        "showNowLine" to { uiText("Current time line", "当前时间线") }, "nowArrow" to { uiText("Current time arrow", "当前时间箭头") },
         "floatingDayTray" to { uiText("Floating queue tray", "悬浮待排队列") }, "showDuration" to { uiText("Show duration", "显示时长") }, "showNotes" to { uiText("Show notes", "显示笔记") })),
     MATERIAL("material", mapOf("glass" to { uiText("Liquid glass", "液态玻璃") }, "navGlass" to { uiText("Navigation glass", "导航玻璃") }, "assistantGlass" to { uiText("Assistant glass", "助理玻璃") },
+        "frostedGlass" to { uiText("Frosted glass", "磨砂玻璃") },
         "background" to { uiText("Global background", "全局背景") }, "pageBackgrounds" to { uiText("Page backgrounds", "逐页背景") },
         "showCourseGrid" to { uiText("Timetable grid lines", "课表辅助线") },
         "courseTextOutline" to { uiText("Outline class text", "课程文字描边") },
@@ -83,7 +99,8 @@ internal fun appearanceLabel(value: JsonElement, key: String? = null): String = 
         "LIGHT" -> if (key == "navigationHaptics" || key == "edgeHaptics") uiText("Light", "轻") else uiText("Light", "浅色")
         "STANDARD" -> uiText("Standard", "标准"); "DARK" -> uiText("Dark", "深色"); "DYNAMIC" -> uiText("Dynamic color", "动态色")
         "FLAT" -> uiText("Flat", "平面"); "WHEEL" -> uiText("Wheel", "滚轮")
-        "WAVE" -> uiText("Wavy", "曲线"); "STRAIGHT" -> uiText("Straight", "直线"); "OFF" -> uiText("Off", "关闭")
+        "OFF" -> uiText("Off", "关闭"); "WALLPAPER" -> uiText("From app wallpaper", "跟随应用背景")
+        "null" -> if (key == "palettePage") uiText("Global background", "全局背景") else s
         "SEED" -> uiText("Seed color", "种子色"); "FLOATING" -> uiText("Floating pill", "浮动胶囊"); "DOCKED" -> uiText("Bottom bar", "贴底导航")
         else -> Destination.entries.find { it.name == s }?.label ?: s
     }

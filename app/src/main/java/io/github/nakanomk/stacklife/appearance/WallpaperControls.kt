@@ -32,6 +32,7 @@ import io.github.nakanomk.stacklife.planner.WallpaperPreset
 import io.github.nakanomk.stacklife.planner.WallpaperSpec
 import io.github.nakanomk.stacklife.workspace.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -47,26 +48,30 @@ internal fun Appearance.replacingWallpaper(page: Destination?, spec: WallpaperSp
     copy(background = requireNotNull(spec))
 else copy(pageBackgrounds = if (spec == null) pageBackgrounds - page else pageBackgrounds + (page to spec))
 
-internal class WallpaperPicker(val pick: (Destination?) -> Unit, val preparing: Boolean, val target: Destination?, val failure: String?)
+internal class WallpaperPicker(val pick: (Destination?) -> Unit, val cancel: () -> Unit,
+    val preparing: Boolean, val target: Destination?, val failure: String?)
 
-// The grant and its copy belong to the editor, not a recycled settings row. An already handed-off
-// image belongs to the saveable draft; cancelling an unfinished copy is handled by BackgroundStore.
+// The grant and its copy belong to the editor, not a recycled settings row. Only hand a
+// finished private copy to the writer; BackgroundStore cleans up an interrupted import.
 @Composable
-internal fun rememberWallpaperPicker(onImported: (Destination?, String) -> Unit): WallpaperPicker {
+internal fun rememberWallpaperPicker(accepting: Boolean, onImported: (Destination?, String) -> Unit): WallpaperPicker {
     val handOff by rememberUpdatedState(onImported)
     var pickerTarget by rememberSaveable { mutableStateOf<Destination?>(null) }
     var awaiting by rememberSaveable { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
     var failure by rememberSaveable { mutableStateOf<String?>(null) }
+    val canPick by rememberUpdatedState(accepting)
     val scope = rememberCoroutineScope()
+    var importJob by remember { mutableStateOf<Job?>(null) }
     val store = LocalBackgroundStore.current
     val importFailure = stringResource(R.string.wallpaper_import_failed)
     val picker = rememberLauncherForActivityResult(PickVisualMedia()) { uri ->
+        val wanted = awaiting && canPick
         awaiting = false
-        if (uri != null) {
+        if (uri != null && wanted) {
             val page = pickerTarget
             importing = true
-            scope.launch {
+            importJob = scope.launch {
                 try {
                     handOff(page, store.importImage(uri))
                 } catch (cancel: CancellationException) { throw cancel }
@@ -77,7 +82,7 @@ internal fun rememberWallpaperPicker(onImported: (Destination?, String) -> Unit)
         }
     }
     val pick: (Destination?) -> Unit = { page ->
-        if (!awaiting && !importing) {
+        if (canPick && !awaiting && !importing) {
             failure = null
             pickerTarget = page
             awaiting = true
@@ -86,10 +91,10 @@ internal fun rememberWallpaperPicker(onImported: (Destination?, String) -> Unit)
             catch (_: SecurityException) { awaiting = false; failure = importFailure }
         }
     }
-    return remember(pick, awaiting, importing, pickerTarget, failure) { WallpaperPicker(pick, awaiting || importing, pickerTarget, failure) }
+    return WallpaperPicker(pick, { awaiting = false; importJob?.cancel() }, awaiting || importing, pickerTarget, failure)
 }
 
-// BiliPai 5893c2c, HomeWallpaperAdjustmentSheet: draft-only crop in the window's aspect ratio.
+// BiliPai 5893c2c, HomeWallpaperAdjustmentSheet: crop in the window's aspect ratio.
 @Composable
 internal fun WallpaperControls(value: Appearance, change: (Appearance) -> Unit, target: Destination?,
     chooseTarget: (Destination?) -> Unit, picker: WallpaperPicker) {
@@ -119,7 +124,8 @@ internal fun WallpaperControls(value: Appearance, change: (Appearance) -> Unit, 
             }
             if (mode == WallpaperSource.PRESET) {
                 WallpaperPresetChoices(spec.preset) { preset ->
-                    if (preset != spec.preset) change(value.replacingWallpaper(target, WallpaperSpec(preset = preset)))
+                    if (preset != spec.preset) change(value.replacingWallpaper(target,
+                        WallpaperSpec(preset = preset, tint = spec.tint, blur = spec.blur)))
                 }
             } else if (mode == WallpaperSource.PHOTO) {
                 PreferenceRow(stringResource(R.string.wallpaper_replace), onClick = { picker.pick(target) })

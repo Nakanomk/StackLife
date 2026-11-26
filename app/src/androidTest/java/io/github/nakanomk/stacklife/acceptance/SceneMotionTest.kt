@@ -4,9 +4,9 @@ import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.activity.ComponentActivity
-import androidx.compose.animation.core.tween
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -95,7 +95,19 @@ class SceneMotionTest {
         ui.mainClock.advanceTimeBy(600)
     }
 
-    private fun pixels() = ui.onRoot().captureToImage().toPixelMap()
+    private fun pixels(): PixelMap {
+        if (!ui.mainClock.autoAdvance && android.os.Build.VERSION.SDK_INT >= 29) {
+            // Match the submitted RenderNode frame to the held gesture's geometry;
+            // Compose's test clock does not advance the platform render thread.
+            val submitted = java.util.concurrent.CountDownLatch(1)
+            ui.runOnUiThread { with(ui.activity.window.decorView) {
+                viewTreeObserver.registerFrameCommitCallback { submitted.countDown() }
+                invalidate()
+            } }
+            assertTrue("Scene frame was not submitted", submitted.await(4, java.util.concurrent.TimeUnit.SECONDS))
+        }
+        return ui.onRoot().captureToImage().toPixelMap()
+    }
     private fun delta(a: Color, b: Color) = maxOf(abs(a.red - b.red), abs(a.green - b.green), abs(a.blue - b.blue))
 
     /** Outside the reveal, even the *ink* of the original toolbar, rows and dock must stay
@@ -138,6 +150,31 @@ class SceneMotionTest {
         assertTrue("Expected visible text/controls in $region", edges > 15)
         assertTrue("Landing obscured or displaced the source at $region: $different changed / $edges edges",
             different <= maxOf(8, edges / 10))
+    }
+
+    /** Read actual strokes at the new top-left and uniform width scale. An aperture
+     * exposing the stationary launcher (or a correctly sized solid tile) cannot pass. */
+    private fun assertFlyingPatch(before: PixelMap, now: PixelMap, row: Rect, aperture: Rect, inkRegion: Rect = row) {
+        val scale = aperture.width / row.width
+        val safe = aperture.deflate(3f)
+        var strokes = 0
+        var matched = 0
+        for (y in inkRegion.top.toInt() + 4 until inkRegion.bottom.toInt() - 4 step 2)
+            for (x in inkRegion.left.toInt() + 4 until inkRegion.right.toInt() - 7 step 2) {
+                val a = before[x, y]
+                val b = before[x + 3, y]
+                if (delta(a, b) < .35f) continue
+                val px = (aperture.left + (x + .5f - row.left) * scale).toInt()
+                val py = (aperture.top + (y + .5f - row.top) * scale).toInt()
+                val qx = (aperture.left + (x + 3.5f - row.left) * scale).toInt()
+                if (!safe.contains(Offset(px.toFloat(), py.toFloat())) || !safe.contains(Offset(qx.toFloat(), py.toFloat()))) continue
+                strokes++
+                if ((-1..1).any { dy -> (-1..1).any { dx ->
+                        delta(a, now[px + dx, py + dy]) < .24f && delta(b, now[qx + dx, py + dy]) < .24f
+                    } }) matched++
+            }
+        assertTrue("No source strokes in the flying tile $row → $aperture: $matched/$strokes",
+            strokes >= 12 && matched >= strokes * .70f)
     }
 
     private data class EdgeShot(val frame: Rect, val pixels: PixelMap)
@@ -286,9 +323,20 @@ class SceneMotionTest {
         val detail = "detail:$key"
         fun measuredPage() = ui.onNodeWithTag(detail).fetchSemanticsNode().size
         click(ui.onNodeWithTag(key))
-        // The pinned driver first places the real source and only then starts the
-        // entering clock. Inspect the actual destination-ink part of the trip.
+        // First click: before destination ink participates the row *itself* must already
+        // have lifted into the moving shell, with all other visible items intact.
         val rootHeight = ui.onRoot().fetchSemanticsNode().size.height
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            val window = ui.onAllNodesWithTag(detail).fetchSemanticsNodes().singleOrNull()?.boundsInRoot
+            window != null && window.height in
+                (row.height + .04f * (rootHeight - row.height))..(row.height + .22f * (rootHeight - row.height))
+        }
+        val firstCover = pixels()
+        val lifted = bounds(detail)
+        assertFlyingPatch(before, firstCover, row, lifted)
+        assertUncoveredPixels(before, firstCover, lifted)
+        keepFrame("shared-${key.substringBefore(':')}-lift", firstCover)
         ui.waitUntil(5_000) {
             ui.mainClock.advanceTimeByFrame()
             val window = ui.onAllNodesWithTag(detail).fetchSemanticsNodes().singleOrNull()?.boundsInRoot
@@ -323,11 +371,10 @@ class SceneMotionTest {
             open.box.height + (row.height - open.box.height) * .35f, nearDetail.height, 3f)
         seek(input, .70f)
         val nearCard = frame(key)
+        keepFrame("shared-${key.substringBefore(':')}-back70", nearCard.pixels)
         between(row, nearCard.box, open.box)
         assertUncoveredPixels(before, nearCard.pixels, nearCard.box)
-        // At 70% Back the destination ink has handed off. The row's paper, title
-        // and controls must already be intact, not a second moving detail title.
-        assertLivePatch(before, nearCard.pixels, row)
+        assertFlyingPatch(before, nearCard.pixels, row, nearCard.box)
         assertTrue("More back progress must contract the same surface", nearCard.box.height < nearDetail.height - 2f)
         seek(input, .30f)
         checkTitlePath(bounds(detail), placedTitle())
@@ -390,7 +437,7 @@ class SceneMotionTest {
             keepFrame("entity-source", before)
             for ((i, sample) in lastFrames.withIndex()) keepFrame("entity-landing-$i", sample.second)
             for ((window, shot) in lastFrames) {
-                assertLivePatch(before, shot, original[1])
+                assertFlyingPatch(before, shot, original[1], window)
                 for (i in listOf(0, 2)) if (!window.overlaps(original[i])) assertLivePatch(before, shot, original[i])
             }
             assertTrue("Need frames on the other side of detail disposal", disposedFrames >= 2)
@@ -442,6 +489,15 @@ class SceneMotionTest {
                 assertFixed("Detail composer must replace the dock in place", finalDock, dock)
                 val visible = f.box.deflate(3f)
                 val excluded = f.box.inflate(3f)
+                val zoom = f.box.width / source.width
+                fun handedOff(x: Int, y: Int, destination: Color): Color {
+                    if (detailAlpha >= 1f) return destination
+                    val sx = (source.left + (x - f.box.left) / zoom).toInt()
+                    val sy = (source.top + (y - f.box.top) / zoom).toInt()
+                    val cover = if (sx >= source.left && sx < source.right && sy >= source.top && sy < source.bottom)
+                        rootPixels[sx, sy] else paper
+                    return destination.copy(alpha = detailAlpha).compositeOver(cover)
+                }
                 var expected = 0
                 var wrong = 0
                 for (y in headerBand.top.toInt() until headerBand.bottom.toInt() step 2)
@@ -449,8 +505,7 @@ class SceneMotionTest {
                         val p = Offset(x.toFloat(), y.toFloat())
                         val ink = when {
                             visible.contains(p) && finalHeading.contains(p) && delta(open.pixels[x, y], paper) > .40f ->
-                                (if (source.contains(p)) open.pixels[x, y].copy(alpha = detailAlpha).compositeOver(rootPixels[x, y])
-                                    else open.pixels[x, y]).also { detailGlyphs++ }
+                                handedOff(x, y, open.pixels[x, y]).also { detailGlyphs++ }
                             !excluded.contains(p) && rootHeader.contains(p) && delta(rootPixels[x, y], paper) > .40f ->
                                 rootPixels[x, y].also { rootGlyphs++ }
                             else -> continue
@@ -461,8 +516,8 @@ class SceneMotionTest {
                     }
                 assertTrue("Wrong toolbar visible in ${f.box}: $wrong/$expected glyph samples",
                     wrong <= maxOf(2, expected / 15))
-                // Below the fixed heading the page is opaque except for its source
-                // slot: the return is allowed to reveal exactly that row's real ink.
+                // Where there is no settled destination ink the only allowed ink is
+                // from the real, uniformly scaled flying tile, not a second header.
                 val y0 = maxOf(visible.top, finalHeading.bottom + 4f).toInt()
                 val y1 = minOf(visible.bottom, open.box.center.y).toInt()
                 val x0 = maxOf(visible.left.toInt(), glyphLeft)
@@ -472,19 +527,19 @@ class SceneMotionTest {
                 for (y in y0 until y1 step 3) for (x in x0 until x1 step 3) {
                     if (delta(open.pixels[x, y], paper) > .05f) continue
                     probes++
-                    val expectedPaper = if (source.contains(Offset(x.toFloat(), y.toFloat())))
-                        paper.copy(alpha = detailAlpha).compositeOver(rootPixels[x, y]) else paper
+                    val expectedPaper = handedOff(x, y, paper)
                     if (delta(f.pixels[x, y], expectedPaper) > .28f) ghosts++
                 }
                 checkedBlank += probes
                 assertTrue("Displaced heading ink under the fixed toolbar: $ghosts/$probes", ghosts <= maxOf(2, probes / 700))
             }
             val openAtPush = (push.box.height - source.height) / (open.box.height - source.height)
-            check(push, pushHeading, pushDock, ((openAtPush - .2f) / .2f).coerceIn(0f, 1f))
+            fun handoff(u: Float): Float = u.coerceIn(0f, 1f).let { it * it * (3f - 2f * it) }
+            check(push, pushHeading, pushDock, handoff((openAtPush - .22f) / .28f))
             start(input)
             for (progress in listOf(.12f, .30f, .45f, .56f, .68f)) {
                 seek(input, progress)
-                check(frame(key), windowRect(heading), windowRect(assistant), ((1f - progress - .6f) / .2f).coerceIn(0f, 1f))
+                check(frame(key), windowRect(heading), windowRect(assistant), handoff((1f - progress - .45f) / .30f))
             }
             assertTrue("Need glyphs from both visible toolbars and blank paper between them: $rootGlyphs/$detailGlyphs/$checkedBlank",
                 rootGlyphs > 40 && detailGlyphs > 40 && checkedBlank > 200)
@@ -554,15 +609,19 @@ class SceneMotionTest {
             for (progress in listOf(.12f, .20f, .30f, .50f, .80f, .98f, .50f, .12f)) {
                 seek(input, progress)
                 val moving = frame(key)
-                val paintedTitle = if (progress < .4f) moving.title else ui.onNodeWithTag(
-                    "row-title/$key", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val rowTitle = windowRect(ui.onNodeWithTag("row-title/$key", useUnmergedTree = true))
+                val paintedTitle = if (progress < .4f) moving.title else {
+                    val scale = moving.box.width / source.width
+                    Rect(moving.box.topLeft + (rowTitle.topLeft - source.topLeft) * scale,
+                        moving.box.topLeft + (rowTitle.bottomRight - source.topLeft) * scale)
+                }
                 assertTrue("The visible title must stay inside the moving surface at $progress",
                     moving.box.inflate(1f).contains(paintedTitle.center))
-                assertFalse("The clipped Back control must never cover the painted title", paintedTitle.overlaps(backHit()))
+                if (progress < .4f) assertFalse("The Back control must not cover the detail title", paintedTitle.overlaps(backHit()))
                 keepFrame("large-back-${(progress * 100).roundToInt()}", moving.pixels)
                 assertUncoveredPixels(before, moving.pixels, moving.box)
                 if (progress <= .12f) assertDetailInk(open, moving)
-                if (progress >= .50f) assertLivePatch(before, moving.pixels, source)
+                if (progress >= .50f) assertFlyingPatch(before, moving.pixels, source, moving.box)
             }
             ui.runOnUiThread { input.backCancelled() }
             ui.mainClock.advanceTimeBy(600)
@@ -597,24 +656,21 @@ class SceneMotionTest {
         }
     }
 
-    private fun checkTweenTravel(samples: List<Pair<Long, Float>>, start: Float, end: Float) {
-        val native = tween<Float>()
-        fun nativeTime(distance: Float) = (0..native.durationMillis).first {
-            native.easing.transform(it.toFloat() / native.durationMillis) >= distance
+    private fun checkSharedOpening(samples: List<Pair<Long, Float>>, start: Float, end: Float) {
+        // For BiliPai's from-rest critically damped spring: x=1−(1+ωt)exp(−ωt).
+        // Use differences in crossing times, independent of first placement or frame rate.
+        val omega = kotlin.math.sqrt(310.0)
+        fun time(distance: Double) = (0..800).first {
+            val z = omega * it / 1000
+            1 - (1 + z) * kotlin.math.exp(-z) >= distance
         }
-        val travel = samples.map { (time, position) -> time to (position - start) / (end - start) }
-        // Compare elapsed time between actual placements, not time since click:
-        // the source and destination have to be placed before they can be paired.
-        fun crossed(distance: Float): Double = travel.zipWithNext().firstNotNullOfOrNull { (a, b) ->
-            if (a.second > 0f && a.second <= distance && b.second >= distance && b.second < 1f && b.second > a.second)
-                a.first + (b.first - a.first) * ((distance - a.second) / (b.second - a.second)).toDouble()
-            else null
-        } ?: error("No moving frame crossing $distance in $travel")
-        val startTime = crossed(.30f)
-        for (distance in listOf(.65f, .95f)) {
-            assertEquals("Measured container travel from 30% to ${distance * 100}%: $travel",
-                (nativeTime(distance) - nativeTime(.30f)).toDouble(), crossed(distance) - startTime, 24.0)
+        val travel = samples.map { (t, y) -> t to (y - start) / (end - start) }
+        fun crossing(distance: Float) = travel.zipWithNext().firstNotNullOf { (a, b) ->
+            if (a.second <= distance && b.second > distance)
+                a.first + (b.first - a.first) * ((distance - a.second) / (b.second - a.second)).toDouble() else null
         }
+        for (fraction in listOf(.65f, .95f)) assertEquals("Android shared opening spring: $travel",
+            (time(fraction.toDouble()) - time(.30)).toDouble(), crossing(fraction) - crossing(.30f), 24.0)
     }
 
     private fun checkSpringSettle(samples: List<Pair<Long, Float>>, start: Float, end: Float) {
@@ -633,11 +689,24 @@ class SceneMotionTest {
 
     @Test fun helpPaneOpensAndRecoversFromBackAlongTheSamePlacedPath() {
         ui.setContent {
-            StackLifeTheme(Appearance()) { HelpAboutScreen(back = { error("Unexpected exit") }, onGuide = { error("Unexpected guide") }) }
+            StackLifeTheme(Appearance(theme = ThemeMode.DARK, glass = false)) {
+                // Same page paper on both sides. Give the real enclosing AboutCard an
+                // unmistakable theme color; the transparent preference row paints none.
+                MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(
+                    surfaceContainerLow = Color(0xFF754565), onSurface = Color.White)) {
+                    HelpAboutScreen(back = { error("Unexpected exit") }, onGuide = { error("Unexpected guide") })
+                }
+            }
         }
         val launcher = ui.onNodeWithTag("about-help").performScrollTo()
         val location = launcher.fetchSemanticsNode().boundsInRoot
+        val label = windowRect(ui.onNode(hasText(ui.activity.getString(R.string.about_help)) and
+            hasAnyAncestor(hasTestTag("about-help")), useUnmergedTree = true))
         val sourcePixels = pixels()
+        val materialX = (location.left + .62f * location.width).toInt()
+        val materialY = location.center.y.toInt()
+        val material = sourcePixels[materialX, materialY]
+        assertTrue("Card and shared page paper must differ", delta(material, sourcePixels[2, materialY]) > .18f)
         val tag = "pane:HELP"
         fun window() = ui.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().singleOrNull()?.boundsInRoot
         withClockAndBack { input ->
@@ -647,7 +716,7 @@ class SceneMotionTest {
             val opening = tracePlacement { window()?.height }
             val full = checkNotNull(window())
             val helpPixels = pixels()
-            checkTweenTravel(opening, location.height, full.height)
+            checkSharedOpening(opening, location.height, full.height)
             fun checkSeek(progress: Float): Rect {
                 val landing = ui.onNodeWithTag("about-help", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
                 assertEquals("The same row is available throughout the gesture", location, landing)
@@ -666,7 +735,16 @@ class SceneMotionTest {
             keepFrame("pane-help-open", helpPixels)
             keepFrame("pane-help-back-75", backPixels)
             assertUncoveredPixels(sourcePixels, backPixels, held)
-            assertLivePatch(sourcePixels, backPixels, location)
+            assertFlyingPatch(sourcePixels, backPixels, location, held, inkRegion = label)
+            for (p in listOf(.90f, .98f, .996f)) {
+                seek(input, p)
+                val frame = checkSeek(p)
+                val scale = frame.width / location.width
+                val x = (frame.left + (materialX + .5f - location.left) * scale).toInt()
+                val y = (frame.top + (materialY + .5f - location.top) * scale).toInt()
+                assertTrue("Pane at $p substituted the shared wallpaper for its actual card",
+                    delta(pixels()[x, y], material) < .025f)
+            }
             seek(input, .25f); checkSeek(.25f)
             seek(input, .75f); assertEquals(held, checkSeek(.75f))
             ui.runOnUiThread { input.backCancelled() }
@@ -675,6 +753,7 @@ class SceneMotionTest {
             assertUncoveredPixels(helpPixels, pixels(), Rect.Zero)
             start(input); seek(input, .5f); complete(input)
             assertEquals(location, launcher.fetchSemanticsNode().boundsInRoot)
+            assertTrue(delta(pixels()[materialX, materialY], material) < .025f)
         }
     }
 
@@ -690,7 +769,7 @@ class SceneMotionTest {
         withClockAndBack {
             val opening = record(fab)
             val full = bounds(route).height
-            checkTweenTravel(opening, compact, full)
+            checkSharedOpening(opening, compact, full)
             val back = ui.onNode(hasAnyAncestor(hasTestTag(route)) and hasContentDescription("返回") and hasClickAction())
             checkSpringSettle(record(back), full, compact)
             ui.onNodeWithTag(route).assertDoesNotExist()
@@ -741,11 +820,18 @@ class SceneMotionTest {
 
     @Test fun darkWallpaperAndSolidControlsKeepBothPagesPaintedThroughPushBackAndCancel() = wallpaperTrip(glass = false)
 
-    private fun wallpaperTrip(glass: Boolean) {
+    private fun photoVisible(map: PixelMap): Boolean {
+        val left = map[map.width / 4, map.height * 3 / 5]
+        val right = map[map.width * 3 / 4, map.height * 3 / 5]
+        return left.red - left.blue > .18f && right.blue - right.red > .18f
+    }
+
+    private fun withWorkspacePhoto(glass: Boolean, twoPapers: Boolean = false, examine: (String) -> Unit) {
         val context = ui.activity.applicationContext
         val folder = Files.createTempDirectory(context.cacheDir.toPath(), "scene-photo-").toFile()
         val id = UUID.randomUUID().toString()
-        val photos = BackgroundStore(object : ContextWrapper(context) { override fun getNoBackupFilesDir() = folder }) { setOf(id) }
+        val settingsPhoto = if (twoPapers) UUID.randomUUID().toString() else null
+        val photos = BackgroundStore(object : ContextWrapper(context) { override fun getNoBackupFilesDir() = folder }) { setOfNotNull(id, settingsPhoto) }
         val api = RoomPlannerApi(store.db, imageExists = photos::exists)
         try {
             runBlocking { photos.recover() }
@@ -754,8 +840,13 @@ class SceneMotionTest {
                 photo.eraseColor(android.graphics.Color.rgb(128, 12, 18))
                 Canvas(photo).drawRect(32f, 0f, 64f, 128f, Paint().apply { color = android.graphics.Color.rgb(12, 18, 144) })
                 File(File(folder, "background-images"), id).outputStream().use { check(photo.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                if (settingsPhoto != null) {
+                    photo.eraseColor(android.graphics.Color.rgb(12, 144, 18))
+                    File(File(folder, "background-images"), settingsPhoto).outputStream().use { check(photo.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                }
             } finally { photo.recycle() }
             val appearance = Appearance(start = Destination.WORKSPACE, theme = ThemeMode.DARK, glass = glass,
+                background = settingsPhoto?.let { WallpaperSpec(it, tint = 0f) } ?: Appearance().background,
                 pageBackgrounds = mapOf(Destination.WORKSPACE to WallpaperSpec(id, tint = 0f)))
             runBlocking {
                 val change = api.preview(listOf(PlannerCommand.EditAppearance(AppearancePatch.Replace(appearance)),
@@ -765,19 +856,162 @@ class SceneMotionTest {
             ui.setContent { CompositionLocalProvider(LocalBackgroundStore provides photos) {
                 StackLifeApp(viewModel { WorkspaceViewModel(api) })
             } }
-            val route = "route:settings"
-            val gear = ui.onNode(hasContentDescription(context.getString(R.string.ui_settings)) and hasClickAction())
             val taskId = runBlocking { store.state().queue.single().id }
-            val queueTitle = ui.onNodeWithTag("row-title/task:$taskId", useUnmergedTree = true)
             ui.waitUntil(12_000) { ui.onAllNodesWithTag("queue").fetchSemanticsNodes().isNotEmpty() }
             val material = context.getString(if (glass) R.string.ui_glass_capsule else R.string.ui_solid_capsule)
             ui.onAllNodes(hasStateDescription(material)).onFirst().assertExists()
-            fun photoVisible(map: PixelMap): Boolean {
-                val left = map[map.width / 4, map.height * 3 / 5]
-                val right = map[map.width * 3 / 4, map.height * 3 / 5]
-                return left.red - left.blue > .18f && right.blue - right.red > .18f
-            }
             ui.waitUntil(12_000) { photoVisible(pixels()) }
+            examine(taskId)
+        } finally { folder.deleteRecursively() }
+    }
+
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 33)
+    @Test fun actualRowAndBothWallpaperBandsRemainVisibleDuringTaskReturn() {
+        withWorkspacePhoto(glass = true) { id ->
+            val key = "task:$id"
+            val detail = "detail:$key"
+            val parent = pixels()
+            val row = bounds(key)
+            ui.onNodeWithTag(key).performClick()
+            val full = bounds(detail)
+            val settled = pixels()
+            fun checkFlight(name: String, window: Rect) {
+                val shot = pixels()
+                keepFrame("photo-task-$name", shot)
+                assertUncoveredPixels(parent, shot, window)
+                assertFlyingPatch(parent, shot, row, window)
+                // The launcher is much wider than it is tall. Below its uniformly scaled
+                // bottom edge the aperture still has height, but must not have a solid skirt.
+                val top = (window.top + row.height * window.width / row.width + 5f).toInt()
+                val bottom = (window.bottom - 12 * ui.density.density).toInt()
+                assertTrue("Need exposed material inside $window below the shared tile", bottom - top > 10)
+                for (x in listOf(shot.width / 4, shot.width * 3 / 4)) {
+                    assertTrue(x > window.left && x < window.right)
+                    val photo = parent[x, parent.height * 3 / 5]
+                    for (y in top until bottom step 3) assertTrue("$name: lost the photo at ($x,$y) inside $window",
+                        delta(photo, shot[x, y]) < .06f)
+                }
+            }
+            withClockAndBack { input ->
+                start(input); seek(input, .70f)
+                checkFlight("held", bounds(detail))
+                ui.runOnUiThread { input.backCancelled() }; ui.mainClock.advanceTimeBy(600)
+                assertUncoveredPixels(settled, pixels(), Rect.Zero)
+                ui.runOnUiThread { ui.activity.onBackPressedDispatcher.onBackPressed() }
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    val box = ui.onAllNodesWithTag(detail).fetchSemanticsNodes().singleOrNull()?.boundsInRoot
+                    box != null && (box.height - row.height) / (full.height - row.height) in 0.20f..0.40f
+                }
+                checkFlight("system-back", bounds(detail))
+                ui.mainClock.advanceTimeBy(600)
+                assertLivePatch(parent, pixels(), row)
+            }
+        }
+    }
+
+    @Test fun twoWallpaperReturnLandsOnTheScrolledSettingsCardNotTheWallpaper() = settingsMaterialTrip(glass = false)
+
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 33)
+    @Test fun twoWallpaperReturnLandsOnTheScrolledFrostNotTheWallpaper() = settingsMaterialTrip(glass = true)
+
+    private fun settingsMaterialTrip(glass: Boolean) = withWorkspacePhoto(glass, twoPapers = true) {
+        val gear = hasContentDescription(ui.activity.getString(R.string.ui_settings)) and hasClickAction()
+        ui.onNode(gear).performClick()
+        val settings = hasAnyAncestor(hasTestTag("route:settings"))
+        val launch = hasTestTag("open-feature:workspace")
+        ui.onNode(hasScrollToIndexAction() and settings).performScrollToNode(launch)
+        val row = ui.onNode(launch and settings)
+        // The tag precedes PreferenceRow's vertical padding. LayoutInfo.coordinates
+        // is the inner Row (16dp shorter), not the launcher that Nav3 captured.
+        val origin = row.fetchSemanticsNode().boundsInRoot
+        ui.waitUntil(10_000) { pixels().let { it[2, origin.center.y.toInt()].let { c -> c.green - c.red > .2f } } }
+        val parent = pixels()
+        // The row itself is transparent. Its real paint is the enclosing glass/solid
+        // form card, not the green paper behind the form. Probe well away from text.
+        val sourceX = (origin.left + origin.width * .59f).toInt()
+        val sourceY = origin.center.y.toInt()
+        val material = parent[sourceX, sourceY]
+        val bare = parent[2, sourceY]
+        assertTrue("Test requires a different material under the actual launcher ($material vs $bare)",
+            delta(material, bare) > .06f)
+        row.performClick()
+        val tag = "route:feature:workspace"
+        ui.waitUntil(10_000) { photoVisible(pixels()) }
+        val detail = pixels()
+        val page = bounds(tag)
+
+        fun checkFrame(window: Rect, shot: PixelMap, requestedOpen: Float? = null) {
+            val open = requestedOpen ?: ((window.height - origin.height) / (page.height - origin.height)).coerceIn(0f, 1f)
+            val expectedBox = androidx.compose.ui.geometry.lerp(origin, page, open)
+            val path = "open=$open: launcher=$origin page=$page expected=$expectedBox painted=$window"
+            assertEquals(path, expectedBox.left, window.left, 3f)
+            assertEquals(path, expectedBox.top, window.top, 3f)
+            assertEquals(path, expectedBox.right, window.right, 3f)
+            assertEquals(path, expectedBox.bottom, window.bottom, 3f)
+            val scale = window.width / origin.width
+            val x = (window.left + (sourceX + .5f - origin.left) * scale).toInt()
+            val y = (window.top + (sourceY + .5f - origin.top) * scale).toInt()
+            assertTrue("open=$open: row material $material became ${shot[x,y]} at ($x,$y)",
+                delta(material, shot[x, y]) < .035f)
+            assertUncoveredPixels(parent, shot, window)
+            // Below the lifted row: the aperture still has area, but no source glyphs
+            // or card. The wallpaper blend gives way to the real scrolled page beneath
+            // the surplus strip. Compare at the same pixel, not a bare page margin.
+            val tileBottom = window.top + origin.height * scale
+            if (window.bottom - tileBottom > 8f) {
+                val py = ((window.bottom + tileBottom) / 2).toInt()
+                for (px in listOf(shot.width / 4, shot.width * 3 / 4)) {
+                    val side = if (px < shot.width / 2) 2 else shot.width - 3
+                    val front = detail[side, py]
+                    val ground = parent[side, py]
+                    assertTrue("Fixture must provide contrasting real photos", delta(ground, front) > .3f)
+                    val mixed = front.copy(alpha = open).compositeOver(ground)
+                    val t = ((open - .001f) / .119f).coerceIn(0f, 1f)
+                    val expected = mixed.copy(alpha = t * t * (3f - 2f * t)).compositeOver(parent[px, py])
+                    assertTrue("open=$open: ($px,$py) paper ${shot[px,py]}, expected $expected over ${parent[px,py]}",
+                        delta(shot[px, py], expected) < .045f)
+                }
+            }
+        }
+        withClockAndBack { input ->
+            start(input)
+            for (p in listOf(.64f, .76f, .90f, .98f, .996f, .76f)) {
+                seek(input, p)
+                // boundsInRoot belongs to the tagged coordinator between the two
+                // layers. LayoutInfo.coordinates is after the inverse scale (always
+                // full design width), which is correct for text layout, not this probe.
+                checkFrame(bounds(tag), pixels(), 1f - p)
+            }
+            ui.runOnUiThread { input.backCancelled() }; ui.mainClock.advanceTimeBy(700)
+            assertUncoveredPixels(detail, pixels(), Rect.Zero)
+            // Normal toolbar Back: compare every frame from source-ink ownership through
+            // the last two pre-disposal frames, then against the actual returned page.
+            click(ui.onNode(hasContentDescription(ui.activity.getString(R.string.ui_back)) and
+                hasClickAction() and hasAnyAncestor(hasTestTag(tag))))
+            var landingFrames = 0
+            var disposed = false
+            for (i in 0 until 80) {
+                ui.mainClock.advanceTimeByFrame()
+                val window = ui.onAllNodesWithTag(tag).fetchSemanticsNodes().singleOrNull()?.boundsInRoot
+                if (window == null) { disposed = true; break }
+                if (window.height <= origin.height + (page.height - origin.height) * .4f) {
+                    checkFrame(window, pixels())
+                    landingFrames++
+                } else if (landingFrames != 0) assertUncoveredPixels(parent, pixels(), Rect.Zero)
+            }
+            assertTrue("Normal return must paint at least two landing frames before disposal", disposed && landingFrames >= 2)
+            assertEquals(origin, row.fetchSemanticsNode().boundsInRoot)
+            assertUncoveredPixels(parent, pixels(), Rect.Zero)
+        }
+    }
+
+    private fun wallpaperTrip(glass: Boolean) {
+        withWorkspacePhoto(glass) { taskId ->
+            val context = ui.activity.applicationContext
+            val route = "route:settings"
+            val gear = ui.onNode(hasContentDescription(context.getString(R.string.ui_settings)) and hasClickAction())
+            val queueTitle = ui.onNodeWithTag("row-title/task:$taskId", useUnmergedTree = true)
             val parent = pixels()
             val row = windowRect(queueTitle)
             val dock = bounds("navigation-capsule")
@@ -816,7 +1050,7 @@ class SceneMotionTest {
                 fun checkFrame(stage: String) {
                     val box = ui.onAllNodesWithTag(route).fetchSemanticsNodes().singleOrNull()?.boundsInRoot
                     val shot = pixels()
-                    if (stage == "push 6" || stage == "back 0.5" || stage == "back 0.98" || stage == "cancel 4")
+                    if (stage == "push 6" || stage == "back 0.2" || stage == "back 0.5" || stage == "back 0.98" || stage == "cancel 4")
                         keepFrame("$capture-${stage.replace(' ', '-')}", shot)
                     val rootInk = matches(parent, row, shot, Offset.Zero) + matches(parent, dock, shot, Offset.Zero)
                     val pageInk = if (box == null) 0 else matches(settled, label, shot, box.topLeft - page.topLeft)
@@ -825,7 +1059,7 @@ class SceneMotionTest {
                     if (box != null && box.width < page.width - 2f && box.height > page.height * .88f) {
                         assertTrue("$stage: missing settings label inside the nearly open reveal ($pageInk)", pageInk >= 12)
                     }
-                    if (stage == "back 0.5") {
+                    if (stage == "back 0.2") {
                         val reveal = checkNotNull(box).deflate(4f)
                         val offset = box.topLeft - page.topLeft
                         val visibleWake = wake.intersect(reveal.translate(-offset))
@@ -833,7 +1067,7 @@ class SceneMotionTest {
                             !visibleWake.isEmpty && !visibleWake.translate(offset).overlaps(launcher))
                         val evidence = matches(settled, visibleWake, settled, Offset.Zero)
                         val visible = matches(settled, visibleWake, shot, offset)
-                        assertTrue("50% Back: missing settings row ink in the covered area ($visible/$evidence)",
+                        assertTrue("20% Back: missing live settings row ink in the destination ($visible/$evidence)",
                             evidence >= 12 && visible >= evidence * .8f)
                     }
                     if (box != null && !box.inflate(3f).overlaps(row)) assertLivePatch(parent, shot, row)
@@ -858,6 +1092,8 @@ class SceneMotionTest {
                     val expected = androidx.compose.ui.geometry.lerp(page, launcher, p)
                     assertEquals(expected.left, frame.left, 2f); assertEquals(expected.top, frame.top, 2f)
                     assertEquals(expected.right, frame.right, 2f); assertEquals(expected.bottom, frame.bottom, 2f)
+                    assertEquals("Moving page ink must translate on physical pixels", frame.left.roundToInt().toFloat(), frame.left, .001f)
+                    assertEquals("Moving page ink must translate on physical pixels", frame.top.roundToInt().toFloat(), frame.top, .001f)
                     val expectedWake = wake.translate(frame.topLeft - page.topLeft)
                     val actualWake = windowRect(ui.onNodeWithTag("routine-wake"))
                     assertEquals(expectedWake.left, actualWake.left, 1f); assertEquals(expectedWake.right, actualWake.right, 1f)
@@ -893,7 +1129,7 @@ class SceneMotionTest {
                     assertLivePatch(parent, pixels(), row)
                 }
             }
-        } finally { folder.deleteRecursively() }
+        }
     }
 
     @Test fun settingsReturnsToTheWindowEdgeWhenAnotherTabReplacesItsGear() {
@@ -987,7 +1223,7 @@ class SceneMotionTest {
                 val frame = pixels()
                 keepFrame("settings-source", before)
                 keepFrame("settings-return-${(fraction * 1000).roundToInt()}", frame)
-                assertLivePatch(before, frame, origin)
+                assertFlyingPatch(before, frame, origin, bounds(tag))
                 val reveal = bounds(tag)
                 assertUncoveredPixels(before, frame, reveal)
                 assertLivePatch(before, frame, neighbor.copy(bottom = minOf(neighbor.bottom, reveal.top - 2f)))
@@ -1001,7 +1237,9 @@ class SceneMotionTest {
             ui.runOnUiThread { input.backCompleted() }
             repeat(4) {
                 ui.mainClock.advanceTimeByFrame()
-                assertLivePatch(before, pixels(), origin)
+                val actual = ui.onAllNodesWithTag(tag).fetchSemanticsNodes().singleOrNull()?.boundsInRoot
+                if (actual != null && actual != parent) assertFlyingPatch(before, pixels(), origin, actual)
+                else assertLivePatch(before, pixels(), origin)
             }
             ui.mainClock.advanceTimeBy(600)
             ui.onNodeWithTag(tag).assertDoesNotExist()
@@ -1059,10 +1297,12 @@ class SceneMotionTest {
             val midway = edgeShot(key, full, .50f)
             seek(input, .25f)
             val reversed = edgeShot(key, full, .25f)
+            val last = listOf(.98f, .997f).map { p -> seek(input, p); edgeShot(key, full, p) }
             complete(input)
             val after = pixels()
             assertOpaqueEdge(full, before, after, midway)
             assertOpaqueEdge(full, before, after, reversed)
+            for (frame in last) assertUncoveredPixels(after, frame.pixels, frame.frame)
         }
         ui.onNodeWithTag("task:${b.id}").assertIsDisplayed()
         ui.onNodeWithTag("task:${a.id}").assertDoesNotExist()
@@ -1085,10 +1325,12 @@ class SceneMotionTest {
             val midway = edgeShot(tag, full, .5f)
             seek(input, .25f)
             val reversed = edgeShot(tag, full, .25f)
+            val last = listOf(.98f, .997f).map { p -> seek(input, p); edgeShot(tag, full, p) }
             complete(input)
             val parent = pixels()
             assertOpaqueEdge(full, front, parent, midway)
             assertOpaqueEdge(full, front, parent, reversed)
+            for (frame in last) assertUncoveredPixels(parent, frame.pixels, frame.frame)
         }
         ui.onNodeWithTag("about-help").assertIsDisplayed()
     }

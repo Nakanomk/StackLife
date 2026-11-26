@@ -41,7 +41,7 @@ import kotlinx.serialization.Serializable
 @Serializable @SerialName("document") internal data class BDocument(val id:String,val message:Long,val ordinal:Int,val mime:String,val name:String,val bytes:Long):BackupRecord {
     fun attachment() = ChatDocument(id,mime,name,bytes)
 }
-@Serializable @SerialName("appearance") internal data class BAppearance(val value:Appearance):BackupRecord
+@Serializable @SerialName("appearance") internal data class BAppearance(@Serializable(with = PortableAppearance::class) val value:Appearance):BackupRecord
 @Serializable @SerialName("preferences") internal data class BPreferences(val restore:RestorePolicy,val keep:Boolean):BackupRecord
 
 internal fun Owner.authority() = when(this) {

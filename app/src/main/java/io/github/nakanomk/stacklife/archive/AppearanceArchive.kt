@@ -13,6 +13,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.*
 
 private const val RECORD = "appearance/settings.json"
 private const val PHOTOS = "appearance/photos/"
@@ -60,10 +61,22 @@ internal class AppearanceArchive(private val planner: PlannerApi, private val ph
                         }
                     }) { job.ensureActive() }
                     val text = record.toByteArray().decodeToString(throwOnInvalidSequence = true)
-                    val imported = archiveJson.decodeFromString<Appearance>(text)
-                    // The v1 DTO is the full, canonical record. No duplicate/unknown properties or
-                    // partially populated inputs that silently apply current-version defaults.
-                    require(archiveJson.encodeToString(imported) == text)
+                    val raw = archiveJson.parseToJsonElement(text).jsonObject
+                    val imported = archiveJson.decodeFromJsonElement(PortableAppearance, raw)
+                    // Compare against the emitting schema, including field order. Parsing alone
+                    // loses duplicate keys; checking only Map equality would accept them.
+                    if ("nowLine" in raw || "nowTrail" in raw) {
+                        require("nowLine" in raw && "nowTrail" in raw)
+                        val old = buildJsonObject {
+                            for ((key, value) in archiveJson.encodeToJsonElement(imported).jsonObject) when (key) {
+                                "palettePage" -> Unit
+                                "showNowLine" -> put("nowLine", raw.getValue("nowLine"))
+                                "nowArrow" -> { put(key, value); put("nowTrail", raw.getValue("nowTrail")) }
+                                else -> put(key, value)
+                            }
+                        }
+                        require(old.toString() == text)
+                    } else require(archiveJson.encodeToString(imported) == text)
                     val ids = imported.backgroundIds()
                     require(files.keys == ids.mapTo(mutableSetOf()) { PHOTOS + it })
                     val replacements = ids.associateWith { id ->

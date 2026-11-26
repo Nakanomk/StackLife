@@ -165,7 +165,7 @@ internal fun WeekGrid(term: TermSpec, number: Int, state: ReadState<CourseWeek>,
         val scrollingPlane = rememberPlannerBackdrop()
         Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), topBar = {
             Box(Modifier.fillMaxWidth()) {
-                TopChromeBacking(scrollingPlane, Modifier.matchParentSize())
+                TopChromeBacking(scrollingPlane, Modifier.matchParentSize(), includesDateRow = true)
                 Row(Modifier.padding(top = top).pageContentLane().fillMaxWidth().testTag("week-dates"), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.width(rail), contentAlignment = Alignment.Center) {
                             Text(monday.month.getDisplayName(DateTextStyle.SHORT, locale), style = typography.labelSmall, maxLines = 1, color = colors.onSurfaceVariant)

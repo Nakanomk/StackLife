@@ -118,7 +118,7 @@ internal fun PlannerPopupHost(enabled: Boolean = true, content: @Composable () -
 
 @Composable
 private fun PopupPanel(shape: RoundedCornerShape, modifier: Modifier = Modifier, materialBounds: Modifier = Modifier,
-    content: @Composable () -> Unit) {
+    preferFrosted: Boolean = false, content: @Composable () -> Unit) {
     val a = LocalAppearance.current
     val plane = LocalPanelPlane.current.takeIf { LocalPlannerGlassAllowed.current && a.glass && glassUnavailableReason(a) == null }
     val popup = LocalView.current
@@ -134,16 +134,19 @@ private fun PopupPanel(shape: RoundedCornerShape, modifier: Modifier = Modifier,
             plane.release()
         }
     }
-    CompositionLocalProvider(LocalCapsuleBackdrop provides plane) {
+    // The opening control may be inside a toolbar capsule. This window is not its
+    // inner chrome: read the public host's screen-aligned plane, not that capsule.
+    CompositionLocalProvider(LocalCapsuleBackdrop provides plane, LocalParentShell provides false) {
         StackLifeSurface(CapsuleScene.PANEL, modifier, MaterialTheme.colorScheme.surfaceContainerHigh, 4.dp, shape,
-            materialBounds = materialBounds, content = content)
+            materialBounds = materialBounds, preferFrosted = preferFrosted, content = content)
     }
 }
 
 @Composable
-internal fun PlannerDropdownMenu(expanded: Boolean, onDismissRequest: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+internal fun PlannerDropdownMenu(expanded: Boolean, onDismissRequest: () -> Unit, preferFrosted: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit) {
     DropdownMenuPopup(expanded, onDismissRequest) {
-        PopupPanel(menuShape) {
+        PopupPanel(menuShape, preferFrosted = preferFrosted) {
             Column(Modifier.width(IntrinsicSize.Max).verticalScroll(rememberScrollState()).padding(vertical = 6.dp), content = content)
         }
     }

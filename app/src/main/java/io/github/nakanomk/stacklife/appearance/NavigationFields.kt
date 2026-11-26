@@ -21,7 +21,7 @@ import io.github.nakanomk.stacklife.planner.Destination
 import sh.calvin.reorderable.ReorderableListItemScope
 
 // BiliPai 5893c2c, BottomBarSettingsScreen.kt: move stable identities in the full order;
-// switching visibility does not discard their positions. StackLife submits only on Save.
+// switching visibility does not discard their positions. A drag applies only when it settles.
 internal fun Appearance.moveTab(from: Int, to: Int): Appearance = copy(order = order.toMutableList().apply { add(to, removeAt(from)) })
 
 @Composable

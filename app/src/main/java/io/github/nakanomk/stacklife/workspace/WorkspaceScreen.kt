@@ -141,7 +141,13 @@ internal val LocalWorkspaceFeedback = staticCompositionLocalOf<WorkspaceViewMode
 @Composable
 internal fun WorkspaceFeedbackBar(actions: WorkspaceViewModel) {
     val feedback by actions.feedback.collectAsStateWithLifecycle()
-    val shown = feedback
+    // Growing the bottom bar while the rows are airborne moves their viewport boundary;
+    // a long queue then loses its last measured slot partway through its own transfer.
+    // Present the new receipt on landing, without extending the transaction's undo period.
+    val transfer = actions.transfers.current
+    var previous by remember(actions) { mutableStateOf<WorkspaceViewModel.Feedback?>(null) }
+    if (transfer == null) SideEffect { previous = feedback }
+    val shown = if (transfer == null) feedback else previous
     val editor = actions.pushReason
     val editingId = editor?.frameId
     val pushId = (shown?.effect as? WorkspaceEffect.Pushed)?.frameId
@@ -150,8 +156,8 @@ internal fun WorkspaceFeedbackBar(actions: WorkspaceViewModel) {
             .collectAsStateWithLifecycle(initialValue = ReadState.Loading)
         (frame as? ReadState.Loaded)?.value?.frame?.reason?.isBlank() == true
     }
-    LaunchedEffect(shown?.receipt?.requestId) {
-        val receipt = shown?.receipt ?: return@LaunchedEffect
+    LaunchedEffect(feedback?.receipt?.requestId) {
+        val receipt = feedback?.receipt ?: return@LaunchedEffect
         delay((requireNotNull(receipt.expiresAtElapsed) - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0L))
         actions.dismissFeedback(receipt.requestId)
     }
@@ -159,7 +165,7 @@ internal fun WorkspaceFeedbackBar(actions: WorkspaceViewModel) {
     PushFeedbackPanel(shown != null || editingId != null, editingId, Modifier) { frameId ->
         if (frameId != null) key(frameId) {
             if (editor?.frameId == frameId) PushReasonEditor(frameId, actions, editor.field) { actions.closeReason(frameId) }
-        } else if (shown != null) ReceiptRow(shown, enabled = editingId == null && !command.busy, mayAddReason,
+        } else if (shown != null) ReceiptRow(shown, enabled = transfer == null && editingId == null && !command.busy, mayAddReason,
             onAction = { command.submit { actions.applyFeedback(shown.receipt.requestId, it) } },
             onEdit = { pushId?.let(actions::editReason) }, onDismiss = { actions.dismissFeedback(shown.receipt.requestId) })
     }
@@ -190,27 +196,38 @@ private fun PushFeedbackPanel(visible: Boolean, editingId: String?, modifier: Mo
     }
 }
 
+private val receiptTextPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+
 @Composable
 private fun ReceiptRow(shown: WorkspaceViewModel.Feedback, enabled: Boolean, mayAddReason: Boolean,
     onAction: (WorkspaceReceiptAction) -> Unit, onEdit: () -> Unit, onDismiss: () -> Unit) {
     val effect = shown.effect
-    FlowRow(Modifier.semantics {
+    Column(Modifier.fillMaxWidth().semantics {
         liveRegion = LiveRegionMode.Polite
         if (enabled) dismiss { onDismiss(); true }
-    }.padding(start = 16.dp, end = 4.dp), itemVerticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(when (effect) {
-            is WorkspaceEffect.Pushed -> stringResource(R.string.ui_pushed)
-            is WorkspaceEffect.Restored -> if (shown.kept) uiText("History kept", "已保留历史") else uiText("Restored to queue", "已恢复到队列")
-            is WorkspaceEffect.Removed -> uiText("Removed from queue", "已移出队列")
-            is WorkspaceEffect.DeletedHistory -> uiText("History deleted", "已删除历史")
-        }, style = MaterialTheme.typography.bodyMedium)
-        TextButton({ onAction(WorkspaceReceiptAction.UNDO) }, Modifier.testTag("receipt-undo"), enabled = enabled) { Text(uiText("Undo", "撤回")) }
-        if (effect is WorkspaceEffect.Restored && effect.sourceDeleted && !shown.kept)
-            TextButton({ onAction(WorkspaceReceiptAction.KEEP_HISTORY) }, Modifier.testTag("receipt-keep"), enabled = enabled) { Text(uiText("Keep history", "保留历史")) }
-        if (mayAddReason) TextButton(onClick = onEdit, enabled = enabled) { Text(stringResource(R.string.ui_add_reason)) }
-        IconButton(onClick = onDismiss, enabled = enabled) {
-            Icon(painterResource(R.drawable.ic_close), stringResource(R.string.ui_close_panel))
+    }.padding(start = 16.dp, end = 4.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(when (effect) {
+                is WorkspaceEffect.Pushed -> stringResource(R.string.ui_pushed)
+                is WorkspaceEffect.Restored -> if (shown.kept) uiText("History kept", "已保留历史") else uiText("Restored to queue", "已恢复到队列")
+                is WorkspaceEffect.Removed -> uiText("Removed from queue", "已移出队列")
+                is WorkspaceEffect.DeletedHistory -> uiText("History deleted", "已删除历史")
+            }, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            IconButton(onClick = onDismiss, enabled = enabled, modifier = Modifier.size(48.dp),
+                colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                Icon(painterResource(R.drawable.ic_close), stringResource(R.string.ui_close_panel), Modifier.size(14.dp))
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+            if (effect is WorkspaceEffect.Restored && effect.sourceDeleted && !shown.kept)
+                TextButton({ onAction(WorkspaceReceiptAction.KEEP_HISTORY) }, Modifier.weight(1f, fill = false).testTag("receipt-keep"),
+                    enabled = enabled, contentPadding = receiptTextPadding) { Text(uiText("Keep history", "保留历史")) }
+            else if (mayAddReason) TextButton(onEdit, Modifier.weight(1f, fill = false),
+                enabled = enabled, contentPadding = receiptTextPadding) { Text(stringResource(R.string.ui_add_reason)) }
+            IconButton(onClick = { onAction(WorkspaceReceiptAction.UNDO) }, modifier = Modifier.size(48.dp).testTag("receipt-undo"),
+                enabled = enabled, colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.primary)) {
+                Icon(painterResource(R.drawable.ic_symbol_undo), uiText("Undo", "撤回"))
+            }
         }
     }
 }

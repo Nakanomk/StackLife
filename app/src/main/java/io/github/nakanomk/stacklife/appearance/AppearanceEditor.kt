@@ -14,14 +14,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.chromeGutter
-import io.github.nakanomk.stacklife.PinnedPaperHeader
-import io.github.nakanomk.stacklife.pageContentLane
-import io.github.nakanomk.stacklife.StackLifeTheme
+import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.rememberDestinationCapsule
 import io.github.nakanomk.stacklife.courses.CourseTimetablePreview
@@ -29,12 +26,46 @@ import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.workspace.*
 import io.github.nakanomk.stacklife.today.DayWheelPreview
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
+import io.github.nakanomk.stacklife.transitions.LocalFrontEntry
+import io.github.nakanomk.stacklife.transitions.LocalRouteOrigins
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import sh.calvin.reorderable.ReorderableColumn
 
 private val appearanceSaver = Saver<Appearance, String>(save = { encodeAppearance(it) }, restore = ::decodeAppearance)
 private val validSeed = Regex("#[0-9A-F]{6}")
-private class PhotoSeedRequest(val imageId: String)
-private enum class EditorLeadSection { MESSAGE, PREVIEW, MATERIAL, WALLPAPER }
+private enum class EditorLeadSection { PREVIEW, MATERIAL, WALLPAPER }
+private enum class Departure { KEEP, DISCARD, DISPATCHED }
+// Activity recreation continues an editing session. After process death the durable Room
+// value starts a fresh session; neither a vanished photo pin nor a receipt is replayable.
+private val editorProcess = java.util.UUID.randomUUID().toString()
+
+// Undo only this editor's changes. A new value from another owner wins, including
+// changes to a different page or crop inside the same material group.
+private fun undoFields(entry: JsonElement?, written: JsonElement?, current: JsonElement?): JsonElement? = when {
+    current == written -> entry
+    entry == written -> current
+    entry is JsonObject && written is JsonObject && current is JsonObject -> if ("imageId" in written &&
+        (current["imageId"] != written["imageId"] || current["preset"] != written["preset"])) current else
+        JsonObject(buildMap {
+            for (key in entry.keys + written.keys + current.keys)
+                undoFields(entry[key], written[key], current[key])?.let { put(key, it) }
+        })
+    else -> current
+}
+
+private fun AppearanceGroup.undo(entry: Appearance, written: Appearance, current: Appearance): Appearance {
+    val fields = undoFields(project(entry), project(written), project(current)) as JsonObject
+    // If a concurrent edit hid the old start page, keep its valid navigation pair
+    // while still undoing independent fields such as spacing or duration.
+    val restored = if (this == AppearanceGroup.LAYOUT &&
+        fields.getValue("start") !in (fields.getValue("visible") as kotlinx.serialization.json.JsonArray)) {
+        val actual = project(current)
+        JsonObject(fields + mapOf("start" to actual.getValue("start"), "visible" to actual.getValue("visible")))
+    } else fields
+    return AppearanceFields(this, restored).applyTo(current)
+}
 private val AppearanceGroup.title: String @Composable get() = when (this) {
     AppearanceGroup.COLOR -> stringResource(R.string.ui_colors); AppearanceGroup.LAYOUT -> stringResource(R.string.ui_layout); AppearanceGroup.MATERIAL -> stringResource(R.string.ui_material_motion)
 }
@@ -42,73 +73,171 @@ private val AppearanceGroup.title: String @Composable get() = when (this) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions: WorkspaceActions,
-    planner: PlannerApi, startAtWallpaper: Boolean = false, onBack: () -> Unit) {
+    planner: PlannerApi, startAtWallpaper: Boolean = false, onBack: () -> Unit) = key(editorProcess, group) {
     var baseline by rememberSaveable(stateSaver = appearanceSaver) { mutableStateOf(saved) }
-    var draft by rememberSaveable(stateSaver = appearanceSaver) { mutableStateOf(saved) }
+    var confirmed by rememberSaveable(stateSaver = appearanceSaver) { mutableStateOf(saved) }
+    var submitted by rememberSaveable(stateSaver = appearanceSaver) { mutableStateOf(saved) }
+    var ticket by rememberSaveable { mutableStateOf<String?>(null) }
+    var staged by rememberSaveable(stateSaver = appearanceSaver) { mutableStateOf(saved) }
     var seedInput by rememberSaveable { mutableStateOf(saved.seed) }
     var message by rememberSaveable { mutableStateOf("") }
     var leases by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
-    var wallpaperTarget by rememberSaveable { mutableStateOf<Destination?>(null) }
-    var closing by rememberSaveable { mutableStateOf(false) }
-    var applied by rememberSaveable { mutableStateOf(false) }
+    var wallpaperTarget by rememberSaveable { mutableStateOf<Destination?>(if (group == AppearanceGroup.COLOR) saved.palettePage else null) }
+    var departure by rememberSaveable { mutableStateOf<Departure?>(null) }
+    var undoSubmitted by rememberSaveable { mutableStateOf(false) }
+    val owner = rememberSaveable { java.util.UUID.randomUUID().toString() }
+    // Non-null from the first pin attempt: prompt cancellation returning from IO may
+    // have pinned the file before the caller received its result. Back must still release it.
+    var pins by rememberSaveable { mutableStateOf<ArrayList<String>?>(null) }
+    val draft = if (message.isEmpty()) staged else saved
     val backgrounds = LocalBackgroundStore.current
-    // COLOR owns the seed, not the wallpaper: resolve the current saved private file.
-    val seedForm = group == AppearanceGroup.COLOR && draft.palette == PaletteMode.SEED
-    val imageId = if (seedForm) saved.wallpaper(wallpaperTarget).imageId else null
-    var sample by remember(imageId, wallpaperTarget) { mutableStateOf<PhotoSeedRequest?>(null) }
-    var sampleError by remember(imageId, wallpaperTarget) { mutableStateOf<Int?>(null) }
+    val seedForm = group == AppearanceGroup.COLOR && draft.palette != PaletteMode.DYNAMIC
+    val target = if (draft.palette == PaletteMode.WALLPAPER && seedForm) draft.palettePage else wallpaperTarget
+    val seedSource = saved.wallpaper(target)
+    var sample by remember(seedForm, seedSource.imageId, seedSource.preset, target) { mutableStateOf<Any?>(null) }
+    var sampleError by remember(seedForm, seedSource.imageId, seedSource.preset, target) { mutableStateOf<Int?>(null) }
     fun discardSample() { sample = null; sampleError = null }
     val latestBack by rememberUpdatedState(onBack)
+    val latestSaved by rememberUpdatedState(saved)
+    val front by rememberUpdatedState(LocalFrontEntry.current)
     val cleanupFailure = stringResource(R.string.appearance_image_cleanup_failed)
-    val receipt = rememberSubmission(actions, onError = { message = it }) {
-        if (it == SaveOutcome.APPLIED) { applied = true; closing = true }
+    val writeFailure = stringResource(R.string.appearance_write_failed)
+    fun fail(reason: String) {
+        message = reason
+        staged = confirmed
+        seedInput = latestSaved.seed
+        departure = null
+        undoSubmitted = false
     }
-    LaunchedEffect(closing) {
-        if (closing) {
-            try {
-                for (id in leases) backgrounds.release(id)
-                leases = arrayListOf()
-                latestBack()
-            } catch (cancel: CancellationException) { throw cancel }
-            catch (_: Exception) { message = cleanupFailure; closing = false }
+    // The guarded transaction can reject before Room's external value reaches the
+    // page. If that happens the editable hex text must catch up with the form too.
+    LaunchedEffect(message, saved.seed) { if (message.isNotEmpty()) seedInput = saved.seed }
+    fun change(next: Appearance) {
+        if (departure != null) return
+        if (message.isNotEmpty()) {
+            // After a rejection the form shows durable values. Carry only still-owned
+            // undo fields across a fresh, explicit user edit.
+            baseline = group.undo(baseline, confirmed, saved)
+            confirmed = saved
+            message = ""
+        }
+        staged = next
+    }
+    val picker = if (group == AppearanceGroup.MATERIAL) rememberWallpaperPicker(departure == null) { page, id ->
+        leases = ArrayList(leases).apply { add(id) }
+        change(draft.replacingWallpaper(page, WallpaperSpec(imageId = id)))
+    } else null
+    val dirty = staged != confirmed
+    val busy = departure != null || picker?.preparing == true
+    fun exit(how: Departure) {
+        if (departure == null) {
+            picker?.cancel()
+            discardSample()
+            departure = how
         }
     }
-    val picker = if (group == AppearanceGroup.MATERIAL && !receipt.busy && !closing && !applied) rememberWallpaperPicker { page, id ->
-        leases = ArrayList(leases).apply { add(id) }
-        draft = draft.replacingWallpaper(page, WallpaperSpec(imageId = id))
-    } else null
-    val busy = receipt.busy || closing || picker?.preparing == true
-    val leave: () -> Unit = { if (!receipt.busy) { discardSample(); closing = true } }
-    val seedOK = group != AppearanceGroup.COLOR || draft.palette != PaletteMode.SEED || validSeed.matches(seedInput)
-    val selected = remember(group, draft) { group.project(draft) }
-    val persisted = remember(group, saved) { group.project(saved) }
-    val stale = remember(group, baseline, persisted) { group.project(baseline) != persisted }
+    // One consumer owns both ends of each receipt. An effect keyed on "busy" can be
+    // launched for an old frame just as another effect clears that receipt; it must
+    // never submit the same value twice or dispatch a second pop.
+    LaunchedEffect(actions, planner, backgrounds) {
+        while (true) {
+            snapshotFlow { ticket != null || staged != confirmed || departure != null }.first { it }
+            if (departure == Departure.DISPATCHED) return@LaunchedEffect
+            try {
+                val id = ticket
+                if (id != null) {
+                    var reason: String? = null
+                    val outcome = actions.result(id) { reason = it }
+                    ticket = null
+                    if (outcome == SaveOutcome.APPLIED) {
+                        message = ""
+                        confirmed = submitted
+                        if (undoSubmitted) {
+                            undoSubmitted = false
+                            staged = submitted
+                            departure = Departure.KEEP
+                        }
+                    } else fail(reason ?: writeFailure)
+                    continue
+                }
+                val undo = departure == Departure.DISCARD
+                val expected = if (undo) (planner.observe(PlannerQuery.Settings).first() as PolicyView).appearance else confirmed
+                val next = if (undo) group.undo(baseline, confirmed, expected) else staged
+                if (next != expected) {
+                    val fields = group.project(next)
+                    if (!undo && fields == group.project(expected)) {
+                        // Other groups may have changed underneath this form. Their values
+                        // are neither a reason to write nor part of this editor's undo.
+                        staged = confirmed
+                        continue
+                    }
+                    if (!undo && group == AppearanceGroup.MATERIAL) {
+                        val originals = baseline.backgroundIds()
+                        val held = pins.orEmpty()
+                        if (originals.any { it !in held }) {
+                            val attached = next.backgroundIds()
+                            if (originals.any { it !in attached && it !in held }) {
+                                val all = (held + (originals - attached)).toSet()
+                                if (pins == null) pins = arrayListOf()
+                                backgrounds.pinEditorOriginals(owner, all)
+                                pins = ArrayList(all)
+                                if (staged != next || departure == Departure.DISCARD) continue
+                            }
+                        }
+                    }
+                    submitted = next
+                    undoSubmitted = undo
+                    ticket = actions.start(PlannerCommand.EditAppearance(AppearanceFields(group, fields), expected))
+                    if (ticket == null) fail(writeFailure)
+                    continue
+                }
+                if (departure != null) {
+                    if (pins != null || leases.isNotEmpty()) {
+                        backgrounds.finishEditor(owner, leases)
+                        pins = null
+                        leases = arrayListOf()
+                    }
+                    if (front) {
+                        departure = Departure.DISPATCHED
+                        latestBack()
+                    } else departure = null
+                }
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (error: Exception) { ticket = null; fail(error.message ?: if (departure != null) cleanupFailure else writeFailure) }
+        }
+    }
     val request = sample
-    if (request != null && !stale && !busy && !applied) LaunchedEffect(request) {
+    if (request != null && !busy) LaunchedEffect(request) {
         try {
-            val argb = backgrounds.photoSeed(request.imageId)
+            val argb = backgrounds.wallpaperSeed(seedSource)
             if (sample === request) {
                 if (argb == null) sampleError = R.string.wallpaper_seed_no_color
                 else {
                     val seed = "#%06X".format(java.util.Locale.ROOT, argb and 0xffffff)
                     seedInput = seed
-                    draft = draft.copy(seed = seed)
+                    change(draft.copy(seed = seed))
                 }
             }
         } catch (cancel: CancellationException) { throw cancel }
         catch (_: Exception) { if (sample === request) sampleError = R.string.wallpaper_seed_unavailable }
         finally { if (sample === request) sample = null }
     }
-    val preview = remember(group, selected, saved) { AppearanceFields(group, selected).applyTo(saved) }
-    var previewPage by rememberSaveable(preview.start, wallpaperTarget) { mutableStateOf(wallpaperTarget ?: preview.start) }
-    val reload = { discardSample(); baseline = saved; draft = saved; seedInput = saved.seed; message = "" }
+    val preview = if (group == AppearanceGroup.LAYOUT) draft else saved
+    val material = if (group == AppearanceGroup.MATERIAL) draft else saved
+    var previewPage by rememberSaveable(preview.start, target) { mutableStateOf(target ?: preview.start) }
     val transfer = if (group == AppearanceGroup.MATERIAL) rememberAppearanceTransfer(planner, backgrounds,
-        available = !busy && !applied && !stale && selected == persisted) { applied = true; closing = true } else null
-    BackHandler(enabled = busy || leases.isNotEmpty() || request != null) { leave() }
+        available = !busy && !dirty && ticket == null) { exit(Departure.KEEP) } else null
+    val origins = LocalRouteOrigins.current
+    fun needsExitWork() = departure != Departure.DISPATCHED && (departure != null || staged != confirmed ||
+        ticket != null || pins != null || leases.isNotEmpty() || picker?.preparing == true || sample != null)
+    // Let the real stack seek or reverse untouched. Only a committed Back needs to flush IO.
+    origins?.GuardCommittedPop {
+        if (needsExitWork()) { exit(Departure.KEEP); true } else false
+    }
+    BackHandler(enabled = origins == null && front && needsExitWork()) { exit(Departure.KEEP) }
     val hasMessage = message.isNotEmpty()
-    val leadSections = remember(group, hasMessage) {
+    val leadSections = remember(group) {
         buildList {
-            if (hasMessage) add(EditorLeadSection.MESSAGE)
             add(EditorLeadSection.PREVIEW)
             if (group == AppearanceGroup.MATERIAL) {
                 add(EditorLeadSection.MATERIAL)
@@ -119,77 +248,78 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
     // The entry point only chooses the initial viewport. LazyListState restores subsequent user scrolls.
     val scroll = rememberLazyListState(initialFirstVisibleItemIndex =
         if (startAtWallpaper && group == AppearanceGroup.MATERIAL) leadSections.indexOf(EditorLeadSection.WALLPAPER) else 0)
-    StackLifeTheme(preview) {
-        Page {
-            PinnedPaperHeader {
-                CenterAlignedTopAppBar(title = { Text(group.title, style = MaterialTheme.typography.titleLarge) },
-                    modifier = Modifier.testTag("appearance-header"),
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent, scrolledContainerColor = Color.Transparent),
-                    navigationIcon = { TextButton(onClick = leave, enabled = !receipt.busy && !closing) { Text(stringResource(R.string.ui_cancel)) } },
-                    actions = {
-                        TextButton(enabled = !busy && request == null && !applied && seedOK && !stale && selected != persisted,
-                            onClick = { receipt.send(PlannerCommand.EditAppearance(AppearanceFields(group, selected), expected = baseline)) }) {
-                            Text(stringResource(R.string.ui_save_appearance))
+    // The navigation entry already supplies the committed global wallpaper. A second
+    // screen-sized host switched donors twice per slider change (preview, then receipt).
+    Page {
+        RootPane(header = {
+            Column(Modifier.testTag("appearance-header")) {
+                PageTitle(group.title, back = { exit(Departure.KEEP) }, backEnabled = departure == null,
+                    action = {
+                        TextButton(onClick = { exit(Departure.DISCARD) }, enabled = departure == null &&
+                            (draft != baseline || confirmed != baseline || seedInput != baseline.seed || ticket != null)) {
+                            Text(stringResource(R.string.appearance_discard))
                         }
-                    }, windowInsets = WindowInsets(0))
+                    })
+                if (hasMessage) Text(message, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
             }
-            LazyColumn(Modifier.weight(1f).pageContentLane().testTag("appearance-scroll"), state = scroll, contentPadding = dockListPadding(0.dp, 0.dp),
+        }) { top, bottom ->
+            LazyColumn(Modifier.fillMaxSize().testTag("appearance-scroll"), state = scroll, contentPadding = dockListPadding(top, bottom),
                 verticalArrangement = listSpacing) {
                 items(leadSections, key = { it }) { section ->
                     when (section) {
-                        EditorLeadSection.MESSAGE -> Text(message, color = MaterialTheme.colorScheme.error)
                         EditorLeadSection.PREVIEW -> {
-                            val page = previewPage.takeIf { it in preview.visible || it == wallpaperTarget } ?: preview.start
-                            AppearancePreview(preview, page, preview.wallpaper(if (seedForm) wallpaperTarget else page)) {
-                                if (seedForm) { discardSample(); wallpaperTarget = it }
+                            val page = previewPage.takeIf { it in preview.visible || it == target } ?: preview.start
+                            AppearancePreview(preview, page, material.wallpaper(if (seedForm) target else page)) {
+                                if (seedForm) {
+                                    discardSample(); wallpaperTarget = it
+                                    if (draft.palette == PaletteMode.WALLPAPER) change(draft.copy(palettePage = it))
+                                }
                                 previewPage = it
                             }
                         }
-                        EditorLeadSection.MATERIAL -> MaterialFields(draft) { draft = it }
+                        EditorLeadSection.MATERIAL -> MaterialFields(draft, ::change)
                         EditorLeadSection.WALLPAPER -> if (picker != null) {
-                            WallpaperControls(draft, { draft = it }, wallpaperTarget, { wallpaperTarget = it }, picker)
+                            WallpaperControls(draft, ::change, wallpaperTarget, { wallpaperTarget = it }, picker)
                         }
                     }
                 }
                 when (group) {
                     AppearanceGroup.COLOR -> item {
-                        ColorFields(draft, seedInput, { discardSample(); seedInput = it }, { discardSample(); draft = it }) {
-                            Choice(stringResource(R.string.wallpaper_seed_source), wallpaperTargets, wallpaperTarget,
-                                { it?.label ?: stringResource(R.string.wallpaper_global) }) { discardSample(); wallpaperTarget = it }
-                            Secondary(stringResource(R.string.wallpaper_seed_pick),
-                                enabled = !busy && !applied && !stale && imageId != null && request == null) {
-                                if (imageId != null) { sampleError = null; sample = PhotoSeedRequest(imageId) }
+                        ColorFields(draft, seedInput, { discardSample(); seedInput = it }, { discardSample(); change(it) }) {
+                            Choice(stringResource(R.string.wallpaper_seed_source), wallpaperTargets, target,
+                                { it?.label ?: stringResource(R.string.wallpaper_global) }) {
+                                discardSample(); wallpaperTarget = it
+                                if (draft.palette == PaletteMode.WALLPAPER) change(draft.copy(palettePage = it))
                             }
-                            if (request != null) Hint(stringResource(R.string.wallpaper_seed_reading))
-                            else if (imageId == null) Hint(stringResource(R.string.wallpaper_seed_no_photo))
-                            sampleError?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
+                            if (draft.palette == PaletteMode.SEED) {
+                                Secondary(stringResource(R.string.wallpaper_seed_pick),
+                                    enabled = !busy && seedSource.hasImage && request == null) {
+                                    sampleError = null; sample = Any()
+                                }
+                                if (request != null) Hint(stringResource(R.string.wallpaper_seed_reading))
+                                sampleError?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
+                            }
+                            if (!seedSource.hasImage) Hint(stringResource(R.string.wallpaper_seed_no_photo))
                         }
                     }
                     AppearanceGroup.LAYOUT -> {
-                        item { LayoutFields(draft) { draft = it } }
-                        item { DayWheelPreview() }
+                        item { LayoutFields(draft, ::change) }
+                        item { CompositionLocalProvider(LocalAppearance provides preview) { DayWheelPreview() } }
                         item {
                             FormGroup(frosted = true) {
-                                Choice(stringResource(R.string.now_marker_line), NowLineStyle.entries, draft.nowLine, {
-                                    stringResource(when (it) {
-                                        NowLineStyle.WAVE -> R.string.now_marker_wave
-                                        NowLineStyle.STRAIGHT -> R.string.now_marker_straight
-                                        NowLineStyle.OFF -> R.string.now_marker_off
-                                    })
-                                }) { draft = draft.copy(nowLine = it) }
-                                SwitchRow(stringResource(R.string.now_marker_arrow), draft.nowArrow) { draft = draft.copy(nowArrow = !draft.nowArrow) }
-                                SwitchRow(stringResource(R.string.now_marker_trail), draft.nowTrail) { draft = draft.copy(nowTrail = !draft.nowTrail) }
+                                SwitchRow(stringResource(R.string.now_marker_line), draft.showNowLine) { change(draft.copy(showNowLine = !draft.showNowLine)) }
+                                SwitchRow(stringResource(R.string.now_marker_arrow), draft.nowArrow) { change(draft.copy(nowArrow = !draft.nowArrow)) }
                             }
                         }
                         item { SectionTitle(stringResource(R.string.ui_nav_order)) }
                         // Only these five rows reorder. Measure their intervals in this section,
                         // not in the lazy viewport that also contains previews and preferences.
                         item {
-                            ReorderableColumn(draft.order, onSettle = { from, to -> draft = draft.moveTab(from, to) },
+                            ReorderableColumn(draft.order, onSettle = { from, to -> change(draft.moveTab(from, to)) },
                                 verticalArrangement = listSpacing) { index, dest, dragging ->
                                 key(dest) {
                                     ReorderableItem {
-                                        NavigationField(dest, index, draft, enabled = !busy, dragging = dragging, update = { draft = it })
+                                        NavigationField(dest, index, draft, enabled = !busy, dragging = dragging, update = ::change)
                                     }
                                 }
                             }
@@ -199,14 +329,16 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                         item {
                             FormGroup(frosted = true) {
                                 SectionTitle(stringResource(R.string.ui_course_preview))
-                                CompositionLocalProvider(LocalPlannerGlassAllowed provides true) {
-                                    WallpaperHost(preview.wallpaper(Destination.COURSES)) { CourseTimetablePreview() }
+                                // Paint the setting the adjacent switch already shows. Do not wait
+                                // for Room to re-emit it or start a second window wallpaper donor.
+                                CompositionLocalProvider(LocalPlannerGlassAllowed provides true, LocalAppearance provides material) {
+                                    WallpaperHost(material.wallpaper(Destination.COURSES)) { CourseTimetablePreview() }
                                 }
-                                SwitchRow(stringResource(R.string.appearance_grid_lines), draft.showCourseGrid) { draft = draft.copy(showCourseGrid = !draft.showCourseGrid) }
-                                SwitchRow(stringResource(R.string.ui_course_outline), draft.courseTextOutline) { draft = draft.copy(courseTextOutline = !draft.courseTextOutline) }
+                                SwitchRow(stringResource(R.string.appearance_grid_lines), draft.showCourseGrid) { change(draft.copy(showCourseGrid = !draft.showCourseGrid)) }
+                                SwitchRow(stringResource(R.string.ui_course_outline), draft.courseTextOutline) { change(draft.copy(courseTextOutline = !draft.courseTextOutline)) }
                             }
                         }
-                        item { AccessibilityFields(draft) { draft = it } }
+                        item { AccessibilityFields(draft, ::change) }
                         if (transfer != null) item(key = "appearance-transfer") { transfer() }
                     }
                 }
@@ -214,13 +346,16 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
                     Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         HorizontalDivider()
                         Spacer(Modifier.height(12.dp))
-                        TextButton(onClick = { discardSample(); draft = AppearanceFields(group, null).applyTo(draft); seedInput = draft.seed; message = "" },
-                            enabled = !busy && !applied, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
+                        TextButton(onClick = {
+                            discardSample()
+                            val defaults = AppearanceFields(group, null).applyTo(draft)
+                            change(defaults); seedInput = defaults.seed
+                        },
+                            enabled = !busy, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
                             Text(stringResource(R.string.ui_restore_defaults))
                         }
                     }
                 }
-                if (stale && !applied) item { Secondary(stringResource(R.string.ui_reload_settings), enabled = !busy, onClick = reload) }
             }
         }
     }
@@ -263,13 +398,17 @@ private fun ColorFields(d: Appearance, seed: String, editSeed: (String) -> Unit,
     photoSource: @Composable () -> Unit) {
     FormGroup(frosted = true) {
         Choice(stringResource(R.string.ui_color_theme), ThemeMode.entries, d.theme, { when (it) { ThemeMode.SYSTEM -> stringResource(R.string.ui_follow_system); ThemeMode.LIGHT -> stringResource(R.string.ui_light); ThemeMode.DARK -> stringResource(R.string.ui_dark) } }) { update(d.copy(theme = it)) }
-        Choice(stringResource(R.string.ui_palette), PaletteMode.entries, d.palette, { if (it == PaletteMode.DYNAMIC) stringResource(R.string.ui_dynamic_color) else stringResource(R.string.ui_custom_seed) },
+        Choice(stringResource(R.string.ui_palette), PaletteMode.entries, d.palette, { stringResource(when (it) {
+            PaletteMode.DYNAMIC -> R.string.ui_dynamic_color
+            PaletteMode.SEED -> R.string.ui_custom_seed
+            PaletteMode.WALLPAPER -> R.string.ui_wallpaper_color
+        }) },
             help = stringResource(R.string.ui_dynamic_hint)) { update(d.copy(palette = it)) }
         if (d.palette == PaletteMode.SEED) TextField(colors = lineFieldColors(), value = seed, onValueChange = { text ->
             val normalized = text.uppercase(); editSeed(normalized)
             if (validSeed.matches(normalized)) update(d.copy(seed = normalized))
         }, label = { Text(stringResource(R.string.ui_seed_hex)) }, singleLine = true, isError = !validSeed.matches(seed), modifier = Modifier.fillMaxWidth().testTag("seed-color"))
-        if (d.palette == PaletteMode.SEED) photoSource()
+        if (d.palette != PaletteMode.DYNAMIC) photoSource()
     }
 }
 
@@ -278,6 +417,7 @@ private fun LayoutFields(d: Appearance, update: (Appearance) -> Unit) {
     FormGroup(frosted = true) {
         Choice(stringResource(R.string.ui_spacing), listOf(false, true), d.compact, { if (it) stringResource(R.string.ui_compact) else stringResource(R.string.ui_standard) }) { update(d.copy(compact = it)) }
         Choice(stringResource(R.string.ui_nav_style), NavStyle.entries, d.navStyle, { if (it == NavStyle.FLOATING) stringResource(R.string.ui_floating_nav) else stringResource(R.string.ui_bottom_nav) }) { update(d.copy(navStyle = it)) }
+        SwitchRow(stringResource(R.string.appearance_show_nav_labels), d.showNavLabels) { update(d.copy(showNavLabels = !d.showNavLabels)) }
         Choice(stringResource(R.string.ui_backlog), listOf(true, false), d.floatingDayTray, { if (it) stringResource(R.string.ui_floating_button) else stringResource(R.string.ui_persistent_tray) }) { update(d.copy(floatingDayTray = it)) }
         Choice(stringResource(R.string.ui_start_page), d.visibleOrder, d.start, { it.label }) { update(d.copy(start = it)) }
         Choice(stringResource(R.string.appearance_day_scroll), DayScrollEffect.entries, d.dayScrollEffect,
@@ -296,6 +436,8 @@ private fun MaterialFields(d: Appearance, update: (Appearance) -> Unit) {
     FormGroup(frosted = true) {
         SectionTitle(stringResource(R.string.ui_materials))
         SwitchRow(stringResource(R.string.ui_liquid_glass), d.glass, help = stringResource(R.string.ui_glass_surfaces)) { update(d.copy(glass = !d.glass)) }
+        SwitchRow(stringResource(R.string.ui_frosted_glass), d.frostedGlass, enabled = d.glass,
+            help = stringResource(R.string.ui_frosted_glass_help)) { update(d.copy(frostedGlass = !d.frostedGlass)) }
         SwitchRow(stringResource(R.string.ui_glass_navigation), d.navGlass, enabled = d.glass) { update(d.copy(navGlass = !d.navGlass)) }
         SwitchRow(stringResource(R.string.ui_glass_assistant), d.assistantGlass, enabled = d.glass) { update(d.copy(assistantGlass = !d.assistantGlass)) }
         if (reason != null) Hint(stringResource(R.string.ui_solid_because, reason))

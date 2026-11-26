@@ -15,7 +15,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.util.fastRoundToInt
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavEntry
@@ -68,10 +67,12 @@ private val StackEdgeTransition = navGraphicsTransition { scope ->
 }
 private val StackEffects = NavDisplayEffects(enableCornerClip = false, dimAmount = 0f)
 
-private val landing = NavSettleSpec.Spring(dampingRatio = .82f, stiffness = 500f,
-    clampOvershoot = false, visibilityThreshold = .0001f)
-private val cancel = NavSettleSpec.Spring(dampingRatio = 1f, stiffness = 700f)
-private val enterMotion = NavMotion(programmatic = NavSettleSpec.Tween(300, FastOutSlowInEasing), commit = landing, cancel = cancel)
+// SettingsSharedContainerTransition.navigationControlFallback at BiliPai 3f719310:
+// critically damped opening, slightly firmer return, short recovery after a cancelled seek.
+private val landing = NavSettleSpec.Spring(dampingRatio = 1f, stiffness = 390f, visibilityThreshold = .002f)
+private val cancel = NavSettleSpec.Spring(dampingRatio = 1f, stiffness = 520f, visibilityThreshold = .002f)
+private val enterMotion = NavMotion(programmatic = NavSettleSpec.Spring(dampingRatio = 1f, stiffness = 310f,
+    visibilityThreshold = .002f), commit = landing, cancel = cancel)
 private val returnMotion = NavMotion(programmatic = landing, commit = landing, cancel = cancel)
 
 /** The aperture is applied inside the entry, where its real launcher and final-size content live. */
@@ -79,7 +80,6 @@ private class ContainerBoundary(private val leaving: () -> Boolean) : NavTransit
     override val opaqueDepth get() = 2f
     override val handlesOwnClipping get() = true
     override val preparesEnterFrame get() = true
-    override val retainsSpringOvershoot get() = true
     override val motion get() = if (leaving()) returnMotion else enterMotion
     override fun Modifier.transformEntry(scope: NavTransitionScope) = this
     override fun scrimFraction(scope: NavTransitionScope) = 0f

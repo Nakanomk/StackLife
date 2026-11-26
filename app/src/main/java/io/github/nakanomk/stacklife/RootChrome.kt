@@ -110,14 +110,15 @@ internal fun RootPane(header: @Composable () -> Unit,
     overlay: (@Composable BoxScope.(top: Dp, bottom: Dp) -> Unit)? = null,
     contentDrawsTopEdge: Boolean = false,
     content: @Composable (top: Dp, bottom: Dp) -> Unit) {
-    val source = rememberPlannerBackdrop(enabled = !contentDrawsTopEdge)
-    val headerSource = if (contentDrawsTopEdge) LocalCapsuleBackdrop.current else source
+    // The week's date row paints its own gradient, but the toolbar lenses above it
+    // still need the live page beneath them, not just the static wallpaper.
+    val source = rememberPlannerBackdrop()
     val bottom = LocalRootBottom.current.calculateBottomPadding()
     // BiliPai SettingsPinnedChromeLayout: measure the pinned region, pass its height to the
     // content's scrolling padding, then place both at y=0. No inset crops the sampling plane.
     SubcomposeLayout(Modifier.fillMaxSize()) { constraints ->
         val chrome = subcompose("chrome") {
-            PinnedChrome(headerSource, drawBackground = !contentDrawsTopEdge, content = header)
+            PinnedChrome(source, drawBackground = !contentDrawsTopEdge, content = header)
         }.single().measure(constraints.copy(minHeight = 0))
         val top = chrome.height.toDp()
         val body = subcompose("content") {
@@ -126,7 +127,7 @@ internal fun RootPane(header: @Composable () -> Unit,
                 Box(Modifier.fillMaxSize().plannerBackdrop(source).wallpaperBackground(MaterialTheme.colorScheme.surface).then(lane)) {
                     content(top, bottom)
                 }
-                if (overlay != null) CompositionLocalProvider(LocalCapsuleBackdrop provides headerSource) {
+                if (overlay != null) CompositionLocalProvider(LocalCapsuleBackdrop provides source) {
                     Box(Modifier.fillMaxSize().pageContentLane()) { overlay.invoke(this, top, bottom) }
                 }
             }
@@ -156,9 +157,10 @@ private fun PinnedChrome(source: Backdrop?, drawBackground: Boolean, content: @C
 }
 
 private val topChromeGradient = ProgressiveBlur.Top.copy(startFraction = 0f, endFraction = 1f, curve = 1.25f)
+private val dateChromeGradient = topChromeGradient.copy(startFraction = .55f)
 
 @Composable
-internal fun TopChromeBacking(source: Backdrop?, modifier: Modifier) {
+internal fun TopChromeBacking(source: Backdrop?, modifier: Modifier, includesDateRow: Boolean = false) {
     val surface = MaterialTheme.colorScheme.surface
     if (source == null || source is UniformPagePaper) {
         Spacer(modifier.background(surface))
@@ -185,7 +187,10 @@ internal fun TopChromeBacking(source: Backdrop?, modifier: Modifier) {
         )
         onDrawWithContent { drawContent(); drawRect(brush) }
     }
-    ProgressiveEdge(source, modifier.then(wash), topChromeGradient, 10.dp)
+    // When the date row is inside the measured header, keep its labels over frosted
+    // pixels and finish the fade at its own edge, never over the first teaching period.
+    val gradient = if (includesDateRow) dateChromeGradient else topChromeGradient
+    ProgressiveEdge(source, modifier.then(wash), gradient, 10.dp)
 }
 
 @Composable
@@ -200,9 +205,13 @@ internal fun ScrollEdge(source: PlannerBackdrop, modifier: Modifier) {
 
 @Composable
 private fun ProgressiveEdge(source: Backdrop, modifier: Modifier, gradient: ProgressiveBlur, radius: Dp) {
-    val reader = rememberGlassReader(source)
-    Spacer(modifier.drawBackdrop(reader.backdrop, shape = { RectangleShape }, progressiveGradient = gradient,
-        effects = { progressiveBlur(radius.toPx(), gradient = gradient) }).then(reader.placement))
+    // A replaced donor can have exactly the previous one's size. Drop its sampled
+    // RenderNode while keeping the toolbar controls, focus and scroll position alive.
+    key(source) {
+        val reader = rememberGlassReader(source)
+        Spacer(modifier.drawBackdrop(reader.backdrop, shape = { RectangleShape }, progressiveGradient = gradient,
+            effects = { progressiveBlur(radius.toPx(), gradient = gradient) }).then(reader.placement))
+    }
 }
 
 @Composable

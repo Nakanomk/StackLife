@@ -6,15 +6,18 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -75,7 +78,7 @@ class WorkspaceTransferTest {
         // its endpoint. Each direction must show *both* real titles, not just a frame outline.
         ui.mainClock.advanceTimeBy(if (returning) 200L else 64L)
     }
-    private fun movingBounds(expanded: Rect, titles: List<Rect>): Rect {
+    private fun movingBounds(expanded: Rect, titles: List<Rect>, capture: String? = null): Rect {
         val group = ui.onNodeWithTag("workspace-transfer", useUnmergedTree = true)
         group.assertIsDisplayed()
         val coords = group.fetchSemanticsNode().layoutInfo.coordinates
@@ -91,6 +94,15 @@ class WorkspaceTransferTest {
             assertTrue("Workspace frame was not submitted", submitted.await(4, java.util.concurrent.TimeUnit.SECONDS))
         }
         val map = ui.onRoot().captureToImage().toPixelMap()
+        if (capture != null && androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("captureMotion") == "yes") {
+            val bitmap = android.graphics.Bitmap.createBitmap(map.buffer, map.bufferOffset, map.stride,
+                map.width, map.height, android.graphics.Bitmap.Config.ARGB_8888)
+            try {
+                java.io.File(ui.activity.getExternalFilesDir(null), "repair-$capture.png").outputStream().use {
+                    check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                }
+            } finally { bitmap.recycle() }
+        }
         fun ink(area: Rect): Int {
             var count = 0
             for (y in (area.top.toInt() + 2).coerceAtLeast(0) until (area.bottom.toInt() - 2).coerceAtMost(map.height) step 2)
@@ -159,6 +171,96 @@ class WorkspaceTransferTest {
         val undone = result { it.frames.singleOrNull()?.remaining == 2 }
         assertTrue(undone.queue.isEmpty())
         tag("queue").assertIsDisplayed() // Undo is a data operation, not a second transfer
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test fun narrowReceiptKeepsHistoryBesideUndoAndCloseAboveWithoutRevertingTheQueue() {
+        val before = prepare(true, PlannerCommand.TaskAdd(TaskInput("Pack this task")))
+        val direction = mutableStateOf(LayoutDirection.Ltr)
+        ui.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(320.dp, 760.dp)) then
+                DeviceConfigurationOverride.FontScale(2f)) {
+                CompositionLocalProvider(LocalLayoutDirection provides direction.value) {
+                    StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
+                }
+            }
+        }
+        tag("queue-push").performClick()
+        val frame = result { it.queue.isEmpty() }.frames.single()
+        tag("frame:${frame.id}").performClick()
+        button(R.string.ui_restore_all).performScrollTo().performClick()
+        val restored = result { it.frames.isEmpty() && it.queue == before.queue }
+        val close = hasContentDescription(ui.activity.getString(R.string.ui_close_panel)) and hasClickAction() and
+            hasAnyAncestor(hasTestTag("push-feedback"))
+        for (layout in listOf(LayoutDirection.Ltr, LayoutDirection.Rtl)) {
+            ui.runOnIdle { direction.value = layout }
+            val undo = tag("receipt-undo").assertContentDescriptionEquals("撤回").assertHasClickAction()
+                .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
+            val keep = tag("receipt-keep").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val x = node(close).assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+                .fetchSemanticsNode().boundsInRoot
+            assertTrue("Close must not overlap undo: $x / $undo", x.bottom <= undo.top + 1f)
+            assertEquals(x.center.x, undo.center.x, 1f)
+            assertEquals(keep.center.y, undo.center.y, 1f)
+            if (layout == LayoutDirection.Ltr) assertEquals(keep.right, undo.left, 1f)
+            else assertEquals(keep.left, undo.right, 1f)
+        }
+        node(close).performClick()
+        ui.onNodeWithTag("receipt-undo").assertDoesNotExist()
+        assertEquals(restored, runBlocking { store.state() })
+    }
+
+    @Test fun longQueueFliesOnlyMeasuredRowsInBothDirectionsWithOneOrderedReceipt() {
+        assumeTrue(ValueAnimator.areAnimatorsEnabled())
+        val before = prepare(false, *List(24) { PlannerCommand.TaskAdd(TaskInput("Meeting $it", "Agenda $it")) }.toTypedArray())
+        val ids = before.queue.map { it.id }
+        attach()
+        val first = tag("task:${ids.first()}").fetchSemanticsNode().boundsInRoot
+        val titles = before.queue.take(2).map { task ->
+            ui.onNode(hasText(task.title) and hasAnyAncestor(hasTestTag("task:${task.id}")), useUnmergedTree = true)
+                .fetchSemanticsNode().boundsInRoot
+        }
+        ui.onNodeWithTag("task:${ids.last()}").assertDoesNotExist()
+        fun sample(returning: Boolean): Pair<Rect, Float> {
+            moveClockToQueueInk(returning)
+            // The unscaled design size is the union of *participating* measured rows,
+            // which may differ on return (receipt bar, scroll retention, insets).
+            val size = ui.onNodeWithTag("workspace-transfer", useUnmergedTree = true).fetchSemanticsNode().size
+            val group = first.copy(bottom = first.top + size.height)
+            assertTrue("Not the whole queue: ${size.height}", size.height < first.height * ids.size)
+            assertTrue("Both measured title slots should participate", titles.last().bottom < group.bottom)
+            return movingBounds(group, titles, if (returning) "many-restore" else "many-push") to group.height
+        }
+        ui.mainClock.autoAdvance = false
+        try {
+            tag("queue-push").performClick()
+            val pushed = result { it.queue.isEmpty() }
+            val saved = pushed.frames.single()
+            assertEquals(ids, saved.items.map { it.taskId })
+            val (packing, expanded) = sample(false)
+            ui.mainClock.advanceTimeBy(1400)
+            val frame = tag("frame:${saved.id}")
+            val folded = frame.fetchSemanticsNode().boundsInRoot.height
+            assertTrue("Push must compress from measured rows to the saved frame", packing.height in folded..expanded &&
+                packing.height < expanded - 1f && packing.height > folded + 1f)
+            ui.mainClock.autoAdvance = true
+            frame.performClick()
+            val restore = button(R.string.ui_restore_all).performScrollTo()
+            ui.mainClock.autoAdvance = false
+            restore.performClick()
+            val restored = result { it.queue.size == ids.size }
+            val (expanding, landing) = sample(true)
+            assertTrue("Restore must unfold from the same frame into real queue slots",
+                expanding.height > folded + 1f && expanding.height < landing - 1f)
+            ui.mainClock.advanceTimeBy(1400)
+            tag("task:${ids.first()}").assertIsDisplayed()
+            tag("queue").performScrollToKey(ids.last())
+            tag("task:${ids.last()}").assertIsDisplayed()
+            assertEquals(ids, restored.queue.map { it.id })
+            assertTrue(restored.frames.isEmpty())
+            assertEquals(before.revision + 2, restored.revision)
+            ui.onNodeWithTag("workspace-transfer", useUnmergedTree = true).assertDoesNotExist()
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
     @OptIn(ExperimentalTestApi::class)

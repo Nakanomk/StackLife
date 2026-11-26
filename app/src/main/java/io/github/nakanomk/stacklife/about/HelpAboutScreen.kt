@@ -106,7 +106,7 @@ internal fun HelpAboutScreen(back: () -> Unit, onGuide: () -> Unit) {
                         version.display { Text(stringResource(R.string.about_version, it.name ?: "—", it.code),
                             modifier = Modifier.testTag("about-version"), style = MaterialTheme.typography.labelLarge) }
                     } }
-                    item { AboutCard(PaddingValues(horizontal = 14.dp, vertical = 4.dp), Arrangement.spacedBy(4.dp)) {
+                    item { AboutCard(PaddingValues(horizontal = 14.dp, vertical = 4.dp), Arrangement.spacedBy(4.dp), provideContainerUnderlay = true) {
                         listOf(AboutPage.HELP, AboutPage.DIAGNOSTICS, AboutPage.BUILD, AboutPage.LICENSES).forEach { entry ->
                             PreferenceRow(stringResource(entry.title), modifier = Modifier.paneOrigin(origins, origin(entry))
                                 .testTag("about-${entry.name.lowercase(java.util.Locale.ROOT)}"),
@@ -180,7 +180,7 @@ private fun BuildDetails(padding: PaddingValues, version: Load<InstalledVersion>
             }
         }
         item {
-            AboutCard {
+            AboutCard(provideContainerUnderlay = true) {
                 AboutHeading(stringResource(R.string.about_project))
                 Text(stringResource(R.string.about_developer), style = MaterialTheme.typography.bodyLarge)
                 ExactValue(STACKLIFE_REPOSITORY)

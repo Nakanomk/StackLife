@@ -1,7 +1,6 @@
 package io.github.nakanomk.stacklife.transitions
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -15,9 +14,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
-import io.github.nakanomk.stacklife.appearance.LocalCapsuleBackdrop
 import io.github.nakanomk.stacklife.appearance.LocalPanelBack
-import io.github.nakanomk.stacklife.appearance.LocalWallpaperRecording
 import io.github.nakanomk.stacklife.appearance.wallpaperBackground
 
 /** Clip in native pixels after undoing only the outer bounds scale. */
@@ -32,16 +29,15 @@ private class RouteOutline(frame: PaintedContainer) : Shape {
 @Composable
 internal fun RoutePage(origins: ContainerOrigins, link: ContainerLink?, source: ContainerAnchor?, progress: ContainerProgress?,
     tag: Modifier, content: @Composable () -> Unit) {
-    val placement = placedContainer(origins, link, source, progress)
+    val placement = placedContainer(origins, link, source, progress, fixedPlane = false)
     val window by placement
     val outline by remember(placement) { derivedStateOf { placement.value?.let(::RouteOutline) } }
     val pane = origins is PaneOrigins
     val sheet = pane && LocalPanelBack.current != null
     val colors = MaterialTheme.colorScheme
     val paper = if (sheet) colors.surfaceContainerHigh else colors.surface
-    val donor = if (sheet) LocalCapsuleBackdrop.current else LocalWallpaperRecording.current
-    val background = if (pane && progress?.moving != true) Modifier else Modifier.wallpaperBackground(paper, donor)
-    Box(Modifier.fillMaxSize(), propagateMinConstraints = true) {
+    ContainerMaterials(origins, source, placement, progress) { material ->
+        val background = if (pane && progress?.moving != true) Modifier else Modifier.wallpaperBackground(paper, material)
         Box(Modifier.graphicsLayer {
             val w = window
             val rect = w?.rect
@@ -59,8 +55,7 @@ internal fun RoutePage(origins: ContainerOrigins, link: ContainerLink?, source: 
                 outline?.let { shape = it }
                 clip = true
             }
-        }.sourceHandoff({ window?.ink ?: 1f }) {
-            window?.let { w -> w.source?.translate(-w.rect.left, -w.rect.top) }
-        }.then(background), propagateMinConstraints = true) { content() }
+        }.sourceCover(origins, source, placement, progress, material, fixedPlane = false)
+            .then(background), propagateMinConstraints = true) { content() }
     }
 }

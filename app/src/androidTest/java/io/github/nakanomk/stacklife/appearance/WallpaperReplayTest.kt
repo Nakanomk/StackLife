@@ -48,12 +48,14 @@ class WallpaperReplayTest {
             file.outputStream().use { assertTrue(b.compress(Bitmap.CompressFormat.PNG, 100, it)) }
             var right by mutableStateOf(false)
             var solid by mutableStateOf(false)
+            var crop by mutableFloatStateOf(0f)
             ui.setContent {
                 MaterialTheme(colorScheme = lightColorScheme(surface = Color.White, onSurface = Color.Black)) {
                     CompositionLocalProvider(LocalAppearance provides Appearance(reduceTransparency = solid),
                         LocalPlannerGlassAllowed provides true, LocalPlatformAppearance provides rememberPlatformAppearance()) {
                         Box(Modifier.size(200.dp, 100.dp)) {
-                            WallpaperHost(WallpaperSpec(id, tint = 0f), drawBehindContent = false) {
+                            WallpaperHost(WallpaperSpec(id, tint = 0f, scale = 1f + crop, offsetX = crop,
+                                blur = crop * .25f), drawBehindContent = false) {
                                 Box(Modifier.fillMaxSize().background(Color.Green)) {
                                     Box(Modifier.align(if (right) Alignment.CenterEnd else Alignment.CenterStart)
                                         .size(32.dp).wallpaperBackground(Color.Yellow).testTag("receiver"))
@@ -67,6 +69,13 @@ class WallpaperReplayTest {
             ui.waitUntil(10_000) { center().let { it.red > it.blue + .2f && it.red > it.green + .2f } }
             ui.runOnIdle { right = true }
             ui.waitUntil(10_000) { center().let { it.blue > it.red + .2f && it.blue > it.green + .2f } }
+            // Right edge stays blue for every crop. Neither the black buffer nor the
+            // solid base is an acceptable intermediate frame while measuring a new crop.
+            for (step in listOf(.2f, .9f, .35f, .8f, .4f, 1f, .1f)) {
+                ui.runOnIdle { crop = step }
+                val frame = center()
+                assertTrue("Lost the blue photo during crop $step: $frame", frame.blue > frame.red + .2f && frame.blue > frame.green + .2f)
+            }
             ui.runOnIdle { solid = true }
             assertEquals(Color.Yellow, center())
         } finally { b.recycle(); file.delete() }

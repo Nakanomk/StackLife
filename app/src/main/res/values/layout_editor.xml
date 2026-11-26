@@ -1,5 +1,5 @@
 <resources>
-    <string name="appearance_image_cleanup_failed">Could not finish releasing draft images. Tap Cancel to retry leaving.</string>
+    <string name="appearance_image_cleanup_failed">Could not release the background photos. Go back to retry.</string>
     <string name="appearance_grid_lines">Show timetable grid lines</string>
     <string name="appearance_day_scroll">Day scrolling</string>
     <string name="appearance_scroll_flat">Flat</string>

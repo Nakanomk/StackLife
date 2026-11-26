@@ -20,9 +20,9 @@
     <string name="wallpaper_percent">%1$d%%</string>
     <string name="wallpaper_solid_accessibility">正使用实色表面以便阅读，你的图片会保留。</string>
     <string name="wallpaper_seed_source">取色背景</string>
-    <string name="wallpaper_seed_pick">从这张图片取色</string>
-    <string name="wallpaper_seed_reading">正在读取图片颜色…</string>
-    <string name="wallpaper_seed_no_photo">此背景未使用私有图片。</string>
-    <string name="wallpaper_seed_unavailable">无法读取这张私有图片，请在「背景图片」中重新选择。</string>
+    <string name="wallpaper_seed_pick">从这张背景取色</string>
+    <string name="wallpaper_seed_reading">正在读取背景颜色…</string>
+    <string name="wallpaper_seed_no_photo">此背景为主题纯色，没有可取色的图片。</string>
+    <string name="wallpaper_seed_unavailable">无法读取这张背景，请在「背景图片」中重新选择。</string>
     <string name="wallpaper_seed_no_color">图片中没有合适的主题色，请尝试其他图片或输入种子色。</string>
 </resources>

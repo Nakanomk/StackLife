@@ -1,6 +1,6 @@
-Google Material Symbols (outlined): system_update_alt, task_alt, event, person and school. The 24px path data is retained in Android vector drawables.
+Google Material Symbols (outlined): system_update_alt, task_alt, event, person, school and undo. The 24px path data is retained in Android vector drawables.
 https://github.com/google/material-design-icons/blob/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/system_update_alt/materialsymbolsoutlined/system_update_alt_24px.svg
-All five use symbols/web/{name}/materialsymbolsoutlined/{name}_24px.svg at 10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7. The event field follows BiliPai c7f835b34d8323358be57be298f86f29fecb53c8 feature/home/components/TopTabMaterialIconPolicy.kt::resolveTopTabMaterialIcon and design-system/core/ui/renderer/material3/AppMaterial3Icon.kt: stable semantic key → named glyph regardless of selected state. Only Google vector geometry is copied; see BiliPai-GPL-3.0.txt for the renderer reference.
+All six use symbols/web/{name}/materialsymbolsoutlined/{name}_24px.svg at 10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7. The event field follows BiliPai c7f835b34d8323358be57be298f86f29fecb53c8 feature/home/components/TopTabMaterialIconPolicy.kt::resolveTopTabMaterialIcon and design-system/core/ui/renderer/material3/AppMaterial3Icon.kt: stable semantic key → named glyph regardless of selected state. Only Google vector geometry is copied; see BiliPai-GPL-3.0.txt for the renderer reference.
 
                                  Apache License
                            Version 2.0, January 2004

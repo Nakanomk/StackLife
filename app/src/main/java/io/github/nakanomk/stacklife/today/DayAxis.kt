@@ -4,6 +4,7 @@ import io.github.nakanomk.stacklife.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.animateBounds
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -18,6 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.StrokeCap
@@ -47,7 +49,7 @@ import kotlin.math.roundToInt
 @Composable
 internal fun DayAxis(
     drag: AxisDrag, revision: Long, enabled: Boolean, onEdit: (AgendaOccurrence) -> Unit, openCourse: (ScheduledCourse) -> Unit,
-    send: (PlannerCommand) -> Unit, onMore: (TimeGridPlacement.Overflow) -> Unit, focused: String?, modifier: Modifier, topInset: Dp, spine: Dp, endInGutter: Boolean,
+    send: (PlannerCommand) -> Unit, onMore: (TimeGridPlacement.Overflow) -> Unit, modifier: Modifier, topInset: Dp, spine: Dp, endInGutter: Boolean,
 ) {
     val density = LocalDensity.current
     val scale = drag.scale
@@ -56,7 +58,10 @@ internal fun DayAxis(
     val railWidth = 48.dp
     val gutter = spine + railWidth / 2
     var selectedEnd by remember(drag, revision) { mutableStateOf<String?>(null) }
+    val now by rememberMinuteClock(scale.day)
+    val cursorY = remember(scale, now) { scale.cursorY(now) }
     Box(modifier.fillMaxWidth().clipToBounds()) {
+        TimeAxisRail(drag, spine, cursorY, now >= scale.day.endMillis, Modifier.padding(top = topInset))
         Box(Modifier.fillMaxSize().testTag("day-axis").scrollBoundaryHaptics(drag.scroll).verticalScroll(drag.scroll).padding(top = topInset, bottom = 16.dp)) {
             val plane = Modifier.fillMaxWidth().height(with(density) { scale.height.toDp() })
             Box(plane) {
@@ -86,7 +91,7 @@ internal fun DayAxis(
                             Modifier.width(railWidth).fillMaxHeight())
                         val source = item.dragSource()
                         val move = if (source == null) Modifier else Modifier.slotDrag(source, drag, revision, enabled, send)
-                        AgendaEventCard(item, scale.day, revision, enabled, onEdit, openCourse, send, Modifier.fillMaxSize(), move, compact = compact, focused = item.stableKey == focused)
+                        AgendaEventCard(item, scale.day, revision, enabled, onEdit, openCourse, send, Modifier.fillMaxSize(), move, compact = compact)
                     }
                 }
                 for (group in scale.placement.more) key(group.start) {
@@ -106,7 +111,7 @@ internal fun DayAxis(
         }
         Box(Modifier.fillMaxSize().padding(top = topInset).clipToBounds().testTag("day-drop-area")
             .onGloballyPositioned(drag::placeViewport)) {
-            CurrentLine(drag, spine)
+            CurrentTimeMarker(drag, spine, now, cursorY)
             DropPreview(drag, gutter)
         }
     }
@@ -203,8 +208,7 @@ private fun AgendaOccurrence.dragSource() = (key as? OccurrenceKey.Schedule)?.ta
 @Composable
 internal fun AgendaEventCard(entry: AgendaOccurrence, day: PlannerQuery.Day, revision: Long, enabled: Boolean, onEdit: (AgendaOccurrence) -> Unit,
     openCourse: (ScheduledCourse) -> Unit, complete: (PlannerCommand) -> Unit, modifier: Modifier, move: Modifier = Modifier,
-    wrap: Boolean = false, compact: Boolean = false, focused: Boolean = false) {
-    val container = if (focused) modifier.background(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.shapes.medium) else modifier
+    wrap: Boolean = false, compact: Boolean = false, showTitleIcon: Boolean = true) {
     val body: @Composable (Modifier) -> Unit = { area ->
         if (entry.course != null) CourseCard(entry.course, day, area, wrap, entry.completed, openCourse)
         else {
@@ -223,7 +227,7 @@ internal fun AgendaEventCard(entry: AgendaOccurrence, day: PlannerQuery.Day, rev
                 .padding(horizontal = 4.dp)) {
                 val lines = if (wrap) Int.MAX_VALUE else 1
                 Text(range, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = lines, overflow = TextOverflow.Ellipsis)
-                TaskIconTitle(entry.icon) {
+                TaskIconTitle(if (showTitleIcon) entry.icon else TaskIcon.AUTO) {
                     Text(entry.title, style = MaterialTheme.typography.titleSmall, textDecoration = if (entry.completed) TextDecoration.LineThrough else null,
                         maxLines = lines, overflow = TextOverflow.Ellipsis)
                 }
@@ -236,8 +240,8 @@ internal fun AgendaEventCard(entry: AgendaOccurrence, day: PlannerQuery.Day, rev
         Checkbox(checked = entry.completed, enabled = enabled, modifier = Modifier.size(48.dp).semantics { contentDescription = description },
             onCheckedChange = { complete(PlannerCommand.SetOccurrenceCompletion(entry.key, it, revision, entry.version)) })
     }
-    if (compact) Column(container.padding(end = 2.dp)) { body(Modifier.fillMaxWidth().weight(1f)); check() }
-    else Row(container) { body(Modifier.weight(1f).then(if (wrap) Modifier.heightIn(min = 48.dp) else Modifier.fillMaxHeight())); check() }
+    if (compact) Column(modifier.padding(end = 2.dp)) { body(Modifier.fillMaxWidth().weight(1f)); check() }
+    else Row(modifier) { body(Modifier.weight(1f).then(if (wrap) Modifier.heightIn(min = 48.dp) else Modifier.fillMaxHeight())); check() }
 }
 
 @Composable
@@ -259,15 +263,15 @@ private fun CourseCard(course: ScheduledCourse, day: PlannerQuery.Day, modifier:
 }
 
 @Composable
-private fun CurrentLine(drag: AxisDrag, spine: Dp) {
-    val millis by produceState(System.currentTimeMillis(), drag.scale.day) {
+private fun rememberMinuteClock(day: PlannerQuery.Day): State<Long> =
+    produceState(System.currentTimeMillis(), day) {
         while (true) {
             value = System.currentTimeMillis()
             delay(MINUTE_MS - Math.floorMod(value, MINUTE_MS))
         }
     }
-    CurrentTimeMarker(drag, spine, millis)
-}
+
+private val dropSnapSpec = tween<Rect>(durationMillis = 100)
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -287,7 +291,8 @@ private fun DropPreview(drag: AxisDrag, gutter: Dp) {
         layout(child.width, child.height) { child.place(0, -drag.scroll.value) }
     }.wrapContentHeight(Alignment.Top, unbounded = true)) {
         LookaheadScope {
-            val bounds = if (LocalMotionEnabled.current) Modifier.animateBounds(this) else Modifier
+            val bounds = if (LocalMotionEnabled.current) Modifier.animateBounds(this,
+                boundsTransform = { _, _ -> dropSnapSpec }) else Modifier
             val height = if (slot.interval.point) 12.dp else with(density) { (endY - startY).toDp() }
             Box(Modifier.fillMaxWidth().offset(y = with(density) { startY.toDp() })
                 .then(bounds).height(height).testTag("drop-interval")) {

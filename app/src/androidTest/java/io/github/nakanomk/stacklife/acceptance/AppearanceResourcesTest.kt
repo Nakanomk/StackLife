@@ -179,6 +179,47 @@ class AppearanceResourcesTest {
         } finally { folder.deleteRecursively() }
     }
 
+    @Test fun wallpaperPaletteFollowsItsSelectedPageAndNestedInkSwitchesWithThePreview() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val store = BackgroundStore(context) { emptySet() }
+        val page = Destination.COURSES
+        val pink = WallpaperSpec(preset = WallpaperPreset.PINK)
+        val blue = WallpaperSpec(preset = WallpaperPreset.BLUE)
+        val subject = mutableStateOf(Appearance(theme = ThemeMode.LIGHT, palette = PaletteMode.WALLPAPER,
+            palettePage = page, background = pink, pageBackgrounds = mapOf(page to blue)))
+        fun seed(spec: WallpaperSpec) = "#%06X".format(java.util.Locale.ROOT,
+            kotlinx.coroutines.runBlocking { requireNotNull(store.wallpaperSeed(spec)) } and 0xffffff)
+        val expectedSeed = mutableStateOf(seed(blue))
+        val actual = java.util.concurrent.atomic.AtomicInteger()
+        val expected = java.util.concurrent.atomic.AtomicInteger()
+        val inkMatches = java.util.concurrent.atomic.AtomicBoolean()
+        ui.setContent {
+            CompositionLocalProvider(LocalBackgroundStore provides store) {
+                StackLifeTheme(subject.value.copy(palette = PaletteMode.SEED, seed = expectedSeed.value)) {
+                    val reference = MaterialTheme.colorScheme.primary.toArgb()
+                    SideEffect { expected.set(reference) }
+                }
+                StackLifeTheme(Appearance(theme = ThemeMode.LIGHT)) {
+                    StackLifeTheme(subject.value) {
+                        val accent = MaterialTheme.colorScheme.primary.toArgb()
+                        val ink = androidx.compose.material3.LocalContentColor.current == MaterialTheme.colorScheme.onSurface
+                        SideEffect { actual.set(accent); inkMatches.set(ink) }
+                    }
+                }
+            }
+        }
+        fun matched(previous: Int? = null) = ui.waitUntil(5_000) {
+            val reference = expected.get()
+            reference != 0 && reference != previous && actual.get() == reference && inkMatches.get()
+        }
+        matched(); val original = actual.get()
+        val rose = seed(pink)
+        ui.runOnIdle { expectedSeed.value = rose; subject.value = subject.value.copy(pageBackgrounds = emptyMap()) }
+        matched(original); val lightRose = actual.get()
+        ui.runOnIdle { subject.value = subject.value.copy(theme = ThemeMode.DARK) }
+        matched(lightRose)
+    }
+
     @Test fun userSeedAndSystemPalettesKeepReadableTextInBothThemes() {
         val state = mutableStateOf(Appearance()); var roles = emptyList<Pair<Int, Int>>()
         ui.setContent { StackLifeTheme(state.value) {

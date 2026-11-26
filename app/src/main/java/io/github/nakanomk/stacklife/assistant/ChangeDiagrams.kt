@@ -20,10 +20,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.kotlinflow.components.KotlinFlow
 import io.github.kotlinflow.models.KotlinFlowTheme
-import io.github.kotlinflow.types.EdgeStyle
+import io.github.kotlinflow.models.Edge
 import io.github.kotlinflow.types.FitViewOptions
 import io.github.nakanomk.stacklife.graphs.canvasNode
-import io.github.nakanomk.stacklife.graphs.directedEdge
+import io.github.nakanomk.stacklife.graphs.DependencyEdges
 import io.github.nakanomk.stacklife.graphs.graphNodeWidth
 import io.github.nakanomk.stacklife.graphs.graphNodeHeight
 import io.github.nakanomk.stacklife.i18n.uiText
@@ -84,13 +84,13 @@ import java.time.ZoneId
     if (expanded) {
         val scale = LocalDensity.current.density
         val projected = remember(value.nodes, scale) { value.nodes.map { it.canvasNode(scale) } }
-        val edges = remember(value.edges, otherEdges, colors, sideColor, scale) { value.edges.map {
-            it.directedEdge(scale, if (it in otherEdges) null else EdgeStyle(strokeColor = sideColor))
-        } }
-        KotlinFlow(projected, edges, Modifier.fillMaxWidth().height(248.dp).clip(MaterialTheme.shapes.medium),
+        val theme = KotlinFlowTheme(canvasBackgroundColor = colors.surfaceContainer, edgeColor = colors.onSurfaceVariant)
+        KotlinFlow(projected, emptyList<Edge<Unit>>(), Modifier.fillMaxWidth().height(248.dp).clip(MaterialTheme.shapes.medium),
             nodesDraggable = false, nodesConnectable = false, elementsSelectable = false, fitView = true,
             fitViewOptions = FitViewOptions(padding = 8f * scale, durationMillis = 0),
-            theme = KotlinFlowTheme(canvasBackgroundColor = colors.surfaceContainer, edgeColor = colors.onSurfaceVariant)) { n ->
+            theme = theme, overlay = {
+                DependencyEdges(projected, value.edges, theme.edgeWidth) { if (it in otherEdges) theme.edgeColor else sideColor }
+            }) { n ->
             Surface(shape = MaterialTheme.shapes.medium, color = colors.surfaceContainerHighest) {
                 Column(Modifier.width(graphNodeWidth).heightIn(min = graphNodeHeight).padding(8.dp)) {
                     Text(n.data.title); status(n.data)?.let { Text(it, color = nodeColor(n.data), style = MaterialTheme.typography.labelMedium) }

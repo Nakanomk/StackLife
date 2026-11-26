@@ -1,5 +1,5 @@
 <resources>
-    <string name="appearance_image_cleanup_failed">未能释放草稿图片。点击取消可重试退出。</string>
+    <string name="appearance_image_cleanup_failed">未能释放背景图片。请再次返回以重试。</string>
     <string name="appearance_grid_lines">显示课表辅助线</string>
     <string name="appearance_day_scroll">今日滚动效果</string>
     <string name="appearance_scroll_flat">平面</string>

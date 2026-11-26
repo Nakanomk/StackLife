@@ -2,6 +2,7 @@ package io.github.nakanomk.stacklife.acceptance
 
 import io.github.nakanomk.stacklife.R
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.provider.Settings
 import android.os.ParcelFileDescriptor
@@ -12,10 +13,12 @@ import java.io.File
 import androidx.compose.ui.platform.ViewRootForTest
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.key.Key
@@ -26,7 +29,6 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.LayoutDirection
@@ -92,6 +94,11 @@ class DayTimelineTest {
     private fun show() {
         ui.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
         await(hasTestTag("day-axis"))
+    }
+    // Navigation3 also owns Android SavedStateRegistry state. Recreate that owner, not
+    // only a subtree's Compose saveable registry, then attach the app to the new Activity.
+    private fun attachRestorableWindow() = ui.activityRule.scenario.onActivity { window ->
+        window.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
     }
     private fun await(matcher: SemanticsMatcher): SemanticsNodeInteraction {
         ui.waitUntil(10_000) { ui.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
@@ -250,36 +257,88 @@ class DayTimelineTest {
         assertEquals(before, readDay())
     }
 
-    @Test fun horizontalSwipeAndSavedStateRestoreKeepTheScrollAndCollapsedQueue() {
-        val restore = StateRestorationTester(ui)
-        restore.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
+    private fun dateHeading(date: LocalDate) = hasTestTag("day-date") and
+        hasContentDescription("${date.year}年${date.monthValue}月${date.dayOfMonth}日", substring = true)
+
+    @Test fun revisitingTodayShowsNowWhileRotationPreservesAChosenScrollAndCollapsedTray() {
+        attachRestorableWindow()
         val toggle = hasTestTag("day-tray-toggle")
         await(toggle and hasStateDescription("已展开"))
         ui.onNodeWithText("队列中没有待排任务").assertIsDisplayed()
         ui.onNode(toggle).performTouchInput { click() }
         await(toggle and hasStateDescription("已收起"))
-        centerTick("12:00")
+        // Far from now but not at the midnight stop, where the tray intentionally leaves the screen.
+        val away = if (LocalTime.now().hour < 12) "17:00" else "07:00"
+        centerTick(away)
         val axis = hasTestTag("day-axis")
-        val before = await(axis).fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
-        fun dateHeading(date: LocalDate) = hasTestTag("day-date") and
-            hasContentDescription("${date.year}年${date.monthValue}月${date.dayOfMonth}日", substring = true)
+        ui.onNodeWithTag("now-line").assertDoesNotExist()
         await(axis).performTouchInput { swipeLeft() }
         await(dateHeading(query.date.plusDays(1))).assertIsDisplayed()
         await(toggle and hasStateDescription("已收起"))
         await(hasTestTag("nav:workspace")).performClick()
         await(hasTestTag("nav:today")).performClick()
-        await(dateHeading(query.date.plusDays(1))).assertIsDisplayed()
         await(toggle and hasStateDescription("已收起"))
-        await(axis).performTouchInput { swipeRight() }
         await(dateHeading(query.date)).assertIsDisplayed()
-        val restored = await(axis).fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
-        assertEquals(before, restored, 1f)
-        restore.emulateSavedInstanceStateRestore()
+        await(hasTestTag("now-line")).assertIsDisplayed()
+        centerTick(away)
+        ui.onNodeWithTag("now-line").assertDoesNotExist()
+        await(hasTestTag("nav:today")).performClick()
+        await(hasTestTag("now-line")).assertIsDisplayed()
+        centerTick(away)
+        await(toggle and hasStateDescription("已收起")).assertIsDisplayed()
+        val before = await(axis).fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+        ui.activityRule.scenario.recreate(); attachRestorableWindow()
         await(dateHeading(query.date)).assertIsDisplayed()
         await(toggle and hasStateDescription("已收起")).assertIsDisplayed()
         ui.onNodeWithTag("day-tray").assertDoesNotExist()
         assertEquals(before, await(axis).fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value(), 1f)
         assertEquals(0L, readDay().revision)
+    }
+
+    @Test fun openingTodayFromSettingsOnTomorrowReturnsToTheCurrentDayAndTime() {
+        show()
+        ui.onNodeWithContentDescription("后一天").performClick()
+        await(dateHeading(query.date.plusDays(1))).assertIsDisplayed()
+        await(hasContentDescription("设置") and hasClickAction()).performClick()
+        val settings = hasAnyAncestor(hasTestTag("route:settings"))
+        val jump = hasTestTag("open-feature:today")
+        await(hasScrollToIndexAction() and settings).performScrollToNode(jump)
+        await(jump and settings).performClick()
+        val feature = hasAnyAncestor(hasTestTag("route:feature:today"))
+        await(dateHeading(query.date) and feature).assertIsDisplayed()
+        await(hasTestTag("now-line") and feature).assertIsDisplayed()
+    }
+
+    @Test fun explicitLandingWinsThisVisitWithoutPaintingTheEventAndNextVisitReturnsToNow() {
+        val hour = if (LocalTime.now().hour < 12) 21 else 3
+        runBlocking { store.apply(TaskAdd(TaskInput("提醒落点", ref = "target")), once("@target", at(hour, 0), 30)) }
+        val event = readDay().occurrences.single()
+        val reveal = mutableStateOf<OccurrenceKey?>(event.key)
+        val visit = mutableStateOf<Int?>(null)
+        val accent = Color.Magenta
+        var consumed = 0
+        ui.setContent {
+            val model = viewModel { WorkspaceViewModel(store.api) }
+            StackLifeTheme(Appearance(reduceMotion = true)) {
+                MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(secondaryContainer = accent)) {
+                    TodayRoute(model, query.date, query.zone, {}, {}, {}, reveal.value,
+                        { assertEquals(event.key, it); consumed++; reveal.value = null }, {}, todayVisit = visit.value)
+                }
+            }
+        }
+        await(hasTestTag("day-axis"))
+        ui.runOnIdle { assertEquals(0, consumed); visit.value = 1 }
+        ui.waitUntil(10_000) { reveal.value == null }
+        val card = await(hasTestTag("block:${event.taskId}")).assertIsDisplayed().assertHasClickAction()
+        ui.onNodeWithTag("now-line").assertDoesNotExist()
+        val pixels = card.captureToImage().toPixelMap()
+        val accentArgb = accent.toArgb()
+        for (y in 0 until pixels.height step 4) for (x in 0 until pixels.width step 4) {
+            assertNotEquals("Revealing a card must not apply a persistent container", accentArgb, pixels[x, y].toArgb())
+        }
+        ui.runOnIdle { assertEquals(1, consumed); visit.value = 2 }
+        await(hasTestTag("now-line")).assertIsDisplayed()
+        card.assertIsNotDisplayed()
     }
 
     @Test fun sameQueueSurfaceGrowsFromTheBallAndReversesBeforeEitherEndpoint() {
@@ -464,7 +523,7 @@ class DayTimelineTest {
 
     @Test fun eventViewCompressesFreeTimeAndAddsOnlyOneScheduledTaskOnConfirmation() {
         runBlocking {
-            store.apply(TaskAdd(TaskInput("早班", ref = "a")), once("@a", at(9, 0), 30),
+            store.apply(TaskAdd(TaskInput("早班", ref = "a", icon = TaskIcon.PERSON)), once("@a", at(9, 0), 30),
                 TaskAdd(TaskInput("评审", ref = "b")), once("@b", at(11, 0), 30))
         }
         val before = readDay()
@@ -472,8 +531,19 @@ class DayTimelineTest {
         ui.onNodeWithTag("day-tray-toggle").performClick()
         selectDayView("events")
         val list = await(hasTestTag("day-events"))
+        val early = before.occurrences.single { it.title == "早班" }
+        val blockTag = hasTestTag("block:${early.taskId}")
+        list.performScrollToNode(blockTag)
+        val symbol = hasContentDescription("人物") and hasAnyAncestor(hasTestTag("day-events"))
+        ui.onAllNodes(symbol, useUnmergedTree = true).assertCountEquals(1)
+        val glyph = ui.onNode(symbol, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val rail = ui.onNodeWithTag("day-rail").fetchSemanticsNode().boundsInRoot
+        assertEquals(rail.center.x, glyph.center.x, 2f)
+        await(blockTag).assertHasClickAction()
         val gap = hasTestTag("day-gap:${at(9, 30).toInstant().toEpochMilli()}")
-        val nineHours = ui.onNodeWithTag("day-gap:${query.startMillis}").fetchSemanticsNode().size.height
+        val firstGap = hasTestTag("day-gap:${query.startMillis}")
+        list.performScrollToNode(firstGap)
+        val nineHours = ui.onNode(firstGap).fetchSemanticsNode().size.height
         list.performScrollToNode(gap)
         assertEquals("Long free periods use one compact row, not proportional whitespace", nineHours,
             await(gap).fetchSemanticsNode().size.height)
@@ -488,6 +558,7 @@ class DayTimelineTest {
         val after = readDay { it.revision > before.revision }
         assertEquals(before.revision + 1, after.revision)
         val task = after.occurrences.single { it.title == "在空档读论文" }
+        assertEquals(TaskIcon.TASK, task.icon)
         assertEquals(at(10, 15).toInstant().toEpochMilli(), task.startMillis)
         assertEquals(at(10, 30).toInstant().toEpochMilli(), task.endMillis)
         assertEquals(3, after.occurrences.size); assertTrue(after.tray.isEmpty())
@@ -501,8 +572,7 @@ class DayTimelineTest {
     }
 
     @Test fun emptyEventDaySurvivesDateTabAndRotationAndRefusesStaleGapDraft() {
-        val restore = StateRestorationTester(ui)
-        restore.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
+        attachRestorableWindow()
         await(hasTestTag("day-axis"))
         selectDayView("events")
         fun bounds(tag: String) = await(hasTestTag(tag)).fetchSemanticsNode().boundsInRoot
@@ -516,10 +586,9 @@ class DayTimelineTest {
         ui.onNodeWithContentDescription("后一天").performClick()
         await(hasTestTag("nav:workspace")).performClick()
         await(hasTestTag("nav:today")).performClick()
-        restore.emulateSavedInstanceStateRestore()
-        val tomorrow = PlannerQuery.Day(query.date.plusDays(1), query.zone)
-        val gap = await(hasTestTag("day-gap:${tomorrow.startMillis}"))
-        gap.assert(hasText("空闲 · ${(tomorrow.endMillis - tomorrow.startMillis) / 3_600_000L} 小时")).performClick()
+        ui.activityRule.scenario.recreate(); attachRestorableWindow()
+        val gap = await(hasTestTag("day-gap:${query.startMillis}"))
+        gap.assert(hasText("空闲 · ${(query.endMillis - query.startMillis) / 3_600_000L} 小时")).performClick()
         await(hasTestTag("gap-title")).performTextInput("过期待办")
         runBlocking { store.apply(TaskAdd(TaskInput("同步变化"))) }
         await(hasText("日程已变更，请关闭并重新选择空闲时段。"))
@@ -637,6 +706,8 @@ class DayTimelineTest {
             ui.mainClock.advanceTimeBy(48)
             val moving = box("drop-interval").top
             assertTrue("The bound must cross an intermediate position", firstTime.y < moving && moving < laterTime.y)
+            ui.mainClock.advanceTimeBy(96)
+            assertEquals("The snap settles without a long spring tail", laterTime.y, box("drop-interval").top, 2f)
             ui.onNodeWithText("16:00–16:30 · 松手安排").assertIsDisplayed()
             assertEquals(before, readDay())
             root.performTouchInput { moveTo(firstTime); up() }
@@ -856,6 +927,35 @@ class DayTimelineTest {
         } } finally { image.recycle() }
     }
 
+    @Test fun warmLandingOnAnotherDateAcknowledgesTheHiddenOccurrenceInItsOwnDrawer() {
+        val later = PlannerQuery.Day(query.date.plusDays(3), query.zone)
+        val atLater = later.date.atTime(18, 55).atZone(query.zone).toOffsetDateTime()
+        runBlocking {
+            store.apply(*buildList {
+                add(TaskAdd(TaskInput("第一个提醒", ref = "first"))); add(once("@first", at(9, 0), 0))
+                for (i in 1..6) {
+                    add(TaskAdd(TaskInput("后续提醒$i", ref = "later$i"))); add(once("@later$i", atLater, 0))
+                }
+            }.toTypedArray())
+        }
+        val first = readDay().occurrences.single()
+        val hidden = runBlocking { (store.api.observe(later).first() as DayPlan).occurrences.last() }
+        val owner = mutableStateOf(query.date)
+        val reveal = mutableStateOf<OccurrenceKey?>(first.key)
+        val consumed = mutableListOf<OccurrenceKey>()
+        ui.setContent {
+            val model = viewModel { WorkspaceViewModel(store.api) }
+            StackLifeTheme { TodayRoute(model, owner.value, query.zone, { owner.value = it }, {}, {}, reveal.value,
+                { key -> consumed.add(key); if (reveal.value == key) reveal.value = null }, {}) }
+        }
+        ui.waitUntil(10_000) { reveal.value == null }
+        await(hasTestTag("block:${first.taskId}")).assertIsDisplayed()
+        ui.runOnIdle { owner.value = later.date; reveal.value = hidden.key }
+        ui.waitUntil(10_000) { reveal.value == null }
+        await(hasTestTag("overlap-item:${hidden.stableKey}")).assertIsDisplayed()
+        ui.runOnIdle { assertEquals(listOf(first.key, hidden.key), consumed); assertEquals(later.date, owner.value) }
+    }
+
     @Test fun twentiethPointCanBeMovedAndCompletedWithoutMovingOrCompletingItsSeries() {
         val pattern = SchedulePattern.Daily(listOf(DailySegment(query.date.toEpochDay(), 10 * 60, query.zone.id, 0)))
         runBlocking { store.apply(*buildList {
@@ -998,9 +1098,9 @@ class DayTimelineTest {
         await(hasText(ui.activity.getString(R.string.appearance_scroll_wheel)) and hasClickAction()).performClick()
         val after = previewInk()
         assertEquals(before.size, after.size)
-        assertTrue("Changing the unsaved preference must repaint the clock rows", before.indices.count { before[it] != after[it] } > 100)
+        assertTrue("Changing the preference must repaint the clock rows", before.indices.count { before[it] != after[it] } > 100)
         captureSchedule("layout-wheel", ui.onNode(preview), "U8")
-        ui.onNodeWithText(ui.activity.getString(R.string.ui_save_appearance)).performClick()
+        ui.onNodeWithContentDescription(ui.activity.getString(R.string.ui_back)).performClick()
         ui.waitUntil(10_000) { ui.onAllNodesWithTag("appearance-scroll").fetchSemanticsNodes().isEmpty() }
         ui.onNodeWithContentDescription("返回").performClick()
         await(hasTestTag("day-axis"))
@@ -1015,18 +1115,23 @@ class DayTimelineTest {
             TaskAdd(TaskInput("读书", ref = "d")), once("@d", at(2, 30), 45)
         ) }
         val point = readDay().occurrences.first()
-        val flat = Appearance(theme = ThemeMode.LIGHT, palette = PaletteMode.SEED, dayScrollEffect = DayScrollEffect.FLAT)
+        val flat = Appearance(theme = ThemeMode.LIGHT, palette = PaletteMode.SEED,
+            dayScrollEffect = DayScrollEffect.FLAT, background = WallpaperSpec())
         val wheel = flat.copy(dayScrollEffect = DayScrollEffect.WHEEL)
         appearance(flat); show()
         ui.onNodeWithTag("day-tray-toggle").performClick()
         centerTick("00:00")
         for (mode in listOf("time", "events")) {
             if (mode == "events") { appearance(flat); selectDayView(mode) }
-            val card = await(hasTestTag("block:${point.taskId}")).assertIsDisplayed()
+            val cardTag = hasTestTag("block:${point.taskId}")
             val viewport = ui.onNodeWithTag(if (mode == "time") "day-axis" else "day-events")
-            val top = if (mode == "time") ui.onNodeWithTag("day-drop-area") else viewport
-            val shift = card.fetchSemanticsNode().boundsInRoot.center.y - top.fetchSemanticsNode().boundsInRoot.top - with(ui.density) { 28.dp.toPx() }
+            if (mode == "events") viewport.performScrollToNode(cardTag)
+            val card = await(cardTag).assertIsDisplayed()
+            val top = ui.onNodeWithTag("day-rail").fetchSemanticsNode().boundsInRoot.top
+            val shift = card.fetchSemanticsNode().boundsInRoot.center.y - top - with(ui.density) { 28.dp.toPx() }
             viewport.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, shift) }
+            fun scrollOffset() = viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+            val baselineOffset = scrollOffset()
             val region = card.fetchSemanticsNode().boundsInRoot
             val baseline = painted(region)
             val rail = ui.onNodeWithTag("day-rail").fetchSemanticsNode().boundsInRoot
@@ -1040,7 +1145,13 @@ class DayTimelineTest {
                 }
             }
             captureSchedule("$mode-flat", card, "U8")
-            if (mode == "time") chooseWheelInLayout() else appearance(wheel)
+            if (mode == "time") {
+                chooseWheelInLayout()
+                // Returning to Today intentionally lands on the current minute, not the 00:30 fixture.
+                val correction = baselineOffset - scrollOffset()
+                viewport.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, correction) }
+                assertEquals(baselineOffset, scrollOffset(), 1f)
+            } else appearance(wheel)
             ui.waitUntil(10_000) { difference() > maxOf(40, baseline.size / 180) }
             assertEquals(rail, ui.onNodeWithTag("day-rail").fetchSemanticsNode().boundsInRoot)
             captureSchedule("$mode-wheel", card, "U8")

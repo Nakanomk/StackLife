@@ -68,7 +68,7 @@ class AppearanceTransferTest {
     private val global = "01010101-0101-0101-0101-010101010101"
     private val perPage = "02020202-0202-0202-0202-020202020202"
     private suspend fun Device.source(): Appearance {
-        val value = Appearance(theme = ThemeMode.DARK, compact = true, background = WallpaperSpec(global, 1.3f, .2f, -.2f, .4f, blur = .15f),
+        val value = Appearance(theme = ThemeMode.DARK, compact = true, showNavLabels = false, background = WallpaperSpec(global, 1.3f, .2f, -.2f, .4f, blur = .15f),
             pageBackgrounds = mapOf(Destination.COURSES to WallpaperSpec(perPage, scale = 2f), Destination.TODAY to WallpaperSpec(global, offsetY = .4f)))
         photos.withArchiveLease { lease ->
             lease.photo(global, Color.RED); lease.photo(perPage, Color.GREEN)
@@ -102,6 +102,28 @@ class AppearanceTransferTest {
             assertEquals(days, target.countdowns()); assertEquals(tasks, target.workspace().queue); assertEquals(before.copy(appearance = restored), target.settings())
         } }
     }
+    @Test fun legacyMarkerArchiveKeepsAnExplicitlyHiddenLineAndRejectsForeignFields() = runBlocking {
+        Device().use { device ->
+            val current = archiveJson.encodeToString(Appearance(showNowLine = false, nowArrow = false))
+            val old = current.replace("\"palettePage\":null,", "").replace("\"showNowLine\":false", "\"nowLine\":\"OFF\"")
+                .replace("\"nowArrow\":false", "\"nowArrow\":false,\"nowTrail\":true")
+            fun archive(record: String) = ByteArrayOutputStream().also { out ->
+                ArchiveCodec.write(AppearanceLayout, mapOf("appearance" to 1),
+                    listOf(ArchiveSource("appearance/settings.json") { record.byteInputStream() }), out)
+            }.toByteArray()
+            val bytes = archive(old)
+            assertEquals(AppearanceImport.APPLIED, device.transfer.restore({ bytes.inputStream() }) { true })
+            device.reopen(); assertEquals(Appearance(showNowLine = false, nowArrow = false), device.settings().appearance)
+            for (invalid in listOf(old.dropLast(1) + ",\"other\":true}",
+                old.replace("\"palette\":\"DYNAMIC\"", "\"palette\":\"WALLPAPER\""),
+                old.replace("\"nowLine\":\"OFF\",\"nowArrow\":false", "\"nowArrow\":false,\"nowLine\":\"OFF\""))) {
+                val bad = archive(invalid)
+                val failure = runCatching { device.transfer.restore({ bad.inputStream() }) { fail("Invalid record reached review"); true } }
+                assertTrue(failure.exceptionOrNull() is IllegalArgumentException)
+            }
+        }
+    }
+
     @Test fun cancellationConflictAndForeignFieldsLeaveNoOrphanOrUnconfirmedRevision() = runBlocking {
         Device().use { donor -> Device().use { target ->
             val expected = donor.source(); val packed = donor.export(); val initial = target.workspace(); val original = target.settings()

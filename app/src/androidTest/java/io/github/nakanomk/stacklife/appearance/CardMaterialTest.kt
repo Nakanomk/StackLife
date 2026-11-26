@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
+import io.github.nakanomk.stacklife.RootPane
+import io.github.nakanomk.stacklife.TopChromeBacking
 import io.github.nakanomk.stacklife.about.AboutIdentity
 import io.github.nakanomk.stacklife.about.HelpAboutScreen
 import io.github.nakanomk.stacklife.assistant.ProviderOptions
@@ -64,6 +66,92 @@ class CardMaterialTest {
                 }
             }
         }
+    }
+
+    @Test fun toolbarLensReadsLiveContentWhenTheDateRowOwnsTheGradient() {
+        val paper = mutableStateOf(Color.Red)
+        show {
+            RootPane(contentDrawsTopEdge = true, header = {
+                Box(Modifier.fillMaxWidth().height(56.dp), contentAlignment = Alignment.Center) {
+                    StackLifeSurface(CapsuleScene.CHROME, Modifier.size(84.dp, 44.dp).testTag("lens"),
+                        solid = Color.White) {}
+                }
+            }) { _, _ -> Spacer(Modifier.fillMaxSize().background(paper.value)) }
+        }
+        fun centre() = ui.onNodeWithTag("lens").captureToImage().toPixelMap().let { it[it.width / 2, it.height / 2] }
+        val first = centre()
+        ui.runOnIdle { paper.value = Color.Blue }
+        val second = centre()
+        assertTrue("The lens retained wallpaper or an earlier content frame: $first → $second",
+            first.red - first.blue > .25f && second.blue - second.red > .25f)
+    }
+
+    @Test fun dateHeaderBlursTheLabelBandButLeavesTheFirstPeriodUntouched() {
+        show {
+            val source = rememberPlannerBackdrop()
+            Box(Modifier.size(200.dp, 144.dp).testTag("bands")) {
+                Canvas(Modifier.matchParentSize().plannerBackdrop(source)) {
+                    drawRect(Color.White)
+                    drawRect(Color.Black, size = Size(size.width / 2, size.height))
+                }
+                TopChromeBacking(source, Modifier.fillMaxWidth().height(96.dp), includesDateRow = true)
+            }
+        }
+        val pixels = ui.onNodeWithTag("bands").captureToImage().toPixelMap()
+        val boundary = with(ui.density) { 96.dp.roundToPx() }
+        val x = pixels.width / 2
+        val textY = boundary - with(ui.density) { 18.dp.roundToPx() }
+        assertTrue("Expected a softened edge behind the date", pixels[x, textY].red - pixels[x - 1, textY].red < .8f)
+        assertEquals(Color.Black, pixels[x - 1, boundary + 2])
+        assertEquals(Color.White, pixels[x, boundary + 2])
+    }
+
+    @Test fun classicFrostTransmitsBroadLightSoftensDetailAndLeavesTheLabelSharp() {
+        val scene = mutableStateOf(CapsuleScene.NAVIGATION)
+        show {
+            StackLifeSurface(scene.value, Modifier.align(Alignment.Center).size(200.dp, 84.dp).testTag("material"),
+                Color.White, shape = RectangleShape) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) { Text("H", color = Color.Green) }
+            }
+        }
+        val material = ui.onNodeWithTag("material")
+        fun image() = material.captureToImage().toPixelMap()
+        fun contrast(pixels: androidx.compose.ui.graphics.PixelMap, dx: Int): Float {
+            val x = pixels.width / 2; val y = pixels.height / 2
+            return pixels[x + dx, y].red - pixels[x - dx, y].red
+        }
+        fun glyph(pixels: androidx.compose.ui.graphics.PixelMap): Set<Int> = buildSet {
+            for (y in pixels.height / 2 until pixels.height) for (x in pixels.width / 3 until pixels.width * 2 / 3) {
+                if (pixels[x, y] == Color.Green) add(y * pixels.width + x)
+            }
+        }
+        val liquid = image()
+        val near = with(ui.density) { 6.dp.roundToPx() }
+        val far = with(ui.density) { 65.dp.roundToPx() }
+        val classic = Appearance(glass = true, frostedGlass = true)
+        ui.runOnIdle { appearance.value = classic }
+        val frost = image()
+        material.assert(hasStateDescription(ui.activity.getString(R.string.ui_frosted_capsule)))
+        assertTrue("Frost lost the wallpaper step", contrast(frost, far) > .28f)
+        assertTrue("A tint alone leaves the normalized edge unchanged",
+            contrast(frost, near) / contrast(frost, far) < .75f * contrast(liquid, near) / contrast(liquid, far))
+        val ink = glyph(liquid)
+        assertTrue("Reference glyph has no fully painted pixels", ink.isNotEmpty())
+        assertTrue("Foreground was filtered with the material", glyph(frost).intersect(ink).size >= ink.size * .95f)
+        ui.runOnIdle { appearance.value = classic.copy(frostedGlass = false) }
+        assertEquals(contrast(liquid, near), contrast(image(), near), .02f)
+        for (fallback in listOf(classic.copy(navGlass = false), classic.copy(glass = false),
+            classic.copy(highContrast = true), classic.copy(reduceTransparency = true))) {
+            ui.runOnIdle { appearance.value = fallback }
+            material.assert(hasStateDescription(ui.activity.getString(R.string.ui_solid_capsule)))
+            assertEquals(0f, contrast(image(), far), .005f)
+        }
+        ui.runOnIdle { scene.value = CapsuleScene.ASSISTANT; appearance.value = classic.copy(assistantGlass = false) }
+        assertEquals(0f, contrast(image(), far), .005f)
+        ui.runOnIdle { appearance.value = classic }
+        assertTrue(contrast(image(), far) > .28f)
+        ui.runOnIdle { platform.value = PlatformAppearance(accelerated = true, powerSave = true) }
+        assertEquals(0f, contrast(image(), far), .005f)
     }
 
     @Test fun collectionBlursTheWallpaperEdgeButKeepsForegroundAndOpaqueFallbacksSharp() {

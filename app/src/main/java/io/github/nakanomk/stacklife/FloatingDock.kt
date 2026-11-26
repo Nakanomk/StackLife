@@ -30,6 +30,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
@@ -141,7 +142,8 @@ private fun chromeRail(top: Dp = 4.dp) = Modifier.widthIn(max = 520.dp).fillMaxW
     .padding(start = chromeGutter, end = chromeGutter, top = top, bottom = 4.dp)
 
 @Composable
-internal fun rememberDestinationCapsule(active: String, pagerPosition: State<Float>? = null, onSelect: (String) -> Unit): @Composable () -> Unit {
+internal fun rememberDestinationCapsule(active: String, pagerPosition: State<Float>? = null,
+    onReselect: ((String) -> Unit)? = null, onSelect: (String) -> Unit): @Composable () -> Unit {
     val appearance = LocalAppearance.current
     val position = appearance.visibleOrder.indexOfFirst { it.key == active }.coerceAtLeast(0).toFloat()
     val slot = pagerPosition ?: animateFloatAsState(position, if (LocalMotionEnabled.current) tween(200) else snap(), label = "navigation slot")
@@ -154,39 +156,46 @@ internal fun rememberDestinationCapsule(active: String, pagerPosition: State<Flo
                 accepted = key
                 pulse()
                 onSelect(key)
-            }
+            } else if (key == active) onReselect?.invoke(key)
         }
         if (appearance.navStyle == NavStyle.DOCKED) DockedNavigation(appearance.visibleOrder, active, select)
         else DestinationCapsule(appearance.visibleOrder, active, slot, select)
     }
 }
 
+private fun Modifier.navigationTab(tab: Destination): Modifier {
+    val fullName = tab.label
+    return testTag("nav:${tab.key}").semantics { contentDescription = fullName }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DockedNavigation(tabs: List<Destination>, active: String, onSelect: (String) -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val showLabels = LocalAppearance.current.showNavLabels
     val glass = LocalCapsuleBackdrop.current != null && LocalAppearance.current.navGlass
     StackLifeSurface(CapsuleScene.NAVIGATION, Modifier.fillMaxWidth(), colors.surfaceContainer,
         shape = androidx.compose.foundation.shape.RoundedCornerShape(0.dp)) {
         val description = stringResource(R.string.ui_bottom_nav)
         val bar = Modifier.fillMaxWidth().testTag("navigation-capsule").semantics { stateDescription = description }
         if (LocalShortDock.current) BoxWithConstraints(bar) {
-            // Material text-only scrollable tabs retain full labels (including long translations)
-            // and a 48dp hit row without taking a second row away from the calendar.
+            // One scrollable 48dp row in short windows, including icon-only navigation.
             PrimaryScrollableTabRow(selectedTabIndex = tabs.indexOfFirst { it.key == active }.coerceAtLeast(0),
                 containerColor = Color.Transparent, edgePadding = 0.dp, minTabWidth = (maxWidth / tabs.size).coerceAtLeast(48.dp),
                 divider = {}) {
                 for (tab in tabs) key(tab.key) {
-                    Tab(selected = tab.key == active, onClick = { onSelect(tab.key) }, modifier = Modifier.heightIn(min = 48.dp).testTag("nav:${tab.key}")) {
-                        Text(tab.label, Modifier.padding(horizontal = 4.dp), softWrap = false, style = MaterialTheme.typography.labelMedium)
+                    Tab(selected = tab.key == active, onClick = { onSelect(tab.key) }, modifier = Modifier.heightIn(min = 48.dp).navigationTab(tab)) {
+                        if (showLabels) Text(tab.dockLabel, Modifier.padding(horizontal = 4.dp), softWrap = false, style = MaterialTheme.typography.labelMedium)
+                        else DockIcon(tab.key, LocalContentColor.current)
                     }
                 }
             }
         } else NavigationBar(bar, windowInsets = WindowInsets(0), containerColor = if (glass) Color.Transparent else colors.surfaceContainer) {
             for (tab in tabs) key(tab.key) {
                 NavigationBarItem(selected = tab.key == active, onClick = { onSelect(tab.key) },
-                    icon = { DockIcon(tab.key, LocalContentColor.current) }, label = { Text(tab.label, textAlign = TextAlign.Center) },
-                    modifier = Modifier.testTag("nav:${tab.key}"))
+                    icon = { DockIcon(tab.key, LocalContentColor.current) },
+                    label = if (showLabels) { { Text(tab.dockLabel, textAlign = TextAlign.Center) } } else null,
+                    modifier = Modifier.navigationTab(tab))
             }
         }
     }
@@ -195,6 +204,7 @@ private fun DockedNavigation(tabs: List<Destination>, active: String, onSelect: 
 @Composable
 private fun DestinationCapsule(tabs: List<Destination>, active: String, slot: State<Float>, onSelect: (String) -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val showLabels = LocalAppearance.current.showNavLabels
     StackLifeSurface(CapsuleScene.NAVIGATION, Modifier.fillMaxWidth().testTag("navigation-capsule"),
         solid = colors.surfaceContainerLow, elevation = 2.dp) {
         SegmentTrack(slot, tabs.size, colors.secondaryContainer, { onSelect(tabs[it].key) },
@@ -205,12 +215,12 @@ private fun DestinationCapsule(tabs: List<Destination>, active: String, slot: St
                     val tab = tabs[index]
                     val ink = if (highlighted == index) colors.primary else colors.onSurfaceVariant
                     Column(Modifier.weight(1f).fillMaxHeight()
-                        .testTag("nav:${tab.key}").selectable(active == tab.key, role = Role.Tab) { onSelect(tab.key) }
+                        .navigationTab(tab).selectable(active == tab.key, role = Role.Tab) { onSelect(tab.key) }
                         .heightIn(min = 48.dp).padding(vertical = 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = if (short) Arrangement.Center else Arrangement.Top) {
-                        if (!short) DockIcon(tab.key, ink)
-                        Text(tab.label, Modifier.fillMaxWidth(), color = ink, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
+                        verticalArrangement = if (short || !showLabels) Arrangement.Center else Arrangement.Top) {
+                        if (!short || !showLabels) DockIcon(tab.key, ink)
+                        if (showLabels) Text(tab.dockLabel, Modifier.fillMaxWidth(), color = ink, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
                     }
                 }
             }

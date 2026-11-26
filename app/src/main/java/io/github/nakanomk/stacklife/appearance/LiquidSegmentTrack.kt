@@ -130,7 +130,12 @@ internal fun SegmentTrack(position: State<Float>, count: Int, ink: Color, onSele
                 .fillMaxWidth(1f / count)
             val shape = (if (indicatorInset > 0.dp) slotBounds.padding(horizontal = indicatorInset) else slotBounds).height(rest)
             if (shell == null) Spacer(shape.background(ink, CircleShape))
-            else {
+            else if (LocalAppearance.current.frostedGlass) {
+                // The track already painted the frosted shell. Tint those pixels in place,
+                // including while scrubbing, rather than reintroducing a moving prism.
+                val tone = if (MaterialTheme.colorScheme.surface.luminance() < .5f) Color.White else Color.Black
+                Spacer(shape.background(tone.copy(alpha = .18f), CircleShape))
+            } else {
                 // BiliPai's 64/56/78dp shell/rest/press reference, capped even when the text grows.
                 val pressedScale = when {
                     navigationInset == null -> 78f / 56f

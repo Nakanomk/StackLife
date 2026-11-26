@@ -115,7 +115,7 @@ data class FrameEntry(
 }
 
 /** A creation ref is batch-local: declare `ref = "a"`, then address it as `@a`. */
-data class TaskInput(val title: String, val notes: String = "", val minutes: Int = 30, val ref: String? = null, val icon: TaskIcon = TaskIcon.AUTO)
+data class TaskInput(val title: String, val notes: String = "", val minutes: Int = 30, val ref: String? = null, val icon: TaskIcon = TaskIcon.TASK)
 
 sealed interface PlannerCommand {
     data class TaskAdd(val task: TaskInput) : PlannerCommand

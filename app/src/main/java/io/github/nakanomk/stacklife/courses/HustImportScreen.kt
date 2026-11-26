@@ -226,7 +226,7 @@ internal fun HustImportScreen(model: WorkspaceViewModel, entry: ImportEntry, onB
                 ImportPane(showComposer = !busy && !hub, composer = { AssistantComposer(AssistantPage.Terms) }) { bottom ->
                     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, bottom))) {
                         SectionTitle(stringResource(if (entry == ImportEntry.WEB) R.string.courses_hub_source else R.string.courses_import_file))
-                        FormGroup {
+                        FormGroup(provideContainerUnderlay = true) {
                             if (entry == ImportEntry.WEB) {
                                 PreferenceRow(stringResource(R.string.courses_hub_extract), modifier = Modifier.paneOrigin(origins, "hub")
                                     .testTag("importCourseHub"), enabled = !busy, labelMaxLines = 1) { state.message = null; state.page = ImportPage.HUB }

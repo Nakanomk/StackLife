@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -82,20 +83,26 @@ internal fun WallpaperPixels(spec: WallpaperSpec, base: Color, foreground: Color
         if (bitmap == null || viewport.width <= 0 || viewport.height <= 0) null
         else wallpaperCrop(viewport, IntSize(bitmap.width, bitmap.height), spec)
     }
-    // Present crop and protection together. During a slider gesture the previous protected crop
-    // stays on screen until the worker has measured the new one.
+    // One worker per image plane. An in-progress measurement can still present its protected
+    // frame during a continuous gesture; the next read uses the most recent focal point.
+    val latestCrop by rememberUpdatedState(crop)
     val frame = key(bitmap, base, foreground, viewport) {
-        produceState<ProtectedCrop?>(null, crop) {
-            if (bitmap != null && crop != null) value = withContext(Dispatchers.Default) {
-                ProtectedCrop(crop, wallpaperBands(bitmap, viewport, crop, base, foreground))
+        produceState<ProtectedCrop?>(null) {
+            if (bitmap != null) snapshotFlow { latestCrop }.collect { next ->
+                if (next != null) value = withContext(Dispatchers.Default) {
+                    ProtectedCrop(next, wallpaperBands(bitmap, viewport, next, base, foreground))
+                }
             }
         }
     }.value
     Box(modifier.onSizeChanged { viewport = it }) {
         Spacer(Modifier.matchParentSize().then(record).drawWithCache {
             val protection = frame?.bands?.let {
-                val tint = if (card) spec.tint else (spec.tint * .55f).coerceAtMost(.28f)
-                fun color(alpha: Float) = base.copy(alpha = alpha + (1f - alpha) * tint)
+                val darkPaper = base.luminance() < foreground.luminance()
+                // On light paper the user's tint lifts the picture toward white. On dark
+                // paper don't apply a second dimmer on top of the computed readability floor.
+                fun color(alpha: Float) = base.copy(alpha = if (!card && darkPaper) max(alpha, spec.tint)
+                    else alpha + (1f - alpha) * spec.tint)
                 // Blend at band boundaries without reducing either neighbouring band's protection.
                 val stops = Array(2 * it.size + 1) { k ->
                     val i = k / 2

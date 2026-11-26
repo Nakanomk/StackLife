@@ -84,7 +84,7 @@ internal fun NodeForm(model: WorkspaceViewModel, graphId: String, revision: Long
     var title by rememberSaveable { mutableStateOf(node?.title.orEmpty()) }
     val note = rememberNoteLink(node?.notes.orEmpty())
     var minutes by rememberSaveable { mutableIntStateOf(node?.minutes ?: 30) }
-    var icon by rememberSaveable { mutableStateOf(node?.icon ?: TaskIcon.AUTO) }
+    var icon by rememberSaveable { mutableStateOf(node?.icon ?: TaskIcon.TASK) }
     // A Dialog is a separate Android window: withdraw it while the note route is in front,
     // keeping all form fields in the graph entry's saved-state scope, not in the Dialog.
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()

@@ -50,7 +50,7 @@ internal fun LicenseIndex(files: Load<List<String>>, padding: PaddingValues, ori
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LicenseEntry(file: String, origins: PaneOrigins, open: (String) -> Unit) {
-    FrostedCard(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium) {
+    FrostedCard(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, provideContainerUnderlay = true) {
         ListItem(modifier = Modifier.paneOrigin(origins, "license:$file").testTag("license:$file")
             .clickable(role = Role.Button) { open(file) },
             supportingContent = { Text(file, style = MaterialTheme.typography.bodyMedium) },

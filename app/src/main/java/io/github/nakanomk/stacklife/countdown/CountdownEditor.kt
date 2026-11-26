@@ -150,7 +150,7 @@ private fun CountdownForm(model: WorkspaceViewModel, id: String?, saved: Countdo
             if (cleanupError) Text(stringResource(R.string.countdown_cleanup_error), color = MaterialTheme.colorScheme.error)
             val preview = stringResource(R.string.countdown_preview)
             CountdownCard(draft, today, Modifier.semantics { contentDescription = preview }.testTag("countdown-preview"))
-            FormGroup {
+            FormGroup(Modifier.testTag("countdown-fields"), frosted = true) {
                 TextField(title, { title = it }, Modifier.fillMaxWidth().testTag("countdown-name"), enabled = editable, colors = lineFieldColors(),
                     singleLine = true, label = { Text(stringResource(R.string.countdown_name)) }, isError = title.length > 256)
                 DateWheelField(stringResource(R.string.countdown_date), date, today, editable, Modifier.testTag("countdown-date")) { day = it.toEpochDay() }
@@ -159,7 +159,7 @@ private fun CountdownForm(model: WorkspaceViewModel, id: String?, saved: Countdo
                 else PreferenceRow(stringResource(R.string.countdown_mode), TextMode(mode), enabled = false) {}
                 CheckRow(stringResource(R.string.countdown_pinned), pinned, enabled = editable) { pinned = !pinned }
             }
-            FormGroup {
+            FormGroup(Modifier.testTag("countdown-photo-fields"), frosted = true) {
                 PreferenceRow(stringResource(if (importing) R.string.countdown_preparing else R.string.countdown_choose_photo),
                     enabled = editable) { picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) }
                 photoError?.let { Text(it, color = MaterialTheme.colorScheme.error) }

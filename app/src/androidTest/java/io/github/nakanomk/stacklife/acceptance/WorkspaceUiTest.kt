@@ -82,7 +82,7 @@ class WorkspaceUiTest {
         }
         fun back() { ui.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() } }
         edit(); choose("学习"); back()
-        assertEquals(TaskIcon.AUTO, runBlocking { store.state().queue.single().icon })
+        assertEquals(TaskIcon.TASK, runBlocking { store.state().queue.single().icon })
         edit(); choose("人物"); await(hasText("保存修改") and hasClickAction()).performClick()
         await(hasContentDescription("人物")); back()
         await(hasTestTag("task:$id") and hasContentDescription("人物")).assertIsDisplayed()
@@ -415,7 +415,7 @@ class WorkspaceUiTest {
         val item = runBlocking { store.state() }.frames.single().items.single()
         assertEquals("旧标题", item.title)
         assertEquals("旧备注", item.notes)
-        assertEquals(QueueTask(id, "新标题", "新备注", 35), item.current)
+        assertEquals(QueueTask(id, "新标题", "新备注", 35, icon = TaskIcon.TASK), item.current)
         val direct = hasTestTag("task-note:$id")
         scrollTo(direct)
         ui.onNode(direct).performClick()
@@ -492,7 +492,9 @@ class WorkspaceUiTest {
         await(hasTestTag("title:0")).assertTextContains("本机笔记测试")
         assertTrue(runBlocking { store.state() }.queue.isEmpty())
         await(hasText("添加到队列") and isEnabled()).performClick()
-        assertEquals(accepted, awaitQueue("本机笔记测试").queue.single().notes)
+        val saved = awaitQueue("本机笔记测试").queue.single()
+        assertEquals(accepted, saved.notes)
+        assertEquals(TaskIcon.TASK, saved.icon)
 
         await(hasTestTag("add-task")).performClick()
         await(hasTestTag("notes:0")).performClick()

@@ -2,7 +2,7 @@
     <string name="transfer_no_picker">No system document picker is available.</string>
     <string name="transfer_title">Appearance sharing</string>
     <string name="transfer_scope">Only saved appearance settings and their global and per-page photos are included. No schedules, conversations, connections or device preferences. Limit: 32 MiB per photo, 128 MiB total.</string>
-    <string name="transfer_finish_draft">Save or discard your current edits before transferring appearance.</string>
+    <string name="transfer_pending_edit">Wait for the current appearance change to finish.</string>
     <string name="transfer_export">Export appearance file</string>
     <string name="transfer_import">Preview appearance file</string>
     <string name="transfer_review">Replace saved appearance?</string>

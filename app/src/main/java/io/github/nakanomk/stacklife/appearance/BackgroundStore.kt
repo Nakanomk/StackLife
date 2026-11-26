@@ -14,6 +14,7 @@ import io.github.nakanomk.stacklife.archive.archiveHex
 import io.github.nakanomk.stacklife.i18n.uiText
 import io.github.nakanomk.stacklife.images.*
 import io.github.nakanomk.stacklife.planner.privatePhotoId
+import io.github.nakanomk.stacklife.planner.WallpaperSpec
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
@@ -34,10 +35,15 @@ import kotlinx.coroutines.withContext
 // (GPL-3.0): copy during picker grant; StackLife normalizes a private still and cleans cancelled imports.
 internal class BackgroundStore(context: Context, private val retained: suspend () -> Set<String>) {
     private val root = File(context.noBackupFilesDir, "background-images")
+    private val resources = context.resources
     private val resolver = context.applicationContext.contentResolver
     private val mutex = Mutex()
     private val drafts = HashSet<String>()
     private val archivePins = HashMap<String, Int>()
+    // An immediately applied edit may detach the only database reference to its entry photo.
+    // The route owns this pin until ordinary Back or a completed rollback, including rotation.
+    private val editorPins = HashMap<String, Set<String>>()
+    private fun pinned(id: String) = id in archivePins || editorPins.values.any { id in it }
     private var recovered = false
 
     /** Also called inside a Planner transaction: no store lock or database callback here. */
@@ -72,7 +78,7 @@ internal class BackgroundStore(context: Context, private val retained: suspend (
             val name = file.name
             val staging = name.startsWith(".input-") || name.startsWith(".pending-")
             val id = if (staging) name.substringAfter('-') else name
-            if (privatePhotoId.matches(id) && id !in drafts && id !in archivePins && (staging || id !in keep))
+            if (privatePhotoId.matches(id) && id !in drafts && !pinned(id) && (staging || id !in keep))
                 Files.deleteIfExists(file.toPath())
         }
         recovered = true
@@ -80,6 +86,31 @@ internal class BackgroundStore(context: Context, private val retained: suspend (
 
     suspend fun recover() = io { mutex.withLock { if (!recovered) sweepLocked() } }
     suspend fun collect() = io { mutex.withLock { sweepLocked() } }
+
+    suspend fun pinEditorOriginals(owner: String, ids: Set<String>) = io {
+        mutex.withLock {
+            if (ids.any { !exists(it) }) storageFailure()
+            editorPins[owner] = ids
+        }
+    }
+
+    suspend fun finishEditor(owner: String, imports: Collection<String>) = io {
+        mutex.withLock {
+            val originals = editorPins[owner].orEmpty()
+            val candidates = originals + imports
+            if (candidates.isNotEmpty()) {
+                val keep = retained()
+                for (id in candidates) {
+                    if (id !in keep && id !in archivePins && (id !in drafts || id in imports) &&
+                        editorPins.none { (other, pins) -> other != owner && id in pins })
+                        Files.deleteIfExists(File(root, id).toPath())
+                }
+            }
+            drafts.removeAll(imports)
+            editorPins.remove(owner)
+            Unit
+        }
+    }
 
     suspend fun importImage(uri: Uri): String {
         val id = UUID.randomUUID().toString()
@@ -115,7 +146,7 @@ internal class BackgroundStore(context: Context, private val retained: suspend (
         mutex.withLock {
             // Retry the same release after a failed reference read, without dropping its lease.
             if (id in drafts) {
-                if (id !in archivePins && id !in retained()) Files.deleteIfExists(File(root, id).toPath())
+                if (!pinned(id) && id !in retained()) Files.deleteIfExists(File(root, id).toPath())
                 drafts.remove(id)
             }
             Unit
@@ -138,7 +169,7 @@ internal class BackgroundStore(context: Context, private val retained: suspend (
                         // or turns a completed Planner transaction into an apparent failed import.
                         try {
                             val keep = retained()
-                            for (id in lease.ids) if (id !in keep && id !in drafts && id !in archivePins)
+                            for (id in lease.ids) if (id !in keep && id !in drafts && !pinned(id))
                                 Files.deleteIfExists(File(root, id).toPath())
                         }
                         catch (e: Exception) { android.util.Log.w("StackLife", "Archive background cleanup deferred", e) }
@@ -176,7 +207,7 @@ internal class BackgroundStore(context: Context, private val retained: suspend (
                 }
                 val reserved = retained()
                 var target = id
-                while (Files.exists(File(root, target).toPath(), LinkOption.NOFOLLOW_LINKS) || target in archivePins || target in drafts || target in reserved)
+                while (Files.exists(File(root, target).toPath(), LinkOption.NOFOLLOW_LINKS) || pinned(target) || target in drafts || target in reserved)
                     target = UUID.randomUUID().toString()
                 pin(target)
                 val pending = File(root, ".pending-$target")
@@ -211,19 +242,23 @@ internal class BackgroundStore(context: Context, private val retained: suspend (
         decodePrivatePhoto(File(root, id), edge)
     }
 
-    /** Read a bounded private thumbnail before file collection; score it outside the store lock. */
-    suspend fun photoSeed(id: String): Int? {
-        val pixels = io {
-            mutex.withLock {
+    /** Quantize the original source, never a tinted/blurred screenshot of the current theme. */
+    suspend fun wallpaperSeed(spec: WallpaperSpec, allowNeutral: Boolean = false): Int? {
+        val preset = spec.preset
+        val pixels = if (preset != null) withContext(Dispatchers.Default) {
+            presetBitmap(resources, preset, 128).asImageBitmap().samplePixels().pixels
+        } else {
+            val id = spec.imageId ?: return null
+            io { mutex.withLock {
                 if (!exists(id)) storageFailure()
                 val thumbnail = decodePrivatePhoto(File(root, id), 128)
-                try { thumbnail.asImageBitmap().samplePixels().pixels }
-                finally { thumbnail.recycle() }
-            }
+                try { thumbnail.asImageBitmap().samplePixels().pixels } finally { thumbnail.recycle() }
+            } }
         }
         return withContext(Dispatchers.Default) {
             val colors = QuantizerCelebi.quantize(pixels, 128)
             Score.score(colorsToPopulation = colors, desired = 1, fallbackColorArgb = null, filter = true).firstOrNull()
+                ?: if (allowNeutral) colors.maxByOrNull { it.value }?.key else null
         }
     }
 }

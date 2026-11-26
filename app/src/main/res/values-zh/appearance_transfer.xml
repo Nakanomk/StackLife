@@ -2,7 +2,7 @@
     <string name="transfer_no_picker">系统文件选择器不可用。</string>
     <string name="transfer_title">外观分享</string>
     <string name="transfer_scope">仅包含已保存的外观设置及全局、逐页背景图片，不包含日程、对话、模型连接或设备偏好。每张图片限 32 MiB，合计限 128 MiB。</string>
-    <string name="transfer_finish_draft">请先保存或放弃当前编辑，再分享或导入外观。</string>
+    <string name="transfer_pending_edit">请等待当前外观修改完成。</string>
     <string name="transfer_export">导出外观文件</string>
     <string name="transfer_import">预览外观文件</string>
     <string name="transfer_review">替换已保存的外观？</string>

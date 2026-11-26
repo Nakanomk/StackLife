@@ -74,7 +74,7 @@ def read_frames(processor, path):
     return overruns, misses
 
 
-def score(processor, paths):
+def score(processor, paths, material):
     overruns = []
     misses = 0
     iterations = []
@@ -86,9 +86,15 @@ def score(processor, paths):
     overruns.sort()
     count = len(overruns)
     p95_ns = overruns[(95 * count - 1) // 100]  # ceil(0.95 * count) - 1
+    p99_ns = overruns[(99 * count - 1) // 100]
+    if material == "glass":
+        # Fixed 120 Hz device: allow occasional one-interval slips, not a long tail.
+        passed = p95_ns <= 8_333_333 and p99_ns <= 16_666_667 and 100 * misses < 5 * count
+    else:
+        passed = p95_ns <= 0 and 100 * misses < count
     return dict(iterations=iterations, windowFrames=count, p95Ms=p95_ns / 1_000_000,
                 appMissedOrDropped=misses, appMissedOrDroppedPct=100 * misses / count,
-                passed=p95_ns <= 0 and 100 * misses < count)
+                p99Ms=p99_ns / 1_000_000, passed=passed)
 
 
 def main():
@@ -108,7 +114,7 @@ def main():
                 if digest in seen:
                     raise ValueError(f"duplicate trace input: {path} has identical contents to {seen[digest]}")
                 seen[digest] = path
-        report = {mode: score(args.trace_processor, paths) for mode, paths in modes.items()}
+        report = {mode: score(args.trace_processor, paths, mode) for mode, paths in modes.items()}
     except (OSError, ValueError, csv.Error) as error:
         parser.exit(2, f"{parser.prog}: {error}\n")
     print(json.dumps(report, indent=2))

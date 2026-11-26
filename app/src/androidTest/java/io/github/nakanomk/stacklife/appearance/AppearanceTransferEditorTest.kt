@@ -59,11 +59,13 @@ class AppearanceTransferEditorTest {
         fun action(id: Int) {
             val row = hasText(label(id)) and hasClickAction()
             ui.onNodeWithTag("appearance-scroll").performScrollToNode(row)
+            ui.waitUntil(7_000) { ui.onAllNodes(row and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
             ui.onNode(row).performScrollTo().performClick()
         }
         fun dialog() = hasText(label(R.string.transfer_review)) and hasAnyAncestor(isDialog())
         fun waitFor(matcher: SemanticsMatcher) = ui.waitUntil(7_000) { ui.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
-        val exported = Appearance(theme = ThemeMode.DARK); val other = exported.copy(theme = ThemeMode.LIGHT)
+        val exported = Appearance(theme = ThemeMode.DARK)
+        val other = exported.copy(theme = ThemeMode.LIGHT, courseTextOutline = true)
         fun set(a: Appearance) = runBlocking { fixture.apply(PlannerCommand.EditAppearance(AppearancePatch.Replace(a))) }
         fun saved() = runBlocking { (fixture.api.observe(PlannerQuery.Settings).first() as PolicyView).appearance }
         val closed = java.util.concurrent.atomic.AtomicBoolean()
@@ -77,8 +79,17 @@ class AppearanceTransferEditorTest {
                 }
             }
             action(R.string.transfer_export); waitFor(hasText(label(R.string.transfer_exported))); assertTrue(file.length() > 0)
-            set(other); val before = runBlocking { fixture.state().revision }
+            set(exported.copy(theme = ThemeMode.LIGHT))
+            val beforeEdit = runBlocking { fixture.state().revision }
+            action(R.string.ui_course_outline)
+            ui.waitUntil(7_000) { saved() == other }
+            val before = beforeEdit + 1
+            assertEquals(before, runBlocking { fixture.state().revision })
             action(R.string.transfer_import); waitFor(dialog()); assertEquals(other, saved())
+            for (key in listOf("theme", "courseTextOutline")) {
+                val label = AppearanceGroup.entries.firstNotNullOf { it.fields[key] }()
+                ui.onNode(hasText(label) and hasAnyAncestor(isDialog())).assertExists()
+            }
             ui.onNode(hasText(label(R.string.ui_cancel)) and hasAnyAncestor(isDialog())).performClick()
             ui.waitUntil(7_000) { ui.onAllNodes(isDialog()).fetchSemanticsNodes().isEmpty() }
             assertEquals(before, runBlocking { fixture.state().revision }); assertFalse(closed.get())

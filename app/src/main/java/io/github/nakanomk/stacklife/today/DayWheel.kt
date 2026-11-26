@@ -71,8 +71,10 @@ internal fun Modifier.listWheel(enabled: Boolean, list: LazyListState, index: In
     // Calendar rows are not sticky or pinned: visible indices are contiguous in scroll order.
     if (visible.isEmpty()) return@graphicsLayer
     val item = visible.getOrNull(index - visible[0].index) ?: return@graphicsLayer
-    projectDayWheel(item.offset - layout.viewportStartOffset + (item.size - size.height) / 2f,
-        (layout.viewportEndOffset - layout.viewportStartOffset).toFloat(), list.canScrollForward)
+    // Rows scroll under the fixed header for glass sampling; the visible wheel starts below it.
+    val top = layout.viewportStartOffset + layout.beforeContentPadding
+    projectDayWheel(item.offset - top + (item.size - size.height) / 2f,
+        (layout.viewportEndOffset - top).toFloat(), list.canScrollForward)
 }
 
 /** Read-only clock rows share the event list projection. No selection, haptics or snapping. */

@@ -96,6 +96,7 @@ private val wallpaperShape = Record("imageId?" to Nullable(text), "preset?" to N
 private fun prefField(key: String): Shape = when (key) {
     "theme" -> choices(*ThemeMode.entries.map { it.name }.toTypedArray())
     "palette" -> choices(*PaletteMode.entries.map { it.name }.toTypedArray())
+    "palettePage" -> Nullable(destination)
     "seed" -> Scalar("string", { it.isString && it.content.matches(seedPattern) }) { put("pattern", seedPattern.pattern) }
     "navStyle" -> choices(*NavStyle.entries.map { it.name }.toTypedArray())
     "background" -> wallpaperShape

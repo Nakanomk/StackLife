@@ -163,7 +163,7 @@ class GestureHapticsTest {
         choose(R.string.haptic_navigation, R.string.ui_standard)
         choose(R.string.haptic_edges, R.string.haptic_off)
         field(R.string.ui_system_haptics).performClick()
-        node(text(R.string.ui_save_appearance) and hasClickAction()).performClick()
+        node(hasContentDescription(ui.activity.getString(R.string.ui_back)) and hasClickAction()).performClick()
         node(material)
         val saved = runBlocking { (store.api.observe(PlannerQuery.Settings).first() as PolicyView).appearance }
         assertEquals(false, saved.haptics)

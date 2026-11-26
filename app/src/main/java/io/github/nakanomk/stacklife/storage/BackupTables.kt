@@ -140,7 +140,7 @@ private fun decodePortableRow(line:String):BackupRecord {
         fun checkSide(side:String,snapshot:ChangeSnapshot?) {
             if(snapshot is AppearanceSnapshot) {
                 val value=raw[i].jsonObject.getValue(side).jsonObject.getValue("value")
-                require(backupFormat.decodeFromJsonElement<Appearance>(value)==snapshot.value)
+                require(backupFormat.decodeFromJsonElement(PortableAppearance, value)==snapshot.value)
             }
         }
         checkSide("before",change.before); checkSide("after",change.after)

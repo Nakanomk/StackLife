@@ -20,6 +20,7 @@ import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.rememberDynamicScheme
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.planner.*
+import kotlinx.coroutines.CancellationException
 
 private val SilentHaptics = object : HapticFeedback {
     override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) = Unit
@@ -60,9 +61,21 @@ internal fun StackLifeTheme(appearance: Appearance = Appearance(), content: @Com
             if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
     } else {
+        val wallpaperColor = if (appearance.palette == PaletteMode.WALLPAPER) {
+            val spec = appearance.wallpaper(appearance.palettePage)
+            val store = LocalBackgroundStore.current
+            key(store, spec.imageId, spec.preset) {
+                produceState<Int?>(null) {
+                    value = try { store.wallpaperSeed(spec, allowNeutral = true) }
+                    catch (cancel: CancellationException) { throw cancel }
+                    catch (_: io.github.nakanomk.stacklife.images.PhotoProblem) { null }
+                }
+            }.value
+        } else null
         val seedHex = if (appearance.palette == PaletteMode.DYNAMIC) defaultSeed else appearance.seed
-        val seed = remember(seedHex, dynamic, config) {
-            if (Build.VERSION.SDK_INT >= 31 && dynamic) Color(context.getColor(android.R.color.system_accent1_500))
+        val seed = remember(seedHex, wallpaperColor, dynamic, config) {
+            if (wallpaperColor != null) Color(wallpaperColor)
+            else if (Build.VERSION.SDK_INT >= 31 && dynamic) Color(context.getColor(android.R.color.system_accent1_500))
             else Color(android.graphics.Color.parseColor(seedHex))
         }
         val scheme = rememberDynamicScheme(seed, dark, contrastLevel = contrast,
@@ -100,7 +113,7 @@ internal fun StackLifeTheme(appearance: Appearance = Appearance(), content: @Com
     val systemHaptics = LocalSystemHaptics.current ?: LocalHapticFeedback.current
     val haptics = if (appearance.haptics && platform.haptics) systemHaptics else SilentHaptics
     CompositionLocalProvider(LocalSystemDark provides systemDark, LocalSystemHaptics provides systemHaptics, LocalBarPreviews provides barPreviews,
-        LocalAppearance provides appearance,
+        LocalAppearance provides appearance, LocalContentColor provides colors.onSurface,
         LocalPlatformAppearance provides platform, LocalMotionEnabled provides motion, LocalHapticFeedback provides haptics) {
         MaterialTheme(colorScheme = colors, typography = plannerTypography,
             motionScheme = if (motion) MotionScheme.standard() else StillMotion) {

@@ -12,8 +12,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.PixelMap
-import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
@@ -73,29 +71,6 @@ class ReminderRulesEditorTest {
         val identity = ink.fetchSemanticsNode().id
         val left = ink.fetchSemanticsNode().boundsInRoot.left
         val lead = ui.onNodeWithTag("expandable-preference-leading", useUnmergedTree = true)
-        fun icon(): PixelMap {
-            ui.waitForIdle()
-            if (android.os.Build.VERSION.SDK_INT >= 29) {
-                // The virtual clock advances Compose; PixelCopy must read the corresponding submitted window frame.
-                val frame = java.util.concurrent.CountDownLatch(1)
-                ui.runOnUiThread { with(ui.activity.window.decorView) {
-                    viewTreeObserver.registerFrameCommitCallback { frame.countDown() }
-                    invalidate()
-                } }
-                assertTrue("Reminder frame not submitted", frame.await(4, java.util.concurrent.TimeUnit.SECONDS))
-            }
-            return lead.captureToImage().toPixelMap()
-        }
-        fun difference(a: PixelMap, b: PixelMap): Float {
-            var delta = 0f
-            for (y in 0 until a.height) for (x in 0 until a.width) {
-                val p = a[x, y]; val q = b[x, y]
-                delta += kotlin.math.abs(p.red - q.red) + kotlin.math.abs(p.green - q.green) +
-                    kotlin.math.abs(p.blue - q.blue) + kotlin.math.abs(p.alpha - q.alpha)
-            }
-            return delta
-        }
-        val initialIcon = icon()
         val iconBounds = lead.fetchSemanticsNode().boundsInRoot
         val closed = bounds()
         ui.mainClock.autoAdvance = false
@@ -104,29 +79,26 @@ class ReminderRulesEditorTest {
             ui.mainClock.advanceTimeBy(80)
             val opening = bounds()
             val moving = ink.fetchSemanticsNode().boundsInRoot.left
-            val fadingIcon = icon()
             ui.mainClock.advanceTimeBy(2_000)
             val open = bounds()
             assertTrue("Opening jumped from $closed to $open", opening.height > closed.height && opening.height < open.height)
             assertEquals(closed.top, opening.top, 0f)
-            val right = ink.fetchSemanticsNode().boundsInRoot.left
+            val start = ink.fetchSemanticsNode().boundsInRoot.left
             assertEquals(iconBounds, lead.fetchSemanticsNode().boundsInRoot)
-            val absentIcon = icon()
-            val fullInk = difference(initialIcon, absentIcon)
-            assertTrue("No calendar ink in the closed slot at $iconBounds (${initialIcon.width}×${initialIcon.height})", fullInk > 0)
-            val fadingInk = difference(fadingIcon, absentIcon)
-            assertTrue("Expected a partly faded icon: remaining $fadingInk of $fullInk", fadingInk > 0 && fadingInk < fullInk)
-            assertTrue("Title did not move right through a real intermediate position: $left, $moving, $right", moving > left && moving < right)
+            val rule = ui.onNodeWithText(ui.activity.getString(R.string.reminder_minutes_before, 15), useUnmergedTree = true)
+            assertEquals(iconBounds.left, start, 1f)
+            assertEquals(start, rule.fetchSemanticsNode().boundsInRoot.left, 1f)
+            assertTrue("Title did not move to the start padding: $left, $moving, $start", moving < left && moving > start)
             assertEquals(identity, ink.fetchSemanticsNode().id)
             click(R.string.ui_cancel)
             ui.mainClock.advanceTimeBy(80)
             val closing = bounds()
             val returning = ink.fetchSemanticsNode().boundsInRoot.left
-            assertTrue(returning > left && returning < right)
+            assertTrue(returning < left && returning > start)
             // Retarget before settling. The same title and same edit session UI remain usable.
             ui.onNode(title).performClick()
             ui.mainClock.advanceTimeBy(2_000)
-            assertEquals(right, ink.fetchSemanticsNode().boundsInRoot.left, 1f)
+            assertEquals(start, ink.fetchSemanticsNode().boundsInRoot.left, 1f)
             assertEquals(identity, ink.fetchSemanticsNode().id)
             ui.onNode(title).performClick()
             assertTrue("Closing jumped from $open to $closed", closing.height < open.height && closing.height > closed.height)
@@ -141,7 +113,7 @@ class ReminderRulesEditorTest {
                 ui.onNode(title).performClick()
                 ui.mainClock.advanceTimeByFrame()
                 assertEquals(open, bounds())
-                assertEquals(right, ink.fetchSemanticsNode().boundsInRoot.left, 1f)
+                assertEquals(start, ink.fetchSemanticsNode().boundsInRoot.left, 1f)
                 click(R.string.ui_cancel)
                 ui.mainClock.advanceTimeByFrame()
                 assertEquals(closed, bounds())
@@ -152,7 +124,7 @@ class ReminderRulesEditorTest {
     }
 
     @OptIn(ExperimentalTestApi::class)
-    @Test fun doubleSizeRtlTitleWrapsWithoutEllipsisAndStillExpandsRight() {
+    @Test fun doubleSizeRtlTitleWrapsWithoutEllipsisAndAlignsWithExpandedRules() {
         ui.setContent {
             DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -169,22 +141,25 @@ class ReminderRulesEditorTest {
         ui.waitUntil(5_000) { ui.onAllNodes(header).fetchSemanticsNodes().size == 1 }
         val title = ui.onNodeWithText(text, useUnmergedTree = true)
         fun titleBounds() = title.fetchSemanticsNode().boundsInRoot
-        fun assertFullTitle() {
+        fun assertFullTitle(): Int {
             val results = mutableListOf<TextLayoutResult>()
             title.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(results) }
             val layout = results.single()
-            assertTrue(layout.lineCount > 1)
             assertEquals(text.length, layout.getLineEnd(layout.lineCount - 1))
             assertFalse(layout.isLineEllipsized(layout.lineCount - 1))
             val bounds = titleBounds()
             val slot = ui.onNode(header).fetchSemanticsNode().boundsInRoot
             assertTrue(bounds.left >= slot.left && bounds.right <= slot.right && bounds.bottom <= slot.bottom)
+            return layout.lineCount
         }
-        assertFullTitle()
+        val closedLines = assertFullTitle()
+        assertTrue(closedLines > 1)
         val closed = titleBounds()
         ui.onNode(header).performClick()
-        assertFullTitle()
-        assertTrue(titleBounds().left > closed.left)
+        assertTrue(assertFullTitle() <= closedLines)
+        val rule = ui.onNodeWithText(ui.activity.getString(R.string.reminder_minutes_before, 15), useUnmergedTree = true)
+        assertEquals(rule.fetchSemanticsNode().boundsInRoot.right, titleBounds().right, 1f)
+        assertTrue(titleBounds().right > closed.right)
         click(R.string.ui_cancel)
         assertEquals(closed, titleBounds())
     }

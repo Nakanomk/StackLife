@@ -6,10 +6,13 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
@@ -24,9 +27,11 @@ import io.github.nakanomk.stacklife.StackLifeApp
 import io.github.nakanomk.stacklife.StackLifeTheme
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
+import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.PlannerPopupHost
 import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
 import io.github.nakanomk.stacklife.graphs.GoalReview
+import io.github.nakanomk.stacklife.graphs.GraphCanvas
 import io.github.nakanomk.stacklife.graphs.GraphEditorRoute
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.planner.PlannerCommand.*
@@ -98,6 +103,35 @@ class GraphEditorTest {
     private fun bringIntoReview(matcher: SemanticsMatcher): SemanticsNodeInteraction {
         tag("goal-order").performScrollToNode(matcher)
         return await(matcher and hasAnyAncestor(hasTestTag("goal-order")))
+    }
+
+    @Test fun arrowWingsFollowRisingAndFallingCurvesAtTheirPaintedTip() {
+        val rising = mutableStateOf(false)
+        ui.setContent {
+            val a = GraphNode("a", "A", "", 10, 1, 10f, if (rising.value) 170f else 20f)
+            val b = GraphNode("b", "B", "", 10, 2, 140f, if (rising.value) 20f else 170f)
+            MaterialTheme(colorScheme = lightColorScheme(onSurfaceVariant = Color.Magenta)) {
+                CompositionLocalProvider(LocalAppearance provides Appearance(glass = false)) {
+                    GraphCanvas(GraphDetail(1, GraphSummary("g", "曲线"), listOf(a, b), listOf(GraphEdge("a", "b"))),
+                        null, {}, {}, { _, _ -> }, { _, _ -> false }, Modifier.fillMaxSize())
+                }
+            }
+        }
+        for (up in listOf(false, true)) {
+            ui.runOnIdle { rising.value = up }
+            val target = tag("canvas-node:b").fetchSemanticsNode().boundsInRoot
+            val image = ui.onRoot().captureToImage().toPixelMap()
+            fun arrowInk(dx: Float, dy: Float): Boolean = with(ui.density) {
+                val pixel = image[(target.left + dx.dp.toPx()).toInt(),
+                    (target.center.y + (if (up) -dy else dy).dp.toPx()).toInt()]
+                pixel.red > .8f && pixel.blue > .8f && pixel.green < .25f
+            }
+            // Neither point touches the 2dp stroke. The first is inside the tangent wing;
+            // the second would be inside a horizontal triangle placed 6dp left of the port.
+            assertTrue("Detached or missing wing: rising=$up", arrowInk(-12f, -4.7f))
+            assertFalse("Horizontal marker still painted: rising=$up", arrowInk(-12f, 2f))
+            captureGraph(if (up) "rising-arrow" else "falling-arrow")
+        }
     }
 
     @Test fun graphCardCountsAndNestedMenuUseTheSelectedGraphId() {

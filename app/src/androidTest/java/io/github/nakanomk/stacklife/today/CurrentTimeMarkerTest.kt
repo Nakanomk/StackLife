@@ -24,18 +24,11 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.LifecycleRegistry
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
-import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 import io.github.nakanomk.stacklife.planner.Appearance
-import io.github.nakanomk.stacklife.planner.NowLineStyle
 import io.github.nakanomk.stacklife.planner.PlannerQuery
-import io.github.nakanomk.stacklife.transitions.LocalFrontEntry
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.runBlocking
@@ -51,23 +44,17 @@ class CurrentTimeMarkerTest {
     private val day = PlannerQuery.Day(LocalDate.of(2026, 11, 1), ZoneId.of("America/New_York"))
     private val fixed = day.date.atTime(1, 30).atZone(day.zone).withLaterOffsetAtOverlap().toInstant().toEpochMilli()
     private val clock = mutableLongStateOf(fixed)
-    private val settings = mutableStateOf(Appearance(nowLine = NowLineStyle.OFF, nowTrail = false))
-    private val front = mutableStateOf(true)
-    private val motion = mutableStateOf(true)
-    private lateinit var entry: LifecycleRegistry
+    private val settings = mutableStateOf(Appearance(showNowLine = false, nowArrow = true))
     private lateinit var scroll: ScrollState
     private var anchor = 0
     private var axisY = 0
     private fun px(dp: Int) = with(ui.density) { dp.dp.roundToPx() }
 
-    private fun show(rtl: Boolean = false) {
+    private fun show(rtl: Boolean = false, rail: Boolean = false) {
         ui.mainClock.autoAdvance = false
         ui.setContent {
             DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
                 val density = LocalDensity.current
-                val owner = remember { object : LifecycleOwner {
-                    override val lifecycle = LifecycleRegistry(this).also { entry = it }
-                }.also { it.lifecycle.currentState = Lifecycle.State.RESUMED } }
                 val scale = remember(day, density) { DayAxisScale(day,
                     TimeGridPlacement(emptyList(), day.startMillis, day.endMillis), with(density) { 2.dp.toPx() }, 1, 1, 1) }
                 axisY = scale.yAt(fixed)
@@ -79,15 +66,16 @@ class CurrentTimeMarkerTest {
                 val colors = if (rtl) darkColorScheme(primary = Color.Magenta, surface = surface) else
                     lightColorScheme(primary = Color.Magenta, surface = surface)
                 CompositionLocalProvider(LocalLayoutDirection provides (if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr),
-                    LocalAppearance provides settings.value, LocalMotionEnabled provides motion.value,
-                    LocalFrontEntry provides front.value, LocalLifecycleOwner provides owner) {
+                    LocalAppearance provides settings.value) {
                     MaterialTheme(colorScheme = colors) {
                         Box(Modifier.size(272.dp, 220.dp).clipToBounds().background(background).testTag("viewport")
                             .onGloballyPositioned(drag::placeViewport)) {
+                            val y = scale.cursorY(clock.longValue)
+                            if (rail) TimeAxisRail(drag, 96.dp, y, clock.longValue >= day.endMillis)
                             Box(Modifier.fillMaxSize().verticalScroll(scroll)) {
                                 Spacer(Modifier.width(1.dp).height(with(density) { scale.height.toDp() }))
                             }
-                            CurrentTimeMarker(drag, 96.dp, clock.longValue)
+                            CurrentTimeMarker(drag, 96.dp, clock.longValue, y)
                         }
                     }
                 }
@@ -103,79 +91,79 @@ class CurrentTimeMarkerTest {
     }
     private fun slice(image: PixelMap, x: Int, y: Int, width: Int, height: Int) =
         IntArray(width * height) { image[x + it % width, y + it / width].toArgb() }
-    private fun arrow(image: PixelMap, x: Int) = slice(image, x - px(10), anchor - px(18), px(20), px(19))
-    private fun edges(image: PixelMap, x: Int): IntRange {
-        val rows = (anchor - px(47) until anchor - px(20)).filter { ink(image, x, it) }
-        assertTrue("Expected ink on vertical trail in actual draw", rows.isNotEmpty())
-        return rows.first()..rows.last()
-    }
-    private fun assertDown(image: PixelMap, x: Int, tipY: Int = anchor) {
-        fun width(y: Int) = (x - px(10) .. x + px(10)).count { ink(image, it, y) }
-        val bodyY = tipY - px(13)
-        val body = (x - px(11)..x + px(11)).filter { ink(image, it, bodyY) }
-        assertTrue("Both sides of the rail need a broad, filled navigation body", body.isNotEmpty() &&
-            x - body.first() >= px(5) && body.last() - x >= px(5))
-        assertTrue("The cursor must be centred on the rail", kotlin.math.abs(body.first() + body.last() - 2 * x) <= 2)
-        assertTrue("No hollow centre or gap in the navigation body", (body.first()..body.last()).all { ink(image, it, bodyY) })
-        val paper = image[image.width / 2, bodyY].toArgb()
-        for (side in listOf(-1, 1)) assertEquals("No badge outside the triangle", paper, image[x + side * px(10), bodyY].toArgb())
-        assertTrue(ink(image, x, tipY - px(2)))
-        assertTrue("Arrow shoulders must be wider above its bottom tip", width(tipY - px(8)) > width(tipY - px(1)))
-        assertFalse(ink(image, x, tipY + px(1)))
+    private fun assertCentredTriangle(image: PixelMap, x: Int, timeY: Int = anchor) {
+        val radius = px(12)
+        var count = 0
+        var xSum = 0.0
+        var ySum = 0.0
+        for (y in timeY - radius until timeY + radius) for (col in x - radius until x + radius) {
+            if (ink(image, col, y)) { count++; xSum += col + 0.5; ySum += y + 0.5 }
+        }
+        assertTrue("Expected a broad, filled triangle", count > px(10) * px(10))
+        assertEquals("Centred on the spine", x.toDouble(), xSum / count, 1.5)
+        assertEquals("Area centroid marks the instant", timeY.toDouble(), ySum / count, 1.5)
+        fun width(y: Int): Int {
+            val pixels = (x - radius until x + radius).filter { ink(image, it, y) }
+            assertFalse("No holes or split tip", pixels.isEmpty())
+            assertEquals(pixels.last() - pixels.first() + 1, pixels.size)
+            return pixels.size
+        }
+        assertTrue(width(timeY - px(4)) > width(timeY + px(6)))
+        assertFalse(ink(image, x, timeY - px(9)))
+        assertFalse(ink(image, x, timeY + px(12)))
     }
 
-    @Test fun theTipFollowsTimeAndScrollWithoutLeavingTheRail() {
+    @Test fun theCentroidFollowsTimeAndScrollWithoutLeavingTheRail() {
         show()
         val x = px(96)
-        assertDown(image(), x)
+        assertCentredTriangle(image(), x)
         ui.runOnIdle { clock.longValue = fixed + 10 * 60_000L }; frames()
         ui.onNodeWithContentDescription(ui.activity.getString(R.string.today_now_at, "01:40 -05:00")).assertIsDisplayed()
         val moved = image()
-        assertDown(moved, x, anchor + px(20)) // Ten minutes on this unobstructed 2dp/minute axis.
-        assertFalse(ink(moved, x, anchor - px(8)))
+        assertCentredTriangle(moved, x, anchor + px(20)) // Ten minutes at 2dp/minute.
+        assertFalse(ink(moved, x, anchor))
         ui.runOnIdle { runBlocking { scroll.scrollTo(scroll.value + px(20)) } }; frames()
-        assertDown(image(), x)
+        assertCentredTriangle(image(), x)
     }
-    private fun movingTail(rtl: Boolean) {
-        show(rtl)
-        ui.onNodeWithContentDescription(ui.activity.getString(R.string.today_now_at, "01:30 -05:00")).assertIsDisplayed()
+
+    @Test fun elapsedRailTracksTheArrowInsideAndOutsideTheScrolledViewport() {
+        show(rail = true)
+        val x = px(96)
+        fun samples() = image().let { ink(it, x, px(24)) to ink(it, x, it.height - px(24)) }
+        assertEquals(true to false, samples())
+        ui.runOnIdle { runBlocking { scroll.scrollTo(0) } }; frames()
+        assertEquals(true to true, samples())
+        ui.runOnIdle { runBlocking { scroll.scrollTo(axisY + px(40)) } }; frames()
+        assertEquals(false to false, samples())
+        ui.runOnIdle { runBlocking { scroll.scrollTo(axisY - anchor) }; settings.value = settings.value.copy(nowArrow = false) }; frames()
+        assertEquals(false to false, samples())
+        ui.runOnIdle { clock.longValue = day.endMillis }; frames()
+        ui.onNodeWithTag("now-line").assertDoesNotExist()
+        assertEquals(true to true, samples())
+        ui.runOnIdle { settings.value = settings.value.copy(nowArrow = true); clock.longValue = day.startMillis - 1 }; frames()
+        assertEquals(false to false, samples())
+    }
+
+    @Test fun darkRtlStraightLineAndArrowShareAnInstantAtDoubleFontSize() {
+        show(rtl = true)
         val base = image()
-        val x = if (rtl) base.width - px(96) else px(96)
-        assertDown(base, x)
-        val before = arrow(base, x)
-        val bounds = ui.onNodeWithTag("now-line").fetchSemanticsNode().boundsInRoot
-        ui.runOnIdle { settings.value = settings.value.copy(nowTrail = true) }; frames()
-        ui.mainClock.advanceTimeBy(624)
-        val early = image()
-        ui.mainClock.advanceTimeBy(304)
-        val late = image()
-        val a = edges(early, x); val b = edges(late, x)
-        assertTrue("Both painted edges must travel downward: $a then $b", b.first > a.first && b.last > a.last)
-        assertArrayEquals(before, arrow(early, x)); assertArrayEquals(before, arrow(late, x))
-        assertEquals(bounds, ui.onNodeWithTag("now-line").fetchSemanticsNode().boundsInRoot)
-        ui.runOnIdle { settings.value = settings.value.copy(nowTrail = false) }; frames()
-        fun all(image: PixelMap) = slice(image, 0, 0, image.width, image.height)
-        assertArrayEquals(all(base), all(image()))
-        ui.mainClock.advanceTimeBy(432); assertArrayEquals(all(base), all(image()))
-    }
-
-    @Test fun bothTrailEdgesMoveButTimeAndArrowStayFixed() = movingTail(false)
-    @Test fun darkRtlAtDoubleFontKeepsDownwardTipAndStationaryTime() = movingTail(true)
-
-    @Test fun waveFreezesBehindAnotherEntryWhenPausedOrWithReducedMotionAndRestartsInFront() {
-        show()
-        ui.runOnIdle { settings.value = settings.value.copy(nowLine = NowLineStyle.WAVE, nowArrow = false) }; frames()
-        fun wave(): IntArray = slice(image(), px(124), anchor - px(8), px(100), px(16))
-        fun moves(expected: Boolean) {
-            val a = wave(); ui.mainClock.advanceTimeBy(320)
-            assertEquals("Wave movement", expected, !a.contentEquals(wave()))
+        val x = base.width - px(96)
+        assertCentredTriangle(base, x)
+        ui.runOnIdle { settings.value = settings.value.copy(showNowLine = true) }; frames()
+        val both = image()
+        for (col in px(4)..x - px(14)) {
+            assertTrue(ink(both, col, anchor))
+            assertFalse(ink(both, col, anchor + px(4)))
         }
-        moves(true)
-        ui.runOnIdle { front.value = false }; frames(); moves(false)
-        ui.runOnIdle { front.value = true; entry.currentState = Lifecycle.State.STARTED }; frames(); moves(false)
-        ui.runOnIdle { entry.currentState = Lifecycle.State.RESUMED; motion.value = false }; frames(); moves(false)
-        ui.runOnIdle { motion.value = true }; frames(); moves(true)
-        ui.runOnIdle { settings.value = settings.value.copy(nowLine = NowLineStyle.STRAIGHT) }; frames(); moves(false)
+        assertTrue(ink(both, x, anchor + px(6)))
+        ui.runOnIdle { settings.value = settings.value.copy(nowArrow = false) }; frames()
+        val lineOnly = image()
+        assertFalse(ink(lineOnly, x - px(2), anchor + px(6)))
+        assertTrue(ink(lineOnly, px(8), anchor))
+        // A frame clock alone must not change any of the line's pixels.
+        ui.mainClock.advanceTimeBy(432)
+        assertArrayEquals(slice(lineOnly, 0, 0, lineOnly.width, lineOnly.height),
+            slice(image(), 0, 0, lineOnly.width, lineOnly.height))
     }
 
     @Test fun timeSurvivesAllDecorationsOffAndClipsAtBothEdgesOfDstDayViewport() {
@@ -187,11 +175,12 @@ class CurrentTimeMarkerTest {
         val empty = image()
         assertFalse((anchor - px(17) .. anchor).any { ink(empty, px(96), it) })
         ui.runOnIdle { runBlocking { scroll.scrollTo(0) } }; frames(); label.assertDoesNotExist()
+        ui.runOnIdle { clock.longValue += 60_000 }; frames()
+        ui.onNodeWithTag("now-line").assertDoesNotExist()
+        ui.runOnIdle { assertEquals("A minute tick must not move a manually scrolled viewport", 0, scroll.value); clock.longValue = fixed }; frames()
         ui.runOnIdle { runBlocking { scroll.scrollTo(axisY + px(2)) } }; frames(); label.assertDoesNotExist()
         ui.runOnIdle { runBlocking { scroll.scrollTo(axisY - anchor) } }; frames(); label.assertIsDisplayed()
         ui.runOnIdle { clock.longValue = day.endMillis }; frames(); ui.onNodeWithTag("now-line").assertDoesNotExist()
         ui.runOnIdle { clock.longValue = fixed }; frames(); label.assertIsDisplayed()
-        ui.runOnIdle { settings.value = settings.value.copy(nowTrail = true); motion.value = false }; frames()
-        assertTrue(edges(image(), px(96)).last > anchor - px(24)) // trail without the arrow
     }
 }

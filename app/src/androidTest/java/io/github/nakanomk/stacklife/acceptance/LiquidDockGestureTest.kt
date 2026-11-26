@@ -64,7 +64,7 @@ class LiquidDockGestureTest {
         val painted = ui.onRoot().captureToImage().toPixelMap()
         for (destination in Destination.entries) {
             tab(destination.key).assertHeightIsAtLeast(48.dp).assertWidthIsAtLeast(48.dp)
-            val matcher = hasText(destination.label) and hasAnyAncestor(hasTestTag("nav:${destination.key}"))
+            val matcher = hasText(destination.dockLabel) and hasAnyAncestor(hasTestTag("nav:${destination.key}"))
             ui.onAllNodes(matcher, useUnmergedTree = true).assertCountEquals(1)
             val caption = ui.onNode(matcher, useUnmergedTree = true)
             val origin = caption.fetchSemanticsNode().positionInRoot
@@ -77,7 +77,7 @@ class LiquidDockGestureTest {
             val mask = ImageBitmap(text.size.width, text.size.height)
             text.multiParagraph.paint(Canvas(mask), Color.Black)
             val expected = mask.toPixelMap()
-            for (i in destination.label.indices) {
+            for (i in destination.dockLabel.indices) {
                 val glyph = text.getBoundingBox(i)
                 var strokes = 0; var drawn = 0
                 for (y in glyph.top.toInt().coerceAtLeast(0) until glyph.bottom.toInt().coerceAtMost(mask.height)) {

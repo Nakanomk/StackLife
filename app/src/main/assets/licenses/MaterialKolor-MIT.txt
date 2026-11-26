@@ -1,10 +1,11 @@
 MaterialKolor 6.0.0, https://github.com/jordond/MaterialKolor/tree/83864a90eeb6f16f63295bceda40a4e795baa860
 material-kolor-core/src/commonMain/kotlin/com/materialkolor/ktx/{ImageSampling,ImageBitmap}.kt:
-BackgroundStore.photoSeed uses samplePixels and the themeColorOrNull sequence (Celebi, up to
-128 colors; filtered Score, one result, no fallback). The Apache-2.0 Material Color Utilities
-implementation is used from the existing dependency; full Apache-2.0 text is bundled in
-Backdrop-Miuix-Apache-2.0.txt. StackLife decodes a bounded private thumbnail, reports an empty
-palette, and applies a still-current result only to the editable color draft.
+BackgroundStore.wallpaperSeed uses samplePixels, Celebi (up to 128 colors) and Score, from
+the existing dependency. StackLife samples a bounded private thumbnail or the actual bundled
+wallpaper. A manual pick reports an empty filtered palette. Follow-wallpaper mode can use the
+dominant neutral tone and follows replacement of the selected source; the user's saved seed
+is the fallback for an absent image. Full Apache-2.0 license for the Material Color Utilities:
+Backdrop-Miuix-Apache-2.0.txt.
 
 MIT License
 

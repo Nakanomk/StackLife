@@ -32,7 +32,7 @@ import io.github.nakanomk.stacklife.appearance.wallpaperBackground
 import io.github.nakanomk.stacklife.workspace.SharedModifier
 
 // Entity bounds and title layout use the same Nav3 timeline as ordinary containers.
-// BiliPai SettingsSharedContainerTransition, 5893c2c80739e3759ac64ae5f232cf03a94da7f8 (GPL-3.0).
+// Deterministic BiliPai shared container: the actual source tile flies inside that aperture.
 internal val noCardBounds: SharedModifier = { Modifier }
 internal val LocalCardList = compositionLocalOf<LazyListState?> { null }
 private val LocalDetailBody = compositionLocalOf<Modifier> { Modifier }
@@ -133,7 +133,7 @@ internal fun DetailRoute(key: String, enabled: Boolean, content: @Composable () 
     val compactScale = with(LocalDensity.current) { typography.bodyLarge.fontSize.toPx() / typography.titleLarge.fontSize.toPx() }
 
     // Chrome stays in its final slot while the title and aperture share the upstream driver.
-    val placement = placedContainer(origins, link, row, progress)
+    val placement = placedContainer(origins, link, row, progress, fixedPlane = true)
     val window by remember(placement) { derivedStateOf { placement.value?.let(::CardWindow) } }
     val lastBody = remember(link, moving) { BodyPose() }
     var plane by remember(key) { mutableStateOf<LayoutCoordinates?>(null, referentialEqualityPolicy()) }
@@ -211,7 +211,8 @@ internal fun DetailRoute(key: String, enabled: Boolean, content: @Composable () 
         }
     }
         .onPlaced { plane = it }
-        .sourceHandoff({ window?.painted?.ink ?: 1f }) { row?.bounds }
-        .wallpaperBackground(fill)
-    Box(aperture) { CompositionLocalProvider(LocalDetailBody provides body, content = content) }
+    ContainerMaterials(origins, row, placement, progress) { paper ->
+        Box(aperture.sourceCover(origins, row, placement, progress, paper, fixedPlane = true)
+            .wallpaperBackground(fill, paper)) { CompositionLocalProvider(LocalDetailBody provides body, content = content) }
+    }
 }

@@ -1,7 +1,8 @@
 KotlinFlow 1.0.1 (https://repo.maven.apache.org/maven2/io/github/joaonart/kotlinflow/1.0.1/)
-StackLife uses KotlinFlow's directed edges and read-only pan/zoom. The local proposal overview adapts
-components/MiniMap.kt: fit both snapshots to one logical bounding box; draw changed nodes and edges
-without viewport controls. The full diagram uses the library, not a second editable canvas.
+StackLife uses KotlinFlow's node measurements, right/left Bézier path (utils/EdgeUtils.kt), and pan/zoom.
+The editor and expanded proposal draw arrowheads from the tangent at their actual position on the path.
+The local proposal overview adapts components/MiniMap.kt: fit both snapshots to one logical bounding
+box and draw changed nodes and edges without viewport controls.
 
 MIT License
 

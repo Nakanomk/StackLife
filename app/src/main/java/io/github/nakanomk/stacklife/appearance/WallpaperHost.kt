@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.platform.LocalContext
 import io.github.nakanomk.stacklife.StackLifeApplication
 import io.github.nakanomk.stacklife.planner.WallpaperSpec
+import androidx.compose.ui.graphics.luminance
 import top.yukonga.miuix.kmp.blur.Backdrop
 
 internal val LocalBackgroundStore = compositionLocalWithComputedDefaultOf {
@@ -31,13 +32,23 @@ internal val LocalBackgroundStore = compositionLocalWithComputedDefaultOf {
 
 // Adapted from BiliPai 5893c2c, design-system/.../wallpaper/GlobalWallpaperBackdrop.kt (GPL-3.0).
 internal val LocalWallpaperRecording = compositionLocalOf<PlannerBackdrop?> { null }
-private val LocalWallpaperSpec = compositionLocalOf<WallpaperSpec?> { null }
+private data class WallpaperPlane(val spec: WallpaperSpec, val paper: Color, val ink: Color, val solid: Boolean)
+private val LocalWallpaperPlane = compositionLocalOf<WallpaperPlane?> { null }
 
 @Composable
 internal fun WallpaperHost(spec: WallpaperSpec, drawBehindContent: Boolean = true, content: @Composable () -> Unit) {
-    val inherited = !drawBehindContent && LocalWallpaperSpec.current == spec
-    val visible = !inherited && spec.hasImage && !wallpaperUsesSolidSurface()
-    val layer = if (visible) rememberGraphicsLayer() else null
+    val colors = MaterialTheme.colorScheme
+    val solid = wallpaperUsesSolidSurface()
+    val base = when {
+        solid || !spec.hasImage -> colors.surface
+        colors.surface.luminance() < colors.onSurface.luminance() -> colors.surfaceContainer
+        else -> colors.surfaceContainerLowest
+    }
+    val ink = colors.onSurface
+    val plane = remember(spec, base, ink, solid) { WallpaperPlane(spec, base, ink, solid) }
+    val inherited = !drawBehindContent && LocalWallpaperPlane.current == plane
+    val visible = !inherited && spec.hasImage && !solid
+    val layer = if (visible) key(base, ink) { rememberGraphicsLayer() } else null
     if (layer != null) {
         // A navigation plane serves the page, chrome and cards. Rasterize its static crop and
         // protection once instead of resampling the original photo in every receiver's shaders.
@@ -45,7 +56,6 @@ internal fun WallpaperHost(spec: WallpaperSpec, drawBehindContent: Boolean = tru
         val cache = !drawBehindContent && LocalPlannerGlassAllowed.current && glassUnavailableReason(LocalAppearance.current) == null
         SideEffect { layer.compositingStrategy = if (cache) CompositingStrategy.Offscreen else CompositingStrategy.Auto }
     }
-    val base = MaterialTheme.colorScheme.surface
     val recording = remember(layer, base) { layer?.let { PlannerBackdrop(it, base, null, null) } }
     val donor = if (inherited) LocalWallpaperRecording.current else recording
     // A preview starts a new wallpaper plane, even when embedded in a page with a glass donor.
@@ -53,12 +63,12 @@ internal fun WallpaperHost(spec: WallpaperSpec, drawBehindContent: Boolean = tru
     // A navigation entry only supplies material. Painting this full-window sibling would
     // cover the parent outside the animated destination, before its own clip or alpha runs.
     Box(if (drawBehindContent && recording == null) Modifier.background(base) else Modifier, propagateMinConstraints = true) {
-        if (recording != null) WallpaperPixels(spec, base, MaterialTheme.colorScheme.onSurface, card = false,
+        if (recording != null) WallpaperPixels(spec, base, ink, card = false,
             modifier = Modifier.matchParentSize(), record = Modifier.plannerBackdrop(recording, drawInPlace = drawBehindContent),
             reportFailure = false)
         // Page chrome can still record scroll content over this donor. Never capture that content here.
         // Changing crop or owner must not move the editor/navigation subtree to another call site.
-        CompositionLocalProvider(LocalWallpaperSpec provides spec, LocalWallpaperRecording provides donor,
+        CompositionLocalProvider(LocalWallpaperPlane provides plane, LocalWallpaperRecording provides donor,
             LocalCapsuleBackdrop provides donor, content = content)
     }
 }

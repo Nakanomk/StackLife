@@ -15,6 +15,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathMeasure
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
@@ -29,6 +33,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.zIndex
 import io.github.nakanomk.stacklife.appearance.CardFrostGroup
 import io.github.nakanomk.stacklife.appearance.FrostedCard
 import io.github.nakanomk.stacklife.appearance.wallpaperBackground
@@ -39,15 +44,14 @@ import io.github.kotlinflow.models.*
 import kotlin.math.roundToInt
 import io.github.kotlinflow.utils.KotlinFlowInstance
 import io.github.nakanomk.stacklife.planner.*
-import io.github.kotlinflow.types.EdgeStyle
+import io.github.kotlinflow.state.LocalKotlinFlowState
+import io.github.kotlinflow.types.Position
+import io.github.kotlinflow.utils.getBezierPath
 
 internal val graphNodeWidth = 150.dp
 internal val graphNodeHeight = 56.dp
 internal fun GraphNode.canvasNode(scale: Float, inset: Float = 0f, selected: Boolean = false) =
     Node(id, XYPosition(x * scale, y * scale + inset), this, selected = selected)
-internal fun GraphEdge.directedEdge(scale: Float, style: EdgeStyle? = null) =
-    Edge<Unit>(id = "$from:$to", source = from, target = to, style = style,
-        markerEnd = EdgeMarker(MarkerType.ARROW_CLOSED, 9f * scale, 9f * scale))
 
 private data class Moving(val id: String, val revision: Long, val position: Offset)
 private data class Wire(val source: String, val revision: Long, val start: Offset, val tip: Offset)
@@ -92,7 +96,6 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
         if (drag == null || index < 0) fixed
         else DragFrame(fixed, index, fixed[index].copy(position = XYPosition(drag.position.x * scale, drag.position.y * scale + originY)))
     }
-    val edges = remember(detail.edges, scale) { detail.edges.map { it.directedEdge(scale) } }
     val theme = remember(colors, scale) { KotlinFlowTheme(canvasBackgroundColor = Color.Transparent,
         edgeColor = colors.onSurfaceVariant, edgeWidth = 2f * scale, nodeSelectedBorderColor = colors.primary,
         gridColor = colors.outlineVariant, gridSpacing = 22f) }
@@ -131,13 +134,24 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
     CardFrostGroup(enabled = nodes.isNotEmpty(),
         modifier = modifier.clip(MaterialTheme.shapes.large).onGloballyPositioned { canvas = it }.testTag("graph-canvas"),
         underlay = { plane -> GraphPaper(viewport, theme, plane.wallpaperBackground(colors.surfaceContainerLow)) }) {
-        // 1.0.1 renders directed edges and handles pan/pinch. Its built-in node drag conflates
-        // cancellation with release, and its onConnect isn't dispatched. Own just those gestures.
-        KotlinFlow(nodes, edges, theme = theme, kotlinFlowInstance = instance, onViewportChange = { viewport.value = it },
+        // KotlinFlow owns the viewport and node measurements. Its 1.0.1 marker is translated
+        // off the endpoint along a fixed horizontal vector, not along the painted curve.
+        KotlinFlow(nodes, emptyList<Edge<Unit>>(), theme = theme, kotlinFlowInstance = instance, onViewportChange = { viewport.value = it },
             nodesDraggable = false, elementsSelectable = false, onNodeClick = { onSelect(it.id) }, overlay = {
-                wire?.let { draft -> Canvas(Modifier.fillMaxSize()) {
-                    drawLine(colors.primary, draft.start, draft.tip, 2.dp.toPx(), StrokeCap.Round)
-                } }
+                DependencyEdges(nodes, detail.edges, theme.edgeWidth) { theme.edgeColor }
+                wire?.let { draft ->
+                    val head = remember { Path() }
+                    Canvas(Modifier.fillMaxSize()) {
+                        drawLine(colors.primary, draft.start, draft.tip, 2.dp.toPx(), StrokeCap.Round)
+                        val vector = draft.tip - draft.start
+                        val length = vector.getDistance()
+                        if (length > 0f) {
+                            head.rewind()
+                            head.addArrow(draft.tip, vector / length, minOf(8.dp.toPx(), length))
+                            drawPath(head, colors.primary)
+                        }
+                    }
+                }
             }) { rendered ->
             val node = rendered.data
             DisposableEffect(node.id) { onDispose { boxes.remove(node.id) } }
@@ -214,7 +228,9 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
                                     }
                                 })
                             } finally { if (wire?.source == node.id) wire = null }
-                        }, contentAlignment = Alignment.Center) { Text("→", color = colors.primary, style = MaterialTheme.typography.titleMedium) }
+                        }, contentAlignment = Alignment.Center) {
+                        Text("→", color = colors.primary, style = MaterialTheme.typography.titleMedium)
+                    }
                 }
             }
         }
@@ -229,6 +245,59 @@ internal fun GraphCanvas(detail: GraphDetail, selected: String?, onSelect: (Stri
             ActionPill(stringResource(R.string.ui_fit_graph), ::fit)
         }
     }
+}
+
+private fun Path.addArrow(tip: Offset, tangent: Offset, depth: Float) {
+    val base = tip - tangent * depth
+    val side = Offset(-tangent.y, tangent.x) * (depth * .55f)
+    moveTo(tip.x, tip.y)
+    lineTo(base.x + side.x, base.y + side.y)
+    lineTo(base.x - side.x, base.y - side.y)
+    close()
+}
+
+private class EdgeInk(val color: Color, val curves: Path = Path(), val heads: Path = Path())
+
+/** KotlinFlow 1.0.1's measured right/left ports and Bézier, with the marker on that same path. */
+@Composable
+internal fun DependencyEdges(nodes: List<Node<GraphNode>>, edges: List<GraphEdge>, strokeWidth: Float, colorOf: (GraphEdge) -> Color) {
+    if (edges.isEmpty()) return
+    val flow = LocalKotlinFlowState.current
+    val byId = remember(nodes) { nodes.associateBy { it.id } }
+    Spacer(Modifier.fillMaxSize().zIndex(-1f).drawWithCache {
+        val sizes = flow.nodeSizes
+        val inks = ArrayList<EdgeInk>(2)
+        val measure = PathMeasure()
+        val inset = 6.dp.toPx()
+        val arrow = 8.dp.toPx()
+        val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        for (edge in edges) {
+            val a = byId[edge.from]?.position ?: continue
+            val b = byId[edge.to]?.position ?: continue
+            val from = sizes[edge.from] ?: continue
+            val to = sizes[edge.to] ?: continue
+            val curve = getBezierPath(a.x + from.width, a.y + from.height / 2, Position.RIGHT,
+                b.x, b.y + to.height / 2, Position.LEFT).path
+            measure.setPath(curve, false)
+            val length = measure.length
+            if (length <= 0f) continue
+            val color = colorOf(edge)
+            val ink = inks.firstOrNull { it.color == color } ?: EdgeInk(color).also(inks::add)
+            ink.curves.addPath(curve)
+            val distance = length - minOf(inset, length / 4f)
+            ink.heads.addArrow(measure.getPosition(distance), measure.getTangent(distance), minOf(arrow, distance))
+        }
+        onDrawBehind {
+            val vp = flow.viewport
+            withTransform({ translate(vp.x, vp.y); scale(vp.zoom, vp.zoom, Offset.Zero) }) {
+                for (i in inks.indices) {
+                    val ink = inks[i]
+                    drawPath(ink.curves, ink.color, style = stroke)
+                    drawPath(ink.heads, ink.color)
+                }
+            }
+        }
+    })
 }
 
 /** KotlinFlow 1.0.1's DOTS geometry, painted on a separate sibling so nodes cannot

@@ -95,6 +95,7 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
     var frames by rememberSaveable { mutableStateOf(startOnStack) }
     val local = deviceDay()
     var dateEpoch by rememberSaveable { mutableStateOf<Long?>(null) }
+    var todayVisit by rememberSaveable { mutableIntStateOf(0) }
     val date = dateEpoch?.let(LocalDate::ofEpochDay) ?: local.date
     var revealIdentity by rememberSaveable { mutableStateOf<String?>(null) }
     val reveal = remember(revealIdentity) { revealIdentity?.let { Json.decodeFromString<OccurrenceKey>(it) } }
@@ -127,7 +128,8 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
                             dateEpoch = day.takeUnless { it == local.date }?.toEpochDay()
                         },
                         onEdit = navigate, onSettings = settings, revealKey = reveal,
-                        onRevealed = { revealIdentity = null }, onAdd = { navigate(MotionAdd) })
+                        onRevealed = { located -> if (revealIdentity == located.storageKey()) revealIdentity = null }, onAdd = { navigate(MotionAdd) },
+                        todayVisit = todayVisit.takeIf { front && stack.last() == MotionHome })
                     Destination.COURSES -> CoursesRoute(model, courseSelection, onSelection = { courseSelection = it },
                         onImport = { importBoundary = true }, onRemove = { selected, source -> navigate(MotionRemoveTerm(selected.id, source)) },
                         onSettings = settings, onScope = { courseScope = it })
@@ -138,8 +140,12 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
         val entries = entryProvider<NavKey> {
             entry<MotionHome> {
                 if (calendarNavigation) {
-                    RootPages(scopedAppearance.visibleOrder, destination, 0L, { destination = it },
-                        if (destination == Destination.TODAY) AssistantPage.Day(date, local.zone) else courseScope, features)
+                    val returnToNow = { dateEpoch = null; revealIdentity = null; todayVisit++; Unit }
+                    RootPages(scopedAppearance.visibleOrder, destination, 0L, { next ->
+                        if (next == Destination.TODAY && destination != next) returnToNow()
+                        destination = next
+                    }, if (destination == Destination.TODAY) AssistantPage.Day(date, local.zone) else courseScope,
+                        onReselectToday = returnToNow, content = features)
                 } else if (start == Destination.WORKSPACE) {
                     val scope = if (frames) AssistantPage.Frames else AssistantPage.Queue
                     Page(scope) { features(start, true) }
@@ -196,7 +202,7 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
             entry<SlotEditorKey> { key -> SlotEditor(key, model, back) { occurrence, instant ->
                 if (instant != null) {
                     dateEpoch = instant.atZone(local.zone).toLocalDate().takeUnless { it == local.date }?.toEpochDay()
-                    revealIdentity = occurrence?.let { Json.encodeToString<OccurrenceKey>(it) }
+                    revealIdentity = occurrence?.storageKey()
                 }
                 back()
             } }

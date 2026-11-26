@@ -42,6 +42,8 @@ import io.github.nakanomk.stacklife.planner.Workspace
 import io.github.nakanomk.stacklife.planner.WorkspaceEffect
 import io.github.nakanomk.stacklife.transitions.LocalFrontEntry
 import io.github.nakanomk.stacklife.transitions.LocalRouteOriginsEnabled
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import top.yukonga.miuix.kmp.nav.transition.NavSettleSpec
 
@@ -208,13 +210,14 @@ internal class WorkspaceFlight private constructor(private val slots: Map<String
             }
             if (request.before.revision + 1 != after.revision || request.source.size != queue.size || queue.size != stack.size) return null
             val frame = stack.bounds[frameId] ?: return null
-            if (!request.toStack && request.source.bounds[frameId] != frame) return null
+            if (!request.toStack && frameId !in request.source.bounds) return null
             val slots = LinkedHashMap<String, Rect>()
             var group = Rect.Zero
             for (id in moved) {
-                if (request.toStack && id !in request.source.bounds) continue // never invent off-screen source ink
-                val r = queue.bounds[id] ?: return null
-                if (request.toStack && request.source.bounds[id] != r) return null
+                // A receipt can contain hundreds of IDs. The flight represents the
+                // intersection of that receipt and the actual painted queue slots.
+                val r = queue.bounds[id] ?: continue
+                if (request.toStack && id !in request.source.bounds) continue
                 slots[id] = r
                 group = if (slots.size == 1) r else Rect(minOf(r.left, group.left), minOf(r.top, group.top), maxOf(r.right, group.right), maxOf(r.bottom, group.bottom))
             }
@@ -232,6 +235,27 @@ internal class WorkspaceFlight private constructor(private val slots: Map<String
             val saved = (if (request.toStack) after.frames else request.before.frames).firstOrNull { it.id == frameId } ?: return null
             return WorkspaceFlight(slots, tasks, projection.size > 1, saved, frame, group, request.toStack)
         }
+    }
+}
+
+/** Only scroll a destination with no visible receipt member. APPEND need not displace
+ * an already visible subset just because the first restored ID is above the viewport. */
+private suspend fun revealReceipt(effect: WorkspaceEffect, state: Workspace, queue: LazyListState,
+    stack: LazyListState, gutter: Int) {
+    when (effect) {
+        is WorkspaceEffect.Pushed -> if (effect.frameId !in stack.visibleCards(gutter).bounds) {
+            val index = state.frames.indexOfFirst { it.id == effect.frameId && it.remaining > 0 }
+            if (index >= 0) stack.scrollToItem(index + 2) // summary, recent frames
+        }
+        is WorkspaceEffect.Restored -> {
+            val visible = queue.visibleCards(gutter).bounds
+            if (effect.taskIds.none { it in visible }) {
+                val id = effect.taskIds.firstOrNull() ?: return
+                val index = state.queue.indexOfFirst { it.id == id }
+                if (index >= 0) queue.scrollToItem(index + 1) // summary
+            }
+        }
+        else -> Unit
     }
 }
 
@@ -272,38 +296,39 @@ internal fun WorkspaceTransferPager(state: Workspace, transfers: WorkspaceTransf
             // recreated host resumes the real result, never a second flight or a second write.
             choose(request.toStack)
             withFrameNanos { } // both real lists are composed/measured; don't guess heights from text
-            val queue = queueScroll.visibleCards(gutter); val frames = stackScroll.visibleCards(gutter)
+            val effect = receipt.effects.single()
+            revealReceipt(effect, state, queueScroll, stackScroll, gutter)
             val plan = if (animateReceipt && pager.currentPage == 1 - destination && pager.currentPageOffsetFraction == 0f)
-                WorkspaceFlight.build(request, state, queue, frames) else null
+                WorkspaceFlight.build(request, state, queueScroll.visibleCards(gutter), stackScroll.visibleCards(gutter)) else null
             if (plan == null) {
-                when (val effect = receipt.effects.single()) {
-                    is WorkspaceEffect.Pushed -> if (effect.frameId !in frames.bounds) {
-                        val index = state.frames.indexOfFirst { it.id == effect.frameId && it.remaining > 0 }
-                        if (index >= 0) stackScroll.scrollToItem(index + 2) // summary and Recent frames
-                    }
-                    is WorkspaceEffect.Restored -> effect.taskIds.firstOrNull()?.let { id -> if (id !in queue.bounds) {
-                        val index = state.queue.indexOfFirst { it.id == id }
-                        if (index >= 0) queueScroll.scrollToItem(index + 1) // summary
-                    } }
-                    else -> Unit
-                }
                 pager.scrollToPage(destination)
             } else {
                 flight = plan
-                val spec = NavSettleSpec.Spring()
-                pager.animateScrollToPage(destination, animationSpec = spring(dampingRatio = spec.dampingRatio, stiffness = spec.stiffness,
-                    visibilityThreshold = spec.visibilityThreshold * pager.layoutInfo.pageSize.coerceAtLeast(1)))
+                // One owner for animation, loss of its anchors, and final selection. Starting
+                // a competing scroll from a different effect could cancel this entire receipt.
+                coroutineScope {
+                    val travel = launch {
+                        val spec = NavSettleSpec.Spring()
+                        pager.animateScrollToPage(destination, animationSpec = spring(dampingRatio = spec.dampingRatio,
+                            stiffness = spec.stiffness, visibilityThreshold = spec.visibilityThreshold * pager.layoutInfo.pageSize.coerceAtLeast(1)))
+                    }
+                    val watch = launch {
+                        snapshotFlow { plan.valid(queueScroll, stackScroll) }.first { !it }
+                        travel.cancel()
+                    }
+                    travel.join()
+                    watch.cancel()
+                    if (travel.isCancelled) {
+                        flight = null
+                        revealReceipt(effect, state, queueScroll, stackScroll, gutter)
+                        pager.scrollToPage(destination)
+                    }
+                }
             }
         } finally {
             flight = null
             if (activity?.isChangingConfigurations == true) request.releaseForRecreation() else transfers.end(request)
         }
-    }
-    LaunchedEffect(flight) {
-        val path = flight ?: return@LaunchedEffect
-        snapshotFlow { path.valid(queueScroll, stackScroll) }.first { !it }
-        pager.scrollToPage(destination)
-        if (request != null) transfers.end(request)
     }
     Box(Modifier.fillMaxSize().clipToBounds(), contentAlignment = androidx.compose.ui.AbsoluteAlignment.TopLeft) {
         val lock = if (request != null && front) Modifier.pointerInput(request) {

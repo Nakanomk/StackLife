@@ -34,7 +34,7 @@ private data class Draft(
     val key: Int,
     val title: TextFieldValue = TextFieldValue(),
     val minutes: TextFieldValue = TextFieldValue(),
-    val icon: TaskIcon = TaskIcon.AUTO,
+    val icon: TaskIcon = TaskIcon.TASK,
 ) {
     fun duration(): Int? = if (minutes.text.isBlank()) 30 else minutes.text.toIntOrNull()
 }
@@ -46,7 +46,7 @@ private val draftSaver = listSaver<SnapshotStateList<Draft>, Any>(
     save = { rows -> rows.map { arrayListOf(it.key, saveField(it.title), saveField(it.minutes), it.icon.name) } },
     restore = { values -> (if (values.firstOrNull() is Int) {
         // A form saved by a pre-icon build used flat three-field rows.
-        values.chunked(3).map { Draft(it[0] as Int, it[1].restoreField(), it[2].restoreField()) }
+        values.chunked(3).map { Draft(it[0] as Int, it[1].restoreField(), it[2].restoreField(), TaskIcon.AUTO) }
     } else values.map { packed -> val row = packed as List<*>
         Draft(row[0] as Int, checkNotNull(row[1]).restoreField(), checkNotNull(row[2]).restoreField(), TaskIcon.valueOf(row[3] as String))
     }).toMutableStateList() },
@@ -75,7 +75,7 @@ internal fun TaskEditor(
     BackHandler(enabled = action.busy || notes.any { it.ownsFile || it.opening }, onBack = close)
     val heading = if (createFrame) stringResource(R.string.ui_new_frame) else if (original != null) stringResource(R.string.ui_edit_task) else stringResource(R.string.ui_add_task)
     EditorPage(heading, close, frameId?.let { AssistantPage.Frame(it) } ?: original?.let { AssistantPage.Task(it.id) } ?: if (createFrame) AssistantPage.Frames else AssistantPage.Queue,
-        backEnabled = !action.busy, footer = {
+        backEnabled = !action.busy, independentFooter = original == null && !createFrame, footer = {
             Actions {
                 if (createFrame) Secondary(stringResource(R.string.ui_add_another), enabled = !action.busy) {
                     drafts.add(Draft(nextKey++))
@@ -101,7 +101,7 @@ internal fun TaskEditor(
                 }
             }
             itemsIndexed(drafts, key = { _, draft -> draft.key }) { index, row ->
-                FormGroup {
+                FormGroup(frosted = true) {
                     if (createFrame) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Text(stringResource(R.string.ui_task_number, index + 1), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                         if (drafts.size > 1) TextButton(enabled = !action.busy, onClick = { notes[index].release(); drafts.remove(row) }) { Text(stringResource(R.string.ui_delete_item)) }

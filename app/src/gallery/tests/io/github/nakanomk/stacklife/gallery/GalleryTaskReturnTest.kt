@@ -259,12 +259,29 @@ class GalleryTaskReturnTest {
             ui.mainClock.advanceTimeBy(800)
             assertEquals(open, detail.fetchSemanticsNode().boundsInRoot)
             assertTrue("Cancelling must restore the live detail ink", changed(fullyOpen, paint(), open.deflate(4f)) < .02f)
-            ui.runOnUiThread { input.backStarted(event(0f)); input.backProgressed(event(.7f)) }
-            ui.mainClock.advanceTimeBy(64)
+            ui.runOnUiThread { input.backStarted(event(0f)) }
+            val px = (row.left + row.width * .58f).toInt()
+            val py = row.center.y.toInt()
+            val material = parent[px, py]
+            // Keep the sampled point attached to the lifted card, not the screen:
+            // at 70% it is still appreciably above the real row. Both last held
+            // frames and the disposed result must have that card's original paint.
+            for (p in listOf(.70f, .98f, .996f)) {
+                ui.runOnUiThread { input.backProgressed(event(p)) }
+                ui.mainClock.advanceTimeBy(64)
+                val box = detail.fetchSemanticsNode().boundsInRoot
+                val scale = box.width / row.width
+                val shot = paint()
+                val color = shot[(box.left + (px + .5f - row.left) * scale).toInt(),
+                    (box.top + (py + .5f - row.top) * scale).toInt()]
+                assertTrue("At $p the card material changed from $material to $color",
+                    maxOf(abs(color.red - material.red), abs(color.green - material.green), abs(color.blue - material.blue)) < .035f)
+            }
             ui.runOnUiThread { input.backCompleted() }
             ui.mainClock.advanceTimeBy(1000)
             ui.onNodeWithTag("detail:$tag").assertDoesNotExist()
             assertEquals(row, ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot)
+            assertEquals(material, paint()[px, py])
         } finally {
             ui.mainClock.autoAdvance = true
             ui.runOnUiThread { ui.activity.navigationEventDispatcher.removeInput(input) }

@@ -21,6 +21,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsActions
@@ -99,6 +100,9 @@ class AppearanceEditorInteractionTest {
 
     private fun revision() = runBlocking { fixture.state().revision }
     private fun saved() = runBlocking { (fixture.api.observe(PlannerQuery.Settings).first() as PolicyView).appearance }
+    private fun awaitSaved(expected: Appearance) = ui.waitUntil(10_000) { saved() == expected }
+    private fun back() = ui.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+    private fun discard() = await(row(ui.activity.getString(R.string.appearance_discard)) and isEnabled()).performClick()
     private fun seedAppearance(value: Appearance) = runBlocking {
         fixture.apply(PlannerCommand.EditAppearance(AppearancePatch.Replace(value)))
     }
@@ -109,14 +113,39 @@ class AppearanceEditorInteractionTest {
     }
     private fun openSettings() = await(hasContentDescription("设置") and hasClickAction()).performClick()
     private fun openGroup(label: String) {
-        val group = row(label)
-        await(hasScrollToIndexAction()).performScrollToNode(group)
-        await(group).performScrollTo().performClick()
+        val settings = hasAnyAncestor(hasTestTag("route:settings"))
+        val list = await(hasScrollToIndexAction() and settings)
+        val back = await(hasContentDescription(ui.activity.getString(R.string.ui_back)) and settings)
+        val top = back.fetchSemanticsNode().boundsInRoot.bottom + with(ui.density) { 6.dp.toPx() }
+        val bottom = ui.onAllNodes(hasTestTag("assistant-composer") and settings).fetchSemanticsNodes()
+            .singleOrNull()?.boundsInRoot?.top ?: list.fetchSemanticsNode().boundsInRoot.bottom
+        exposed(list, row(label) and settings, top, bottom).performTouchInput { click() }
         await(hasTestTag("appearance-scroll"))
     }
     private fun field(m: SemanticsMatcher): SemanticsNodeInteraction {
         await(hasTestTag("appearance-scroll")).performScrollToNode(m)
         return ui.onNode(m).performScrollTo().assertIsDisplayed()
+    }
+    private fun exposedField(m: SemanticsMatcher): SemanticsNodeInteraction {
+        val list = await(hasTestTag("appearance-scroll"))
+        val top = await(hasTestTag("appearance-header")).fetchSemanticsNode().boundsInRoot.bottom
+        return exposed(list, m, top, list.fetchSemanticsNode().boundsInRoot.bottom)
+    }
+    private fun exposed(list: SemanticsNodeInteraction, m: SemanticsMatcher, top: Float, bottom: Float): SemanticsNodeInteraction {
+        list.performScrollToNode(m)
+        val node = ui.onNode(m).performScrollTo()
+        val layout = node.fetchSemanticsNode()
+        val y = layout.positionInRoot.y
+        // The scrollable extends under pinned chrome. A node in its bounds can still be
+        // untappable (or PixelCopy may capture the header instead of the preview photo).
+        if (layout.size.height + 2 < bottom - top) {
+            val desired = y.coerceIn(top + 1f, bottom - layout.size.height - 1f)
+            if (abs(y - desired) > 1f) list.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, y - desired) }
+            val placed = node.fetchSemanticsNode()
+            assertTrue("Covered $m at ${placed.boundsInRoot}; usable y=$top..$bottom",
+                placed.positionInRoot.y >= top - 1f && placed.positionInRoot.y + placed.size.height <= bottom + 1f)
+        }
+        return node.assertIsDisplayed()
     }
     private fun choice(title: String, option: String) {
         field(row(title)).performClick()
@@ -140,8 +169,28 @@ class AppearanceEditorInteractionTest {
     }
     private fun blue(c: Color) = c.blue > c.red + .12f && c.blue > c.green + .06f
     private fun green(c: Color) = c.green > c.red + .12f && c.green > c.blue + .06f
+
+    @SdkSuppress(minSdkVersion = 33)
+    @Test fun unchangedSizeColorControlsRepaintAsDayAndNightArePersisted() {
+        val original = saved().copy(theme = ThemeMode.LIGHT)
+        seedAppearance(original)
+        attach(); openSettings(); openGroup(ui.activity.getString(R.string.ui_colors))
+        val title = ui.activity.getString(R.string.ui_color_theme)
+        val controls = field(row(title))
+        val size = controls.fetchSemanticsNode().size
+        fun paper() = sample(controls, .20f).luminance()
+        ui.waitUntil(8_000) { paper() > .45f }
+        for ((label, dark) in listOf(R.string.ui_dark to true, R.string.ui_light to false)) {
+            controls.performClick()
+            await(hasText(ui.activity.getString(label)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
+            ui.waitUntil(8_000) { if (dark) paper() < .20f else paper() > .45f }
+            awaitSaved(original.copy(theme = if (dark) ThemeMode.DARK else ThemeMode.LIGHT))
+            assertEquals(size, controls.fetchSemanticsNode().size)
+        }
+        assertEquals(original, saved())
+    }
     private fun page(destination: Destination): SemanticsNodeInteraction {
-        val preview = field(pagePreview)
+        val preview = exposedField(pagePreview)
         ui.onNode(hasTestTag("nav:${destination.key}") and hasAnyAncestor(pagePreview)).assertIsSelected()
         ui.onNode(hasText("${destination.label} · 预览") and hasAnyAncestor(pagePreview)).assertIsDisplayed()
         val text = ui.activity.getString(R.string.ui_sample_note)
@@ -173,8 +222,9 @@ class AppearanceEditorInteractionTest {
         ui.waitUntil(12_000) { matches(sample(node, .22f)) }
     }
 
+    @OptIn(ExperimentalTestApi::class)
     @SdkSuppress(minSdkVersion = 29)
-    @Test fun eachAppearanceHeaderShowsTheGlobalPhotoBeforeAndAfterScrolling() {
+    @Test fun eachPinnedAppearanceHeaderUsesThePhotoThenItsOwnScrolledControls() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val folder = Files.createTempDirectory(context.cacheDir.toPath(), "header-photo-").toFile()
         val photos = BackgroundStore(object : ContextWrapper(context) { override fun getNoBackupFilesDir() = folder }) { emptySet() }
@@ -183,7 +233,7 @@ class AppearanceEditorInteractionTest {
             val id = withSelectedPhoto(context, redPixels(Bitmap.CompressFormat.PNG), "image/png") { uri ->
                 runBlocking { photos.importImage(uri) }
             }
-            val a = Appearance(theme = ThemeMode.LIGHT, background = WallpaperSpec(id, tint = 0f))
+            val a = Appearance(theme = ThemeMode.LIGHT, palette = PaletteMode.SEED, background = WallpaperSpec(id, tint = 0f))
             runBlocking {
                 val proposal = api.preview(listOf(PlannerCommand.EditAppearance(AppearancePatch.Replace(a)))) as PreviewResult.Ready
                 assertTrue(api.commit(proposal.proposalId) is CommitResult.Applied)
@@ -194,7 +244,9 @@ class AppearanceEditorInteractionTest {
                     StackLifeTheme(a) {
                         val fallback = if (glassUnavailableReason(a) != null) MaterialTheme.colorScheme.surface else null
                         SideEffect { solid = fallback }
-                        StackLifeApp(viewModel { WorkspaceViewModel(api) })
+                        DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 520.dp))) {
+                            StackLifeApp(viewModel { WorkspaceViewModel(api) })
+                        }
                     }
                 }
             } }
@@ -208,16 +260,35 @@ class AppearanceEditorInteractionTest {
             for (title in listOf(R.string.ui_colors, R.string.ui_layout, R.string.ui_material_motion)) {
                 openGroup(context.getString(title))
                 ui.waitUntil(10_000) { matchesHeader() }
+                val before = ui.onNode(header).captureToImage().toPixelMap()
+                val bounds = ui.onNode(header).fetchSemanticsNode().boundsInRoot
+                val heading = ui.onNode(hasText(context.getString(title)) and hasAnyAncestor(header), useUnmergedTree = true)
+                    .fetchSemanticsNode().boundsInRoot
+                val discard = ui.onNode(hasText(context.getString(R.string.appearance_discard)) and hasClickAction())
+                    .fetchSemanticsNode().boundsInRoot
+                assertEquals("The discard action must not shift the heading", bounds.center.x, heading.center.x, 1f)
+                assertFalse("The action must not cover title text", discard.overlaps(heading))
                 field(row(context.getString(R.string.ui_restore_defaults)))
-                assertTrue("Header material changed after scrolling ${context.getString(title)}", matchesHeader())
-                ui.onNode(row(context.getString(R.string.ui_cancel)) and hasAnyAncestor(header)).performClick()
+                assertEquals(bounds, ui.onNode(header).fetchSemanticsNode().boundsInRoot)
+                ui.waitUntil(10_000) {
+                    val after = ui.onNode(header).captureToImage().toPixelMap()
+                    var changed = 0; var dark = 0; var samples = 0
+                    for (x in 4 until after.width step 6) for (y in 3 until after.height step 6) {
+                        samples++
+                        val c = after[x, y]; val old = before[x, y]
+                        if (c.luminance() < .03f) dark++
+                        if (abs(c.green - old.green) + abs(c.blue - old.blue) > .06f) changed++
+                    }
+                    dark * 4 < samples && (if (solid == null) changed * 50 > samples else matchesHeader())
+                }
+                back()
                 ui.waitUntil(5_000) { ui.onAllNodes(header).fetchSemanticsNodes().isEmpty() }
             }
         } finally { folder.deleteRecursively() }
     }
 
     @SdkSuppress(minSdkVersion = 29)
-    @Test fun privatePhotoSeedUsesTheSelectedPageAndCommitsOnlyOnSave() {
+    @Test fun privatePhotoSeedPersistsOnlySuccessfulSamplesAndDiscardRestoresEntry() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val folder = Files.createTempDirectory(context.cacheDir.toPath(), "seed-photos-").toFile()
         val photos = BackgroundStore(object : ContextWrapper(context) { override fun getNoBackupFilesDir() = folder }) { emptySet() }
@@ -255,16 +326,17 @@ class AppearanceEditorInteractionTest {
             await(hasText(text(R.string.wallpaper_seed_unavailable))).performScrollTo().assertIsDisplayed()
             choice(target, COUNTDOWN.label); field(pick).assertIsNotEnabled()
             field(hasText(text(R.string.wallpaper_seed_no_photo))).assertIsDisplayed()
-            choice(target, WORKSPACE.label); field(pick).performClick() // inherits the global private file
-            await(seed and hasText(expected)); assertEquals(initial, saved())
-            await(row(text(R.string.ui_cancel))).performClick(); await(row(colors))
             assertEquals(initial, saved()); assertEquals(before, revision())
-            // Restore the deliberately missing file before asking Planner to validate the save.
+            choice(target, WORKSPACE.label); field(pick).performClick() // inherits the global private file
+            await(seed and hasText(expected)); awaitSaved(initial.copy(seed = expected))
+            discard(); await(row(colors))
+            assertEquals(initial, saved()); assertEquals(before + 2, revision())
+            // The unreadable fixture and neutral source never wrote anything.
             File(File(folder, "background-images"), red).copyTo(File(File(folder, "background-images"), missing))
             openGroup(colors); field(seed).assertTextContains(initial.seed)
             field(pick).performClick(); await(seed and hasText(expected))
-            await(row(text(R.string.ui_save_appearance)) and isEnabled()).performClick(); await(row(colors))
-            assertEquals(initial.copy(seed = expected), saved()); assertEquals(before + 1, revision())
+            back(); await(row(colors))
+            assertEquals(initial.copy(seed = expected), saved()); assertEquals(before + 3, revision())
             openGroup(colors); field(seed).assertTextContains(expected)
         } finally { folder.deleteRecursively() }
     }
@@ -306,39 +378,127 @@ class AppearanceEditorInteractionTest {
             startRead(); choice(target, WORKSPACE.label) // different target, same inherited image
             startRead(); field(row(text(R.string.ui_restore_defaults))).performClick()
             choice(text(R.string.ui_palette), text(R.string.ui_custom_seed))
-            startRead(); await(row(text(R.string.ui_cancel))).performClick(); await(row(colors))
+            startRead(); back(); await(row(colors))
             openGroup(colors); startRead(); field(seed).performTextReplacement("#13579B")
             resume.complete(Unit); collection.join()
-            await(row(text(R.string.ui_save_appearance)) and isEnabled()).performClick(); await(row(colors))
+            back(); await(row(colors))
             assertEquals(initial.copy(seed = "#13579B"), saved())
         } finally { resume.complete(Unit); folder.deleteRecursively() }
     }
 
-    @Test fun currentTimeControlsStayDraftUntilSavedAndReopenTogether() {
+    @Test fun discardColorReturnsOnlyToSettingsThenBackReturnsToTheWorkspace() {
+        val entry = saved().copy(start = WORKSPACE, theme = ThemeMode.LIGHT)
+        seedAppearance(entry)
+        attach(); openSettings(); openGroup(ui.activity.getString(R.string.ui_colors))
+        choice(ui.activity.getString(R.string.ui_color_theme), ui.activity.getString(R.string.ui_dark))
+        awaitSaved(entry.copy(theme = ThemeMode.DARK))
+        discard(); awaitSaved(entry)
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("route:appearance:color").fetchSemanticsNodes().isEmpty() }
+        val settings = hasTestTag("route:settings")
+        await(settings).assertIsDisplayed()
+        await(hasContentDescription(ui.activity.getString(R.string.ui_back)) and hasAnyAncestor(settings)).performClick()
+        await(hasTestTag("nav:workspace") and isSelected()).assertIsDisplayed()
+        ui.onNode(settings).assertDoesNotExist()
+    }
+
+    @Test fun currentTimeControlsPersistOnBackAndDiscardUsesTheEntryBeforeRotation() {
         val original = saved()
         val before = revision()
         fun text(id: Int) = ui.activity.getString(id)
         val layout = text(R.string.ui_layout)
-        val line = text(R.string.now_marker_line)
+        val line = hasText(text(R.string.now_marker_line)) and isToggleable()
         val arrow = hasText(text(R.string.now_marker_arrow)) and isToggleable()
-        val trail = hasText(text(R.string.now_marker_trail)) and isToggleable()
         fun edit() {
-            choice(line, text(R.string.now_marker_straight))
-            field(arrow).assertIsOn().performClick()
-            field(trail).assertIsOn().performClick()
+            exposedField(line).assertIsOn().performTouchInput { click() }
+            exposedField(arrow).assertIsOn().performTouchInput { click() }
         }
         attach(); openSettings(); openGroup(layout); edit()
-        await(row(text(R.string.ui_cancel))).performClick()
-        await(row(layout))
-        assertEquals(original, saved()); assertEquals(before, revision())
+        val edited = original.copy(showNowLine = false, nowArrow = false)
+        awaitSaved(edited)
+        // A writer changed both an unrelated group and an unedited setting of this group.
+        val external = edited.copy(compact = !original.compact, theme = ThemeMode.DARK)
+        seedAppearance(external)
+        ui.activityRule.scenario.recreate(); attach()
+        discard(); await(row(layout))
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("appearance-scroll").fetchSemanticsNodes().isEmpty() }
+        assertEquals(original.copy(compact = external.compact, theme = external.theme), saved())
         openGroup(layout); edit()
-        await(row(text(R.string.ui_save_appearance)) and isEnabled()).performClick()
-        await(row(layout))
-        assertEquals(original.copy(nowLine = NowLineStyle.STRAIGHT, nowArrow = false, nowTrail = false), saved())
-        assertEquals(before + 1, revision())
+        field(line).assertIsOff(); field(arrow).assertIsOff()
+        back(); await(row(layout))
+        assertEquals(external, saved())
+        assertTrue(revision() > before)
         openGroup(layout)
-        field(row(line)).assertTextContains(text(R.string.now_marker_straight))
-        field(arrow).assertIsOff(); field(trail).assertIsOff()
+        field(line).assertIsOff(); field(arrow).assertIsOff()
+        ui.activityRule.scenario.close(); fixture.reopen()
+        assertEquals(external, saved())
+    }
+
+    @Test fun invalidSeedAndAConflictingWriterNeverOverwriteTheStoredColor() {
+        val entry = saved().copy(palette = PaletteMode.SEED)
+        seedAppearance(entry)
+        val before = revision()
+        val rejected = CompletableDeferred<String>()
+        val api = object : PlannerApi by fixture.api {
+            override suspend fun preview(commands: List<PlannerCommand>): PreviewResult = fixture.api.preview(commands).also {
+                if (it is PreviewResult.Rejected) rejected.complete(it.message)
+            }
+        }
+        attach(api); openSettings(); openGroup(ui.activity.getString(R.string.ui_colors))
+        val seed = hasTestTag("seed-color")
+        exposedField(seed).performTextReplacement("#12")
+        assertEquals(entry, saved()); assertEquals(before, revision())
+        exposedField(seed).performTextReplacement("#123456")
+        awaitSaved(entry.copy(seed = "#123456"))
+        val external = entry.copy(seed = "#ABCDEF", showNotes = !entry.showNotes)
+        seedAppearance(external)
+        val concurrent = revision()
+        exposedField(seed).performTextReplacement("#13579B")
+        ui.waitUntil(10_000) { rejected.isCompleted }
+        val reason = runBlocking { rejected.await() }
+        assertEquals(io.github.nakanomk.stacklife.i18n.uiText(
+            "Appearance settings have changed. Edit the latest settings instead.", "外观设置已变更，请按最新设置重新编辑。"), reason)
+        await(hasText(reason) and hasAnyAncestor(hasTestTag("appearance-header"))).assertIsDisplayed()
+        exposedField(seed).assertTextContains(external.seed)
+        assertEquals(external, saved()); assertEquals(concurrent, revision())
+        discard(); await(row(ui.activity.getString(R.string.ui_colors)))
+        assertEquals(external, saved()); assertEquals(concurrent, revision())
+    }
+
+    @Test fun rapidWallpaperEditsFlushOnlyTheLatestQueuedCropOnBack() {
+        val entered = CompletableDeferred<Unit>(); val resume = CompletableDeferred<Unit>()
+        val api = object : PlannerApi by fixture.api {
+            override suspend fun preview(commands: List<PlannerCommand>): PreviewResult {
+                if (commands.singleOrNull() is PlannerCommand.EditAppearance && entered.complete(Unit)) resume.await()
+                return fixture.api.preview(commands)
+            }
+        }
+        val entry = saved().copy(theme = ThemeMode.LIGHT, background = WallpaperSpec(preset = WallpaperPreset.BLUE, tint = .45f))
+        seedAppearance(entry); val before = revision()
+        attach(api); openSettings(); openGroup(ui.activity.getString(R.string.wallpaper_title))
+        val zoom = field(hasContentDescription(ui.activity.getString(R.string.wallpaper_zoom)))
+        // The list's 16dp side padding exposes the actual page donor, not the thumbnail.
+        // With this light wash the patterned gutter cannot contain a black or blank frame.
+        fun showsPlaid(): Boolean {
+            val px = ui.onNodeWithTag("appearance-scroll").captureToImage().toPixelMap()
+            val strip = (4..28).map { px[2, px.height * it / 32] }
+            return strip.all { it.luminance() > .10f } &&
+                strip.maxOf { it.luminance() } - strip.minOf { it.luminance() } > .008f
+        }
+        ui.waitUntil(8_000) { showsPlaid() }
+        try {
+            zoom.performSemanticsAction(SemanticsActions.SetProgress) { it(1.25f) }
+            ui.waitUntil(8_000) { entered.isCompleted }
+            for (value in listOf(2.75f, 1.5f, 2.25f, 2f)) {
+                zoom.performSemanticsAction(SemanticsActions.SetProgress) { it(value) }
+                assertTrue("Global wallpaper disappeared at zoom $value", showsPlaid())
+            }
+            assertEquals(entry, saved())
+            back()
+            await(hasTestTag("appearance-header")).assertIsDisplayed()
+        } finally { resume.complete(Unit) }
+        await(row(ui.activity.getString(R.string.ui_material_motion)))
+        assertEquals(entry.copy(background = entry.background.copy(scale = 2f)), saved())
+        assertEquals(before + 2, revision())
     }
 
     @OptIn(ExperimentalTestApi::class)
@@ -375,10 +535,10 @@ class AppearanceEditorInteractionTest {
         await(dockTab and isSelected()).assertIsDisplayed()
         ui.activityRule.scenario.recreate(); attach(selection = picker)
         await(dockTab and isSelected()).assertIsDisplayed()
-        assertEquals(original, saved()); assertEquals(before, revision())
-
-        await(row("保存外观") and isEnabled()).performClick(); await(row("材质与动态"))
-        assertEquals(original.copy(pageBackgrounds = original.pageBackgrounds + (COURSES to WallpaperSpec())), saved())
+        val expected = original.copy(pageBackgrounds = original.pageBackgrounds + (COURSES to WallpaperSpec()))
+        assertEquals(expected, saved())
+        back(); await(row("材质与动态"))
+        assertEquals(expected, saved())
         assertEquals(before + 1, revision())
         openGroup("材质与动态"); await(pagePreview).assertIsDisplayed()
         choice("应用范围", COURSES.label); field(row("背景")).assertTextContains("主题纯色")
@@ -386,7 +546,7 @@ class AppearanceEditorInteractionTest {
     }
 
     @SdkSuppress(minSdkVersion = 29)
-    @Test fun presetPixelsAndPageOverridesOnlyPersistOnSave() {
+    @Test fun presetPixelsAndPageOverridesPersistWithoutASeparateSave() {
         val picker = Selection()
         val original = saved()
         val before = revision()
@@ -428,8 +588,9 @@ class AppearanceEditorInteractionTest {
         }
         assertEquals(4, designs.values.distinct().size)
         field(blur).performSemanticsAction(SemanticsActions.SetProgress) { it(1f) }
-        await(row("取消")).performClick(); await(row("材质与动态"))
-        assertEquals(original, saved()); assertEquals(before, revision())
+        awaitSaved(original.copy(background = WallpaperSpec(preset = WallpaperPreset.ORANGE, blur = 1f)))
+        discard(); await(row("材质与动态"))
+        assertEquals(original, saved()); assertTrue(revision() > before)
 
         openGroup(title); await(tile(WallpaperPreset.BLUE)).assertIsSelected()
         select(WallpaperPreset.BROWN)
@@ -449,11 +610,12 @@ class AppearanceEditorInteractionTest {
         ui.activityRule.scenario.recreate(); attach(selection = picker)
         field(tile(WallpaperPreset.ORANGE)).assertIsSelected()
         pixels { sameCrop(it, orangeCrop) }
-        assertEquals(original, saved()); assertEquals(before, revision())
-        await(row("保存外观") and isEnabled()).performClick(); await(row("材质与动态"))
-        assertEquals(original.copy(background = WallpaperSpec(preset = WallpaperPreset.BROWN, blur = .5f),
-            pageBackgrounds = mapOf(WORKSPACE to WallpaperSpec(preset = WallpaperPreset.ORANGE, scale = 1.5f, blur = 1f))), saved())
-        assertEquals(before + 1, revision())
+        val both = original.copy(background = WallpaperSpec(preset = WallpaperPreset.BROWN, blur = .5f),
+            pageBackgrounds = mapOf(WORKSPACE to WallpaperSpec(preset = WallpaperPreset.ORANGE, scale = 1.5f, blur = 1f)))
+        assertEquals(both, saved())
+        val committed = revision()
+        back(); await(row("材质与动态"))
+        assertEquals(both, saved()); assertEquals(committed, revision())
 
         ui.activityRule.scenario.recreate(); attach(selection = picker)
         openGroup(title); field(tile(WallpaperPreset.BROWN)).assertIsSelected()
@@ -464,7 +626,7 @@ class AppearanceEditorInteractionTest {
         ui.runOnIdle { assertEquals(0, picker.launches) }
         choice("背景", ui.activity.getString(R.string.wallpaper_inherit))
         pixels { sameCrop(it, brownBlur) }
-        await(row("保存外观") and isEnabled()).performClick(); await(row("材质与动态"))
+        back(); await(row("材质与动态"))
         assertEquals(original.copy(background = WallpaperSpec(preset = WallpaperPreset.BROWN, blur = .5f)), saved())
     }
 
@@ -488,7 +650,7 @@ class AppearanceEditorInteractionTest {
     }
 
     @SdkSuppress(minSdkVersion = 29)
-    @Test fun privatePhotoDraftSurvivesRecreationAndCancelKeepsOnlyCommittedImages() {
+    @Test fun privatePhotosSurviveRecreationAndDiscardRestoresOnlyOriginalImages() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val folder = Files.createTempDirectory(context.cacheDir.toPath(), "material-editor-").toFile()
         val dir = File(folder, "background-images")
@@ -505,7 +667,7 @@ class AppearanceEditorInteractionTest {
             val solid = sample(page(TODAY), .22f)
             withChatPhoto(context, 180) { uri ->
                 picker.uri = uri; choice("背景", "私有图片")
-                await(row("保存外观") and isEnabled())
+                ui.waitUntil(10_000) { saved().background.imageId != null }
                 val crop = field(hasTestTag("wallpaper-crop-preview"))
                 ui.waitUntil(12_000) { blue(sample(crop, .5f)) }
                 field(hasContentDescription("缩放")).performSemanticsAction(SemanticsActions.SetProgress) { it(1.5f) }
@@ -513,6 +675,8 @@ class AppearanceEditorInteractionTest {
             val global = files().single(); assertTrue(photos.exists(global))
             choice("应用范围", WORKSPACE.label)
             field(row("背景")).assertTextContains("继承全局背景")
+            val inherited = original.copy(background = WallpaperSpec(global, scale = 1.5f))
+            awaitSaved(inherited)
             preview(WORKSPACE, ::blue); capture("wallpaper-inherited-preview")
             withChatPhoto(context, 216) { uri ->
                 picker.uri = uri; picker.hold = true; choice("背景", "私有图片")
@@ -520,9 +684,9 @@ class AppearanceEditorInteractionTest {
                 // resizing/scrolling has moved its lazy settings row out of composition.
                 field(row("减少透明度"))
                 ui.activityRule.scenario.recreate(); attach(api, photos, picker)
-                field(row("减少透明度")); await(row("保存外观")).assertIsNotEnabled()
+                field(row("减少透明度")); assertEquals(inherited, saved())
                 ui.runOnIdle { picker.finishSelection() }
-                await(row("保存外观") and isEnabled())
+                ui.waitUntil(10_000) { saved().pageBackgrounds[WORKSPACE]?.imageId != null }
                 val crop = field(hasTestTag("wallpaper-crop-preview"))
                 ui.waitUntil(12_000) { green(sample(crop, .5f)) }
                 capture("wallpaper-crop-settings")
@@ -534,34 +698,43 @@ class AppearanceEditorInteractionTest {
             choice("应用范围", COURSES.label); choice("背景", "主题纯色")
             preview(COURSES) { it == solid }; capture("wallpaper-plain-preview")
             field(row("显示课表辅助线")).assertIsOn().performClick()
-            assertEquals(original, saved()); assertEquals(initialRevision, revision())
+            val expected = inherited.copy(pageBackgrounds = mapOf(WORKSPACE to WallpaperSpec(own), COURSES to WallpaperSpec()), showCourseGrid = false)
+            awaitSaved(expected); assertTrue(revision() > initialRevision)
 
-            // Both source URIs have been removed. Only app-private copies and saveable draft IDs remain.
+            // Both source URIs have been removed. Only app-private copies remain.
             ui.activityRule.scenario.recreate(); attach(api, photos, picker)
             field(row("显示课表辅助线")).assertIsOff()
             field(row("应用范围")).assertTextContains(COURSES.label)
             choice("应用范围", WORKSPACE.label); preview(WORKSPACE, ::green)
             choice("应用范围", TODAY.label); field(row("背景")).assertTextContains("继承全局背景"); preview(TODAY, ::blue)
-            assertEquals(initialRevision, revision())
-            await(row("保存外观") and isEnabled()).performClick(); await(row("材质与动态"))
-            val expected = original.copy(background = WallpaperSpec(global, scale = 1.5f),
-                pageBackgrounds = mapOf(WORKSPACE to WallpaperSpec(own), COURSES to WallpaperSpec()), showCourseGrid = false)
-            assertEquals(expected, saved()); assertEquals(initialRevision + 1, revision()); assertEquals(setOf(global, own), files())
+            val committed = revision()
+            back(); await(row("材质与动态"))
+            assertEquals(expected, saved()); assertEquals(committed, revision()); assertEquals(setOf(global, own), files())
 
             openGroup("材质与动态"); preview(TODAY, ::blue)
             choice("应用范围", COURSES.label); preview(COURSES) { it == solid }
             choice("应用范围", WORKSPACE.label); preview(WORKSPACE, ::green)
             withChatPhoto(context, 180) { uri ->
                 picker.uri = uri; field(row("重新选择图片")).performClick()
-                await(row("保存外观") and isEnabled())
+                ui.waitUntil(10_000) { saved().pageBackgrounds[WORKSPACE]?.imageId != own }
                 val crop = field(hasTestTag("wallpaper-crop-preview")); ui.waitUntil(12_000) { blue(sample(crop, .5f)) }
             }
             val discarded = (files() - setOf(global, own)).single()
             choice("背景", "继承全局背景"); field(row("背景")).assertTextContains("继承全局背景")
             choice("应用范围", "全局"); choice("背景", "主题纯色")
-            assertEquals(expected, saved()); assertTrue(photos.exists(discarded))
-            await(row("取消")).performClick(); await(row("材质与动态"))
-            assertEquals(expected, saved()); assertEquals(initialRevision + 1, revision()); assertEquals(setOf(global, own), files())
+            awaitSaved(expected.copy(background = WallpaperSpec(), pageBackgrounds = expected.pageBackgrounds - WORKSPACE))
+            runBlocking { photos.collect() }
+            assertEquals(setOf(global, own, discarded), files())
+            ui.activityRule.scenario.recreate(); attach(api, photos, picker)
+            discard(); await(row("材质与动态"))
+            assertEquals(expected, saved()); assertEquals(setOf(global, own), files())
+
+            openGroup("材质与动态"); choice("背景", "主题纯色")
+            val kept = expected.copy(background = WallpaperSpec())
+            awaitSaved(kept)
+            assertTrue(photos.exists(global))
+            back(); await(row("材质与动态"))
+            assertEquals(kept, saved()); assertEquals(setOf(own), files())
         } finally { folder.deleteRecursively() }
     }
 
@@ -630,12 +803,13 @@ class AppearanceEditorInteractionTest {
             val global = wallpaper()
             choice("应用范围", WORKSPACE.label)
             val page = wallpaper()
-            assertEquals(before + 1, revision())
-            await(row("保存外观") and isEnabled()).performClick(); await(row("材质与动态"))
+            ui.waitUntil(10_000) { saved().background.imageId == global && saved().pageBackgrounds[WORKSPACE]?.imageId == page }
+            val committed = revision()
+            back(); await(row("材质与动态"))
             ui.activityRule.scenario.recreate(); attach(api, photos, picker)
             assertEquals(global, saved().background.imageId); assertEquals(page, saved().pageBackgrounds[WORKSPACE]?.imageId)
             assertEquals(countdown, savedCountdown())
-            assertEquals(setOf(global, page, countdown), files()); assertEquals(before + 2, revision())
+            assertEquals(setOf(global, page, countdown), files()); assertEquals(committed, revision())
         } finally { folder.deleteRecursively() }
     }
 
@@ -687,7 +861,7 @@ class AppearanceEditorInteractionTest {
         assertTrue("Released ${from.key} must remain above ${above.key}", center(from).y < center(above).y)
     }
 
-    @Test fun navigationRowsCommitDragVisibilityAndStartTogether() {
+    @Test fun navigationRowsPersistDragVisibilityAndStartBeforeReturning() {
         val original = saved(); val before = revision()
         attach(); openSettings(); openGroup("布局")
         choice("启动页", GRAPHS.label)
@@ -711,10 +885,11 @@ class AppearanceEditorInteractionTest {
         assertEquals(visiblePositions.sorted(), visiblePositions)
         ui.onNode(hasTestTag("nav:workspace") and hasAnyAncestor(pagePreview)).assertDoesNotExist()
         capture("navigation-preview")
-        assertEquals(original, saved()); assertEquals(before, revision())
-        await(row("保存外观") and isEnabled()).performClick(); await(row("布局"))
-        assertEquals(original.copy(order = order, visible = visible, start = GRAPHS), saved()); assertEquals(before + 1, revision())
+        val expected = original.copy(order = order, visible = visible, start = GRAPHS)
+        awaitSaved(expected); val committed = revision(); assertTrue(committed > before)
+        back(); await(row("布局"))
+        assertEquals(expected, saved()); assertEquals(committed, revision())
         openGroup("布局"); shown(WORKSPACE).assertIsOff(); shown(COURSES).assertIsOff()
-        field(row("启动页")).assertTextContains(GRAPHS.label); await(row("保存外观")).assertIsNotEnabled()
+        field(row("启动页")).assertTextContains(GRAPHS.label); await(row(ui.activity.getString(R.string.appearance_discard))).assertIsNotEnabled()
     }
 }

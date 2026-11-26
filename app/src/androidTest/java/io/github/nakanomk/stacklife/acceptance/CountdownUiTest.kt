@@ -13,9 +13,11 @@ import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityOptionsCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigationevent.DirectNavigationEventInput
@@ -31,6 +33,7 @@ import io.github.nakanomk.stacklife.appearance.redPixels
 import io.github.nakanomk.stacklife.appearance.withSelectedPhoto
 import io.github.nakanomk.stacklife.courses.*
 import io.github.nakanomk.stacklife.planner.*
+import io.github.nakanomk.stacklife.storage.RoomPlannerApi
 import java.io.File
 import java.time.LocalDate
 import java.time.Instant
@@ -110,6 +113,67 @@ class CountdownUiTest {
         ui.tapAboveDock(form, delete); tag("countdown-confirm-delete").performClick()
         await(hasText("倒数日已不存在。")); assertEquals(listOf(added.id, reading.id), list().items.map { it.id })
         assertEquals(queue, runBlocking { store.state().queue })
+    }
+
+    @Test @SdkSuppress(minSdkVersion = 33)
+    fun newAndEditedCountdownFieldsTransmitPagePaperNotThePrivateCardPhoto() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val folder = java.nio.file.Files.createTempDirectory(context.cacheDir.toPath(), "countdown-material-").toFile()
+        val paper = java.util.UUID.randomUUID().toString(); val photo = java.util.UUID.randomUUID().toString()
+        val photos = BackgroundStore(object : ContextWrapper(context) { override fun getNoBackupFilesDir() = folder }) { setOf(paper, photo) }
+        val api = RoomPlannerApi(store.db, imageExists = photos::exists)
+        try {
+            runBlocking { photos.recover() }
+            val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+            fun writeImage(id: String) = File(folder, "background-images/$id").outputStream().use {
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+            }
+            try {
+                bitmap.eraseColor(android.graphics.Color.RED)
+                android.graphics.Canvas(bitmap).drawRect(32f, 0f, 64f, 64f, android.graphics.Paint().apply { color = android.graphics.Color.BLUE })
+                writeImage(paper)
+                bitmap.eraseColor(android.graphics.Color.GREEN); writeImage(photo)
+            } finally { bitmap.recycle() }
+            val day = LocalDate.now().plusDays(2).toEpochDay()
+            val look = Appearance(start = Destination.COUNTDOWN, theme = ThemeMode.LIGHT, frostedGlass = true,
+                reduceMotion = true, pageBackgrounds = mapOf(Destination.COUNTDOWN to WallpaperSpec(imageId = paper, tint = 0f)))
+            runBlocking {
+                val ready = api.preview(listOf(PlannerCommand.EditAppearance(AppearancePatch.Replace(look)),
+                    PlannerCommand.CountdownAdd("照片卡", day, backgroundId = photo, maskOpacity = 0f))) as PreviewResult.Ready
+                assertTrue(api.commit(ready.proposalId) is CommitResult.Applied)
+            }
+            val existing = list().items.single()
+            ui.setContent { CompositionLocalProvider(LocalBackgroundStore provides photos) {
+                StackLifeApp(viewModel { WorkspaceViewModel(api) })
+            } }
+            fun checkFields() {
+                for (name in listOf("countdown-fields", "countdown-photo-fields")) {
+                    val group = tag(name).performScrollTo()
+                    // The group gutters contain no field ink; their colors must follow
+                    // opposite halves of the page, never the editor's green photo.
+                    val pad = with(ui.density) { 7.dp.roundToPx() }
+                    ui.waitUntil(10_000) {
+                        val p = group.captureToImage().toPixelMap()
+                        val left = p[pad, p.height / 2]; val right = p[p.width - pad - 1, p.height / 2]
+                        left.red - left.blue > .10f && right.blue - right.red > .10f
+                    }
+                }
+            }
+            tag("countdown-add").performClick(); checkFields()
+            tag("countdown-name").performScrollTo().performTextReplacement("新日期")
+            tag("countdown-save").performClick(); tag("countdown-list")
+            assertEquals(2, list().items.size)
+            tag("open-countdown:${existing.id}").performClick(); tag("countdown-edit").performClick()
+            val preview = tag("countdown-preview")
+            ui.waitUntil(10_000) {
+                val p = preview.captureToImage().toPixelMap(); val c = p[p.width / 2, p.height / 2]
+                c.green > c.red + .25f && c.green > c.blue + .25f
+            }
+            checkFields(); tag("countdown-name").performScrollTo().performTextReplacement("保留照片")
+            tag("countdown-save").performClick(); tag("countdown-detail:${existing.id}")
+            val saved = list().items.single { it.id == existing.id }
+            assertEquals("保留照片", saved.title); assertEquals(photo, saved.backgroundId)
+        } finally { folder.deleteRecursively() }
     }
 
     private fun bounds(tag: String) = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot

@@ -22,6 +22,7 @@ import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.reminders.ReminderRuleFields
 import io.github.nakanomk.stacklife.reminders.ReminderRuleLabel
 import kotlinx.serialization.json.Json
+import io.github.nakanomk.stacklife.workspace.ActionPill
 import io.github.nakanomk.stacklife.workspace.SaveOutcome
 import io.github.nakanomk.stacklife.workspace.rememberSubmission
 import java.time.Instant
@@ -81,12 +82,13 @@ internal fun GapTaskEditor(plan: DayPlan, start: Long, end: Long, revision: Long
             SideEffect { reviewed = valid }
             (problem ?: rejection)?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.error) }
         }
-    }, dismissButton = { TextButton(onClick = close, enabled = editable) { Text(stringResource(R.string.today_cancel)) } }, confirmButton = {
-        TextButton(enabled = editable && reviewed && changes.isNotEmpty(), modifier = Modifier.testTag("gap-save"), onClick = {
-            if (atMillis != null) {
-                rejection = null
-                submission.submit { model.startReviewed(changes, revision) }
-            }
-        }) { Text(stringResource(R.string.today_add_and_schedule)) }
+    }, dismissButton = { ActionPill(stringResource(R.string.today_cancel), close, enabled = editable) }, confirmButton = {
+        ActionPill(stringResource(R.string.today_add_and_schedule), enabled = editable && reviewed && changes.isNotEmpty(),
+            prominent = true, modifier = Modifier.testTag("gap-save"), onClick = {
+                if (atMillis != null) {
+                    rejection = null
+                    submission.submit { model.startReviewed(changes, revision) }
+                }
+            })
     })
 }

@@ -69,7 +69,7 @@ internal fun rememberAppearanceTransfer(planner: PlannerApi, store: BackgroundSt
     }
     val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) run {
-            if (!canStart) { message = context.getString(R.string.transfer_finish_draft); return@run }
+            if (!canStart) { message = context.getString(R.string.transfer_pending_edit); return@run }
             val result = archive.restore({ context.contentResolver.openInputStream(uri) ?: throw IOException() }) { data ->
                 committing = false
                 val pending = PendingReview(data, CompletableDeferred()); review = pending
@@ -110,7 +110,7 @@ internal fun rememberAppearanceTransfer(planner: PlannerApi, store: BackgroundSt
     return {
         FormGroup(frosted = true) {
             SectionTitle(stringResource(R.string.transfer_title)); Hint(stringResource(R.string.transfer_scope))
-            if (!available) Hint(stringResource(R.string.transfer_finish_draft))
+            if (!available) Hint(stringResource(R.string.transfer_pending_edit))
             Secondary(stringResource(R.string.transfer_export), available && running == null) { pick { create.launch("stacklife-appearance.zip") } }
             Secondary(stringResource(R.string.transfer_import), available && running == null) {
                 pick { open.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed")) }

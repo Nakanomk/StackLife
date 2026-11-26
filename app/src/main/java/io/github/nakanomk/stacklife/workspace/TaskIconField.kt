@@ -23,7 +23,7 @@ import io.github.nakanomk.stacklife.planner.TaskIcon
     TaskIcon.SCHOOL -> R.drawable.ic_symbol_school
 }
 
-private fun symbolLabel(icon: TaskIcon): String = when (icon) {
+internal fun symbolLabel(icon: TaskIcon): String = when (icon) {
     TaskIcon.AUTO -> uiText("Automatic", "自动")
     TaskIcon.TASK -> uiText("Task", "任务")
     TaskIcon.EVENT -> uiText("Event", "日程")

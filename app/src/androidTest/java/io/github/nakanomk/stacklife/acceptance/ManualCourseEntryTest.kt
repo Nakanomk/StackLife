@@ -130,7 +130,7 @@ class ManualCourseEntryTest {
         val term = TermSpec("Studio-7", LocalDate.of(2026, 9, 7), 1, BellSchedule.SUMMER)
         val m = term.meeting(1, 1, "测试课", "", 1, 12)
         val week = CourseWeek(term, 1, listOf(ScheduledCourse(term.id, MANUAL_SOURCE, m)), mapOf(m.title to 0))
-        val appearance = Appearance(theme = ThemeMode.LIGHT, glass = true, reduceTransparency = !live)
+        val appearance = Appearance(theme = ThemeMode.LIGHT, glass = true, showCourseGrid = true, reduceTransparency = !live)
         var available = false
         ui.setContent { StackLifeTheme(appearance) {
             available = glassUnavailableReason(appearance) == null
@@ -201,11 +201,32 @@ class ManualCourseEntryTest {
                     background = WallpaperSpec())))) }
             finally { store.api.discardCourseImport(draft) }
         }
-        ui.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
+        val applying = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val api = object : PlannerApi by store.api {
+            override suspend fun preview(commands: List<PlannerCommand>): PreviewResult {
+                if (commands.singleOrNull() is PlannerCommand.EditAppearance && applying.complete(Unit)) release.await()
+                return store.api.preview(commands)
+            }
+        }
+        ui.setContent { StackLifeApp(viewModel { WorkspaceViewModel(api) }) }
         val dp = ui.density.density
         fun delta(a: Int, b: Int) = maxOf(abs((a ushr 16 and 255) - (b ushr 16 and 255)),
             abs((a ushr 8 and 255) - (b ushr 8 and 255)), abs((a and 255) - (b and 255)))
+        fun awaitPaintedWeek() {
+            // The semantics tree can lay out the timetable while the display still shows
+            // the startup spinner or the outgoing settings page. Synchronize on rail ink,
+            // independent of the grid lines and the course pigment under test.
+            val firstPeriod = ui.onNode(hasText("1") and hasAnyAncestor(hasTestTag("week-grid")), useUnmergedTree = true)
+            val start = point(firstPeriod, 0f, 0f)
+            val end = point(firstPeriod, 1f, 1f)
+            val glyph = buildList {
+                for (y in start.y until end.y step 2) for (x in start.x until end.x step 2) add(Point(x, y))
+            }
+            ui.waitUntil(7_000) { colorsAt(glyph).any { android.graphics.Color.red(it) < 100 } }
+        }
         fun probe(preview: Boolean, lines: Boolean): Int {
+            if (!preview) awaitPaintedWeek()
             val scope = hasTestTag(if (preview) "course-timetable-preview" else "week-grid")
             val tile = ui.onNode(hasTestTag("grid-course:0") and hasAnyAncestor(scope)).assertIsDisplayed()
             val origin = point(tile, 0f, 0f)
@@ -251,14 +272,26 @@ class ManualCourseEntryTest {
         val list = await("appearance-scroll")
         val toggle = hasText(ui.activity.getString(R.string.appearance_grid_lines)) and hasClickAction()
         val preview = hasTestTag("course-timetable-preview")
-        list.performScrollToNode(preview); ui.onNode(preview).performScrollTo()
+        fun revealPreview() {
+            list.performScrollToNode(preview); ui.onNode(preview).performScrollTo()
+            // A bring-into-view can reach y=0 of the scrolling surface, behind the overlay.
+            // Sample both real rules below the pinned controls, on the displayed window.
+            val bottom = ui.onNodeWithTag("appearance-header").fetchSemanticsNode().boundsInRoot.bottom
+            val y = ui.onNode(preview).fetchSemanticsNode().positionInRoot.y
+            if (y < bottom) list.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, y - bottom - 1f) }
+            assertTrue(ui.onNode(preview).fetchSemanticsNode().positionInRoot.y >= bottom - 1f)
+        }
+        revealPreview()
         probe(preview = true, lines = false)
-        list.performScrollToNode(toggle)
-        ui.onNode(toggle).performScrollTo().assertIsOff().performTouchInput { click() }
-        ui.onNode(toggle).assertIsOn()
-        ui.onNode(preview).performScrollTo()
-        probe(preview = true, lines = true)
-        ui.onNodeWithText(ui.activity.getString(R.string.ui_save_appearance)).performClick()
+        try {
+            list.performScrollToNode(toggle)
+            ui.onNode(toggle).performScrollTo().assertIsOff().performTouchInput { click() }
+            ui.onNode(toggle).assertIsOn()
+            ui.waitUntil(10_000) { applying.isCompleted }
+            revealPreview()
+            probe(preview = true, lines = true)
+        } finally { release.complete(Unit) }
+        ui.onNodeWithContentDescription(ui.activity.getString(R.string.ui_back)).performClick()
         ui.waitUntil(10_000) { ui.onAllNodesWithTag("appearance-scroll").fetchSemanticsNodes().isEmpty() }
         ui.onNodeWithContentDescription("返回").performClick()
         await("week-grid")
@@ -278,7 +311,7 @@ class ManualCourseEntryTest {
         val id = java.util.UUID.randomUUID().toString()
         val photos = BackgroundStore(object : ContextWrapper(context) { override fun getNoBackupFilesDir() = dir }) { setOf(id) }
         val api = RoomPlannerApi(store.db, imageExists = photos::exists)
-        val term = TermSpec("光学", LocalDate.of(2026, 9, 7), 1, BellSchedule.SUMMER)
+        val term = TermSpec("光学", LocalDate.of(2026, 9, 7), 2, BellSchedule.SUMMER)
         fun crop(x: Float) = runBlocking {
             val a = Appearance(theme = ThemeMode.LIGHT, start = Destination.COURSES, showCourseGrid = false,
                 pageBackgrounds = mapOf(Destination.COURSES to WallpaperSpec(id, offsetX = x, tint = 0f)))
@@ -291,16 +324,25 @@ class ManualCourseEntryTest {
                 val draft = store.api.stageCourseImport(term, listOf(term.meeting(1, 1, "光学实验", "", 1, 3)))
                 try { store.apply(PlannerCommand.CourseImport(draft)) } finally { store.api.discardCourseImport(draft) }
             }
-            val bitmap = Bitmap.createBitmap(256, 40, Bitmap.Config.ARGB_8888)
+            val bitmap = Bitmap.createBitmap(2048, 320, Bitmap.Config.ARGB_8888)
             try {
-                bitmap.eraseColor(android.graphics.Color.RED)
-                Canvas(bitmap).drawRect(128f, 0f, 256f, 40f, Paint().apply { color = android.graphics.Color.BLUE })
+                val canvas = Canvas(bitmap)
+                val paint = Paint()
+                for (y in 0 until bitmap.height step 2) {
+                    val level = if (y % 4 == 0) 255 else 140
+                    paint.color = android.graphics.Color.rgb(level, 0, 0)
+                    canvas.drawRect(0f, y.toFloat(), 1024f, y + 2f, paint)
+                    paint.color = android.graphics.Color.rgb(0, 0, level)
+                    canvas.drawRect(1024f, y.toFloat(), 2048f, y + 2f, paint)
+                }
                 File(File(dir, "background-images"), id).outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
             } finally { bitmap.recycle() }
             crop(-1f)
             ui.setContent { CompositionLocalProvider(LocalBackgroundStore provides photos) {
                 StackLifeApp(viewModel { WorkspaceViewModel(api) })
             } }
+            await("course-week").performClick()
+            await("course-week-choice:1").performClick()
             val tile = await("grid-course:0")
             assumeTrue("Requires the real optical renderer", ui.onAllNodes(hasStateDescription("折射胶囊")).fetchSemanticsNodes().isNotEmpty())
             val inside = point(tile, .55f, .8f)
@@ -316,6 +358,35 @@ class ManualCourseEntryTest {
             val blue = sample(-1, "blue")
             assertTrue("An opaque tile would not transmit the wallpaper change: #${red.toUInt().toString(16)} → #${blue.toUInt().toString(16)}",
                 bias(red) - bias(blue) > 32)
+            // This dropdown is a separate window opened from inside a glass capsule.
+            // The opaque Material fallback (or a toolbar-sized donor) cannot pass this.
+            await("course-week").performClick()
+            await("course-week-choice:1").assertIsSelected()
+            val next = await("course-week-choice:2")
+            val menuPoint = listOf(point(next, .88f, .5f))
+            ui.waitUntil(10_000) { bias(colorsAt(menuPoint).single()) < -24 }
+            val from = point(next, .88f, .17f); val to = point(next, .88f, .83f)
+            val scan = (from.y..to.y).map { Point(from.x, it) }
+            fun relativeTexture(pixels: List<Int>): Double {
+                val channel = pixels.map { -bias(it) }
+                return (channel.max() - channel.min()) / channel.average().coerceAtLeast(1.0)
+            }
+            val frosted = relativeTexture(colorsAt(scan))
+            InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("course-week-choice:2").fetchSemanticsNodes().isEmpty() }
+            val bare = relativeTexture(colorsAt(scan))
+            assertTrue("No sharp wallpaper reference under the window: $bare", bare > .16)
+            assertTrue("A tint attenuates signal and texture equally; expected actual blur: $frosted vs $bare", frosted < .65 * bare)
+            await("course-week").performClick(); await("course-week-choice:2")
+            crop(-1f)
+            ui.waitUntil(10_000) { bias(colorsAt(menuPoint).single()) > 24 }
+            colorsAt(menuPoint, "u8-week-menu-red")
+            next.performClick()
+            await("course-week").assertTextContains(ui.activity.getString(R.string.courses_week, 2))
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("course-week-choice:2").fetchSemanticsNodes().isEmpty() }
+            await("course-week").performClick(); await("course-week-choice:2").assertIsSelected()
+            await("course-week-choice:1").performClick()
+            await("grid-course:0")
             tile.performClick(); await("course-detail")
             ui.onNode(hasText("光学实验") and hasAnyAncestor(hasTestTag("course-detail"))).assertIsDisplayed()
         } finally { dir.deleteRecursively() }

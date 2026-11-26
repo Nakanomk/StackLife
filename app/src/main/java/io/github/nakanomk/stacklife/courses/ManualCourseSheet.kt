@@ -174,7 +174,8 @@ internal fun ManualCourseSheet(model: WorkspaceViewModel, form: ManualCourseForm
                 Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), topBar = {
                     CompositionLocalProvider(LocalCapsuleBackdrop provides plane) {
                         StackLifeSurface(CapsuleScene.FROST, Modifier.fillMaxWidth().testTag("manual-toolbar"),
-                            solid = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(0.dp)) {
+                            solid = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(0.dp),
+                            provideContainerUnderlay = true) {
                             CenterAlignedTopAppBar(title = {
                                 Text(stringResource(R.string.manual_progress, shown.ordinal + 1), style = MaterialTheme.typography.labelLarge)
                             }, navigationIcon = {

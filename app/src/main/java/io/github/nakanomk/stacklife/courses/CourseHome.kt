@@ -21,6 +21,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.createSavedStateHandle
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.CircleShape
@@ -89,8 +91,10 @@ private fun RowScope.WeekPicker(term: TermSpec, selection: CalendarSelection) {
                 }
             }
         }
-        PlannerDropdownMenu(expanded, { expanded = false }) {
-            for (n in 1..term.weeks) DropdownMenuItem(text = { Text(stringResource(R.string.courses_week, n)) }, onClick = { expanded = false; selection.request(n - 1) })
+        PlannerDropdownMenu(expanded, { expanded = false }, preferFrosted = true) {
+            for (n in 1..term.weeks) DropdownMenuItem(text = { Text(stringResource(R.string.courses_week, n)) },
+                modifier = Modifier.testTag("course-week-choice:$n").semantics { selected = n == week },
+                onClick = { expanded = false; selection.request(n - 1) })
         }
     }
     IconButton(onClick = { selection.request(selection.displayPage.value + 1) }, enabled = week < term.weeks, modifier = Modifier.testTag("course-next")) {
@@ -185,8 +189,8 @@ internal fun CourseHome(
         }
     }) { top, bottom ->
         if (term == null || selection == null) {
-            Column(Modifier.fillMaxSize().padding(top = top, bottom = bottom).verticalScroll(rememberScrollState())
-                .padding(16.dp)) {
+            Column(Modifier.fillMaxSize().padding(bottom = bottom).verticalScroll(rememberScrollState())
+                .padding(top = top).padding(16.dp)) {
                 Text(stringResource(R.string.courses_no_timetable), style = MaterialTheme.typography.titleMedium)
                 ActionPill(stringResource(R.string.courses_add), add, Modifier.padding(top = 12.dp).testTag("course-add"), prominent = true)
                 Text(stringResource(R.string.courses_empty_timetable_hint),

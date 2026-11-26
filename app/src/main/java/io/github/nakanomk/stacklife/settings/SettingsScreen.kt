@@ -167,6 +167,6 @@ private fun LanguagePreference() {
 private fun SettingsGroup(label: String, rows: @Composable ColumnScope.() -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         SectionTitle(label)
-        FormGroup(frosted = true, content = rows)
+        FormGroup(frosted = true, provideContainerUnderlay = true, content = rows)
     }
 }

@@ -20,9 +20,9 @@
     <string name="wallpaper_percent">%1$d%%</string>
     <string name="wallpaper_solid_accessibility">Solid surfaces are active for readability. Your image is kept.</string>
     <string name="wallpaper_seed_source">Wallpaper to sample</string>
-    <string name="wallpaper_seed_pick">Use a color from this photo</string>
-    <string name="wallpaper_seed_reading">Reading photo colors…</string>
-    <string name="wallpaper_seed_no_photo">This background does not use a private photo.</string>
-    <string name="wallpaper_seed_unavailable">This private photo could not be read. Select the photo again in Background image.</string>
+    <string name="wallpaper_seed_pick">Sample this wallpaper</string>
+    <string name="wallpaper_seed_reading">Reading wallpaper colors…</string>
+    <string name="wallpaper_seed_no_photo">This background is a solid theme color and has no image to sample.</string>
+    <string name="wallpaper_seed_unavailable">Could not read this wallpaper. Select it again in Background image.</string>
     <string name="wallpaper_seed_no_color">No suitable theme color was found. Try another photo or enter a seed color.</string>
 </resources>

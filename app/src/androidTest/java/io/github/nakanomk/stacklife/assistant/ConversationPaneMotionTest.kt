@@ -81,6 +81,11 @@ class ConversationPaneMotionTest {
         row.performClick()
         tag("assistant-history-messages").assertIsDisplayed()
         val title = ui.activity.getString(io.github.nakanomk.stacklife.R.string.assistant_transcript)
+        val transcript = tag("assistant-history-messages").fetchSemanticsNode().boundsInRoot
+        val message = ui.onNode(hasText("Local conversation 1") and hasAnyAncestor(hasTestTag("assistant-history-messages")))
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        org.junit.Assert.assertTrue("A short thread must start below its header, with the spare space below it",
+            message.top - transcript.top < transcript.bottom - message.bottom)
         val description = ui.activity.getString(io.github.nakanomk.stacklife.R.string.setting_info, title)
         ui.onNodeWithContentDescription(description).performClick()
         val noService = ui.activity.getString(io.github.nakanomk.stacklife.R.string.assistant_configure_to_continue)

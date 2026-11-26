@@ -161,8 +161,8 @@ private fun ScheduleForm(entry: SlotEditorKey, summary: ScheduleSummary?, item: 
     BackHandler(enabled = LocalFrontEntry.current && (submission.busy || note.ownsFile || note.opening), onBack = leave)
     EditorPage(stringResource(if (summary?.enabled == true) R.string.today_adjust_slot else R.string.today_schedule), leave,
         if (entry.role == null) AssistantPage.Task(entry.id) else AssistantPage.Settings, backEnabled = editable) { top, bottom ->
-        Column(Modifier.fillMaxSize().padding(top = top, bottom = bottom).verticalScroll(rememberScrollState())
-            .padding(dockListPadding(0.dp, 0.dp)),
+        Column(Modifier.fillMaxSize().padding(bottom = bottom).verticalScroll(rememberScrollState())
+            .padding(dockListPadding(top, 0.dp)),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(entry.title, style = MaterialTheme.typography.titleMedium)
             countdownOccurrence?.let { AddOccurrenceCountdown(it.title, it.startMillis, deviceZone, editable && !note.opening) }
