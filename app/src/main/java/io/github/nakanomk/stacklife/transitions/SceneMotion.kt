@@ -1,6 +1,5 @@
 package io.github.nakanomk.stacklife.transitions
 
-import androidx.compose.animation.EnterExitState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyListState
@@ -29,7 +28,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.util.lerp
-import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import io.github.nakanomk.stacklife.appearance.wallpaperBackground
 import io.github.nakanomk.stacklife.workspace.SharedModifier
 
@@ -51,8 +49,17 @@ private const val TitlePart = "title/"
 @Composable
 internal fun SharedModifier.title(entityKey: String) = this("$TitlePart$entityKey")
 
-private class CardWindow(val rect: Rect, radius: Float, val edge: EdgeFrame? = null) : Shape {
-    private val outline = Outline.Rounded(RoundRect(rect, CornerRadius(radius.coerceIn(0f, rect.minDimension / 2))))
+/** A covered list can observe a Room commit after the open detail already lost its source. */
+@Composable internal fun DetailSourceAvailable(available: Boolean) {
+    val owner = LocalRouteOwner.current ?: return
+    val link = LocalRouteOrigins.current?.links?.get(owner) ?: return
+    SideEffect { link.entityPresent = available }
+}
+
+private class CardWindow(val painted: PaintedContainer) : Shape {
+    val rect = painted.rect
+    val edge = painted.takeIf { it.source == null }
+    private val outline = Outline.Rounded(RoundRect(rect, CornerRadius(painted.radius.coerceIn(0f, rect.minDimension / 2))))
     override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline = outline
 }
 
@@ -111,59 +118,24 @@ internal fun DetailRoute(key: String, enabled: Boolean, content: @Composable () 
         Box(Modifier.fillMaxSize().then(tag)) { content() }
         return
     }
-    val origins = LocalRouteOrigins.current
-    val link = origins?.links?.get(key)
-    val density = LocalDensity.current
-    val front = LocalFrontEntry.current
-    val visibility = LocalNavAnimatedContentScope.current
-    val sampled = visibility.routeOpen(front)
-    val returning = visibility.transition.currentState == EnterExitState.Visible
-    val moving = front && visibility.transition.currentState != visibility.transition.targetState
+    val origins = checkNotNull(LocalRouteOrigins.current)
+    val link = origins.links[key]
+    val progress = rememberContainerProgress()
+    val sampled = progress.open
+    val moving = progress.moving
     val fill = MaterialTheme.colorScheme.surface
-    val direction = LocalLayoutDirection.current
     if (link == null) {
-        Box(Modifier.fillMaxSize().graphicsLayer {
-            if (moving) {
-                translationX = ((1f - sampled.value) * size.width) * if (direction == LayoutDirection.Ltr) 1f else -1f
-                clip = true
-            }
-        }.then(tag).wallpaperBackground(fill)) { content() }
+        RoutePage(origins, null, null, progress, tag, content)
         return
     }
-    val row by remember(link, origins, density) {
-        derivedStateOf {
-            if (link.density != density) null
-            else (origins.source(link) as? RowAnchor)?.takeIf { it.visible() }
-        }
-    }
+    val row = origins.source(link) as? RowAnchor
     val typography = MaterialTheme.typography
-    val compactScale = with(density) { typography.bodyLarge.fontSize.toPx() / typography.titleLarge.fontSize.toPx() }
+    val compactScale = with(LocalDensity.current) { typography.bodyLarge.fontSize.toPx() / typography.titleLarge.fontSize.toPx() }
 
-    // Both Nav3 scenes use the NavDisplay plane. The backing, header and footer stay
-    // at their final coordinates; only the aperture and the list's display list move.
-    // A detached/recycled or partly covered row is not a landing, even on a held seek.
-    val departure = remember(link, moving, returning) { EdgeDeparture() }
-    val lastBody = remember(departure) { BodyPose() }
-    val hostSize = origins.size
-    val end = remember(hostSize) { Rect(0f, 0f, hostSize.width.toFloat(), hostSize.height.toFloat()) }
-    val window by remember(link, origins, moving, sampled, density, departure, direction, end) {
-        derivedStateOf {
-            if (!moving) null else {
-                val t = sampled.value
-                if (end.isEmpty) return@derivedStateOf null
-                val start = if (!departure.detached && origins.live(link)) row?.bounds else null
-                if (start != null) {
-                    val rect = androidx.compose.ui.geometry.lerp(start, end, t)
-                    val corner = link.radius * (1f - t)
-                    departure.placed(rect, corner, t)
-                    CardWindow(rect, corner)
-                } else {
-                    val edge = departure.depart(end, end.width, direction, t)
-                    CardWindow(edge.rect, edge.radius, edge)
-                }
-            }
-        }
-    }
+    // Chrome stays in its final slot while the title and aperture share the upstream driver.
+    val placement = placedContainer(origins, link, row, progress)
+    val window by remember(placement) { derivedStateOf { placement.value?.let(::CardWindow) } }
+    val lastBody = remember(link, moving) { BodyPose() }
     var plane by remember(key) { mutableStateOf<LayoutCoordinates?>(null, referentialEqualityPolicy()) }
     var bodyOrigin by remember(key) { mutableStateOf(Offset.Unspecified) }
     var titleOffset by remember(key) { mutableStateOf(Offset.Unspecified) }
@@ -224,7 +196,7 @@ internal fun DetailRoute(key: String, enabled: Boolean, content: @Composable () 
             translationY = frame.top
             clip = true
         }
-        alpha = if (moving && (frame == null || sampled.value <= 0f)) 0f else 1f
+        alpha = if (moving && frame == null) 0f else 1f
     }.then(tag).graphicsLayer {
         val aperture = window
         if (aperture != null) {
@@ -239,7 +211,7 @@ internal fun DetailRoute(key: String, enabled: Boolean, content: @Composable () 
         }
     }
         .onPlaced { plane = it }
-        .sourceHandoff({ if (window?.let { it.edge == null } == true) containerInk(sampled.value, returning) else 1f }) { row?.bounds }
+        .sourceHandoff({ window?.painted?.ink ?: 1f }) { row?.bounds }
         .wallpaperBackground(fill)
     Box(aperture) { CompositionLocalProvider(LocalDetailBody provides body, content = content) }
 }

@@ -48,6 +48,8 @@ import androidx.compose.ui.semantics.dismiss
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Density
+import top.yukonga.miuix.kmp.nav.core.ProvideNavEntryBackScope
+import androidx.navigationevent.findViewTreeNavigationEventDispatcherOwner
 import top.yukonga.miuix.kmp.blur.Backdrop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -206,28 +208,34 @@ internal fun PlannerModalBottomSheet(onDismissRequest: () -> Unit, nested: Boole
         sheetState = sheetState, shape = sheetShape, containerColor = Color.Transparent,
         properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false, shouldDismissOnClickOutside = !nested && canDismiss),
         sheetGesturesEnabled = true, contentColor = MaterialTheme.colorScheme.onSurface, dragHandle = null, contentWindowInsets = { WindowInsets(0) }) {
-        BackHandler(onBack = close)
-        val inputWindow = remember(sheetState) { PlatformTextInputInterceptor { request, next ->
-            // A dialog has its own insets dispatch. Expand before the IME covers the
-            // half-height footer, not after a visibility notification from the other window.
-            snapshotFlow { sheetState.currentValue }.first { it != SheetValue.Hidden }
-            if (sheetState.currentValue != SheetValue.Expanded) sheetState.expand()
-            next.startInputMethod(request)
-        } }
-        val glassViewport = remember(sheetState) { sheetViewport(sheetState, fullHeightOnly, glass = true) }
-        val bodyViewport = remember(sheetState) { sheetViewport(sheetState, fullHeightOnly, glass = false) }
-        PopupPanel(sheetShape, Modifier.fillMaxSize().testTag("planner-sheet-shell"), materialBounds = glassViewport) {
-            Column(Modifier.fillMaxSize().then(bodyViewport).windowInsetsPadding(WindowInsets.safeDrawing)) {
-                val expanded = sheetState.currentValue == SheetValue.Expanded
-                val resize: () -> Unit = {
-                    scope.launch { if (expanded) sheetState.partialExpand() else sheetState.expand() }
-                }
-                val firstFocus = remember { FocusRequester() }
-                LaunchedEffect(firstFocus) { if (freshWindow) firstFocus.requestFocus() }
-                SheetHandle(Modifier.align(Alignment.CenterHorizontally).focusRequester(firstFocus).focusProperties { canFocus = true }, expanded, fullHeightOnly,
-                    canDismiss, resize, close)
-                CompositionLocalProvider(LocalPanelBack provides close) {
-                    InterceptPlatformTextInput(inputWindow) { content() }
+        // A sheet inherits its opening route's composition context, but physical Back arrives
+        // at the ComponentDialog. Bind both the sheet and its nested panes to this window.
+        val view = LocalView.current
+        val windowBack = remember(view) { view.findViewTreeNavigationEventDispatcherOwner() }
+        ProvideNavEntryBackScope(windowBack) {
+            BackHandler(onBack = close)
+            val inputWindow = remember(sheetState) { PlatformTextInputInterceptor { request, next ->
+                // A dialog has its own insets dispatch. Expand before the IME covers the
+                // half-height footer, not after a visibility notification from the other window.
+                snapshotFlow { sheetState.currentValue }.first { it != SheetValue.Hidden }
+                if (sheetState.currentValue != SheetValue.Expanded) sheetState.expand()
+                next.startInputMethod(request)
+            } }
+            val glassViewport = remember(sheetState) { sheetViewport(sheetState, fullHeightOnly, glass = true) }
+            val bodyViewport = remember(sheetState) { sheetViewport(sheetState, fullHeightOnly, glass = false) }
+            PopupPanel(sheetShape, Modifier.fillMaxSize().testTag("planner-sheet-shell"), materialBounds = glassViewport) {
+                Column(Modifier.fillMaxSize().then(bodyViewport).windowInsetsPadding(WindowInsets.safeDrawing)) {
+                    val expanded = sheetState.currentValue == SheetValue.Expanded
+                    val resize: () -> Unit = {
+                        scope.launch { if (expanded) sheetState.partialExpand() else sheetState.expand() }
+                    }
+                    val firstFocus = remember { FocusRequester() }
+                    LaunchedEffect(firstFocus) { if (freshWindow) firstFocus.requestFocus() }
+                    SheetHandle(Modifier.align(Alignment.CenterHorizontally).focusRequester(firstFocus).focusProperties { canFocus = true }, expanded, fullHeightOnly,
+                        canDismiss, resize, close)
+                    CompositionLocalProvider(LocalPanelBack provides close) {
+                        InterceptPlatformTextInput(inputWindow) { content() }
+                    }
                 }
             }
         }

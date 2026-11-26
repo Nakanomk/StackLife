@@ -1,26 +1,16 @@
 package io.github.nakanomk.stacklife.transitions
 
-import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.SharedTransitionLayout
-import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.SeekableTransitionState
-import androidx.compose.animation.core.createChildTransition
-import androidx.compose.animation.core.rememberTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -30,13 +20,14 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.launch
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import top.yukonga.miuix.kmp.nav.core.ProvideNavEntryBackScope
+import top.yukonga.miuix.kmp.nav.core.rememberNavEntryDispatcherOwner
 
-// BiliPai SharedCardContainerHost.kt, 5893c2c80739e3759ac64ae5f232cf03a94da7f8 (GPL-3.0).
-// Keep both pages in the existing sheet/window and seek the same transition on cancellation.
+// Same fixed BiliPai NavMotionLayout and container renderer as the root, inside the actual sheet.
 internal class PaneOrigins : ContainerOrigins()
 private val LocalPane = staticCompositionLocalOf<String?> { null }
 
@@ -48,94 +39,133 @@ internal fun Modifier.paneOrigin(origins: PaneOrigins, key: String): Modifier = 
     containerSource(origins, anchor)
 }
 
+private class PaneSlot<T : Any>(val key: String) {
+    var value by mutableStateOf<T?>(null)
+}
+
+/** Keep only business route identities in saved state. Never serialize a draft, private file,
+ * session, or launcher. On recreation the caller supplies the real page and its return parent;
+ * deeper, fully covered identities receive their business values before they can be revealed. */
+private class PanePath<T : Any>(var keys: List<String> = emptyList()) {
+    val slots = HashMap<String, PaneSlot<T>>()
+    fun slot(key: String) = slots.getOrPut(key) { PaneSlot(key) }
+
+    fun select(page: T, id: String, parent: T?, parentId: String?, depth: (T) -> Int, origins: PaneOrigins) {
+        val lastId = keys.lastOrNull()
+        val previous = slots[lastId]?.value
+        val same = lastId == id
+        val predecessor = keys.getOrNull(keys.lastIndex - 1)
+        if (!same || parentId != null && parentId != predecessor) {
+            val at = keys.indexOf(id)
+            val from = if (parentId == null) -1 else keys.indexOf(parentId)
+            val push = !same && previous != null && at < 0 && depth(page) > depth(previous)
+            val next = when {
+                parentId != null && from >= 0 -> keys.take(from + 1) + id
+                parentId != null -> listOf(parentId, id)
+                at >= 0 -> keys.take(at + 1)
+                push -> keys + id // e.g. the school browser, which handles its own Back.
+                else -> listOf(id)
+            }
+            if (push) origins.capture(id, lastId)
+            keys = next
+            slots.keys.retainAll(next)
+        }
+        slot(id).value = page
+        if (parentId != null && parent != null) slot(parentId).value = parent
+    }
+}
+
 @Composable
 internal fun <T : Any> PaneMotion(
     page: T, origins: PaneOrigins, depth: (T) -> Int, originKey: (T) -> String,
     modifier: Modifier = Modifier, parent: T? = null, onBack: (() -> Unit)? = null,
     content: @Composable (T) -> Unit,
 ) {
-    val motion = LocalMotionEnabled.current
-    if (!motion) {
-        BackHandler(enabled = parent != null && onBack != null) { onBack?.invoke() }
-        androidx.compose.foundation.layout.Box(modifier, propagateMinConstraints = true) { content(page) }
+    val front = LocalFrontEntry.current
+    val id = originKey(page)
+    val parentId = parent?.let(originKey)
+    val canPop = front && parentId != null && onBack != null
+    // A Kotlin local ::back can compare equal across pages even though it captured a
+    // different return parent. Keep the invocation target by identity, not by equals.
+    val backTarget = remember { mutableStateOf<(() -> Unit)?>(null, referentialEqualityPolicy()) }
+    backTarget.value = onBack.takeIf { canPop }
+    val commitBack: () -> Unit = remember { { backTarget.value?.invoke(); Unit } }
+    if (!LocalMotionEnabled.current) {
+        BackHandler(enabled = canPop, onBack = commitBack)
+        CompositionLocalProvider(LocalPane provides id) {
+            Box(modifier, propagateMinConstraints = true) { content(page) }
+        }
         return
     }
-    val state = remember { SeekableTransitionState(page) }
-    val hostTransition = rememberTransition(state, label = "pane container")
-    var rewind by remember { mutableStateOf<Job?>(null) }
-    LaunchedEffect(page, motion) {
-        rewind?.cancelAndJoin()
-        val from = state.currentState
-        if (depth(page) > depth(from)) origins.capture(originKey(page), originKey(from))
-        // Ease the host fraction, not the children's bounds/ink/size. A partially
-        // completed Back continues from its held geometry, not from a new endpoint.
-        val remaining = if (state.targetState == page) 1f - state.fraction else 1f
-        state.animateTo(page, animationSpec = tween((ContainerDuration * remaining).toInt()))
-    }
-    val recovery = rememberCoroutineScope()
-    PredictiveBackHandler(enabled = parent != null && onBack != null) { events ->
-        val previous = parent ?: return@PredictiveBackHandler
-        rewind?.cancelAndJoin()
-        try {
-            // PredictiveBackHandler starts this block without emitting a progress
-            // event. Place the returning source at the fully open endpoint before
-            // seeking: the first delivered move can already be far from the edge.
-            val grabbed = if (state.targetState == previous) state.fraction else 0f
-            state.seekTo(grabbed, previous)
-            events.collect { state.seekTo(grabbed + (1f - grabbed) * it.progress.coerceIn(0f, 1f), previous) }
-            onBack?.invoke()
-        } catch (cancel: CancellationException) {
-            // Retargeting animateTo(page) makes the original page both endpoints and
-            // removes the clips in mid-gesture. Retrace the same two panes instead.
-            if (state.targetState == previous) rewind = recovery.launch {
-                val cursor = Animatable(state.fraction)
-                val sampling = launch { snapshotFlow { cursor.value }.collect { state.seekTo(it, previous) } }
-                try {
-                    cursor.animateTo(0f, tween((ContainerDuration * cursor.value).toInt()))
-                } finally {
-                    sampling.cancelAndJoin()
-                }
-                state.seekTo(0f, previous)
-                state.snapTo(page)
-            }
-            throw cancel
-        }
-    }
-    val from = hostTransition.currentState
-    val to = hostTransition.targetState
-    val returning = depth(from) > depth(to)
-    val deep = if (returning) from else to
-    val moving = from != to
-    val open = remember(state, moving, returning) { derivedStateOf {
-        if (!moving) 1f else if (returning) 1f - state.fraction else state.fraction
+    val path = rememberSaveable(origins, saver = remember {
+        Saver<PanePath<T>, ArrayList<String>>(save = { ArrayList(it.keys) }, restore = { PanePath(it) })
+    }) { PanePath() }
+    path.select(page, id, parent, parentId, depth, origins)
+    val keys = path.keys
+    // Assistant settings can close the dialog while its business-level origins survive. A new
+    // dialog is not the original launcher, even when the restored row has the same key and size.
+    DisposableEffect(origins) { onDispose {
+        origins.host = null
+        origins.links.clear()
     } }
-    // Sheet height is itself animated; a *window* resize, not that intended sizing, invalidates a pair.
-    val window = LocalWindowInfo.current.containerSize
-    SharedTransitionLayout(modifier.onGloballyPositioned { origins.host = it; origins.size = window }) {
-    val shared = this
-    hostTransition.AnimatedContent(contentKey = originKey, contentAlignment = Alignment.BottomStart, transitionSpec = {
-        (EnterTransition.None togetherWith ExitTransition.KeepUntilTransitionsFinished).apply {
-            targetContentZIndex = depth(targetState).toFloat()
-        }.using(SizeTransform(clip = false) { _, _ -> tween(ContainerDuration, easing = LinearEasing) })
-    }) { shown ->
-        val child = originKey(shown) == originKey(deep)
-        val active = shown == page && !moving
-        val input = if (active) Modifier else Modifier.clearAndSetSemantics {}.pointerInput(Unit) {
-            awaitPointerEventScope { while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() } }
-        }
-        val owner = originKey(shown)
-        val link = origins.links[owner]
-        // Unlike separate Nav3 entries, both panes already belong to this same
-        // SeekableTransitionState. Enlist their shared pair directly: a second
-        // collector/seek could initialize its bounds at a different gesture frame.
-        val pair = if (link == null) null else hostTransition.createChildTransition("pane pair") {
-            originKey(it) == owner || depth(it) > depth(shown)
-        }.placedPair(link)
-        CompositionLocalProvider(LocalPane provides owner) {
-            ContainerPage(origins, link, pair?.page ?: this, shared, open, returning, child, moving && child,
-                Modifier.testTag("pane:$owner").then(input)) { content(shown) }
+
+    val upstream = LocalNavigationEventDispatcherOwner.current
+    val panelDispatcher = upstream?.let { rememberNavEntryDispatcherOwner(canPop, it) }
+    if (upstream == null) BackHandler(enabled = canPop, onBack = commitBack)
+    // These are panes of one business route, not new owners of its editor/ViewModel. Keep the
+    // motion library's internal stores scoped to this display (especially for reopened dialogs).
+    val businessOwner = checkNotNull(LocalViewModelStoreOwner.current)
+    val displayOwner = remember { object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() } }
+    DisposableEffect(displayOwner) { onDispose { displayOwner.viewModelStore.clear() } }
+
+    val renderer = rememberUpdatedState<@Composable (PaneSlot<T>) -> Unit> { slot ->
+        val shown = slot.value
+        if (shown != null) {
+            val progress = rememberContainerProgress()
+            val selected = front && slot.key == id
+            val interactive = selected && !progress.moving && !progress.covered
+            // A resting sheet is transparent to the real dialog material, never to a retained
+            // transcript or form. Keep its parent placed for Back; paint it only when revealed.
+            val exposed = remember(progress) { derivedStateOf { progress.scope.relativeDepth < 1f } }
+            val paint = remember(exposed) { Modifier.drawWithContent { if (exposed.value) drawContent() } }
+            val input = if (interactive) Modifier else Modifier.clearAndSetSemantics {}
+                .focusProperties { onEnter = { cancelFocusChange() } }.focusGroup().pointerInput(Unit) {
+                    awaitPointerEventScope { while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() } }
+                }
+            val link = origins.links[slot.key]
+            DisposableEffect(slot, link) { onDispose {
+                if (slot.key !in path.keys && link != null && origins.links[slot.key] === link) origins.links.remove(slot.key)
+            } }
+            // Disable this display's own pop independently of the nested page's handlers. The
+            // actual WebView's Back, a busy form, and a nested display still see their own owner.
+            val childDispatcher = upstream?.let { rememberNavEntryDispatcherOwner(selected && !progress.covered, it) }
+            ProvideNavEntryBackScope(childDispatcher) {
+                CompositionLocalProvider(LocalPane provides slot.key, LocalFrontEntry provides selected,
+                    LocalViewModelStoreOwner provides businessOwner) {
+                    RoutePage(origins, link, link?.let(origins::source), progress, paint.testTag("pane:${slot.key}").then(input)) {
+                        content(shown)
+                    }
+                }
+            }
         }
     }
-    with(origins) { PlacedSources() }
+    val entries = remember(keys) { HashMap<String, @Composable (Any) -> Unit>(keys.size) }
+    for (owner in keys) entries[owner] = key(owner) {
+        val slot = path.slot(owner)
+        remember(slot) {
+            val draw: @Composable (Any) -> Unit = { renderer.value(slot) }
+            draw
+        }
+    }
+    val entryContent = remember(entries) { { key: Any -> entries.getValue(key as String) } }
+    val window = LocalWindowInfo.current.containerSize
+    ProvideNavEntryBackScope(panelDispatcher) {
+        CompositionLocalProvider(LocalViewModelStoreOwner provides displayOwner) {
+            ContainerMotionLayout(keys, keys, commitBack, modifier.onGloballyPositioned {
+                origins.host = it
+                origins.viewportSize = it.size
+                origins.size = window
+            }, entryContent)
+        }
     }
 }

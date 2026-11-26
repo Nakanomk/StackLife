@@ -253,7 +253,7 @@ private fun NavPresentation.animateTopTo(
  * when the host has no back source. The branch is static per platform in practice.
  */
 @Composable
-private fun ProvideNavEntryBackScope(
+internal fun ProvideNavEntryBackScope(
     owner: NavigationEventDispatcherOwner?,
     content: @Composable () -> Unit,
 ) {
@@ -1047,7 +1047,7 @@ private fun NavEntryHost(
                     ProvideNavEntryLifecycle(lifecycleOwner) {
                         movableContent {
                             CompositionLocalProvider(
-                                LocalNavTransitionScope provides transitionScope,
+                                LocalNavTransitionScope provides visualScope,
                                 LocalNavEntryTransition provides ownTransition,
                                 LocalNavEntryContentVisible provides contentVisible,
                             ) {

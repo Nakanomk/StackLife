@@ -14,14 +14,10 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
-import androidx.navigation3.ui.NavDisplay
-import io.github.nakanomk.stacklife.Home
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.ReadState
@@ -30,7 +26,6 @@ import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
 import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
-import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
 import io.github.nakanomk.stacklife.assistant.AssistantPage
 import io.github.nakanomk.stacklife.assistant.LocalAssistant
 import io.github.nakanomk.stacklife.courses.CourseSelection
@@ -85,26 +80,16 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
     val model = LocalGalleryWorkspace.current
     val settings = LocalOpenGallerySettings.current
     val stack = rememberNavBackStack(MotionHome)
-    val taskStack = if (start == Destination.WORKSPACE && !startOnStack && !calendarNavigation) rememberNavBackStack(Home) else null
     val origins = remember { RouteOrigins() }
-    val owner = LocalLifecycleOwner.current
-    val plane = remember(owner) { HomePlane(owner) }
     val animate by rememberUpdatedState(LocalMotionEnabled.current)
     val appearance = LocalAppearance.current
     val glassAllowed = LocalPlannerGlassAllowed.current
-    val keep = animate && glassAllowed && glassUnavailableReason(appearance) == null
-    SideEffect { origins.canKeepSource = keep }
     val back: () -> Unit = {
         if (stack.size > 1 && !origins.interceptPop(stack.last().origin())) {
             origins.pop(stack.removeAt(stack.lastIndex).origin())
         }
     }
-    val navigate: (NavKey) -> Unit = { next ->
-        if (next != stack.last()) {
-            origins.push(next.origin(), stack.last().origin())
-            stack.add(next)
-        }
-    }
+    val navigate: (NavKey) -> Unit = { next -> origins.navigate(stack, next, NavKey::origin) }
     val shared: SharedModifier = { key -> if (animate) cardBoundsModifier(key) else Modifier }
     var destination by rememberSaveable { mutableStateOf(start) }
     var frames by rememberSaveable { mutableStateOf(startOnStack) }
@@ -128,12 +113,12 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
     CompositionLocalProvider(LocalAppearance provides scopedAppearance, LocalAssistant provides null,
         io.github.nakanomk.stacklife.workspace.LocalWorkspaceFeedback provides model,
         LocalRouteOrigins provides origins, LocalOpenNote provides { navigate(it) }) {
-        val features: @Composable (Destination, Boolean, TrialQueueLinks?) -> Unit = { page, front, links ->
+        val features: @Composable (Destination, Boolean) -> Unit = { page, front ->
             pages.SaveableStateProvider(page.key) {
                 when (page) {
                     Destination.WORKSPACE -> WorkspaceData(model) { data ->
-                        WorkspaceScreen(data, model, links?.open ?: { navigate(MotionTask(it)) }, { navigate(MotionFrame(it)) }, settings,
-                            if (front) links?.cards ?: shared else noCardBounds, frames, { frames = it },
+                        WorkspaceScreen(data, model, { navigate(MotionTask(it)) }, { navigate(MotionFrame(it)) }, settings,
+                            if (front) shared else noCardBounds, frames, { frames = it },
                             { navigate(MotionCreateFrame) }, { navigate(MotionAdd) })
                     }
                     Destination.TODAY -> TodayRoute(model, date, local.zone,
@@ -154,23 +139,21 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
             entry<MotionHome> {
                 if (calendarNavigation) {
                     RootPages(scopedAppearance.visibleOrder, destination, 0L, { destination = it },
-                        if (destination == Destination.TODAY) AssistantPage.Day(date, local.zone) else courseScope) { p, f -> features(p, f, null) }
+                        if (destination == Destination.TODAY) AssistantPage.Day(date, local.zone) else courseScope, features)
                 } else if (start == Destination.WORKSPACE) {
                     val scope = if (frames) AssistantPage.Frames else AssistantPage.Queue
-                    if (taskStack == null) Page(scope) { features(start, true, null) }
-                    else TaskCardPilot.Show(taskStack, model, edit = { id, frame, rev -> navigate(MotionEdit(id, frame, rev)) }) { links ->
-                        Page(scope) { features(start, true, links) }
-                    }
-                } else Page { features(start, true, null) }
+                    Page(scope) { features(start, true) }
+                } else Page { features(start, true) }
             }
-            entry<MotionTask>(metadata = { key -> origins.sourceSceneMetadata(key.origin()) }) { key ->
+            entry<MotionTask> { key ->
                 DetailRoute(key.origin(), animate) {
                     SourceData(model, GraphLink.Task(key.id)) { data ->
+                        DetailSourceAvailable(data.source?.owner == Owner.QUEUE)
                         TaskScreen(key.id, data, model, back, shared) { navigate(MotionEdit(key.id, data.source?.frameId, data.revision)) }
                     }
                 }
             }
-            entry<MotionFrame>(metadata = { key -> origins.sourceSceneMetadata(key.origin()) }) { key ->
+            entry<MotionFrame> { key ->
                 DetailRoute(key.origin(), animate) {
                     WorkspaceData(model) { data ->
                         FrameScreen(key.id, data, model, back, shared, onSource = { link ->
@@ -218,23 +201,13 @@ internal fun MotionWorkbench(start: Destination, startOnStack: Boolean = false, 
             } }
         }
         Box(Modifier.fillMaxSize().clipToBounds()) {
-            plane.Layout(Modifier.onGloballyPositioned { origins.host = it; origins.size = it.size }) {
-                NavDisplay(backStack = stack, onBack = back,
-                    sceneStrategies = remember { listOf(LiveSourceSceneStrategy<NavKey>()) },
-                    transitionSpec = { sceneMotion(animate) }, popTransitionSpec = { sceneMotion(animate) },
-                    predictivePopTransitionSpec = { sceneMotion(animate) },
-                    entryProvider = { key ->
-                        val entry = entries(key)
-                        NavEntry(navEntry = entry) {
-                            val depth = remember(key) { stack.indexOfLast { it == key } }
-                            val parent = stack.getOrNull(depth - 1)?.origin()
-                            val scene: @Composable () -> Unit = {
-                                origins.Entry(key.origin(), depth, stack.lastIndex, parent, animate,
-                                    ordinary = key != MotionHome && key !is MotionTask && key !is MotionFrame) { entry.Content() }
-                            }
-                            if (key == MotionHome && depth == 0) plane.Entry(scene) else scene()
-                        }
-                    })
+            BiliStackDisplay(stack, back, animate, Modifier.onGloballyPositioned {
+                origins.host = it; origins.size = it.size; origins.viewportSize = it.size
+            }) { key ->
+                val depth = remember(key) { stack.indexOfLast { it == key } }
+                val parent = remember(key) { stack.getOrNull(depth - 1)?.origin() }
+                origins.Entry(key.origin(), key == stack.last(), parent, animate,
+                    ordinary = key != MotionHome && key !is MotionTask && key !is MotionFrame) { entries(key).Content() }
             }
             SnackbarHost(notices, Modifier.align(Alignment.BottomCenter).padding(12.dp))
         }

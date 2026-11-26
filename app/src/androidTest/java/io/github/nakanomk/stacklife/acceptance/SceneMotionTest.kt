@@ -62,7 +62,8 @@ class SceneMotionTest {
         ui.waitUntil(12_000) { ui.onAllNodesWithTag("queue").fetchSemanticsNodes().size == 1 }
     }
 
-    private fun bounds(tag: String) = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+    private fun bounds(tag: String, painted: Boolean = false) =
+        ui.onNodeWithTag(tag, useUnmergedTree = painted).fetchSemanticsNode().boundsInRoot
     private fun x(node: SemanticsNode) = ui.runOnIdle {
         assertTrue("The displaced scene must still be placed", node.layoutInfo.isPlaced && node.layoutInfo.coordinates.isAttached)
         node.layoutInfo.coordinates.localToRoot(Offset.Zero).x
@@ -156,19 +157,41 @@ class SceneMotionTest {
     private fun assertOpaqueEdge(full: Rect, front: PixelMap, parent: PixelMap, shot: EdgeShot) {
         assertUncoveredPixels(parent, shot.pixels, shot.frame)
         val dx = (shot.frame.left - full.left).roundToInt()
+        keepFrame("orphan-$dx-front", front)
+        keepFrame("orphan-$dx-parent", parent)
+        keepFrame("orphan-$dx-moving", shot.pixels)
         val trim = (32 * ui.density.density).roundToInt()
+        val paper = front[full.right.toInt().coerceAtMost(front.width) - 4, (full.top + .6f * full.height).roundToInt()]
         var distinct = 0
         var unchanged = 0
+        var coveredEdges = 0
+        var hiddenEdges = 0
         for (y in maxOf(trim, full.top.toInt() + 2) until minOf(front.height - trim, full.bottom.toInt() - 2) step 2) {
             for (x in full.left.toInt() + 2 until minOf(full.right.toInt(), front.width - dx) - 3 step 2) {
                 val a = front[x, y]
                 val b = front[x + 2, y]
-                if (delta(a, b) < .30f || delta(a, parent[x + dx, y]) < .30f) continue
+                val movedA = shot.pixels[x + dx, y]
+                val movedB = shot.pixels[x + dx + 2, y]
+                val parentA = parent[x + dx, y]
+                val parentB = parent[x + dx + 2, y]
+                if (delta(a, b) < .04f && delta(parentA, parentB) >= .30f &&
+                    maxOf(delta(a, parentA), delta(b, parentB)) >= .30f) {
+                    coveredEdges++
+                    if (delta(movedA, movedB) < .12f) hiddenEdges++
+                }
+                if (delta(a, b) < .30f) continue
+                // The wallpaper under the translated glyph legitimately changes with its
+                // screen position. Compare the stroke itself to the same stroke when settled.
+                val first = delta(a, paper) >= delta(b, paper)
+                val ink = if (first) a else b
+                if (delta(ink, if (first) parentA else parentB) < .30f) continue
                 distinct++
-                if (delta(a, shot.pixels[x + dx, y]) < .09f && delta(b, shot.pixels[x + dx + 2, y]) < .09f) unchanged++
+                if (delta(ink, if (first) movedA else movedB) < .09f) unchanged++
             }
         }
-        assertTrue("Moving front-page ink must remain opaque ($unchanged/$distinct)", distinct > 30 && unchanged >= distinct * .85f)
+        assertTrue("Moving front-page ink must remain opaque ($unchanged/$distinct)", distinct > 30 && unchanged >= distinct * .95f)
+        assertTrue("Parent strokes must not show through the moving page ($hiddenEdges/$coveredEdges)",
+            coveredEdges > 30 && hiddenEdges >= coveredEdges * .95f)
     }
 
     private fun title(key: String) =
@@ -263,7 +286,14 @@ class SceneMotionTest {
         val detail = "detail:$key"
         fun measuredPage() = ui.onNodeWithTag(detail).fetchSemanticsNode().size
         click(ui.onNodeWithTag(key))
-        ui.mainClock.advanceTimeBy(128)
+        // The pinned driver first places the real source and only then starts the
+        // entering clock. Inspect the actual destination-ink part of the trip.
+        val rootHeight = ui.onRoot().fetchSemanticsNode().size.height
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            val window = ui.onAllNodesWithTag(detail).fetchSemanticsNodes().singleOrNull()?.boundsInRoot
+            window != null && window.height >= row.height + .52f * (rootHeight - row.height)
+        }
         val middle = frame(key)
         val pushTitle = placedTitle()
         val pushSize = measuredPage()
@@ -338,11 +368,12 @@ class SceneMotionTest {
             ui.mainClock.advanceTimeBy(192)
             val lastFrames = ArrayDeque<Pair<Rect, PixelMap>>(2)
             var disposedFrames = 0
-            repeat(18) {
+            var sampled = 0
+            while (disposedFrames < 2 && sampled++ < 64) {
                 ui.mainClock.advanceTimeByFrame()
                 val moving = ui.onAllNodesWithTag(tag).fetchSemanticsNodes().singleOrNull()?.boundsInRoot
                 val shot = pixels()
-                for (i in keys.indices) assertEquals("The list must reserve the real row, not the moving detail", original[i], bounds(keys[i]))
+                for (i in keys.indices) assertEquals("The list must reserve the real row, not the moving detail", original[i], bounds(keys[i], painted = true))
                 if (moving == null || moving == full) {
                     // A released shared node can report full layout bounds for one frame
                     // before disposal. It must not actually paint any of that rectangle.
@@ -560,13 +591,13 @@ class SceneMotionTest {
     }
 
     private fun tracePlacement(value: () -> Float?): List<Pair<Long, Float>> = buildList {
-        repeat(28) {
+        repeat(60) {
             ui.mainClock.advanceTimeByFrame()
             value()?.let { add(ui.mainClock.currentTime to it) }
         }
     }
 
-    private fun checkTweenTravel(samples: List<Pair<Long, Float>>, start: Float, end: Float, remaining: Float = 1f) {
+    private fun checkTweenTravel(samples: List<Pair<Long, Float>>, start: Float, end: Float) {
         val native = tween<Float>()
         fun nativeTime(distance: Float) = (0..native.durationMillis).first {
             native.easing.transform(it.toFloat() / native.durationMillis) >= distance
@@ -582,8 +613,22 @@ class SceneMotionTest {
         val startTime = crossed(.30f)
         for (distance in listOf(.65f, .95f)) {
             assertEquals("Measured container travel from 30% to ${distance * 100}%: $travel",
-                (nativeTime(distance) - nativeTime(.30f)) * remaining.toDouble(), crossed(distance) - startTime, 24.0)
+                (nativeTime(distance) - nativeTime(.30f)).toDouble(), crossed(distance) - startTime, 24.0)
         }
+    }
+
+    private fun checkSpringSettle(samples: List<Pair<Long, Float>>, start: Float, end: Float) {
+        val travel = samples.map { (time, position) -> time to (position - start) / (end - start) }
+        fun crossing(distance: Float) = travel.zipWithNext().firstNotNullOfOrNull { (a, b) ->
+            if (a.second <= distance && b.second > distance)
+                a.first + (b.first - a.first) * ((distance - a.second) / (b.second - a.second)).toDouble()
+            else null
+        } ?: error("No intermediate frame at $distance in $travel")
+        // An interrupted gesture can transfer velocity; its return still decelerates into the target.
+        val early = crossing(.50f) - crossing(.30f)
+        val late = crossing(.94f) - crossing(.74f)
+        assertTrue("The real bounds must ease into their landing: $travel", early > 0 && late > early * 1.2)
+        assertTrue("The spring must reach the visible endpoint: $travel", travel.any { kotlin.math.abs(it.second - 1f) < .01f })
     }
 
     @Test fun helpPaneOpensAndRecoversFromBackAlongTheSamePlacedPath() {
@@ -625,7 +670,7 @@ class SceneMotionTest {
             seek(input, .25f); checkSeek(.25f)
             seek(input, .75f); assertEquals(held, checkSeek(.75f))
             ui.runOnUiThread { input.backCancelled() }
-            checkTweenTravel(tracePlacement { window()?.height }, held.height, full.height, remaining = .75f)
+            checkSpringSettle(tracePlacement { window()?.height }, held.height, full.height)
             assertEquals(full, window())
             assertUncoveredPixels(helpPixels, pixels(), Rect.Zero)
             start(input); seek(input, .5f); complete(input)
@@ -633,7 +678,7 @@ class SceneMotionTest {
         }
     }
 
-    @Test fun launcherOpenAndToolbarBackFollowTheDefaultComposeTween() {
+    @Test fun launcherOpensWithTheSourceCurveAndToolbarBackSpringsToTheSameButton() {
         show()
         val fab = ui.onNodeWithTag("add-task")
         val compact = fab.fetchSemanticsNode().boundsInRoot.height
@@ -647,7 +692,7 @@ class SceneMotionTest {
             val full = bounds(route).height
             checkTweenTravel(opening, compact, full)
             val back = ui.onNode(hasAnyAncestor(hasTestTag(route)) and hasContentDescription("返回") and hasClickAction())
-            checkTweenTravel(record(back), full, compact)
+            checkSpringSettle(record(back), full, compact)
             ui.onNodeWithTag(route).assertDoesNotExist()
             assertEquals(compact, bounds("add-task").height, 0f)
         }
@@ -675,11 +720,11 @@ class SceneMotionTest {
             ui.mainClock.autoAdvance = false
             start(input); seek(input, .35f)
             val partial = bounds(route)
-            assertEquals("The underlying FAB must not ride the editor's IME", fab, bounds("add-task"))
+            assertEquals("The underlying FAB must not ride the editor's IME", fab, bounds("add-task", painted = true))
             between(fab, partial, page)
             seek(input, .65f)
             val smaller = bounds(route)
-            assertEquals("More Back progress must keep the same stationary launcher", fab, bounds("add-task"))
+            assertEquals("More Back progress must keep the same stationary launcher", fab, bounds("add-task", painted = true))
             between(fab, smaller, page)
             assertTrue(smaller.width < partial.width && smaller.height < partial.height)
             ui.runOnUiThread { input.backCancelled() }; ui.mainClock.advanceTimeBy(600)
@@ -832,7 +877,7 @@ class SceneMotionTest {
                     runBlocking { store.apply(PlannerCommand.TaskEdit(taskId, title = renamed)) }
                     ui.waitUntil(5_000) {
                         ui.mainClock.advanceTimeByFrame()
-                        ui.onAllNodesWithText(renamed).fetchSemanticsNodes().isNotEmpty()
+                        ui.onAllNodesWithText(renamed, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
                     }
                     val live = pixels()
                     val patch = windowRect(queueTitle)
@@ -865,7 +910,7 @@ class SceneMotionTest {
             start(input)
             ui.waitUntil(12_000) {
                 ui.mainClock.advanceTimeByFrame()
-                ui.onAllNodesWithText(emptyGraph).fetchSemanticsNodes().isNotEmpty()
+                ui.onAllNodesWithText(emptyGraph, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
             }
             seek(input, .5f)
             val midway = edgeShot(tag, page, .5f)
@@ -876,6 +921,24 @@ class SceneMotionTest {
             assertOpaqueEdge(page, before, after, midway)
             assertOpaqueEdge(page, before, after, reversed)
         }
+    }
+
+    @Test fun aFeatureSettingsGearReturnsToTheExistingScrolledSettingsEntry() {
+        show()
+        val gear = hasContentDescription("设置") and hasClickAction()
+        ui.onNode(gear).performClick()
+        val jump = hasTestTag("open-feature:workspace")
+        val settings = hasAnyAncestor(hasTestTag("route:settings"))
+        ui.onNode(hasScrollToIndexAction() and settings).performScrollToNode(jump)
+        val row = ui.onNode(jump and settings)
+        val position = row.fetchSemanticsNode().boundsInRoot
+        row.performClick()
+        ui.onNode(gear and hasAnyAncestor(hasTestTag("route:feature:workspace"))).performClick()
+        row.assertIsDisplayed()
+        assertEquals(position, row.fetchSemanticsNode().boundsInRoot)
+        ui.onNode(hasContentDescription("返回") and hasClickAction() and settings).performClick()
+        ui.onNodeWithTag("nav:workspace").assertIsSelected()
+        ui.onNodeWithTag("route:settings").assertDoesNotExist()
     }
 
     @Test fun aSettingsRowExpandsWithoutRetractingSettingsIntoItsOwnGear() {
@@ -906,7 +969,8 @@ class SceneMotionTest {
         val inSettings = hasAnyAncestor(hasTestTag("route:settings"))
         val row = ui.onNode(inSettings and hasText("布局") and hasClickAction())
         val adjacent = ui.onNode(inSettings and hasText("色彩") and hasClickAction())
-        val origin = row.fetchSemanticsNode().boundsInRoot
+        val originalRow = row.fetchSemanticsNode()
+        val origin = originalRow.boundsInRoot
         val neighbor = adjacent.fetchSemanticsNode().boundsInRoot
         val parent = bounds("route:settings")
         val before = pixels()
@@ -917,8 +981,9 @@ class SceneMotionTest {
             for (fraction in listOf(.94f, .98f, .995f)) {
                 seek(input, fraction)
                 ui.onNodeWithTag(tag).assertExists()
-                assertEquals(parent, bounds("route:settings"))
-                assertEquals(origin, row.fetchSemanticsNode().boundsInRoot)
+                assertEquals(parent, bounds("route:settings", painted = true))
+                assertTrue("The same source row must remain placed", originalRow.layoutInfo.isPlaced && originalRow.layoutInfo.coordinates.isAttached)
+                assertEquals(origin, originalRow.boundsInRoot)
                 val frame = pixels()
                 keepFrame("settings-source", before)
                 keepFrame("settings-return-${(fraction * 1000).roundToInt()}", frame)

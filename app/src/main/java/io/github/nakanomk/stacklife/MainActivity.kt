@@ -24,13 +24,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
-import androidx.navigation3.ui.NavDisplay
 import io.github.nakanomk.stacklife.about.AppDiagnostics
 import io.github.nakanomk.stacklife.about.HelpAboutScreen
 import io.github.nakanomk.stacklife.updates.AppUpdates
@@ -46,7 +43,6 @@ import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
 import io.github.nakanomk.stacklife.appearance.AppearanceEditor
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
-import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
 import io.github.nakanomk.stacklife.transitions.*
 import io.github.nakanomk.stacklife.appearance.LocalGlassLight
 import io.github.nakanomk.stacklife.appearance.PlannerPopupHost
@@ -214,9 +210,6 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
         else -> Home
     }
     val stack = rememberNavBackStack(start)
-    val trial = LocalContext.current.applicationContext as? TaskCardTrial
-    // Save route identities with the host. HomePlane may replace the entry that owns the live card layers.
-    val trialStack = if (trial == null) null else rememberNavBackStack(Home)
     var selectedDate by rememberSaveable { mutableStateOf<Long?>(null) }
     var revealIdentity by rememberSaveable { mutableStateOf<String?>(null) }
     val revealKey = remember(revealIdentity) { revealIdentity?.let { Json.decodeFromString<OccurrenceKey>(it) } }
@@ -224,8 +217,6 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
     var destination by rememberSaveable { mutableStateOf(preferences.appearance.start) }
     var courseSelection by rememberSaveable { mutableStateOf(CourseSelection()) }
     val origins = remember { RouteOrigins() }
-    val hostOwner = LocalLifecycleOwner.current
-    val homePlane = remember(hostOwner) { HomePlane(hostOwner) }
     val back = {
         if (stack.size > 1) {
             if (!origins.interceptPop(stack.last().motionKey())) origins.pop(stack.removeAt(stack.lastIndex).motionKey())
@@ -233,12 +224,7 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
         else if (initialDetail != null) onDetailBack()
         Unit
     }
-    val navigate: (NavKey) -> Unit = { key ->
-        if (stack.last() != key) {
-            origins.push(key.motionKey(), stack.last().motionKey())
-            stack.add(key)
-        }
-    }
+    val navigate: (NavKey) -> Unit = { key -> origins.navigate(stack, key, NavKey::motionKey) }
     val openSource: (GraphLink) -> Unit = { link -> navigate(when (link) {
         is GraphLink.Task -> TaskDetail(link.taskId)
         is GraphLink.Occurrence -> SourceOccurrence(link)
@@ -277,10 +263,6 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
             uiText("Could not read the event.", "无法读取事件。") else uiText("This event no longer exists.", "该事件已不存在。")) }
     }
     val animate = LocalMotionEnabled.current
-    val canKeepSource = animate && glassUnavailableReason(preferences.appearance) == null
-    // The source chooses retention at click time. A platform preference changing
-    // must not replace an existing navigation entry or its scroll state.
-    SideEffect { origins.canKeepSource = canKeepSource }
     val privateScreens = remember { mutableIntStateOf(0) }
     var historySource by rememberSaveable { mutableStateOf<String?>(null) }
     val assistantEnabled = assistantSettings.enabled
@@ -298,8 +280,8 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
         val shared: SharedModifier = { key ->
             if (animate && initialDetail == null) cardBoundsModifier(key) else Modifier
         }
-        val showFeature: @Composable (Destination, Boolean, TrialQueueLinks?) -> Unit = { page, front, links ->
-            pages.SaveableStateProvider(page.key) {
+        val showFeature: @Composable (Destination, Boolean) -> Unit = { page, front ->
+            pages.SaveableStateProvider(if (LocalFeatureBack.current == null) page.key else "feature:${page.key}") {
             when (page) {
                 Destination.TODAY -> TodayRoute(model, date, local.zone,
                     onDate = { day ->
@@ -309,8 +291,8 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     onEdit = navigate, onSettings = { navigate(Preferences) }, revealKey = revealKey,
                     onRevealed = { revealIdentity = null }, onAdd = { navigate(AddTask) })
                 Destination.WORKSPACE -> WorkspacePanel(model) { workspace ->
-                    WorkspaceScreen(workspace, model, links?.open ?: { navigate(TaskDetail(it)) }, { navigate(FrameDetail(it)) },
-                        { navigate(Preferences) }, if (front) links?.cards ?: shared else noCardBounds, frames, { frames = it },
+                    WorkspaceScreen(workspace, model, { navigate(TaskDetail(it)) }, { navigate(FrameDetail(it)) },
+                        { navigate(Preferences) }, if (front) shared else noCardBounds, frames, { frames = it },
                         { navigate(CreateFrame) }, { navigate(AddTask) })
                 }
                 Destination.GRAPHS -> GraphsRoute(model, { navigate(GraphEditor(it)) }, { navigate(Preferences) })
@@ -325,15 +307,12 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                 entry<Home> {
                     val order = preferences.appearance.visibleOrder
                     val active = preferences.appearance.nearestVisible(destination)
-                    if (trial == null) RootPages(order, active, visitToday, { destination = it }, featureScope(active)) { p, f -> showFeature(p, f, null) }
-                    else trial.Show(checkNotNull(trialStack), model, edit = { id, frame, rev -> navigate(EditTask(id, frame, rev)) }) { links ->
-                        RootPages(order, active, visitToday, { destination = it }, featureScope(active)) { p, f -> showFeature(p, f, links) }
-                    }
+                    RootPages(order, active, visitToday, { destination = it }, featureScope(active), showFeature)
                 }
                 entry<Feature> { key ->
                     CompositionLocalProvider(LocalFeatureBack provides back, LocalPlannerGlassAllowed provides true) {
                         Page { DockOverlay(assistantPage = featureScope(key.destination)) { bottom ->
-                            CompositionLocalProvider(LocalRootBottom provides bottom) { showFeature(key.destination, true, null) }
+                            CompositionLocalProvider(LocalRootBottom provides bottom) { showFeature(key.destination, true) }
                         } }
                     }
                 }
@@ -344,10 +323,10 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                         while (stack.size > 1) back()
                         if (inNavigation) destination = Destination.WORKSPACE else navigate(Feature(Destination.WORKSPACE))
                     }) }
-                entry<CountDetail>(metadata = { key -> origins.sourceSceneMetadata(key.motionKey(), retainParent = true) }) { key ->
+                entry<CountDetail> { key ->
                     CountdownDetail(model, key.id, { navigate(CountEdit(it)) }, back)
                 }
-                entry<CountEdit>(metadata = { key -> origins.sourceSceneMetadata(key.motionKey(), retainParent = true) }) { key ->
+                entry<CountEdit> { key ->
                     CountdownEditor(model, key.id, back, seed = key.seed)
                 }
                 entry<SlotEditorKey> { key ->
@@ -381,9 +360,10 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                         SlotEditor(editor, model, onBack = back, onSaved = { _, _ -> back() })
                     }
                 } }
-                entry<TaskDetail>(metadata = { key -> origins.sourceSceneMetadata(key.motionKey()) }) { key ->
+                entry<TaskDetail> { key ->
                     DetailRoute("task:${key.id}", animate && initialDetail == null) {
                         SourcePanel(model, GraphLink.Task(key.id)) { view ->
+                            DetailSourceAvailable(view.source?.owner == Owner.QUEUE)
                             TaskScreen(key.id, view, model, back, shared) { navigate(EditTask(key.id, view.source?.frameId, view.revision)) }
                         }
                     }
@@ -395,12 +375,12 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     else TaskEditor(model, back, original = QueueTask(key.id, task.title, task.notes, task.minutes, task.schedule, task.icon),
                         frameId = key.frameId, expectedRevision = key.revision ?: rememberSaveable { view.revision })
                 } }
-                entry<FrameDetail>(metadata = { key -> origins.sourceSceneMetadata(key.motionKey()) }) { key ->
+                entry<FrameDetail> { key ->
                     DetailRoute("frame:${key.id}", animate && initialDetail == null && !key.generated) {
                         WorkspacePanel(model) { FrameScreen(key.id, it, model, back, shared, openSource) { task -> navigate(EditTask(task, key.id, it.revision)) } }
                     }
                 }
-                entry<Preferences>(metadata = { key -> origins.sourceSceneMetadata(key.motionKey()) }) {
+                entry<Preferences> {
                     SettingsHelpHost { SettingsScreen(preferences, model, back, { navigate(ModelConnection) }, { navigate(EditAppearance(it.key)) },
                         onWallpaper = { navigate(EditAppearance(AppearanceGroup.MATERIAL.key, startAtWallpaper = true)) },
                         onAbout = { navigate(HelpAbout) }, onUpdates = updates?.let { { navigate(Updates) } },
@@ -415,40 +395,28 @@ private fun PlannerNavigation(model: WorkspaceViewModel, assistant: AssistantMod
                     AppearanceGroup.entries.first { it.key == key.group }, model, planner = model.planner, startAtWallpaper = key.startAtWallpaper, onBack = back) } }
                 entry<ModelConnection> { PrivateScreen(privateScreens) { SettingsHelpHost { ConnectionScreen(assistant.connections, back) } } }
         }
-        homePlane.Layout(Modifier.onGloballyPositioned { origins.host = it; origins.size = it.size }) {
-            NavDisplay(backStack = stack, onBack = back,
-                sceneStrategies = remember { listOf(LiveSourceSceneStrategy<NavKey>()) },
-                transitionSpec = { sceneMotion(animate) }, popTransitionSpec = { sceneMotion(animate) },
-                predictivePopTransitionSpec = { sceneMotion(animate) },
-                entryProvider = { key ->
-                    val entry = entries(key)
-                    NavEntry(navEntry = entry) {
-                        val depth = remember(key) { stack.indexOfLast { it == key } }
-                        val parent = stack.getOrNull(depth - 1)?.motionKey()
-                        // A retained parent must keep its own wallpaper while the next entry reveals
-                        // itself, including the first and last frame of predictive Back.
-                        // Nav3 caches the entry factory while the stack is unchanged.
-                        val appearance = latestAppearance
-                        val owner = when (key) {
-                            Home -> appearance.nearestVisible(destination)
-                            Preferences, HelpAbout, Updates, Backups, ModelConnection, Guidance, is EditAppearance -> null
-                            is Feature -> key.destination
-                            else -> remember(key) {
-                                (depth - 1 downTo 0).firstNotNullOfOrNull { (stack.getOrNull(it) as? Feature)?.destination }
-                                    ?: appearance.nearestVisible(destination)
-                            }
-                        }
-                        val page: @Composable () -> Unit = {
-                            WallpaperHost(appearance.wallpaper(owner), drawBehindContent = false) {
-                                origins.Entry(key.motionKey(), depth, stack.lastIndex, parent, animate && initialDetail == null,
-                                    ordinary = key != Home && key !is TaskDetail && (key !is FrameDetail || key.generated)) {
-                                    CompositionLocalProvider(LocalWorkspaceFeedback provides model.takeIf { key == stack.last() }) { entry.Content() }
-                                }
-                            }
-                        }
-                        if (key == Home && depth == 0) homePlane.Entry(page) else page()
-                    }
-                })
+        BiliStackDisplay(stack, back, animate && initialDetail == null, Modifier.onGloballyPositioned {
+            origins.host = it; origins.size = it.size; origins.viewportSize = it.size
+        }) { key ->
+            val entry = entries(key)
+            val depth = remember(key) { stack.indexOfLast { it == key } }
+            val parent = remember(key) { stack.getOrNull(depth - 1)?.motionKey() }
+            val appearance = latestAppearance
+            val owner = when (key) {
+                Home -> appearance.nearestVisible(destination)
+                Preferences, HelpAbout, Updates, Backups, ModelConnection, Guidance, is EditAppearance -> null
+                is Feature -> key.destination
+                else -> remember(key) {
+                    (depth - 1 downTo 0).firstNotNullOfOrNull { (stack.getOrNull(it) as? Feature)?.destination }
+                        ?: appearance.nearestVisible(destination)
+                }
+            }
+            WallpaperHost(appearance.wallpaper(owner), drawBehindContent = false) {
+                origins.Entry(key.motionKey(), key == stack.last(), parent, animate && initialDetail == null,
+                    ordinary = key != Home && key !is TaskDetail && (key !is FrameDetail || key.generated)) {
+                    CompositionLocalProvider(LocalWorkspaceFeedback provides model.takeIf { key == stack.last() }) { entry.Content() }
+                }
+            }
         }
     }
     val source = historySource

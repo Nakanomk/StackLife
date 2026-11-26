@@ -1,13 +1,5 @@
 package io.github.nakanomk.stacklife.transitions
 
-import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.EnterExitState
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
@@ -22,20 +14,14 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
-import androidx.navigation3.ui.LocalNavAnimatedContentScope
-import io.github.nakanomk.stacklife.appearance.LocalAppearance
-import io.github.nakanomk.stacklife.appearance.glassUnavailableReason
-
-internal fun AnimatedContentTransitionScope<*>.sceneMotion(enabled: Boolean) = EnterTransition.None togetherWith
-    if (enabled) ExitTransition.KeepUntilTransitionsFinished else ExitTransition.None
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.semantics.clearAndSetSemantics
 
 internal val LocalFrontEntry = compositionLocalOf { true }
 
@@ -44,28 +30,14 @@ internal val LocalRouteOriginsEnabled = compositionLocalOf { true }
 internal val LocalRouteOwner = compositionLocalOf<String?> { null }
 private val LocalRouteParent = compositionLocalOf<String?> { null }
 
-@Composable
-internal fun AnimatedVisibilityScope.routeOpen(enabled: Boolean): State<Float> {
-    val owner = LocalRouteOwner.current
-    val origins = LocalRouteOrigins.current
-    val exiting = enabled && transition.currentState == EnterExitState.Visible && transition.targetState != EnterExitState.Visible
-    // NavDisplay 1.2.2 advances normal animateTo linearly, but seeks gesture progress
-    // directly and eases its own cancellation. A toolbar pop removes the entry first;
-    // a predictive pop starts while it is still on the stack. Latch that distinction
-    // for the whole exit, including release, so committing cannot warp a held frame.
-    val scrubbing = remember(transition, owner, exiting) { exiting && owner != null && origins?.isPopped(owner) == false }
-    return containerOpen(enabled, if (scrubbing) LinearEasing else FastOutSlowInEasing)
-}
-
 internal class RouteLaunch(val modifier: Modifier, private val host: RouteOrigins?, private val site: OriginSite) {
     fun open(action: () -> Unit) { host?.chosen = site; action() }
 }
 
 internal class RouteOrigins : ContainerOrigins() {
     var chosen: OriginSite? = null
-    var canKeepSource = false
     private val removed = mutableSetOf<String>()
-    private val levels = mutableStateMapOf<String, Int>()
+    private val presented = mutableSetOf<String>()
     private val landings = mutableStateMapOf<String, OriginSite?>()
     private val popGuards = mutableMapOf<String, () -> Boolean>()
 
@@ -92,48 +64,47 @@ internal class RouteOrigins : ContainerOrigins() {
 
     override fun tracks(site: OriginSite) = super.tracks(site) || site in landings.values
 
-    override fun keepSource(anchor: ContainerAnchor) = canKeepSource &&
-        (anchor.rowVisible != null || (anchor.site.owner == "home" && anchor.site.target == "settings"))
-
-    fun push(key: String, from: String) {
-        removed.remove(key)
-        capture(key, from, chosen)
+    /** A settings gear or a link may target an entry already below us. Reveal that live
+     * entry (including its scroll or draft) rather than registering its identity twice. */
+    fun <K> navigate(stack: MutableList<K>, next: K, identity: (K) -> String) {
+        val target = identity(next)
+        val origin = chosen
         chosen = null
+        val existing = stack.indexOfLast { identity(it) == target }
+        if (existing >= 0) {
+            while (stack.lastIndex > existing) {
+                if (interceptPop(identity(stack.last()))) break
+                pop(identity(stack.removeAt(stack.lastIndex)))
+            }
+        } else {
+            removed.remove(target)
+            capture(target, identity(stack.last()), origin)
+            stack.add(next)
+        }
     }
-    fun pop(key: String) { removed.add(key) }
-    fun isPopped(key: String) = key in removed
-    fun sourceSceneMetadata(key: String, retainParent: Boolean = false): Map<String, Any> = when {
-        retainParent -> placedParentMetadata
-        links[key]?.keepSource == true -> liveSourceMetadata
-        else -> emptyMap()
+    fun pop(key: String) {
+        if (key in presented) removed.add(key) else { links.remove(key); landings.remove(key) }
     }
-
-    // When a deeper editor returns to a disposed detail there is no live list to keep.
-    // Don't build an invisible Home on the way back from editing.
-    fun hasEntryAbove(depth: Int) = levels.values.any { it > depth }
 
     @Composable
-    internal fun Entry(key: String, depth: Int, stackTop: Int, from: String?, animate: Boolean,
+    internal fun Entry(key: String, logicalFront: Boolean, from: String?, animate: Boolean,
         ordinary: Boolean, content: @Composable () -> Unit) {
         DisposableEffect(key) {
-            levels[key] = depth
+            presented.add(key)
             onDispose {
-                levels.remove(key)
+                presented.remove(key)
                 if (removed.remove(key)) { links.remove(key); landings.remove(key) }
             }
         }
-        val front = depth >= stackTop && levels.values.none { it > depth }
+        val progress = if (animate) rememberContainerProgress() else null
+        val front = logicalFront && progress?.covered != true
         CompositionLocalProvider(LocalRouteOwner provides key, LocalRouteParent provides from, LocalFrontEntry provides front) {
-            EntryWindow(front, animate) {
+            EntryWindow(front, progress?.covered == true) {
                 if (ordinary) {
-                    val visibility = LocalNavAnimatedContentScope.current
-                    val moving = animate && front && visibility.transition.currentState != visibility.transition.targetState
-                    val open = visibility.routeOpen(animate && front)
                     val link = links[key]?.takeIf { it.site.owner == from }
                     val site = if (key in landings) landings[key] else link?.site
                     val source = site?.takeIf { it.owner == from }?.let { source(it) }
-                    val returning = visibility.transition.currentState == EnterExitState.Visible
-                    RoutePage(this, link, source, open, returning, moving, Modifier.testTag("route:$key"), content)
+                    RoutePage(this, link, source, progress, Modifier.testTag("route:$key"), content)
                 } else content()
             }
         }
@@ -144,10 +115,9 @@ internal class RouteOrigins : ContainerOrigins() {
  * it during Back. Keep real bars/cutouts; consume only the extra IME clearance. At commit
  * the IME can outlive the departing scene, so wait for this page to own focus again. */
 @Composable
-private fun EntryWindow(front: Boolean, animate: Boolean, content: @Composable () -> Unit) {
+private fun EntryWindow(front: Boolean, sourceCovered: Boolean, content: @Composable () -> Unit) {
     var hasFocus by remember { mutableStateOf(false) }
     var covered by remember { mutableStateOf(false) }
-    val sourceCovered = LocalCoveredSource.current
     val focus = LocalFocusManager.current
     SideEffect {
         if (sourceCovered && hasFocus) focus.clearFocus(force = true)
@@ -169,16 +139,9 @@ private fun EntryWindow(front: Boolean, animate: Boolean, content: @Composable (
     // Scaffold and list when a page is covered. While present, consume live insets.
     val keyboard = if (hasKeyboardInset && (!front || covered && !hasFocus))
         Modifier.consumeWindowInsets(extra) else Modifier
-    // Keep the same display-list boundary before the tap, through overlap and after
-    // Back. Only a covered, glass-capable page needs a raster cache; solid pages
-    // and the front entry retain live draw commands without a full-window texture.
-    val appearance = LocalAppearance.current
-    val cacheGlass = !front && animate && appearance.glass && glassUnavailableReason(appearance) == null
-    val underlay = if (animate) Modifier.graphicsLayer {
-        compositingStrategy = if (cacheGlass) CompositingStrategy.Offscreen else CompositingStrategy.Auto
-    } else Modifier
-    Box(Modifier.fillMaxSize().coveredSourceWindow(sourceCovered)
-        .onFocusChanged { hasFocus = it.hasFocus }.focusGroup().then(keyboard).then(underlay),
+    val inactive = if (!sourceCovered) Modifier else Modifier.clearAndSetSemantics {}
+        .focusProperties { onEnter = { cancelFocusChange() } }
+    Box(Modifier.fillMaxSize().then(inactive).onFocusChanged { hasFocus = it.hasFocus }.focusGroup().then(keyboard),
         propagateMinConstraints = true) { content() }
 }
 

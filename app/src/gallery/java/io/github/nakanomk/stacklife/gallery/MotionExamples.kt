@@ -30,18 +30,18 @@ private const val currentBiliPai = "BiliPai 5893c2c80739e3759ac64ae5f232cf03a94d
 internal val motionExamples: List<GalleryEntry> = listOf(
     GalleryEntry("motion-task", GalleryGroup.MOTION, "任务卡片 · 开启、返回与反拖取消",
         "workspace/WorkspaceScreen.kt",
-        "workspace/WorkspaceScreen.kt → TaskCardPilot → workspace/Details.kt::TaskScreen。BiliPai c7f835b34d8323358be57be298f86f29fecb53c8：navigation3/{BiliPaiAndroidXNavDisplay,SettingsContainerTransition,SettingsContainerMotionPolicy}.kt、miuix-navigation。",
+        "workspace/WorkspaceScreen.kt → transitions/BiliStackDisplay.kt → workspace/Details.kt::TaskScreen。BiliPai c7f835b34d8323358be57be298f86f29fecb53c8：navigation3/{BiliPaiAndroidXNavDisplay,SettingsContainerTransition,SettingsContainerMotionPolicy}.kt、miuix-navigation。",
         "$appLicense；BiliPai GPL-3.0；miuix-navigation 与 AndroidX Navigation 3 Apache-2.0",
-        "隔离试验和优化后的 .bench 使用同一份实时任务卡和单时钟。正式版尚未切换；下方链接为原队列组件。",
+        "普通版、Gallery 和 .bench 共用实时任务卡、固定 Scene 和同一返回时钟。",
         "点一张完全可见的任务卡。在手势导航设备上从边缘拖至一半再反拖取消：应仍停在同一任务。再用返回按钮回到队列。acceptance/SceneMotionTest#firstTaskPushAndReversiblePredictivePopUseTheScrolledRow。") {
         MotionWorkbench(Destination.WORKSPACE)
     },
     GalleryEntry("motion-stack", GalleryGroup.MOTION, "工作台 · 恢复与压栈",
         "workspace/Frames.kt",
-        "workspace/Frames.kt::FrameScreen、workspace/WorkspaceScreen.kt::WorkspaceScreen、WorkspaceViewModel.kt::pushQueue；Reorderable 3.1.0 (66de5751227c440bcdbd63acc94999231ed67487)。",
-        "$appLicense；Reorderable Apache-2.0",
-        "只操作 Gallery Planner。压栈后可补原因或撤回；恢复后可撤回，取空的栈帧可保留为历史。未启用 U3 跨页转场。",
-        "打开一个栈帧，恢复一项后点底栏的撤回，再从原帧找到该项。切到队列，多选压栈后给新帧补原因。acceptance/WorkspaceUiTest#pushSelectBThenResumeAThroughTheWorkbench。") {
+        "workspace/{Frames,WorkspaceScreen,WorkspaceTransferMotion}.kt；BiliPai c7f835b34d8323358be57be298f86f29fecb53c8 的 SettingsContainerMotionPolicy 与 miuix-navigation。",
+        "$appLicense；BiliPai GPL-3.0；miuix-navigation Apache-2.0",
+        "只操作 Gallery Planner。压栈成功后，选中的可见任务收进实际的新帧；恢复后在队列找到原任务。撤回和保留历史不切页。",
+        "打开栈帧，恢复一项并从队列核对它；点撤回后去栈里找同一项。多选任务压栈，再给新帧补原因。acceptance/WorkspaceTransferTest。") {
         MotionWorkbench(Destination.WORKSPACE, startOnStack = true)
     },
     GalleryEntry("motion-tray", GalleryGroup.MOTION, "今天 · 待排拾取、时间轴与事件行",

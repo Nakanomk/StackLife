@@ -15,6 +15,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.util.fastRoundToInt
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavEntry
@@ -32,6 +33,12 @@ import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
 import top.yukonga.miuix.kmp.nav.core.NavEntryBuilder
 import top.yukonga.miuix.kmp.nav.core.NavMotionLayout
 import top.yukonga.miuix.kmp.nav.core.rememberNavEntryDispatcherOwner
+import top.yukonga.miuix.kmp.nav.core.NAV_TRANSITION_METADATA_KEY
+import top.yukonga.miuix.kmp.nav.core.NavEntry as MotionEntry
+import top.yukonga.miuix.kmp.nav.transition.NavMotion
+import top.yukonga.miuix.kmp.nav.transition.NavSettleSpec
+import top.yukonga.miuix.kmp.nav.transition.NavTransition
+import top.yukonga.miuix.kmp.nav.transition.NavTransitionScope
 import top.yukonga.miuix.kmp.nav.transition.navGraphicsTransition
 
 private val LocalStackSceneContent = compositionLocalOf<@Composable (() -> Unit) -> Unit> {
@@ -61,12 +68,46 @@ private val StackEdgeTransition = navGraphicsTransition { scope ->
 }
 private val StackEffects = NavDisplayEffects(enableCornerClip = false, dimAmount = 0f)
 
+private val landing = NavSettleSpec.Spring(dampingRatio = .82f, stiffness = 500f,
+    clampOvershoot = false, visibilityThreshold = .0001f)
+private val cancel = NavSettleSpec.Spring(dampingRatio = 1f, stiffness = 700f)
+private val enterMotion = NavMotion(programmatic = NavSettleSpec.Tween(300, FastOutSlowInEasing), commit = landing, cancel = cancel)
+private val returnMotion = NavMotion(programmatic = landing, commit = landing, cancel = cancel)
+
+/** The aperture is applied inside the entry, where its real launcher and final-size content live. */
+private class ContainerBoundary(private val leaving: () -> Boolean) : NavTransition {
+    override val opaqueDepth get() = 2f
+    override val handlesOwnClipping get() = true
+    override val preparesEnterFrame get() = true
+    override val retainsSpringOvershoot get() = true
+    override val motion get() = if (leaving()) returnMotion else enterMotion
+    override fun Modifier.transformEntry(scope: NavTransitionScope) = this
+    override fun scrimFraction(scope: NavTransitionScope) = 0f
+}
+
+@Composable
+internal fun <K : Any> ContainerMotionLayout(
+    routes: List<K>, live: List<K>, back: () -> Unit, modifier: Modifier,
+    entryContent: (Any) -> (@Composable (Any) -> Unit),
+) {
+    val latestLive = rememberUpdatedState(live)
+    val boundaries = remember(routes) { HashMap<Any, ContainerBoundary>(routes.size) }
+    for (route in routes) boundaries[route] = key(route) { remember { ContainerBoundary { route !in latestLive.value } } }
+    val registration: NavEntryBuilder.() -> Unit = remember(routes, entryContent) { {
+        for (route in routes) register(route::class) { k ->
+            MotionEntry(k, k, mapOf(NAV_TRANSITION_METADATA_KEY to boundaries.getValue(k)), entryContent(k))
+        }
+    } }
+    NavMotionLayout(routes = routes, liveBackStack = live, modifier = modifier, onBack = back,
+        onBackStarted = {}, onBackCancelled = {}, transition = StackEdgeTransition, effects = StackEffects,
+        backCompletionPolicy = null, motion = registration, entryContent = entryContent)
+}
+
 @Composable
 internal fun BiliStackDisplay(
     backStack: NavBackStack<NavKey>,
     onBack: () -> Unit,
     enabled: Boolean,
-    motion: NavEntryBuilder.() -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable (NavKey) -> Unit,
 ) {
@@ -107,19 +148,7 @@ internal fun BiliStackDisplay(
             // Each retained page owns its lifecycle ceiling and back scope. The fixed scene's
             // transient lifecycle must not stall them when the logical stack changes.
             CompositionLocalProvider(LocalLifecycleOwner provides windowLifecycleOwner) {
-                NavMotionLayout(
-                    routes = routes,
-                    liveBackStack = backStack,
-                    modifier = Modifier.fillMaxSize(),
-                    onBack = sceneOnBack,
-                    onBackStarted = {},
-                    onBackCancelled = {},
-                    transition = StackEdgeTransition,
-                    effects = StackEffects,
-                    backCompletionPolicy = null,
-                    motion = motion,
-                    entryContent = pageContent,
-                )
+                ContainerMotionLayout(routes, backStack, sceneOnBack, Modifier.fillMaxSize(), pageContent)
             }
         }
     }

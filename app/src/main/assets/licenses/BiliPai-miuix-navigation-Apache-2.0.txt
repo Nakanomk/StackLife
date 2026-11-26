@@ -3,7 +3,8 @@ https://github.com/jay3-yy/BiliPai/tree/c7f835b34d8323358be57be298f86f29fecb53c8
 Copyright 2026, compose-miuix-ui contributors
 
 Only the 33-file module in top/yukonga/miuix/kmp/nav uses this independent license. BiliPai’s navigation3 adapter and container rendering are GPL-3.0, not covered by this Apache license.
-Local change: rememberNavEntryDispatcherOwner is internal so an enclosing StackLife route can disable the retained pilot's entire back scope while an editor owns input.
+Local change: rememberNavEntryDispatcherOwner and ProvideNavEntryBackScope are internal so a StackLife route or sheet can give the foreground entry ownership of Back while a retained parent stays visible.
+The entry content receives the same visual scope as its modifier: a parent revealed during spring overshoot remains the covered landing rather than re-entering through its own launcher.
 
 
                                  Apache License

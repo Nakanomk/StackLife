@@ -2,7 +2,7 @@
     xmlns:tools="http://schemas.android.com/tools">
     <permission android:name="${applicationId}.permission.SEED_FIXTURE" android:protectionLevel="signature" />
     <queries><package android:name="io.github.nakanomk.stacklife.macrobenchmark" /></queries>
-    <application android:name=".benchmark.BenchmarkApplication" tools:replace="android:name">
+    <application>
         <profileable android:shell="true" />
         <receiver android:name=".widget.TodayWidgetProvider" tools:node="remove" />
         <receiver android:name=".widget.WeekWidgetProvider" tools:node="remove" />

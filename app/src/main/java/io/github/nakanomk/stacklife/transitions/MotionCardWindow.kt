@@ -1,20 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // BiliPai c7f835b34d8323358be57be298f86f29fecb53c8, navigation3/SettingsContainerMotionPolicy.kt:
 // resolveSettingsContainerFrame, resolveSettingsContainerContentAlpha. The driver already applied
-// its easing. Scalars avoid per-frame Rect/shape allocation; lost-source carry follows StackLife's
-// EdgeDeparture, in the current parent viewport rather than in a remembered launch coordinate root.
+// its easing. If the source vanishes, carry the last painted frame to the actual host edge.
 package io.github.nakanomk.stacklife.transitions
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.util.lerp
 import kotlin.math.roundToInt
 
-/** Private to a single entry capture. Only [detached] is observable by the grounded row. */
+/** Lifetime of a single transition: a detached source cannot reattach mid-gesture. */
 internal class MotionCardWindow {
     var left = 0f; private set
     var top = 0f; private set
@@ -22,8 +18,9 @@ internal class MotionCardWindow {
     var height = 0f; private set
     var corner = 0f; private set
     var ink = 1f; private set
-    var grounded = false; private set
-    var detached by mutableStateOf(false); private set
+    var edgeX = 0f; private set
+    var retained = 0f; private set
+    var detached = false; private set
 
     private var heldLeft = 0f
     private var heldTop = 0f
@@ -53,7 +50,7 @@ internal class MotionCardWindow {
         val pageH = size.height.toFloat()
         val raw = 1f + depth
         val open = raw.coerceIn(0f, 1f)
-        grounded = false
+        edgeX = 0f; retained = 0f
         if (open == 1f) {
             // A cancelled gesture has returned to the intact page. The next gesture may use
             // the original owner again, but only if its live coordinates and pixels validate.
@@ -72,7 +69,6 @@ internal class MotionCardWindow {
             val u = if (returning) ((open - .45f) / .30f).coerceIn(0f, 1f)
                 else ((open - .22f) / .28f).coerceIn(0f, 1f)
             ink = u * u * (3f - 2f * u)
-            grounded = depth == -1f
             heldLeft = left; heldTop = top; heldWidth = width; heldHeight = height
             heldCorner = corner; heldOpen = open
         } else {
@@ -88,7 +84,9 @@ internal class MotionCardWindow {
             val travel = if (heldOpen <= 0f) { if (open == 0f) 1f else 0f }
                 else (1f - open / heldOpen).coerceIn(0f, 1f)
             val distance = if (direction == LayoutDirection.Ltr) pageW - left else -left - width
-            left += (distance * travel).roundToInt()
+            retained = 1f - reopen
+            edgeX = (distance * travel).roundToInt().toFloat()
+            left += edgeX
             ink = 1f
         }
     }
