@@ -12,10 +12,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.DeviceConfigurationOverride
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.FontScale
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -26,6 +31,13 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.StackLifeTheme
+import io.github.nakanomk.stacklife.RootPane
+import io.github.nakanomk.stacklife.appearance.LocalPlannerGlassAllowed
+import io.github.nakanomk.stacklife.appearance.LocalPlatformAppearance
+import io.github.nakanomk.stacklife.appearance.PlatformAppearance
+import io.github.nakanomk.stacklife.workspace.Page
+import io.github.nakanomk.stacklife.workspace.PageTitle
+import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.appearance.BackgroundPhoto
 import io.github.nakanomk.stacklife.appearance.BackgroundStore
 import io.github.nakanomk.stacklife.appearance.LocalBackgroundStore
@@ -60,9 +72,13 @@ class AppearanceResourcesTest {
         }
     }
 
+    @OptIn(ExperimentalTestApi::class)
     @Test fun previewSystemBarsFollowDraftThenReturnToTheLatestSavedMode() {
         val saved = mutableStateOf(ThemeMode.LIGHT)
         val draft = mutableStateOf<ThemeMode?>(null)
+        val glass = mutableStateOf(true)
+        val fontScale = mutableStateOf(1f)
+        val surface = IntArray(1)
         val context = ui.activity.applicationContext
         val folder = Files.createTempDirectory(context.cacheDir.toPath(), "bars-photo-").toFile()
         val id = UUID.randomUUID().toString()
@@ -75,17 +91,28 @@ class AppearanceResourcesTest {
                 Canvas(bitmap).drawRect(16f, 0f, 32f, 32f, android.graphics.Paint().apply { color = Color.BLUE })
                 File(directory, id).outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
             } finally { bitmap.recycle() }
+            @Composable fun content() {
+                val fill = MaterialTheme.colorScheme.surface.toArgb()
+                SideEffect { surface[0] = fill }
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(fontScale.value)) {
+                    Page {
+                        RootPane(header = {
+                            Box(Modifier.testTag("header-controls")) {
+                                PageTitle(context.getString(R.string.ui_settings), back = { ui.activity.onBackPressedDispatcher.onBackPressed() })
+                            }
+                        }) { _, _ -> BackgroundPhoto(id, Modifier.fillMaxSize()) }
+                    }
+                }
+            }
             fun attach() = ui.activityRule.scenario.onActivity { activity ->
                 activity.enableEdgeToEdge()
                 activity.setContent { CompositionLocalProvider(LocalBackgroundStore provides photos) {
-                    StackLifeTheme(Appearance(theme = saved.value)) {
-                        Box(Modifier.fillMaxSize()) {
-                            BackgroundPhoto(id, Modifier.fillMaxSize())
-                            draft.value?.let { mode ->
-                                Box(Modifier.align(Alignment.Center).fillMaxWidth().fillMaxHeight(.4f)) {
-                                    StackLifeTheme(Appearance(theme = mode)) { BackgroundPhoto(id, Modifier.fillMaxSize()) }
-                                }
-                            }
+                    StackLifeTheme(Appearance(theme = saved.value, glass = glass.value)) {
+                        CompositionLocalProvider(LocalPlannerGlassAllowed provides true,
+                            LocalPlatformAppearance provides PlatformAppearance(accelerated = true)) {
+                            val mode = draft.value
+                            if (mode == null) content()
+                            else StackLifeTheme(Appearance(theme = mode, glass = glass.value)) { content() }
                         }
                     }
                 } }
@@ -104,9 +131,10 @@ class AppearanceResourcesTest {
                         .getInsets(WindowInsetsCompat.Type.statusBars()).top
                 }
                 assertTrue("No status bar on the test window", top > 0)
-                val expected = if (light) Color.WHITE else Color.BLACK
-                // The API37 display capture can interpolate a single channel step at the seam.
-                // Keep alpha exact there too; the software raster below gets no tolerance at all.
+                assertTrue(ui.onNodeWithTag("header-controls").fetchSemanticsNode().boundsInRoot.top >= top - 1)
+                val transmitting = glass.value && Build.VERSION.SDK_INT >= 33
+                // System screenshot includes the actual translucent bar. Sample its icon-free
+                // interior and both sides of the inset; a header starting at the inset leaves a seam.
                 val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
                 var failure = ""
                 try {
@@ -118,55 +146,35 @@ class AppearanceResourcesTest {
                             val left = decor.left + decor.width() * 3 / 8
                             val right = decor.left + decor.width() * 5 / 8
                             fun at(x: Int, y: Int) = image.getPixel(x, decor.top + y)
-                            fun photo(y: Int): Boolean {
-                                val a = at(left, y); val b = at(right, y)
-                                return Color.red(a) - Color.blue(a) > 102 && Color.blue(b) - Color.red(b) > 102
-                            }
-                            val nestedRow = (decor.height() * .3f).toInt() + top / 2
-                            fun matchesBar(x: Int, y: Int): Boolean {
-                                val pixel = at(x, y)
-                                if (y != top - 1) return pixel == expected
-                                val range = if (light) 254..255 else 0..1
-                                return Color.alpha(pixel) == 255 && Color.red(pixel) in range &&
-                                    Color.green(pixel) in range && Color.blue(pixel) in range
-                            }
-                            val mismatch = (0 until top).firstOrNull { y -> !matchesBar(left, y) || !matchesBar(right, y) }
-                            fun colors(y: Int) = "${at(left, y).toUInt().toString(16)}/${at(right, y).toUInt().toString(16)}"
-                            failure = "light=$light, decor=$decor, inset=$top, first mismatched bar row=$mismatch " +
-                                "(${colors(mismatch ?: 0)}), photo at inset=${colors(top)}, nested=${colors(nestedRow)}"
-                            mismatch == null && photo(top) && photo(nestedRow)
+                            val probes = listOf(left, right)
+                            fun chroma(y: Int) = Color.red(at(left, y)) - Color.blue(at(left, y)) > 32 &&
+                                Color.blue(at(right, y)) - Color.red(at(right, y)) > 32
+                            fun distance(a: Int, b: Int) = maxOf(kotlin.math.abs(Color.red(a) - Color.red(b)),
+                                kotlin.math.abs(Color.green(a) - Color.green(b)), kotlin.math.abs(Color.blue(a) - Color.blue(b)))
+                            val matches = if (transmitting) {
+                                chroma(0) && chroma(top / 2) && chroma(top) &&
+                                    probes.all { distance(at(it, top - 1), at(it, top)) < 8 } &&
+                                    // The continuous wash fades as it approaches the clear edge.
+                                    probes.any { distance(at(it, top / 2), at(it, top * 2)) > 4 }
+                            } else probes.all { x -> listOf(0, top / 2, top - 1, top, top + 1).all { y ->
+                                distance(at(x, y), surface[0]) <= 2
+                            } }
+                            failure = "light=$light, glass=$transmitting, inset=$top, " +
+                                "top=${at(left, top / 2).toUInt().toString(16)}, seam=${at(left, top).toUInt().toString(16)}"
+                            matches
                         } finally { image.recycle() }
                     }
                 } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
                     throw AssertionError(failure, e)
                 }
-                // GraphicsLayer.toImageBitmap() still renders into a GPU texture, then copies
-                // that texture into ARGB for readback. Draw the actual app view into a native-size
-                // *software* raster instead, with no PixelCopy, GPU texture sampling or rescaling.
-                ui.runOnIdle {
-                    val view = ui.activity.findViewById<android.view.View>(android.R.id.content)
-                    assertEquals(decor.width(), view.width); assertEquals(decor.height(), view.height)
-                    val app = Bitmap.createBitmap(view.width, top + 1, Bitmap.Config.ARGB_8888)
-                    try {
-                        view.draw(Canvas(app))
-                        val pixels = IntArray(app.width * (top + 1))
-                        app.getPixels(pixels, 0, app.width, 0, 0, app.width, top + 1)
-                        for (i in 0 until app.width * top) {
-                            if (pixels[i] != expected) fail("Software app bar ($light) pixel ${i % app.width},${i / app.width}: ${pixels[i].toUInt().toString(16)}")
-                        }
-                        val firstContent = app.width * top
-                        val left = pixels[firstContent + app.width * 3 / 8]
-                        val right = pixels[firstContent + app.width * 5 / 8]
-                        assertTrue("App photo must begin at inset row $top",
-                            Color.red(left) - Color.blue(left) > 102 && Color.blue(right) - Color.red(right) > 102)
-                    } finally { app.recycle() }
-                }
             }
             attach(); bars(true)
+            ui.runOnIdle { fontScale.value = 2f }; bars(true)
             ui.runOnIdle { draft.value = ThemeMode.DARK }; bars(false)
             ui.runOnIdle { draft.value = null }; bars(true)
             ui.runOnIdle { draft.value = ThemeMode.LIGHT; saved.value = ThemeMode.DARK }; bars(true)
             ui.runOnIdle { draft.value = null }; bars(false)
+            ui.runOnIdle { glass.value = false }; bars(false)
             ui.activityRule.scenario.recreate(); attach(); bars(false)
         } finally { folder.deleteRecursively() }
     }

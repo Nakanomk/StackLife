@@ -10,7 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
@@ -20,6 +20,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
+import io.github.nakanomk.stacklife.appearance.FrostedCard
 import io.github.nakanomk.stacklife.transitions.PaneOrigins
 import io.github.nakanomk.stacklife.transitions.paneOrigin
 import kotlinx.coroutines.launch
@@ -49,12 +50,14 @@ internal fun LicenseIndex(files: Load<List<String>>, padding: PaddingValues, ori
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LicenseEntry(file: String, origins: PaneOrigins, open: (String) -> Unit) {
-    ListItem(modifier = Modifier.paneOrigin(origins, "license:$file").testTag("license:$file")
-        .clip(MaterialTheme.shapes.medium).clickable(role = Role.Button) { open(file) },
-        supportingContent = { Text(file, style = MaterialTheme.typography.bodyMedium) },
-        trailingContent = { Icon(painterResource(R.drawable.ic_chevron_right), null, Modifier.size(20.dp)) },
-        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-        Text(remember(file) { componentName(file) }, style = MaterialTheme.typography.titleMedium)
+    FrostedCard(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium) {
+        ListItem(modifier = Modifier.paneOrigin(origins, "license:$file").testTag("license:$file")
+            .clickable(role = Role.Button) { open(file) },
+            supportingContent = { Text(file, style = MaterialTheme.typography.bodyMedium) },
+            trailingContent = { Icon(painterResource(R.drawable.ic_chevron_right), null, Modifier.size(20.dp)) },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent)) {
+            Text(remember(file) { componentName(file) }, style = MaterialTheme.typography.titleMedium)
+        }
     }
 }
 
@@ -84,8 +87,7 @@ internal fun LicenseReader(file: String, padding: PaddingValues) {
     val scope = rememberCoroutineScope()
     // A continuous, contrast-stable reading surface; the frame never measures the entire license at once.
     Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
-        Surface(Modifier.widthIn(max = 600.dp).fillMaxSize(), shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        FrostedCard(Modifier.widthIn(max = 600.dp).fillMaxSize()) {
             LazyColumn(Modifier.testTag("about-license-reader"), contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {

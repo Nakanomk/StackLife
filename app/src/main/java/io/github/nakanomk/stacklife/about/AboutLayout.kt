@@ -12,6 +12,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import io.github.nakanomk.stacklife.appearance.FrostedCard
 import io.github.nakanomk.stacklife.workspace.SettingInfo
 
 // Design references, implemented with StackLife/MD3 (no upstream code or artwork copied):
@@ -28,9 +29,10 @@ internal fun AboutList(padding: PaddingValues, modifier: Modifier = Modifier, co
 }
 
 @Composable
-internal fun AboutCard(content: @Composable ColumnScope.() -> Unit) {
-    Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+internal fun AboutCard(padding: PaddingValues = PaddingValues(16.dp), spacing: Arrangement.Vertical = Arrangement.spacedBy(8.dp),
+    content: @Composable ColumnScope.() -> Unit) {
+    FrostedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(padding), verticalArrangement = spacing, content = content)
     }
 }
 

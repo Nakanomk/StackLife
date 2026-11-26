@@ -35,6 +35,8 @@ import io.github.nakanomk.stacklife.assistant.*
 import io.github.nakanomk.stacklife.DockOverlay
 import io.github.nakanomk.stacklife.GlassIcon
 import io.github.nakanomk.stacklife.LocalRootBottom
+import io.github.nakanomk.stacklife.LocalPageChromeInsets
+import io.github.nakanomk.stacklife.pageControlSize
 import io.github.nakanomk.stacklife.RootPane
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.i18n.AppLanguage
@@ -69,14 +71,14 @@ internal fun Page(assistantPage: AssistantPage? = null, content: @Composable Col
     val colors = MaterialTheme.colorScheme
     val docked = LocalAppearance.current.navStyle == NavStyle.DOCKED
     Surface(modifier = Modifier.fillMaxSize().wallpaperBackground(if (docked) colors.surfaceContainer else colors.surface), color = Color.Transparent) {
-        Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding(), contentAlignment = Alignment.TopCenter) {
-            val page = (if (docked) Modifier else Modifier.widthIn(max = 760.dp)).fillMaxSize()
+        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+            .imePadding(), contentAlignment = Alignment.TopCenter) {
             val paper = rememberPagePaper(colors.surface)
             // Surface already painted the same window-aligned photo or flat
             // paper. Only a photo-free docked page has a different inner color.
             val insetFill = if (docked && LocalWallpaperRecording.current == null) Modifier.background(colors.surface) else Modifier
-            Box(page.then(insetFill)) {
-                CompositionLocalProvider(LocalCapsuleBackdrop provides paper) {
+            Box(Modifier.fillMaxSize().then(insetFill)) {
+                CompositionLocalProvider(LocalCapsuleBackdrop provides paper, LocalPageChromeInsets provides true) {
                     if (assistantPage == null) Column(Modifier.fillMaxSize(), content = content)
                     else DockOverlay(assistantPage = assistantPage) { clearance ->
                         CompositionLocalProvider(LocalRootBottom provides clearance) { Column(Modifier.fillMaxSize(), content = content) }
@@ -91,29 +93,44 @@ internal fun Page(assistantPage: AssistantPage? = null, content: @Composable Col
 @Composable
 internal fun PageChrome(title: String, back: () -> Unit, backEnabled: Boolean = true,
     footer: (@Composable () -> Unit)? = null, headerAction: (@Composable () -> Unit)? = null,
+    independentFooter: Boolean = false,
     content: @Composable (top: Dp, bottom: Dp) -> Unit) {
     val density = LocalDensity.current
     var footerPixels by remember { mutableIntStateOf(0) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // A landscape IME can leave less than two rows of controls plus one editable field.
         // Put the same action dock next to Back instead of covering the remaining form.
-        val short = footer != null && maxWidth >= 480.dp && maxHeight - LocalRootBottom.current.calculateBottomPadding() < 220.dp
-        val actionWidth = maxWidth * .62f
+        val viewport = pageControlSize()
+        val short = footer != null && viewport.width >= 480.dp &&
+            viewport.height - LocalRootBottom.current.calculateBottomPadding() < 220.dp
+        val footerContent: @Composable () -> Unit = {
+            if (footer != null) {
+                if (independentFooter) footer() else ActionDock(footer)
+            }
+        }
         RootPane(header = {
-            if (short && footer != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { PageTitle(title, back, backEnabled, action = headerAction) }
-                Box(Modifier.widthIn(max = actionWidth).padding(end = 8.dp).horizontalScroll(rememberScrollState())) {
-                    ActionDock(footer)
+            if (short && footer != null) BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val actionWidth = maxWidth * .62f
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) { PageTitle(title, back, backEnabled, action = headerAction) }
+                    val overflow = if (independentFooter) Modifier else Modifier.horizontalScroll(rememberScrollState())
+                    Box(Modifier.widthIn(max = actionWidth).padding(end = 8.dp).then(overflow)) {
+                        footerContent()
+                    }
                 }
             } else PageTitle(title, back, backEnabled, action = headerAction)
         }, overlay = { _, bottom ->
             if (!short && footer != null) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = bottom)
                 .onSizeChanged { footerPixels = it.height }.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                ActionDock(footer)
+                footerContent()
             }
         }) { top, bottom ->
             val clearance = bottom + if (short || footer == null) 0.dp else with(density) { footerPixels.toDp() }
-            content(top, clearance)
+            if (short && independentFooter) {
+                // Wrapped actions occupy real header rows. A content padding alone still lets
+                // bringIntoView place an input behind those controls in a short window.
+                Box(Modifier.fillMaxSize().padding(top = top)) { content(0.dp, clearance) }
+            } else content(top, clearance)
         }
     }
 }
@@ -131,9 +148,10 @@ private fun ActionDock(actions: @Composable () -> Unit) {
 @Composable
 internal fun EditorPage(title: String, back: () -> Unit, assistantPage: AssistantPage? = null,
     backEnabled: Boolean = true, footer: (@Composable () -> Unit)? = null, headerAction: (@Composable () -> Unit)? = null,
+    independentFooter: Boolean = false,
     content: @Composable (top: Dp, bottom: Dp) -> Unit) {
     Page(assistantPage) {
-        PageChrome(title, back, backEnabled, footer, headerAction, content)
+        PageChrome(title, back, backEnabled, footer, headerAction, independentFooter, content)
     }
 }
 

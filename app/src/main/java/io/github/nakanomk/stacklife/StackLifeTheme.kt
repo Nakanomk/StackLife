@@ -5,21 +5,12 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.core.snap
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.*
@@ -94,9 +85,9 @@ internal fun StackLifeTheme(appearance: Appearance = Appearance(), content: @Com
         val view = LocalView.current
         SideEffect {
             if (window != null) {
-                // The root draws a fully opaque protection. Do not let DecorView add a second
-                // contrast scrim over it when an in-app preview differs from the system theme.
+                // The page owns the material behind the system icons, including in a draft preview.
                 @Suppress("DEPRECATION")
+                if (Build.VERSION.SDK_INT < 35) window.statusBarColor = android.graphics.Color.TRANSPARENT
                 if (Build.VERSION.SDK_INT >= 29) window.isStatusBarContrastEnforced = false
                 WindowCompat.getInsetsController(window, view).apply {
                     isAppearanceLightStatusBars = !barsDark
@@ -113,24 +104,7 @@ internal fun StackLifeTheme(appearance: Appearance = Appearance(), content: @Com
         LocalPlatformAppearance provides platform, LocalMotionEnabled provides motion, LocalHapticFeedback provides haptics) {
         MaterialTheme(colorScheme = colors, typography = plannerTypography,
             motionScheme = if (motion) MotionScheme.standard() else StillMotion) {
-            if (nested) content() else Box(Modifier.fillMaxSize()) {
-                val statusBars = WindowInsets.statusBars
-                // Preserve the full layout/coordinate plane (including transition anchors) but
-                // never paint wallpaper or private transition content behind the protection.
-                Box(Modifier.fillMaxSize().drawWithContent {
-                    clipRect(top = statusBars.getTop(this).toFloat()) { this@drawWithContent.drawContent() }
-                }) { content() }
-                // Android's edge-to-edge system-bar protection pattern: last in the root window,
-                // outside every navigation overlay and recording layer. Does not consume insets.
-                Spacer(Modifier.fillMaxWidth().windowInsetsTopHeight(statusBars)
-                    .drawBehind {
-                        // An integer-pixel scissor and a solid fill, not an antialiased edge
-                        // laid over a contrasting photo at the final protected pixel.
-                        clipRect {
-                            drawContext.canvas.nativeCanvas.drawColor(if (barsDark) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
-                        }
-                    })
-            }
+            if (nested) content() else Box(Modifier.fillMaxSize()) { content() }
         }
     }
 }

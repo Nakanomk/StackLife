@@ -1,4 +1,4 @@
-Expandable preference headers
+Settings headers, top chrome and preference materials
 
 AndroidX (Android Open Source Project), Apache License 2.0.
 Copyright 2024 The Android Open Source Project.
@@ -10,3 +10,19 @@ ExpandablePreferenceHeader adapts AnimateBounds_usingKeyframes: one title in Loo
 BiliPai (jay3-yy and contributors), GPL-3.0, revision c7f835b34d8323358be57be298f86f29fecb53c8.
 https://github.com/jay3-yy/BiliPai/blob/c7f835b34d8323358be57be298f86f29fecb53c8/app/src/main/java/com/android/purebilibili/feature/profile/ProfileIdentityHeader.kt
 Reference for measured title geometry only. No BiliPai profile animation or reminder component is copied. See BiliPai-GPL-3.0.txt and StackLife-GPL-3.0-or-later.txt.
+
+Source paths relative to the pinned BiliPai revision above:
+app/src/main/java/com/android/purebilibili/feature/settings/ui/SettingsPinnedChromeLayout.kt
+app/src/main/java/com/android/purebilibili/feature/home/components/ProgressiveTopChrome.kt
+app/src/main/java/com/android/purebilibili/feature/home/components/TopChromeColorPolicy.kt
+design-system/src/main/java/com/android/purebilibili/core/ui/blur/ProgressiveFade.kt
+The header wash uses the source's 255/232/176/96/0 stop factors and protected plateau. StackLife checks the worst possible scrolling tone with the existing wallpaperProtection and measures the actual safe top inset for the plateau; it does not invent a new wallpaper palette.
+RootPane adapts the upstream SettingsPinnedChromeLayout two-slot SubcomposeLayout: measure chrome, give scrolling content its observed top padding, place the entire content plane first and chrome last at the same origin. TopChromeBacking uses BiliPai's 10dp top progressive blur, 0–1 range and 1.25 falloff exponent; capability loss selects an opaque theme surface. Only header input and text take the safe top inset. The weekly grid supplies the single edge below its toolbar and dates. Connection headers sample only page paper; the school WebView keeps its pre-existing recording exclusion. No player, OEM renderer, extra status-bar overlay or second icon-theme writer was brought across.
+app/src/main/java/com/android/purebilibili/feature/settings/ui/MaterialAboutContent.kt (MaterialAboutOverview)
+app/src/main/java/com/android/purebilibili/feature/home/components/cards/WallpaperCardBlur.kt
+design-system/src/main/java/com/android/purebilibili/core/ui/components/AppPreferenceComponents.kt (AppPreferenceGroup)
+About keeps the upstream hierarchy of one shaped surface around related entries and the responsive identity layout. BiliPai's About surfaces themselves are solid. StackLife draws the wallpaper through its existing CardFrostGroup/FrostedCard shared filtered plane before drawing About text, license rows and selection overlays; this deliberately does not port a per-card sampled layer. The connection page reuses its existing selectable FormGroup, with the local wallpaper-only frosted renderer around just the public preset choices. No credential or other field belongs to this group. See also BiliPai-GPL-3.0.txt; the complete GPL v3 is in StackLife-GPL-3.0-or-later.txt.
+
+Miuix 0.9.5-beta02 (66248bacc7be29ae6bdc0957de9458b42ac67732), Copyright 2026, compose-miuix-ui contributors; Apache-2.0.
+https://github.com/compose-miuix-ui/miuix/blob/66248bacc7be29ae6bdc0957de9458b42ac67732/miuix-blur/src/commonMain/kotlin/top/yukonga/miuix/kmp/blur/ProgressiveBlur.kt
+StackLife uses the existing Miuix progressive backdrop effect and its Top preset on supported devices. Full license: Backdrop-Miuix-Apache-2.0.txt.

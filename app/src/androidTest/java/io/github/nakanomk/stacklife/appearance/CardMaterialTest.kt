@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,6 +26,9 @@ import io.github.nakanomk.stacklife.R
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
 import io.github.nakanomk.stacklife.about.AboutIdentity
+import io.github.nakanomk.stacklife.about.HelpAboutScreen
+import io.github.nakanomk.stacklife.assistant.ProviderOptions
+import io.github.nakanomk.stacklife.assistant.ServicePreset
 import io.github.nakanomk.stacklife.graphs.GraphCanvas
 import io.github.nakanomk.stacklife.planner.*
 import org.junit.Assert.*
@@ -42,12 +46,12 @@ class CardMaterialTest {
     private val platform = mutableStateOf(PlatformAppearance(accelerated = true))
     private val blue = Color(0xff4466cc)
 
-    private fun show(content: @Composable BoxScope.() -> Unit) {
+    private fun show(hostSize: DpSize = DpSize(240.dp, 240.dp), content: @Composable BoxScope.() -> Unit) {
         ui.setContent {
             MaterialTheme(colorScheme = lightColorScheme(primaryContainer = blue, surface = Color.White)) {
                 val layer = rememberGraphicsLayer()
                 val donor = remember(layer) { PlannerBackdrop(layer, Color.White, null, null) }
-                Box(Modifier.size(240.dp, 240.dp)) {
+                Box(Modifier.size(hostSize)) {
                     Canvas(Modifier.matchParentSize().plannerBackdrop(donor)) {
                         drawRect(Color.White)
                         drawRect(Color.Black, size = Size(size.width * split.floatValue, size.height))
@@ -100,7 +104,9 @@ class CardMaterialTest {
 
     @Test fun aboutIdentityRetainsItsThemeTintAndSamplesTheCropUnderItsText() {
         show {
-            Box(Modifier.fillMaxWidth().align(Alignment.Center).testTag("identity")) { AboutIdentity { Text("0.11.2") } }
+            CardFrostGroup(true, Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxWidth().align(Alignment.Center).testTag("identity")) { AboutIdentity { Text("0.11.2") } }
+            }
         }
         fun probe(): Color = ui.onNodeWithTag("identity").captureToImage().toPixelMap().let { it[it.width / 2, it.height - 4] }
         ui.runOnIdle { split.floatValue = 1f }
@@ -111,6 +117,58 @@ class CardMaterialTest {
         assertTrue("The hero did not sample the new crop", light.red - dark.red > .25f)
         ui.runOnIdle { appearance.value = Appearance(glass = false) }
         assertEquals(blue, probe())
+    }
+
+    @Test fun aboutMenuAndBundledLicenseReadTheSameWallpaperWithOpaqueFallback() {
+        show(DpSize(400.dp, 800.dp)) { HelpAboutScreen(back = { error("unexpected exit") }, onGuide = {}) }
+        fun probe(tag: String): Color {
+            val image = ui.onNodeWithTag(tag).captureToImage().toPixelMap()
+            return image[image.width / 2, 2]
+        }
+        fun compare(tag: String) {
+            ui.runOnIdle { appearance.value = Appearance(glass = true); split.floatValue = 1f }
+            val dark = probe(tag)
+            ui.runOnIdle { split.floatValue = 0f }
+            assertTrue("$tag did not sample its wallpaper", probe(tag).red - dark.red > .3f)
+            ui.runOnIdle { appearance.value = Appearance(glass = false) }
+            val solid = probe(tag)
+            ui.runOnIdle { split.floatValue = 1f }
+            assertEquals(solid, probe(tag))
+        }
+        ui.onNodeWithTag("about-licenses").performScrollTo()
+        compare("about-licenses")
+        ui.onNodeWithTag("about-licenses").performClick()
+        val entry = "license:StackLife-GPL-3.0-or-later.txt"
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag(entry).fetchSemanticsNodes().isNotEmpty() }
+        compare(entry)
+        ui.onNodeWithTag(entry).performClick()
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("about-license-reader").fetchSemanticsNodes().isNotEmpty() }
+        compare("about-license-reader")
+        ui.onNodeWithText(ui.activity.getString(R.string.about_copy_notice)).assertIsDisplayed()
+    }
+
+    @Test fun publicProviderGroupTransmitsOnlyThePaperInBothThemes() {
+        val darkTheme = mutableStateOf(false)
+        val fill = mutableStateOf(Color.Unspecified)
+        show {
+            MaterialTheme(colorScheme = if (darkTheme.value) darkColorScheme() else lightColorScheme()) {
+                val expected = MaterialTheme.colorScheme.surfaceContainerLow
+                SideEffect { fill.value = expected }
+                // A foreground recording would pick up magenta. No private fields are rendered
+                // or photographed: this is the very group used by the FLAG_SECURE editor.
+                Spacer(Modifier.matchParentSize().background(Color.Magenta))
+                ProviderOptions(ServicePreset.DeepSeek, enabled = true, select = {})
+            }
+        }
+        fun sample(): Color = ui.onNodeWithTag("provider-options").captureToImage().toPixelMap().let { it[it.width / 2, 3] }
+        for (dark in listOf(false, true)) {
+            ui.runOnIdle { darkTheme.value = dark; appearance.value = Appearance(glass = true); split.floatValue = 1f }
+            val black = sample()
+            ui.runOnIdle { split.floatValue = 0f }
+            assertTrue(sample().green - black.green > .20f)
+            ui.runOnIdle { appearance.value = Appearance(glass = false) }
+            assertEquals(fill.value, sample())
+        }
     }
 
     @OptIn(ExperimentalTestApi::class)

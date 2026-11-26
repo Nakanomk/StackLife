@@ -19,6 +19,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.workspace.*
+import io.github.nakanomk.stacklife.appearance.CardFrostGroup
 import io.github.nakanomk.stacklife.courses.SchoolImports
 import io.github.nakanomk.stacklife.planner.Destination
 import io.github.nakanomk.stacklife.transitions.PaneMotion
@@ -85,6 +86,8 @@ internal fun HelpAboutScreen(back: () -> Unit, onGuide: () -> Unit) {
             else -> page = AboutPage.HOME
         }
     }
+    // The outgoing and incoming About pages replay the same wallpaper during their handoff.
+    CardFrostGroup(enabled = true, modifier = Modifier.fillMaxSize()) {
     PaneMotion(page, origins, depth = { when (it) { AboutPage.HOME -> 0; AboutPage.TEXT -> 2; else -> 1 } },
         originKey = ::origin, modifier = Modifier.fillMaxSize(),
         parent = when (page) { AboutPage.HOME -> null; AboutPage.TEXT -> licenseParent; else -> AboutPage.HOME }, onBack = up) { shown ->
@@ -103,7 +106,7 @@ internal fun HelpAboutScreen(back: () -> Unit, onGuide: () -> Unit) {
                         version.display { Text(stringResource(R.string.about_version, it.name ?: "—", it.code),
                             modifier = Modifier.testTag("about-version"), style = MaterialTheme.typography.labelLarge) }
                     } }
-                    item { FormGroup {
+                    item { AboutCard(PaddingValues(horizontal = 14.dp, vertical = 4.dp), Arrangement.spacedBy(4.dp)) {
                         listOf(AboutPage.HELP, AboutPage.DIAGNOSTICS, AboutPage.BUILD, AboutPage.LICENSES).forEach { entry ->
                             PreferenceRow(stringResource(entry.title), modifier = Modifier.paneOrigin(origins, origin(entry))
                                 .testTag("about-${entry.name.lowercase(java.util.Locale.ROOT)}"),
@@ -118,6 +121,7 @@ internal fun HelpAboutScreen(back: () -> Unit, onGuide: () -> Unit) {
         }
         }
         }
+    }
     }
 }
 

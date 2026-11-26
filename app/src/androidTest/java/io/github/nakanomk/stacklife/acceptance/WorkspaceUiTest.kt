@@ -160,6 +160,54 @@ class WorkspaceUiTest {
         assertEquals(baseline.frames, runBlocking { store.state().frames })
     }
 
+    @OptIn(ExperimentalTestApi::class)
+    @Test fun taskActionTargetsStaySeparateAndClearTheLastNoteAtDoubleFontScale() {
+        val id = runBlocking { store.apply(PlannerCommand.TaskAdd(TaskInput("Selected task"))); store.state().queue.single().id }
+        val size = androidx.compose.runtime.mutableStateOf(DpSize(320.dp, 740.dp))
+        ui.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(size.value) then DeviceConfigurationOverride.FontScale(2f)) {
+                StackLifeApp(viewModel { WorkspaceViewModel(store.api) })
+            }
+        }
+        await(hasTestTag("nav:workspace")).performClick()
+        await(hasTestTag("task:$id")).performClick()
+        val buttons = listOf(R.string.ui_finish_task, R.string.ui_edit_task, R.string.ui_remove_from_queue)
+            .map { hasText(ui.activity.getString(it)) and hasClickAction() }
+        fun clearance() {
+            val note = hasTestTag("task-note:$id")
+            scrollTo(note); await(note).performScrollTo()
+            val body = await(note).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val bounds = buttons.map { await(it).assertIsDisplayed().assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot }
+            for ((i, a) in bounds.withIndex()) {
+                for (b in bounds.drop(i + 1)) assertTrue("Overlapping task buttons: $a, $b", !a.overlaps(b))
+                assertTrue("Action covers the last note control: $a, $body", a.top >= body.bottom || a.bottom <= body.top)
+            }
+        }
+        clearance()
+        ui.runOnIdle { size.value = DpSize(680.dp, 320.dp) }
+        clearance()
+        await(buttons[1]).performTouchInput { click() }
+        await(hasTestTag("title:0")).assertTextContains("Selected task")
+        ui.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        await(buttons[2]).performTouchInput { click() }
+        awaitQueue()
+        await(hasTestTag("receipt-undo")).performClick()
+        awaitQueue("Selected task")
+        val restoredCard = hasTestTag("task:$id")
+        val queue = await(hasTestTag("queue"))
+        queue.performScrollToNode(restoredCard)
+        val row = await(restoredCard).performScrollTo()
+        // LazyList content extends behind the dock. Scroll the row above the dock before
+        // touching its center, as a user must in the short landscape window.
+        val dockTop = await(hasTestTag("navigation-capsule")).fetchSemanticsNode().boundsInRoot.top
+        val covered = row.fetchSemanticsNode().boundsInRoot.bottom - dockTop
+        if (covered > 0f) queue.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, covered) }
+        assertTrue(row.fetchSemanticsNode().boundsInRoot.center.y < dockTop)
+        row.assertIsDisplayed().performTouchInput { click() }
+        await(buttons[0]).performTouchInput { click() }
+        awaitQueue()
+    }
+
     @Test fun addTaskFloatsAboveCenteredNavigationOnTodayAndInTheQueue() {
         ui.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
         fun checkPlacement() {

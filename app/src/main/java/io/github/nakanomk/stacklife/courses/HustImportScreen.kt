@@ -32,6 +32,7 @@ import io.github.nakanomk.stacklife.ReadPanel
 import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.RootPane
+import io.github.nakanomk.stacklife.pageControlSize
 import io.github.nakanomk.stacklife.appearance.*
 import io.github.nakanomk.stacklife.assistant.AssistantComposer
 import io.github.nakanomk.stacklife.workspace.*
@@ -216,8 +217,11 @@ internal fun HustImportScreen(model: WorkspaceViewModel, entry: ImportEntry, onB
         PaneMotion(step, origins, depth = { it.depth }, originKey = { it.key }, modifier = Modifier.fillMaxSize(),
             parent = previous.takeUnless { busy || writing }, onBack = ::backStep) { shown ->
         when (shown) {
-            ImportStep.Hub -> HubWebView(onRows = { rows -> state.page = ImportPage.SOURCE; state.receive(true) { rows } }, onBack = { if (!state.busy) state.page = ImportPage.SOURCE },
-                onFile = { state.reset(); onFileEntry() }, extractOrigin = Modifier.paneOrigin(origins, "hub-calendar"))
+            ImportStep.Hub -> Box(Modifier.fillMaxSize().padding(top = top)) {
+                HubWebView(onRows = { rows -> state.page = ImportPage.SOURCE; state.receive(true) { rows } },
+                    onBack = { if (!state.busy) state.page = ImportPage.SOURCE }, onFile = { state.reset(); onFileEntry() },
+                    extractOrigin = Modifier.paneOrigin(origins, "hub-calendar"))
+            }
             ImportStep.Source -> if (!writing && !busy) {
                 ImportPane(showComposer = !busy && !hub, composer = { AssistantComposer(AssistantPage.Terms) }) { bottom ->
                     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(dockListPadding(top, bottom))) {
@@ -363,7 +367,7 @@ internal fun HustImportScreen(model: WorkspaceViewModel, entry: ImportEntry, onB
         Page {
             BoxWithConstraints(Modifier.fillMaxSize()) {
             val inset = if (state.page == ImportPage.ENTRIES || state.page == ImportPage.DIFF)
-                importActionInset(maxWidth, if (state.page == ImportPage.DIFF) ImportActions.DIFF else ImportActions.ENTRIES) else 16.dp
+                importActionInset(pageControlSize().width, if (state.page == ImportPage.DIFF) ImportActions.DIFF else ImportActions.ENTRIES) else 16.dp
             RootPane(header = {
                 if (!hub) Column(Modifier.fillMaxWidth().padding(horizontal = inset, vertical = 4.dp)) {
                     if (state.page == ImportPage.DIFF) {

@@ -19,6 +19,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.chromeGutter
+import io.github.nakanomk.stacklife.PinnedPaperHeader
+import io.github.nakanomk.stacklife.pageContentLane
 import io.github.nakanomk.stacklife.StackLifeTheme
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.rememberDestinationCapsule
@@ -119,17 +121,19 @@ internal fun AppearanceEditor(saved: Appearance, group: AppearanceGroup, actions
         if (startAtWallpaper && group == AppearanceGroup.MATERIAL) leadSections.indexOf(EditorLeadSection.WALLPAPER) else 0)
     StackLifeTheme(preview) {
         Page {
-            CenterAlignedTopAppBar(title = { Text(group.title, style = MaterialTheme.typography.titleLarge) },
-                modifier = Modifier.testTag("appearance-header"),
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent, scrolledContainerColor = Color.Transparent),
-                navigationIcon = { TextButton(onClick = leave, enabled = !receipt.busy && !closing) { Text(stringResource(R.string.ui_cancel)) } },
-                actions = {
-                    TextButton(enabled = !busy && request == null && !applied && seedOK && !stale && selected != persisted,
-                        onClick = { receipt.send(PlannerCommand.EditAppearance(AppearanceFields(group, selected), expected = baseline)) }) {
-                        Text(stringResource(R.string.ui_save_appearance))
-                    }
-                }, windowInsets = WindowInsets(0))
-            LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("appearance-scroll"), state = scroll, contentPadding = dockListPadding(0.dp, 0.dp),
+            PinnedPaperHeader {
+                CenterAlignedTopAppBar(title = { Text(group.title, style = MaterialTheme.typography.titleLarge) },
+                    modifier = Modifier.testTag("appearance-header"),
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent, scrolledContainerColor = Color.Transparent),
+                    navigationIcon = { TextButton(onClick = leave, enabled = !receipt.busy && !closing) { Text(stringResource(R.string.ui_cancel)) } },
+                    actions = {
+                        TextButton(enabled = !busy && request == null && !applied && seedOK && !stale && selected != persisted,
+                            onClick = { receipt.send(PlannerCommand.EditAppearance(AppearanceFields(group, selected), expected = baseline)) }) {
+                            Text(stringResource(R.string.ui_save_appearance))
+                        }
+                    }, windowInsets = WindowInsets(0))
+            }
+            LazyColumn(Modifier.weight(1f).pageContentLane().testTag("appearance-scroll"), state = scroll, contentPadding = dockListPadding(0.dp, 0.dp),
                 verticalArrangement = listSpacing) {
                 items(leadSections, key = { it }) { section ->
                     when (section) {

@@ -24,6 +24,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.workspace.*
+import io.github.nakanomk.stacklife.PinnedPaperHeader
+import io.github.nakanomk.stacklife.pageContentLane
 import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -81,30 +83,23 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
     BackHandler(enabled = busy) {}
     Page {
         // The header sees only Page's paper. Do not record or scroll any fields behind it, even masked.
-        PageTitle(stringResource(R.string.assistant_service_title), back = back, backEnabled = !busy,
-            help = stringResource(R.string.assistant_service_privacy, profile?.origin ?: stringResource(R.string.assistant_selected_service)))
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(dockListPadding(0.dp, 8.dp)),
+        PinnedPaperHeader {
+            PageTitle(stringResource(R.string.assistant_service_title), back = back, backEnabled = !busy,
+                help = stringResource(R.string.assistant_service_privacy, profile?.origin ?: stringResource(R.string.assistant_selected_service)))
+        }
+        Column(Modifier.weight(1f).pageContentLane().verticalScroll(rememberScrollState()).padding(dockListPadding(0.dp, 8.dp)),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            FormGroup(Modifier.selectableGroup()) {
-                ServicePreset.entries.forEach { option ->
-                    val selected = preset == option
-                    Row(Modifier.fillMaxWidth().selectable(selected = selected, enabled = !busy, role = Role.RadioButton) {
-                        if (!selected) {
-                            key = ""
-                            preset = option
-                            val saved = stored?.takeIf { ServicePreset.forProfile(it) == option }
-                            base = saved?.baseUrl ?: option.baseUrl
-                            model = saved?.model ?: option.model
-                            error = null
-                            editModel = false
-                        }
-                        keyFocus.requestFocus()
-                    }.heightIn(min = 48.dp).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = selected, enabled = !busy, onClick = null)
-                        Spacer(Modifier.width(12.dp))
-                        Text(option.label, style = MaterialTheme.typography.bodyLarge)
-                    }
+            ProviderOptions(preset, enabled = !busy) { option ->
+                if (preset != option) {
+                    key = ""
+                    preset = option
+                    val saved = stored?.takeIf { ServicePreset.forProfile(it) == option }
+                    base = saved?.baseUrl ?: option.baseUrl
+                    model = saved?.model ?: option.model
+                    error = null
+                    editModel = false
                 }
+                keyFocus.requestFocus()
             }
             HorizontalDivider()
             if (preset == ServicePreset.Custom) {
@@ -156,4 +151,20 @@ internal fun ConnectionScreen(store: ConnectionStore, back: () -> Unit) {
     if (clear) PlannerAlertDialog(onDismissRequest = { clear = false }, title = { Text(stringResource(R.string.assistant_remove_service_title)) }, text = { Text(stringResource(R.string.assistant_remove_service_body)) },
         confirmButton = { TextButton(onClick = { clear = false; run { store.clear(requireNotNull(epoch)); key = ""; back() } }) { Text(stringResource(R.string.assistant_remove)) } },
         dismissButton = { TextButton(onClick = { clear = false }) { Text(stringResource(R.string.assistant_cancel)) } })
+}
+
+/** Only public preset labels belong to the frosted group. No input or credential is a donor. */
+@Composable
+internal fun ProviderOptions(preset: ServicePreset, enabled: Boolean, select: (ServicePreset) -> Unit) {
+    FormGroup(Modifier.selectableGroup().testTag("provider-options"), frosted = true) {
+        ServicePreset.entries.forEach { option ->
+            val selected = preset == option
+            Row(Modifier.fillMaxWidth().selectable(selected, enabled = enabled, role = Role.RadioButton) { select(option) }
+                .heightIn(min = 48.dp).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(selected = selected, enabled = enabled, onClick = null)
+                Spacer(Modifier.width(12.dp))
+                Text(option.label, style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+    }
 }

@@ -54,10 +54,11 @@ internal fun DockOverlay(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // IME animation changes the safe height every frame, but only crossing a
         // layout breakpoint changes the composition of the dock.
-        val landscape = maxWidth > maxHeight
+        val viewport = pageControlSize()
+        val landscape = viewport.width > viewport.height
         DockScaffold(
-            short = maxWidth >= 480.dp && landscape && maxHeight < 220.dp,
-            wideRow = maxWidth >= 600.dp && landscape,
+            short = viewport.width >= 480.dp && landscape && viewport.height < 220.dp,
+            wideRow = viewport.width >= 600.dp && landscape,
             navigationBar, assistantPage, content,
         )
     }
@@ -95,7 +96,7 @@ private fun DockScaffold(short: Boolean, wideRow: Boolean, navigationBar: (@Comp
     }
     Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), bottomBar = {
         CompositionLocalProvider(LocalCapsuleBackdrop provides source) {
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.fillMaxWidth().pageContentLane(), horizontalAlignment = Alignment.CenterHorizontally) {
                 io.github.nakanomk.stacklife.workspace.LocalWorkspaceFeedback.current?.let {
                     io.github.nakanomk.stacklife.workspace.WorkspaceFeedbackBar(it)
                 }

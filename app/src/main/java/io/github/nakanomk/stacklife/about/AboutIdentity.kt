@@ -39,8 +39,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.appearance.LocalMotionEnabled
-import io.github.nakanomk.stacklife.appearance.CapsuleScene
-import io.github.nakanomk.stacklife.appearance.StackLifeSurface
+import io.github.nakanomk.stacklife.appearance.FrostedCard
 
 // Hero dimensions and container roles adapted from BiliPai's MaterialAboutOverview (GPL-3.0):
 // github.com/jay3-yy/BiliPai/blob/5893c2c80739e3759ac64ae5f232cf03a94da7f8/app/src/main/java/com/android/purebilibili/feature/settings/ui/MaterialAboutContent.kt
@@ -49,8 +48,7 @@ import io.github.nakanomk.stacklife.appearance.StackLifeSurface
 internal fun AboutIdentity(version: @Composable () -> Unit) {
     val colors = MaterialTheme.colorScheme
     CompositionLocalProvider(LocalContentColor provides colors.onPrimaryContainer) {
-        StackLifeSurface(CapsuleScene.FROST, Modifier.fillMaxWidth(), solid = colors.primaryContainer,
-            shape = MaterialTheme.shapes.large, tint = colors.primaryContainer) {
+        FrostedCard(Modifier.fillMaxWidth(), color = colors.primaryContainer) {
             BoxWithConstraints(Modifier.fillMaxWidth().padding(20.dp)) {
                 val faceSize = if (maxWidth < 300.dp) 72.dp else 88.dp
                 // Reserve text room at its actual font scale, not just at the default phone size.

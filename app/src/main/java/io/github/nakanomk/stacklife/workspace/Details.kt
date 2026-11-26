@@ -31,7 +31,7 @@ internal fun TaskScreen(id: String, view: SourceView, actions: WorkspaceActions,
         MissingDetail(stringResource(R.string.ui_task_details), stringResource(R.string.graph_source_removed), back)
         return
     }
-    EditorPage(stringResource(R.string.ui_task_details), back, AssistantPage.Task(id), backEnabled = !action.busy, footer = {
+    EditorPage(stringResource(R.string.ui_task_details), back, AssistantPage.Task(id), backEnabled = !action.busy, independentFooter = true, footer = {
         Actions {
             if (source.owner != Owner.DONE) Primary(stringResource(if (task.schedule?.pattern is SchedulePattern.Daily) R.string.slot_finish_series else R.string.ui_finish_task), enabled = !action.busy) { action.send(PlannerCommand.TaskFinish(id)) }
             ActionPill(stringResource(R.string.ui_edit_task), onEdit, Modifier.routeOrigin("edit:$id", CircleShape), enabled = !action.busy)

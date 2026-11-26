@@ -16,9 +16,12 @@ import androidx.activity.result.ActivityResultRegistryOwner
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
@@ -34,6 +37,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nakanomk.stacklife.StackLifeApp
+import io.github.nakanomk.stacklife.StackLifeTheme
 import io.github.nakanomk.stacklife.WorkspaceViewModel
 import io.github.nakanomk.stacklife.acceptance.WorkspaceFixture
 import io.github.nakanomk.stacklife.assistant.withChatPhoto
@@ -179,23 +183,33 @@ class AppearanceEditorInteractionTest {
             val id = withSelectedPhoto(context, redPixels(Bitmap.CompressFormat.PNG), "image/png") { uri ->
                 runBlocking { photos.importImage(uri) }
             }
+            val a = Appearance(theme = ThemeMode.LIGHT, background = WallpaperSpec(id, tint = 0f))
             runBlocking {
-                val a = Appearance(theme = ThemeMode.LIGHT, background = WallpaperSpec(id, tint = 0f))
                 val proposal = api.preview(listOf(PlannerCommand.EditAppearance(AppearancePatch.Replace(a)))) as PreviewResult.Ready
                 assertTrue(api.commit(proposal.proposalId) is CommitResult.Applied)
             }
-            attach(api, photos)
+            var solid: Color? = null
+            ui.activityRule.scenario.onActivity { activity -> activity.setContent {
+                CompositionLocalProvider(LocalBackgroundStore provides photos) {
+                    StackLifeTheme(a) {
+                        val fallback = if (glassUnavailableReason(a) != null) MaterialTheme.colorScheme.surface else null
+                        SideEffect { solid = fallback }
+                        StackLifeApp(viewModel { WorkspaceViewModel(api) })
+                    }
+                }
+            } }
             openSettings()
             val header = hasTestTag("appearance-header")
-            fun showsPhoto(): Boolean {
+            fun matchesHeader(): Boolean {
                 val color = sample(ui.onNode(header), .08f) // Above the title, below the status bar.
-                return color.red > color.green + .25f && color.red > color.blue + .25f
+                return solid?.let { color.toArgb() == it.toArgb() }
+                    ?: (color.red > color.green + .25f && color.red > color.blue + .25f)
             }
             for (title in listOf(R.string.ui_colors, R.string.ui_layout, R.string.ui_material_motion)) {
                 openGroup(context.getString(title))
-                ui.waitUntil(10_000) { showsPhoto() }
+                ui.waitUntil(10_000) { matchesHeader() }
                 field(row(context.getString(R.string.ui_restore_defaults)))
-                assertTrue("Header lost the page photo after scrolling ${context.getString(title)}", showsPhoto())
+                assertTrue("Header material changed after scrolling ${context.getString(title)}", matchesHeader())
                 ui.onNode(row(context.getString(R.string.ui_cancel)) and hasAnyAncestor(header)).performClick()
                 ui.waitUntil(5_000) { ui.onAllNodes(header).fetchSemanticsNodes().isEmpty() }
             }

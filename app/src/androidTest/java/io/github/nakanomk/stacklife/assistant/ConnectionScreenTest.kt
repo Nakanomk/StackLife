@@ -79,6 +79,12 @@ class ConnectionScreenTest {
     @Test fun privateFieldsScrollInASeparateViewportBelowTheSecureHeader() {
         runBlocking { store.save("https://sample.invalid/v1", "sample-model", UUID.randomUUID().toString()) }
         show(Modifier.height(320.dp))
+        val inOptions = hasAnyAncestor(hasTestTag("provider-options"))
+        ui.onAllNodes(inOptions and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
+            .assertCountEquals(ServicePreset.entries.size)
+        for (name in listOf("url", "model", "key", "save")) {
+            ui.onNode(inOptions and hasTestTag("provider-$name")).assertDoesNotExist()
+        }
         val title = ui.onNodeWithText(ui.activity.getString(R.string.assistant_service_title))
         val viewport = ui.onNode(hasScrollAction() and hasAnyDescendant(hasTestTag("provider-save")))
         val heading = title.fetchSemanticsNode().boundsInRoot

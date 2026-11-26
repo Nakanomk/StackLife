@@ -9,8 +9,11 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.descendants
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -50,6 +53,7 @@ class HubMobileImportTest {
     }
 
     private fun attach() = ui.activityRule.scenario.onActivity { activity ->
+        activity.enableEdgeToEdge()
         activity.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }) }
     }
 
@@ -124,7 +128,13 @@ class HubMobileImportTest {
         await(hasTestTag("hubHelpClose")).assertIsDisplayed().performClick()
         ui.activityRule.scenario.recreate()
         attach()
-        await(hasTestTag("hubExtract"))
+        val extract = await(hasTestTag("hubExtract")).assertIsDisplayed()
+        val safeTop = ui.runOnIdle {
+            requireNotNull(ViewCompat.getRootWindowInsets(ui.activity.window.decorView))
+                .getInsets(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.displayCutout()).top
+        }
+        assertTrue("The test window must have a visible status area", safeTop > 0)
+        assertTrue("HUB toolbar overlaps the status area", extract.fetchSemanticsNode().boundsInWindow.top >= safeTop - 1)
         ui.onNodeWithTag("hubHelpClose").assertDoesNotExist()
 
         val fixtureTitle = "StackLife synthetic timetable"

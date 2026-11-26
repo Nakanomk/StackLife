@@ -51,7 +51,8 @@ import io.github.nakanomk.stacklife.appearance.GlassBacking
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.StackLifeSurface
 import io.github.nakanomk.stacklife.appearance.wallpaperBackground
-import io.github.nakanomk.stacklife.ScrollEdge
+import io.github.nakanomk.stacklife.TopChromeBacking
+import io.github.nakanomk.stacklife.pageContentLane
 import io.github.nakanomk.stacklife.appearance.plannerBackdrop
 import io.github.nakanomk.stacklife.appearance.rememberPlannerBackdrop
 import io.github.nakanomk.stacklife.planner.CourseWeek
@@ -160,20 +161,19 @@ internal fun WeekGrid(term: TermSpec, number: Int, state: ReadState<CourseWeek>,
         val courses = remember(ready.classes, selectedDay) { ready.classes.filter { it.meeting.day == selectedDay } }
         CourseReadPanel(null, day.format(dateFormat), courses, open = { selectedDay = 0; open(it) }, close = { selectedDay = 0 })
     }
-    BoxWithConstraints(Modifier.fillMaxSize().testTag("week-grid")) {
-        val dayWidth = ((maxWidth - rail) / 7).coerceAtLeast(0.dp)
+    Box(Modifier.fillMaxSize().testTag("week-grid")) {
         val scrollingPlane = rememberPlannerBackdrop()
         Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0), topBar = {
-            Box(Modifier.fillMaxWidth().then(if (scrollingPlane == null) Modifier.wallpaperBackground(colors.surface) else Modifier)) {
-                if (scrollingPlane != null) ScrollEdge(scrollingPlane, Modifier.matchParentSize(), fadeAbove = 24.dp)
-                Row(Modifier.padding(top = top).fillMaxWidth().testTag("week-dates"), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.fillMaxWidth()) {
+                TopChromeBacking(scrollingPlane, Modifier.matchParentSize())
+                Row(Modifier.padding(top = top).pageContentLane().fillMaxWidth().testTag("week-dates"), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.width(rail), contentAlignment = Alignment.Center) {
                             Text(monday.month.getDisplayName(DateTextStyle.SHORT, locale), style = typography.labelSmall, maxLines = 1, color = colors.onSurfaceVariant)
                         }
                         for (i in 0..6) {
                             val date = monday.plusDays(i.toLong())
                             val dateDescription = date.format(dateFormat)
-                            Column(Modifier.width(dayWidth).heightIn(min = 48.dp)
+                            Column(Modifier.weight(1f).heightIn(min = 48.dp)
                                 .clickable(enabled = ready != null, onClickLabel = stringResource(R.string.courses_open_day), role = Role.Button) {
                                     if (openDay != null) openDay(i + 1) else selectedDay = i + 1
                                 }
@@ -189,7 +189,8 @@ internal fun WeekGrid(term: TermSpec, number: Int, state: ReadState<CourseWeek>,
                     }
             }
         }) { insets ->
-            Box(Modifier.fillMaxSize().plannerBackdrop(scrollingPlane).wallpaperBackground(colors.surface)) {
+            BoxWithConstraints(Modifier.fillMaxSize().plannerBackdrop(scrollingPlane).wallpaperBackground(colors.surface).pageContentLane()) {
+                val dayWidth = ((maxWidth - rail) / 7).coerceAtLeast(0.dp)
                 if (ready == null) Box(Modifier.fillMaxSize().padding(insets)) { ReadPanel(state) {} }
                 else {
                     val railLayout = remember(term, monday, calendars, ready.classes) {
