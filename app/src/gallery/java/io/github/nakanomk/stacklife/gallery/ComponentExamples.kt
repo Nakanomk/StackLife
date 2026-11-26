@@ -44,10 +44,10 @@ internal val componentExamples: List<GalleryEntry> = listOf(
         "Tap the card, then use each enabled pill; the note and disabled action must agree.") { CardPillsExample() },
     GalleryEntry("component-reminder-form", GalleryGroup.COMPONENT, "Expandable course reminder form",
         "reminders/ReminderRulesEditor.kt",
-        "reminders/ReminderRulesEditor.kt (ReminderRulesEditor, ReminderRuleFields) · workspace/WorkspaceUi.kt (FormGroup, PreferenceRow; $preferenceSource)",
+        "reminders/ReminderRulesEditor.kt · workspace/ExpandablePreferenceHeader.kt · AndroidX AnimateBoundsModifierSample.kt (94b9394b) · BiliPai ProfileIdentityHeader.kt (c7f835b3)",
         "$composeLicense · BiliPai GPL-3.0",
-        "The current course-default editor uses animateContentSize, its own draft and the Gallery’s in-memory Planner. This is not the planned shared-title transition.",
-        "Expand, add a rule and cancel; reopen to check it was not saved. Repeat and save; verify the new summary.") {
+        "One live title moves between the measured header anchors; the leading icon fades. The reminder draft belongs to the actual editor and writes only to the Gallery planner.",
+        "Expand and reverse halfway. Check the title, icon, and draft at 200% font and in reduced motion. Cancel to discard; reopen and save to update the summary.") {
         ExampleColumn { FormGroup(frosted = true) { ReminderRulesEditor(LocalGalleryWorkspace.current, ReminderSubject.CourseDefault) } }
     },
     GalleryEntry("component-help-snackbar", GalleryGroup.COMPONENT, "Setting help & actionable Snackbar",

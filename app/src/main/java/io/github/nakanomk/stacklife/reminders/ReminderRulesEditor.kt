@@ -1,7 +1,6 @@
 package io.github.nakanomk.stacklife.reminders
 
 import android.database.sqlite.SQLiteException
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -10,8 +9,10 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.ReadState
@@ -67,33 +68,27 @@ internal fun ReminderRulesEditor(model: WorkspaceViewModel, subject: ReminderSub
                 if (it == SaveOutcome.APPLIED) { draft = null; error = null }
             }
             val policy = remember(draft) { draft?.let { Json.decodeFromString<ReminderPolicy>(it) } }
-            // One live branch: measure its real content and move the following settings with it.
             val courseDefault = subject == ReminderSubject.CourseDefault
-            val layout = if (courseDefault && LocalMotionEnabled.current) Modifier.fillMaxWidth()
-                .animateContentSize(MaterialTheme.motionScheme.defaultSpatialSpec(), alignment = Alignment.TopStart)
-            else if (courseDefault) Modifier.fillMaxWidth() else Modifier
-            Column(layout) {
-                if (policy == null) {
-                    val summary = buildList {
-                        if (view.policy.inherit) add(stringResource(R.string.reminder_inherit))
-                        if (view.effective.isEmpty()) add(stringResource(R.string.reminder_no_rules))
-                        else for (rule in view.effective) add(ReminderRuleLabel(rule.time))
-                    }.joinToString(" · ")
-                    PreferenceRow(heading(subject), summary, valueMaxLines = 2,
-                        leadingIcon = R.drawable.ic_calendar_view_week.takeIf { courseDefault }) {
-                        revision = view.revision; draft = Json.encodeToString(view.policy); error = null
-                    }
-                } else if (!courseDefault && submission.busy) {
-                    LinearProgressIndicator()
-                } else {
-                    ReminderRuleFields(subject, policy, enabled = !submission.busy) { draft = Json.encodeToString(it) }
-                    val command = remember(subject, policy, revision) { PlannerCommand.SetReminders(subject, policy, revision) }
+            val start = {
+                revision = view.revision; draft = Json.encodeToString(view.policy); error = null
+            }
+            val summary: @Composable () -> String = {
+                buildList {
+                    if (view.policy.inherit) add(stringResource(R.string.reminder_inherit))
+                    if (view.effective.isEmpty()) add(stringResource(R.string.reminder_no_rules))
+                    else for (rule in view.effective) add(ReminderRuleLabel(rule.time))
+                }.joinToString(" · ")
+            }
+            val edit: @Composable (ReminderPolicy) -> Unit = { editing ->
+                Column {
+                    ReminderRuleFields(subject, editing, enabled = !submission.busy, showHeading = !courseDefault) { draft = Json.encodeToString(it) }
+                    val command = remember(subject, editing, revision) { PlannerCommand.SetReminders(subject, editing, revision) }
                     var valid by remember(command, view.revision) { mutableStateOf(false) }
                     var issue by remember(command, view.revision) { mutableStateOf<String?>(null) }
                     var expired by remember(command, view.revision) { mutableStateOf(emptyList<ReminderRule>()) }
                     val readError = stringResource(R.string.reminder_read_failed)
                     LaunchedEffect(command, view.revision) {
-                        if (policy != view.policy) try {
+                        if (editing != view.policy) try {
                             when (val preview = model.preview(command)) {
                                 is PreviewResult.Rejected -> issue = preview.message
                                 is PreviewResult.Ready -> try {
@@ -121,16 +116,28 @@ internal fun ReminderRulesEditor(model: WorkspaceViewModel, subject: ReminderSub
                     }
                 }
             }
+            if (courseDefault) {
+                ExpandablePreferenceHeader(expanded = policy != null, onExpandedChange = { open ->
+                    if (open) start() else { draft = null; error = null }
+                }, enabled = !submission.busy, leading = {
+                    Icon(painterResource(R.drawable.ic_calendar_view_week), null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+                }, title = { SectionTitle(heading(subject)) }, summary = {
+                    Text(summary(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }) { if (policy != null) edit(policy) }
+            } else if (policy == null) PreferenceRow(heading(subject), summary(), valueMaxLines = 2, onClick = start)
+            else if (submission.busy) LinearProgressIndicator()
+            else edit(policy)
         }
     }
 }
 
 /** Local-only fields: canceling the enclosing schedule editor never writes a rule. */
 @Composable
-internal fun ReminderRuleFields(subject: ReminderSubject, policy: ReminderPolicy, enabled: Boolean = true, onChange: (ReminderPolicy) -> Unit) = key(subject) {
+internal fun ReminderRuleFields(subject: ReminderSubject, policy: ReminderPolicy, enabled: Boolean = true,
+    showHeading: Boolean = true, onChange: (ReminderPolicy) -> Unit) = key(subject) {
     var editing by rememberSaveable { mutableStateOf<String?>(null) }
     Column {
-        Text(heading(subject), style = MaterialTheme.typography.titleMedium)
+        if (showHeading) Text(heading(subject), style = MaterialTheme.typography.titleMedium)
         if (subject is ReminderSubject.Occurrence) CheckRow(stringResource(R.string.reminder_inherit), policy.inherit, enabled = enabled) {
             editing = null; onChange(ReminderPolicy(!policy.inherit, emptyList()))
         }

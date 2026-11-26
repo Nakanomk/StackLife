@@ -1,0 +1,12 @@
+Expandable preference headers
+
+AndroidX (Android Open Source Project), Apache License 2.0.
+Copyright 2024 The Android Open Source Project.
+https://github.com/androidx/androidx/blob/94b9394bd96f2c5b261551679c8d3e33dbe2b65a/compose/animation/animation/samples/src/main/java/androidx/compose/animation/samples/AnimateBoundsModifierSample.kt#L224-L276
+https://github.com/androidx/androidx/blob/94b9394bd96f2c5b261551679c8d3e33dbe2b65a/compose/animation/animation/src/commonMain/kotlin/androidx/compose/animation/AnimateBoundsModifier.kt
+https://github.com/androidx/androidx/blob/94b9394bd96f2c5b261551679c8d3e33dbe2b65a/compose/animation/animation/src/commonMain/kotlin/androidx/compose/animation/EnterExitTransition.kt
+ExpandablePreferenceHeader adapts AnimateBounds_usingKeyframes: one title in LookaheadScope moves between measured alignment endpoints using Modifier.animateBounds. In StackLife expansion is physically rightward in both LTR and RTL. The leading slot keeps its width and uses Compose fadeIn/fadeOut. The original course reminder editor owns the draft and save/cancel behavior. No sample spline, oversize midpoint or demo content is included. Full Apache License 2.0: Backdrop-Miuix-Apache-2.0.txt.
+
+BiliPai (jay3-yy and contributors), GPL-3.0, revision c7f835b34d8323358be57be298f86f29fecb53c8.
+https://github.com/jay3-yy/BiliPai/blob/c7f835b34d8323358be57be298f86f29fecb53c8/app/src/main/java/com/android/purebilibili/feature/profile/ProfileIdentityHeader.kt
+Reference for measured title geometry only. No BiliPai profile animation or reminder component is copied. See BiliPai-GPL-3.0.txt and StackLife-GPL-3.0-or-later.txt.
