@@ -16,6 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.nakanomk.stacklife.ReadState
 import io.github.nakanomk.stacklife.planner.*
 import io.github.nakanomk.stacklife.appearance.LocalAppearance
 import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
@@ -110,7 +112,7 @@ private fun FrameCard(frame: FrameView, onFrame: (String) -> Unit, shared: Share
 
 @Composable
 internal fun FrameScreen(id: String, state: Workspace, actions: io.github.nakanomk.stacklife.WorkspaceViewModel, onBack: () -> Unit, shared: SharedModifier,
-    onSource: (GraphLink) -> Unit, onEdit: (String) -> Unit) {
+    onSource: (GraphLink) -> Unit, onEdit: (String) -> Unit) = SettingsHelpHost {
     val frame = state.frames.find { it.id == id }
     var deleting by rememberSaveable(id) { mutableStateOf(false) }
     val deletion = rememberSubmission(actions) { result ->
@@ -135,14 +137,14 @@ internal fun FrameScreen(id: String, state: Workspace, actions: io.github.nakano
     fun restore(cmd: PlannerCommand.FrameRestore) = action.submit { actions.start(cmd)?.also { restoreTicket = it } }
     if (frame == null) {
         MissingDetail(stringResource(R.string.ui_frame_details), stringResource(R.string.ui_frame_missing), onBack)
-        return
+        return@SettingsHelpHost
     }
     val selectionIds = remember(entries, selected) {
         val ids = selected.toHashSet()
         entries.mapNotNull { if (it.restorable && it.taskId in ids) it.taskId else null }
     }
     BackHandler(enabled = choosing || action.busy) { if (!action.busy) leaveSelection() }
-    EditorPage(stringResource(R.string.ui_frame_details), { if (choosing) leaveSelection() else onBack() }, AssistantPage.Frame(id), backEnabled = !action.busy,
+    EditorPage(stringResource(R.string.ui_frame_details), backAfterSettingHelp { if (choosing) leaveSelection() else onBack() }, AssistantPage.Frame(id), backEnabled = !action.busy,
         footer = if (editingReason) ({ PushReasonEditor(id, actions) { editingReason = false } })
         else if (!choosing) null else ({
             Column(Modifier.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -184,8 +186,17 @@ internal fun FrameScreen(id: String, state: Workspace, actions: io.github.nakano
             }
             if (frame.remaining > 0) item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SectionTitle(if (choosing) stringResource(R.string.ui_select_to_restore) else stringResource(R.string.ui_restore_to_queue))
-                    Hint(restoreHint(state.restorePolicy, choosing, state.queue.size))
+                    val preferences by actions.settings.collectAsStateWithLifecycle()
+                    val keep = (preferences as? ReadState.Loaded)?.value?.keepRestoredFrames
+                    val history = when {
+                        choosing && selectionIds.size < frame.remaining -> R.string.frame_help_partial
+                        keep == true -> R.string.frame_help_kept
+                        keep == false -> R.string.frame_help_removed
+                        else -> null
+                    }
+                    val order = restoreHint(state.restorePolicy, choosing, state.queue.size)
+                    SettingHeading(stringResource(if (choosing) R.string.ui_select_to_restore else R.string.ui_restore_to_queue),
+                        if (history == null) order else "$order\n${stringResource(history)}")
                     if (!choosing) Actions {
                         Primary(stringResource(R.string.ui_restore_all), enabled = !action.busy) { restore(PlannerCommand.FrameRestore(id, RestoreMode.ALL)) }
                         Secondary(stringResource(R.string.ui_select_to_restore), enabled = !action.busy) { editingReason = false; choosing = true }
@@ -193,10 +204,13 @@ internal fun FrameScreen(id: String, state: Workspace, actions: io.github.nakano
                 }
             }
             item {
-                SectionTitle(stringResource(if (frame.remaining == 0) R.string.ui_saved_list else R.string.ui_frame_tasks))
-                Hint(when { entries.isNotEmpty() && entries.all { it.referenceOnly } -> stringResource(R.string.graph_no_restorable)
+                val help = when {
+                    entries.isNotEmpty() && entries.all { it.referenceOnly } -> stringResource(R.string.graph_no_restorable)
                     frame.remaining == 0 -> stringResource(R.string.ui_empty_frame_hint)
-                    else -> stringResource(R.string.ui_frame_history_hint) })
+                    entries.any { it.referenceOnly } -> stringResource(R.string.frame_help_mixed)
+                    else -> stringResource(R.string.ui_frame_history_hint)
+                }
+                SettingHeading(stringResource(if (frame.remaining == 0) R.string.ui_saved_list else R.string.ui_frame_tasks), help)
             }
             itemsIndexed(entries, key = { _, item -> item.originalPosition }) { index, item ->
                 val current = item.current

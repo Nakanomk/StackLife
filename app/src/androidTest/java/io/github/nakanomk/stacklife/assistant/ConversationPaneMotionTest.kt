@@ -80,6 +80,15 @@ class ConversationPaneMotionTest {
         val dialog = ui.onNode(isDialog(), useUnmergedTree = true).fetchSemanticsNode().id
         row.performClick()
         tag("assistant-history-messages").assertIsDisplayed()
+        val title = ui.activity.getString(io.github.nakanomk.stacklife.R.string.assistant_transcript)
+        val description = ui.activity.getString(io.github.nakanomk.stacklife.R.string.setting_info, title)
+        ui.onNodeWithContentDescription(description).performClick()
+        val noService = ui.activity.getString(io.github.nakanomk.stacklife.R.string.assistant_configure_to_continue)
+        val popup = hasText(noService) and hasAnyAncestor(isPopup())
+        ui.waitUntil(5_000) { ui.onAllNodes(popup).fetchSemanticsNodes().isNotEmpty() }
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        ui.waitUntil(5_000) { ui.onAllNodes(popup).fetchSemanticsNodes().isEmpty() }
+        tag("assistant-history-messages").assertIsDisplayed()
         assertEquals(dialog, ui.onNode(isDialog(), useUnmergedTree = true).fetchSemanticsNode().id)
         ui.exerciseSheetAnchors("history-thread", startsFull = true)
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)

@@ -30,12 +30,15 @@ import io.github.nakanomk.stacklife.appearance.PlannerAlertDialog
 import io.github.nakanomk.stacklife.transitions.PaneOrigins
 import io.github.nakanomk.stacklife.transitions.paneOrigin
 import io.github.nakanomk.stacklife.transitions.rememberRouteLaunch
+import io.github.nakanomk.stacklife.workspace.SettingHeading
+import io.github.nakanomk.stacklife.workspace.SettingsHelpHost
+import io.github.nakanomk.stacklife.workspace.backAfterSettingHelp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
 internal fun ConversationHistoryPane(model: AssistantModel, fallback: AssistantPage, id: Long?, origins: PaneOrigins, threads: List<ConversationRow>?,
-    paneState: SaveableStateHolder, active: Boolean, onThread: (Long?) -> Unit, onBack: () -> Unit, onSettings: () -> Unit, onClose: () -> Unit) {
+    paneState: SaveableStateHolder, active: Boolean, onThread: (Long?) -> Unit, onBack: () -> Unit, onSettings: () -> Unit, onClose: () -> Unit) = SettingsHelpHost {
     val history = model.history
     val selected = if (id == null) null else threads?.find { it.id == id }
     val page = remember(selected, fallback) { selected?.resumePage(fallback) ?: fallback }
@@ -50,17 +53,24 @@ internal fun ConversationHistoryPane(model: AssistantModel, fallback: AssistantP
                 catch (e: CancellationException) { throw e }
                 catch (_: Exception) { ReadState.ReadFailed }
         }
+        val receiver = (recipient as? ReadState.Loaded)?.value
         var confirmDelete by rememberSaveable { mutableStateOf(false) }
         var deletionError by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
             Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 4.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    if (id != null) IconButton(onClick = onBack, modifier = Modifier.testTag("assistant-history-back")) {
+                    if (id != null) IconButton(onClick = backAfterSettingHelp(onBack), modifier = Modifier.testTag("assistant-history-back")) {
                         Icon(painterResource(R.drawable.ic_arrow_back), stringResource(R.string.assistant_back_to_history))
                     }
                     Column(Modifier.weight(1f)) {
-                        Text(if (id == null) stringResource(R.string.assistant_history) else stringResource(R.string.assistant_transcript), Modifier.semantics { heading() },
+                        if (id == null) Text(stringResource(R.string.assistant_history), Modifier.semantics { heading() },
                             style = MaterialTheme.typography.titleLarge)
+                        else SettingHeading(stringResource(R.string.assistant_transcript), when {
+                            receiver != null -> stringResource(R.string.assistant_history_recipient, receiver.profile.origin, receiver.profile.model)
+                            recipient == ReadState.Loading -> stringResource(R.string.assistant_loading_settings)
+                            recipient == ReadState.ReadFailed -> stringResource(R.string.assistant_repair_to_continue)
+                            else -> stringResource(R.string.assistant_configure_to_continue)
+                        }, style = MaterialTheme.typography.titleLarge)
                         Text(if (id == null) stringResource(R.string.assistant_local_only) else page.scopeName(),
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -104,11 +114,7 @@ internal fun ConversationHistoryPane(model: AssistantModel, fallback: AssistantP
                     val draft = model.draft("history:$id")
                     ChatMessages(messages, model.attachments, Modifier.weight(1f), "assistant-history-messages",
                         reattach = if (canReply) ({ draft.add(listOf(AttachmentSource.SavedImage(it))) }) else null)
-                    val receiver = (recipient as? ReadState.Loaded)?.value
                     if (receiver != null && selected != null) {
-                        Text(stringResource(R.string.assistant_history_recipient, receiver.profile.origin, receiver.profile.model),
-                            Modifier.padding(vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         MessageEditor(model, draft, page.scopeName(), {
                             if (model.continueConversation(id, page, receiver)) onClose()
                         }, active = canReply, tagPrefix = "history-reply")

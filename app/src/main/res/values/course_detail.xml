@@ -11,6 +11,10 @@
     <string name="frames_available">Available: %1$d</string>
     <string name="frames_emptied">Emptied: %1$d</string>
     <string name="frame_restore_order">Restore in the original order.</string>
+    <string name="frame_help_partial">Unselected tasks stay in this frame.</string>
+    <string name="frame_help_kept">After the last task is restored, the saved list stays in history.</string>
+    <string name="frame_help_removed">Restoring the last task removes this frame. Choose Keep history afterward to keep its saved list.</string>
+    <string name="frame_help_mixed">Tasks still in this frame can be edited or restored. Tasks that have left and linked entries are read-only here. Restoring does not move the linked originals.</string>
     <string name="frame_item_number">Item %1$d</string>
     <string name="frame_saved_snapshot">When saved</string>
     <string name="queue_unfinished_count">Unfinished: %1$d</string>

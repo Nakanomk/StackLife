@@ -11,6 +11,10 @@
     <string name="frames_available">可恢复：%1$d 帧</string>
     <string name="frames_emptied">已取空：%1$d 帧</string>
     <string name="frame_restore_order">按清单原序恢复。</string>
+    <string name="frame_help_partial">未选中的任务仍留在本帧。</string>
+    <string name="frame_help_kept">取走最后一项后，保存列表仍会保留在历史中。</string>
+    <string name="frame_help_removed">取走最后一项后会删除本帧。随后可点「保留历史」保留保存列表。</string>
+    <string name="frame_help_mixed">可编辑或恢复仍在帧内的任务。已取走的任务和关联项仅供回看；恢复不会移动关联项的原始事件。</string>
     <string name="frame_item_number">第 %1$d 项</string>
     <string name="frame_saved_snapshot">保存时的快照</string>
     <string name="queue_unfinished_count">未完成：%1$d 项</string>

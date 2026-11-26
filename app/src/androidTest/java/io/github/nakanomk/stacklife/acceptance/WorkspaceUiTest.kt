@@ -18,6 +18,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.room.withTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.nakanomk.stacklife.R
 import io.github.nakanomk.stacklife.StackLifeApp
 import io.github.nakanomk.stacklife.StackLifeTheme
 import io.github.nakanomk.stacklife.notes.NoteEditorKey
@@ -102,6 +103,11 @@ class WorkspaceUiTest {
         assertTrue(store.api.commit(p.proposalId) is CommitResult.Applied)
         val frame=store.state().frames.single(); assertEquals(0, frame.remaining)
         ui.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) }, initialDetail=io.github.nakanomk.stacklife.transitions.DetailTarget("frame",frame.id)) }
+        val savedHelp = hasContentDescription(ui.activity.getString(R.string.setting_info, ui.activity.getString(R.string.ui_saved_list)))
+        await(SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollToIndex))
+        scrollTo(savedHelp); await(savedHelp).performClick()
+        await(hasText(ui.activity.getString(R.string.graph_no_restorable))).assertIsDisplayed()
+        ui.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         await(hasTestTag("frame-source:0")).performScrollTo().performClick()
         await(hasText("已完成原项")).assertIsDisplayed(); await(hasText("已完成")).assertIsDisplayed()
         await(hasText("编辑任务") and hasClickAction()).performClick()
@@ -112,6 +118,46 @@ class WorkspaceUiTest {
         ui.waitForIdle(); scrollTo(hasTestTag("frame-source:1")); await(hasTestTag("frame-source:1")).performClick()
         await(hasTestTag("slot:scope")).assertTextContains("仅这次")
         assertEquals(frame,store.state().frames.single()); assertEquals(1,store.state().queue.size)
+    }
+
+    @Test fun frameTitleHelpTracksRestoreSelectionPolicyAndDoesNotPerformIt() {
+        val baseline = runBlocking {
+            store.apply(PlannerCommand.TaskAdd(TaskInput("X", ref = "x")), PlannerCommand.GraphCreate("Graph", "g"),
+                PlannerCommand.GraphPatch("@g", listOf(GraphEdit.LinkExisting(GraphLink.Task("@x"), ref = "link"),
+                    GraphEdit.AddNode("A", x = 100f, y = 0f, ref = "a"), GraphEdit.AddNode("B", x = 200f, y = 0f, ref = "b"),
+                    GraphEdit.AddEdge("@link", "@a"), GraphEdit.AddEdge("@a", "@b"))),
+                PlannerCommand.GraphFrame("@g", "@b", "Frame"), PlannerCommand.SetRestorePolicy(RestorePolicy.SWAP))
+            store.state()
+        }
+        ui.setContent { StackLifeApp(viewModel { WorkspaceViewModel(store.api) },
+            initialDetail = io.github.nakanomk.stacklife.transitions.DetailTarget("frame", baseline.frames.single().id)) }
+        fun text(key: Int, vararg args: Any) = ui.activity.getString(key, *args)
+        fun inspect(title: Int, vararg message: String) {
+            val anchor = hasContentDescription(text(R.string.setting_info, text(title)))
+            scrollTo(anchor)
+            await(anchor).assertWidthIsAtLeast(48.dp).performClick()
+            val content = message.joinToString("\n")
+            await(hasText(content)).assertIsDisplayed()
+            ui.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            ui.waitUntil(5_000) { ui.onAllNodesWithText(content).fetchSemanticsNodes().isEmpty() }
+        }
+        await(SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollToIndex))
+        inspect(R.string.ui_restore_to_queue, text(R.string.ui_swap_all, 1), text(R.string.frame_help_removed))
+        inspect(R.string.ui_frame_tasks, text(R.string.frame_help_mixed))
+        val choose = hasText(text(R.string.ui_select_to_restore)) and hasClickAction()
+        scrollTo(choose); await(choose).performClick()
+        inspect(R.string.ui_select_to_restore, text(R.string.ui_swap_selected), text(R.string.frame_help_partial))
+        await(hasText(text(R.string.ui_restore_selected)) and hasClickAction()).assertIsNotEnabled()
+        val a = hasText("A") and isToggleable()
+        scrollTo(a); await(a).performClick()
+        val b = hasText("B") and isToggleable()
+        scrollTo(b); await(b).performClick()
+        inspect(R.string.ui_select_to_restore, text(R.string.ui_swap_selected), text(R.string.frame_help_removed))
+        await(hasText(text(R.string.frame_restore_order))).assertIsDisplayed()
+        assertEquals(baseline, runBlocking { store.state() })
+        runBlocking { store.apply(PlannerCommand.KeepRestoredFrames(true), PlannerCommand.SetRestorePolicy(RestorePolicy.APPEND)) }
+        inspect(R.string.ui_select_to_restore, text(R.string.ui_append_detail), text(R.string.frame_help_kept))
+        assertEquals(baseline.frames, runBlocking { store.state().frames })
     }
 
     @Test fun addTaskFloatsAboveCenteredNavigationOnTodayAndInTheQueue() {

@@ -692,6 +692,34 @@ class AssistantProposalTest {
         assertEquals(2, server.requestCount); assertEquals(state, store.state())
     }
 
+    @Test fun threadTitleDisclosesTheCurrentRecipientWithoutSendingOrDiscardingTheDraft() = runBlocking {
+        val history = store.db.conversationHistory()
+        val id = history.sendUser(null, "Local", "Historical text", null, emptyList()).conversationId
+        val profile = connection.save("https://localhost:${server.port}/other/v1", "New recipient", "fixture-only")
+        val baseline = store.state()
+        fun text(key: Int, vararg args: Any) = ui.activity.getString(key, *args)
+        val title = text(io.github.nakanomk.stacklife.R.string.assistant_transcript)
+        val info = hasContentDescription(text(io.github.nakanomk.stacklife.R.string.setting_info, title))
+        val recipient = text(io.github.nakanomk.stacklife.R.string.assistant_history_recipient, profile.origin, profile.model)
+        tag("assistant-history").performClick()
+        await(hasText(text(io.github.nakanomk.stacklife.R.string.assistant_local_only))).assertIsDisplayed()
+        tag("assistant-history-thread-$id").performClick()
+        tag("history-reply-input").performTextReplacement("Still local")
+        ui.onNodeWithText(recipient).assertDoesNotExist()
+        val anchor = await(info).assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+        val heading = await(hasText(title)).fetchSemanticsNode().boundsInRoot
+        val button = anchor.fetchSemanticsNode().boundsInRoot
+        assertTrue(button.left >= heading.right && button.top < heading.bottom && button.bottom > heading.top)
+        anchor.performClick()
+        await(hasText(recipient)).assertIsDisplayed()
+        tag("assistant-history-back").performClick()
+        ui.waitUntil(5_000) { ui.onAllNodesWithText(recipient).fetchSemanticsNodes().isEmpty() }
+        tag("history-reply-input").assertTextContains("Still local")
+        assertEquals(0, server.requestCount)
+        assertEquals(1, history.observeMessages(id).first().size)
+        assertEquals(baseline, store.state())
+    }
+
     @Test fun historicalFollowUpSendsOnlyRecentTextAndAppendsToTheOriginalThread() = runBlocking {
         val history = store.db.conversationHistory()
         val originalPage = AssistantPage.Day(LocalDate.of(2026, 10, 17), ZoneId.of("Asia/Shanghai"))

@@ -14,6 +14,9 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.nakanomk.stacklife.R
@@ -35,6 +38,13 @@ internal fun SettingsHelpHost(content: @Composable () -> Unit) {
         Box(Modifier.nestedScroll(host), propagateMinConstraints = true) { content() }
         BackHandler(host.dismiss != null) { host.dismiss?.invoke() }
     }
+}
+
+/** The toolbar and the system Back callback dismiss open help before leaving the page. */
+@Composable
+internal fun backAfterSettingHelp(back: () -> Unit): () -> Unit {
+    val host = LocalSettingHelp.current
+    return { val dismiss = host?.dismiss; if (dismiss != null) dismiss() else back() }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,6 +76,14 @@ internal fun SettingLabel(title: String, help: String?, modifier: Modifier = Mod
     if (help == null) Text(title, modifier, style = MaterialTheme.typography.bodyLarge, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
     else Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         Text(title, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
+        SettingInfo(help, title = title)
+    }
+}
+
+@Composable
+internal fun SettingHeading(title: String, help: String, style: TextStyle = MaterialTheme.typography.titleMedium) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(title, Modifier.weight(1f, fill = false).semantics { heading() }, style = style)
         SettingInfo(help, title = title)
     }
 }
