@@ -7,7 +7,6 @@ package io.github.nakanomk.stacklife.today
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -54,6 +53,8 @@ private fun segmentTiming(delay: Int) = infiniteRepeatable(animation = keyframes
 private val headTiming = segmentTiming(0)
 private val tailTiming = segmentTiming(250)
 private val waveTiming = infiniteRepeatable<Float>(animation = tween(1400, easing = LinearEasing))
+private val cursorSize = 24.dp
+private val trailWidth = 6.dp
 
 @Composable
 internal fun CurrentTimeMarker(drag: AxisDrag, spine: Dp, millis: Long) {
@@ -92,16 +93,16 @@ internal fun CurrentTimeMarker(drag: AxisDrag, spine: Dp, millis: Long) {
                 .height(18.dp).timeLine(wave, phase, scheme.primary, scheme.surface))
         }
         if (appearance.nowTrail) {
-            Spacer(Modifier.align(Alignment.CenterStart).offset(x = spine + 9.dp, y = (-33).dp)
-                .size(6.dp, 26.dp).timeTrail(tail, head, scheme.primary, scheme.surface))
+            Spacer(Modifier.align(Alignment.CenterStart).offset(x = spine - trailWidth / 2, y = (-33).dp)
+                .size(trailWidth, 26.dp).timeTrail(tail, head, scheme.primary, scheme.surface))
         }
         if (appearance.nowArrow) {
-            // The vector tip is at (12,20) in a 24dp viewport: keep it on the real instant.
-            Icon(painterResource(R.drawable.ic_now_arrow_downward), contentDescription = null,
-                modifier = Modifier.align(Alignment.CenterStart).offset(x = spine, y = (-8).dp)
-                    .size(24.dp).background(scheme.surface, CircleShape), tint = scheme.primary)
+            // DayWithTray places the centre of its rail at spine. The vector tip is bottom-centre.
+            Icon(painterResource(R.drawable.ic_now_navigation), contentDescription = null,
+                modifier = Modifier.align(Alignment.CenterStart).offset(x = spine - cursorSize / 2, y = -cursorSize / 2)
+                    .size(cursorSize), tint = scheme.primary)
         }
-        Text(time, Modifier.align(Alignment.CenterStart).widthIn(max = spine)
+        Text(time, Modifier.align(Alignment.CenterStart).widthIn(max = if (appearance.nowArrow) spine - cursorSize / 2 else spine)
             .clearAndSetSemantics { contentDescription = now }
             .background(scheme.primary, MaterialTheme.shapes.small).padding(horizontal = 3.dp),
             style = MaterialTheme.typography.labelMedium, color = scheme.onPrimary)

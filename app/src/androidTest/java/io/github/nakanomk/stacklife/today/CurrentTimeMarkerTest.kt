@@ -75,8 +75,9 @@ class CurrentTimeMarkerTest {
                 scroll = rememberScrollState(axisY - anchor)
                 val drag = remember(scale, scroll) { AxisDrag(scale, scroll) }
                 val background = if (rtl) Color.Black else Color.White
-                val colors = if (rtl) darkColorScheme(primary = Color.Magenta, surface = background) else
-                    lightColorScheme(primary = Color.Magenta, surface = background)
+                val surface = if (rtl) Color.DarkGray else Color.LightGray // Distinguish a painted badge from untouched paper.
+                val colors = if (rtl) darkColorScheme(primary = Color.Magenta, surface = surface) else
+                    lightColorScheme(primary = Color.Magenta, surface = surface)
                 CompositionLocalProvider(LocalLayoutDirection provides (if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr),
                     LocalAppearance provides settings.value, LocalMotionEnabled provides motion.value,
                     LocalFrontEntry provides front.value, LocalLifecycleOwner provides owner) {
@@ -108,17 +109,38 @@ class CurrentTimeMarkerTest {
         assertTrue("Expected ink on vertical trail in actual draw", rows.isNotEmpty())
         return rows.first()..rows.last()
     }
-    private fun assertDown(image: PixelMap, x: Int) {
+    private fun assertDown(image: PixelMap, x: Int, tipY: Int = anchor) {
         fun width(y: Int) = (x - px(10) .. x + px(10)).count { ink(image, it, y) }
-        assertTrue(ink(image, x, anchor - px(2)))
-        assertTrue("Arrow shoulders must be wider above its bottom tip", width(anchor - px(8)) > width(anchor - px(1)))
-        assertFalse(ink(image, x, anchor + px(1)))
+        val bodyY = tipY - px(13)
+        val body = (x - px(11)..x + px(11)).filter { ink(image, it, bodyY) }
+        assertTrue("Both sides of the rail need a broad, filled navigation body", body.isNotEmpty() &&
+            x - body.first() >= px(5) && body.last() - x >= px(5))
+        assertTrue("The cursor must be centred on the rail", kotlin.math.abs(body.first() + body.last() - 2 * x) <= 2)
+        assertTrue("No hollow centre or gap in the navigation body", (body.first()..body.last()).all { ink(image, it, bodyY) })
+        val paper = image[image.width / 2, bodyY].toArgb()
+        for (side in listOf(-1, 1)) assertEquals("No badge outside the triangle", paper, image[x + side * px(10), bodyY].toArgb())
+        assertTrue(ink(image, x, tipY - px(2)))
+        assertTrue("Arrow shoulders must be wider above its bottom tip", width(tipY - px(8)) > width(tipY - px(1)))
+        assertFalse(ink(image, x, tipY + px(1)))
+    }
+
+    @Test fun theTipFollowsTimeAndScrollWithoutLeavingTheRail() {
+        show()
+        val x = px(96)
+        assertDown(image(), x)
+        ui.runOnIdle { clock.longValue = fixed + 10 * 60_000L }; frames()
+        ui.onNodeWithContentDescription(ui.activity.getString(R.string.today_now_at, "01:40 -05:00")).assertIsDisplayed()
+        val moved = image()
+        assertDown(moved, x, anchor + px(20)) // Ten minutes on this unobstructed 2dp/minute axis.
+        assertFalse(ink(moved, x, anchor - px(8)))
+        ui.runOnIdle { runBlocking { scroll.scrollTo(scroll.value + px(20)) } }; frames()
+        assertDown(image(), x)
     }
     private fun movingTail(rtl: Boolean) {
         show(rtl)
         ui.onNodeWithContentDescription(ui.activity.getString(R.string.today_now_at, "01:30 -05:00")).assertIsDisplayed()
         val base = image()
-        val x = if (rtl) base.width - px(108) else px(108)
+        val x = if (rtl) base.width - px(96) else px(96)
         assertDown(base, x)
         val before = arrow(base, x)
         val bounds = ui.onNodeWithTag("now-line").fetchSemanticsNode().boundsInRoot
@@ -163,13 +185,13 @@ class CurrentTimeMarkerTest {
         val label = ui.onNodeWithContentDescription(description)
         label.assertIsDisplayed()
         val empty = image()
-        assertFalse((anchor - px(17) .. anchor).any { ink(empty, px(108), it) })
+        assertFalse((anchor - px(17) .. anchor).any { ink(empty, px(96), it) })
         ui.runOnIdle { runBlocking { scroll.scrollTo(0) } }; frames(); label.assertDoesNotExist()
         ui.runOnIdle { runBlocking { scroll.scrollTo(axisY + px(2)) } }; frames(); label.assertDoesNotExist()
         ui.runOnIdle { runBlocking { scroll.scrollTo(axisY - anchor) } }; frames(); label.assertIsDisplayed()
         ui.runOnIdle { clock.longValue = day.endMillis }; frames(); ui.onNodeWithTag("now-line").assertDoesNotExist()
         ui.runOnIdle { clock.longValue = fixed }; frames(); label.assertIsDisplayed()
         ui.runOnIdle { settings.value = settings.value.copy(nowTrail = true); motion.value = false }; frames()
-        assertTrue(edges(image(), px(108)).last > anchor - px(24)) // trail without the arrow
+        assertTrue(edges(image(), px(96)).last > anchor - px(24)) // trail without the arrow
     }
 }
